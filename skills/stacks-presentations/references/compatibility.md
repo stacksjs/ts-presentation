@@ -14,7 +14,8 @@ in a new ts-presentation project.
 | KaTeX | Native MathML with chemistry, ruled and compact arrays, mixed text and math, numbered alignment rows, scoped macros, custom fractions, and click highlighting |
 | PowerPoint export | Image slides or editable text and boxes with separate artwork |
 | Mermaid | Local flowchart, sequence, basic state, class, ER, pie, Gantt, and GitGraph rendering |
-| Presenter mode | Two synced browser windows, notes and timer |
+| Presenter mode | Two synced browser windows, notes, timer, resizable layouts, next-frame preview, and reveal seeking |
+| Navigation context | Slide-local metadata, route aliases, reveal bounds, and navigation controls |
 | Drawing and recording | Canvas drawing and browser screen capture |
 
 Existing Vue components, UnoCSS configuration, Monaco IntelliSense, Shiki

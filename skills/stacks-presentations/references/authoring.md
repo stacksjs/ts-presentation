@@ -89,7 +89,18 @@ and options and returns an SVG string.
 
 ## Rehearsal
 
-Use **P** for synchronized presenter notes and timer, **O** for overview,
-and **F** for fullscreen. Arrow keys advance through click steps. Verify
-that sample data, links and any live code you intend to run are ready for
+Use **P** for synchronized presenter mode, **O** for overview, and **F**
+for fullscreen. The presenter can switch layouts, resize the panels, preview
+the next reveal, seek through the current slide's reveals, and read the notes.
+Arrow keys advance through click steps. On the dev server, open `/presenter`
+or `/presenter/review?clicks=2` to start at a named slide and step. For an
+offline deck, open `index.html?presenter=1#review/2`.
+
+Addons can listen for `presentation:slide`. Its detail includes `slide`,
+`click`, `title`, and `route`. Read the active metadata and navigate via
+`window.presentationNavigation` on the page that owns the slide. For example,
+`currentFrontmatter` exposes authored fields, `currentPage` gives the slide
+number, and `go('review', 2)` seeks to a named slide and reveal.
+
+Verify that sample data, links and any live code you intend to run are ready for
 the audience. Use the build command to rehearse without the dev server.

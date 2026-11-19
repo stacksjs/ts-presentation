@@ -8,7 +8,7 @@ import { loadAuthoringSetup } from './authoring-setup.ts'
 import { within } from './assets.ts'
 import { resolveCanvas } from './canvas.ts'
 import { loadExtensions } from './extensions.ts'
-import { parseDeck, renderDeck } from './index.ts'
+import { parseDeck, renderPresentation } from './index.ts'
 import { slideRange } from './selection.ts'
 import type { WritableSnippet } from './snippet-write.ts'
 import { snippetRevision, snippetToken } from './snippet-write.ts'
@@ -20,6 +20,7 @@ export interface CompiledDeck extends ExtensionAssets {
   title: string
   author?: string
   canvas: SlideCanvas
+  routeAliases: ReadonlySet<string>
   writableSnippets: ReadonlyMap<string, WritableSnippet>
 }
 
@@ -101,9 +102,10 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
       loadExtensions(deck, directory, observe, options.theme),
       loadAuthoringSetup(directory, observe),
     ])
-    const html = await renderDeck(deck, { liveCompile: options.liveCompile, extensions, setup, writableSnippets })
+    const { html, routes } = await renderPresentation(deck, { liveCompile: options.liveCompile, extensions, setup, writableSnippets })
     const author = typeof deck.headmatter?.author === 'string' ? deck.headmatter.author : undefined
-    const compiled = { title: deck.title, author, canvas: resolveCanvas(deck.headmatter), html, styles: extensions.styles, client: extensions.client, mounts: extensions.mounts, writableSnippets }
+    const routeAliases = new Set(routes.flatMap(route => route.alias ? [route.alias] : []))
+    const compiled = { title: deck.title, author, canvas: resolveCanvas(deck.headmatter), html, styles: extensions.styles, client: extensions.client, mounts: extensions.mounts, writableSnippets, routeAliases }
     cached = { files, deck: compiled }
     return compiled
   }

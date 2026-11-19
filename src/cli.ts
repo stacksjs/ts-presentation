@@ -4,10 +4,12 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { asset, within } from './assets.ts'
+import { findChrome } from './chrome.ts'
 import { compileLiveCode, maxCodeLength } from './compile-code.ts'
 import type { CompiledDeck } from './loader.ts'
 import type { PowerPointFrame } from './powerpoint.ts'
 import { createDeckCompiler } from './loader.ts'
+import { legacySlideLocation } from './navigation.ts'
 import { saveSnippet } from './snippet-write.ts'
 
 const options = {
@@ -36,22 +38,6 @@ const help = `ts-presentation <dev|build|export> [slides.md]
 
 function localAuthorRequest(request: Request, url: URL): boolean {
   return request.headers.get('Origin') === url.origin && ['127.0.0.1', 'localhost'].includes(url.hostname)
-}
-
-async function chromePath(explicit?: string): Promise<string> {
-  const candidates = [
-    explicit ?? process.env.CHROME_BIN,
-    Bun.which('chromium'),
-    Bun.which('google-chrome'),
-    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-    '/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',
-    process.env.PROGRAMFILES && join(process.env.PROGRAMFILES, 'Google/Chrome/Application/chrome.exe'),
-    process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, 'Google/Chrome/Application/chrome.exe'),
-  ]
-  for (const candidate of candidates) {
-    if (candidate && await Bun.file(candidate).exists()) return candidate
-  }
-  throw new Error('Chrome or Chromium is required for export. Pass --executable-path or set CHROME_BIN.')
 }
 
 async function main(): Promise<void> {
@@ -157,7 +143,13 @@ async function main(): Promise<void> {
             const extension = /^\/extensions\/([a-z0-9-]+)(\/.*)$/i.exec(path)
             const mounted = extension ? (await compile()).mounts[extension[1]] : undefined
             if (mounted && extension) return asset(mounted, extension[2])
-            return root ? asset(root, path.endsWith('/') ? `${path}index.html` : path) : new Response('Not found', { status: 404 })
+            const found = root ? await asset(root, path.endsWith('/') ? `${path}index.html` : path) : undefined
+            if (found && found.status !== 404) return found
+            if ((request.method === 'GET' || request.method === 'HEAD') && /^\/(?:[a-z0-9-]+\/?){1,2}$/i.test(path)) {
+              const destination = legacySlideLocation(url, (await compile()).routeAliases)
+              if (destination) return Response.redirect(destination, 307)
+            }
+            return found ?? new Response('Not found', { status: 404 })
           }
         }
       },
@@ -172,7 +164,8 @@ async function main(): Promise<void> {
     return
   }
 
-  const executable = await chromePath(values['executable-path'])
+  const executable = await findChrome(values['executable-path'])
+  if (!executable) throw new Error('Chrome or Chromium is required for export. Pass --executable-path or set CHROME_BIN.')
   const format = values.format ?? 'pdf'
   if (!['pdf', 'png', 'pptx', 'pptx-editable'].includes(format)) throw new Error('Export format must be pdf, png, pptx or pptx-editable')
   const powerPoint = format === 'pptx' || format === 'pptx-editable'

@@ -53,17 +53,18 @@ export async function captureFrames(options: CaptureOptions, onFrame: (frame: Po
         width, height, deviceScaleFactor: options.scale, mobile: false,
       })
       await chrome.navigate(new URL(`?capture=1${options.withClicks ? '&steps=1' : ''}`, preview.url).href)
-      const steps = await chrome.evaluate<number[]>(
-        "[...document.querySelectorAll('#stage > article')].map(slide => Number(slide.dataset.clicks))",
+      const clicks = await chrome.evaluate<{ start: number, end: number }[]>(
+        "[...document.querySelectorAll('#stage > article')].map(slide => ({ start: Number(slide.dataset.clicksStart), end: Number(slide.dataset.clicks) }))",
       )
-      if (!steps.length || steps.some(count => !Number.isSafeInteger(count) || count < 0)) {
+      if (!clicks.length || clicks.some(({ start, end }) => !Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start)) {
         throw new Error('The browser did not load the presentation player')
       }
-      const selected = slideRange(steps.length, options.range)
+      const selected = slideRange(clicks.length, options.range)
       if (!selected.length) throw new Error('Select at least one slide for export')
-      const positions = selected.flatMap((slide) =>
-        Array.from({ length: options.withClicks ? steps[slide - 1] + 1 : 1 }, (_, step) => ({ slide, step })),
-      )
+      const positions = selected.flatMap((slide) => {
+        const { start, end } = clicks[slide - 1]
+        return options.withClicks ? Array.from({ length: end - start + 1 }, (_, index) => ({ slide, step: start + index })) : [{ slide, step: end }]
+      })
       for (const [index, position] of positions.entries()) {
         const metadata = await chrome.evaluate<FrameDetails>(`(async () => {
           location.hash = ${JSON.stringify(`slide-${position.slide}/${position.step}`)}

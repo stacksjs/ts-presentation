@@ -14,11 +14,16 @@ bun run dev
 ```
 
 Use the arrow keys or slide picker to navigate. **P** opens a synchronized
-presenter window with notes, a next-slide cue and a timer. **O** opens
-the overview, **F** toggles fullscreen, **D** opens the drawing layer
+presenter window with notes, a next-frame preview and a timer. Choose
+from three presenter layouts, drag the panel dividers, or use the reveal
+slider to rehearse individual steps. The dev server also accepts
+`/presenter` and `/presenter/2` directly. **O** opens the overview,
+**F** toggles fullscreen, **D** opens the drawing layer
 in the active window, and **C** clears a drawing. Where the host browser
 supports screen capture, **Record** saves the chosen screen or window
 as a video.
+
+Left and right move through reveals. Up and down jump between slides.
 
 `bun run build` emits an offline browser deck. `bun run export` creates a
 PDF with Chrome or Chromium. Set `CHROME_BIN` or pass `--executable-path`
@@ -52,7 +57,7 @@ the deck and style slides with an optional `style.css`.
 | Progressive reveals | `v-click`, `v-click="3"`, `v-after`, or a `<v-clicks>` list |
 | Layouts | `layout: default`, `center`, `cover`, `intro`, `section`, `image-left`, or `image-right`. Set `image` for an image layout |
 | Local slides and ranges | `src: ./chapter.md` or `src: ./chapter.md#2-4`, relative to the including file |
-| Navigation | `routeAlias: review`, then links such as `#review` |
+| Navigation | `routeAlias: review`, then links such as `#review` or `#review/2`. Set `clicksStart` or `clicks` to override a slide's reveal range |
 | Per-slide options | `class`, `hide`, `disabled`, and `transition: fade`, `slide-left`, or `slide-up` |
 | Images and component markup | Trusted HTML, with optional `data-zoom` on an image |
 | Diagrams | Mermaid flowcharts, sequence, basic state, class, entity relationship, pie, Gantt, and GitGraph diagrams |

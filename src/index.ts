@@ -7,12 +7,15 @@ import { renderMermaid } from './diagram.ts'
 import { escapeHtml, unescapeHtml } from './html.ts'
 import { liveBlock } from './live-markup.ts'
 import { createMathRenderer, resolveMathMacros } from './math.ts'
+import type { SlideRoute } from './navigation.ts'
+import { slideAlias } from './navigation.ts'
 import { prepareMarkdown, splitSlots } from './syntax.ts'
 import type { WritableSnippet } from './snippet-write.ts'
 
 export { defineAddon, defineTheme } from './extensions.ts'
 export { defineKatexSetup, defineMermaidRendererSetup, defineMermaidSetup } from './authoring-setup.ts'
 export type { KatexOptions, MermaidOptions, MermaidRenderer } from './authoring-setup.ts'
+export type { PresentationNavigation, SlideRoute } from './navigation.ts'
 export type { LayoutContext, PresentationAddon, PresentationTheme } from './extensions.ts'
 
 export interface Slide {
@@ -140,7 +143,11 @@ export interface RenderOptions {
   writableSnippets?: ReadonlyMap<string, WritableSnippet>
 }
 
-export async function renderDeck(deck: Deck, options: RenderOptions = {}): Promise<string> {
+export async function renderDeck(deck: Deck, options?: RenderOptions): Promise<string> {
+  return (await renderPresentation(deck, options)).html
+}
+
+export async function renderPresentation(deck: Deck, options: RenderOptions = {}): Promise<{ html: string, routes: SlideRoute[] }> {
   const { width, height } = resolveCanvas(deck.headmatter)
   const configuration = options.setup
   const renderMath = createMathRenderer({
@@ -192,9 +199,16 @@ export async function renderDeck(deck: Deck, options: RenderOptions = {}): Promi
     if (!layoutHooks[effectiveLayout(slide)]) return { default: markdown(slide.content) }
     return Object.fromEntries(Object.entries(splitSlots(slide.content)).map(([name, content]) => [name, markdown(content)]))
   })
+  const routes = activeSlides.map((slide, index): SlideRoute => ({
+    no: index + 1,
+    alias: slideAlias(slide.frontmatter?.routeAlias),
+    title: slide.title,
+    layout: effectiveLayout(slide),
+    frontmatter: slide.frontmatter ?? {},
+  }))
   const slides = await Promise.all(activeSlides.map(async (slide, index) => {
     let diagram = 0
-    const layout = effectiveLayout(slide)
+    const { layout, alias } = routes[index]
     const lineNumbers = (slide.frontmatter?.lineNumbers ?? deck.headmatter?.lineNumbers) === true
     const renderCode = async (block: string, language = 'text', code: string) => {
       const decoded = unescapeHtml(code)
@@ -247,10 +261,9 @@ export async function renderDeck(deck: Deck, options: RenderOptions = {}): Promi
     const custom = layoutHooks[layout]
     const body = custom ? custom({ slide, index, html: slots.default, slots }) : slots.default
     const className = [defaults?.className, slide.className].filter(Boolean).join(' ')
-    const alias = String(slide.frontmatter?.routeAlias ?? '')
     const transition = String(slide.frontmatter?.transition ?? '')
     const motion = ['fade', 'slide-left', 'slide-up'].includes(transition) ? ` data-transition="${transition}"` : ''
-    const route = /^[a-z][a-z0-9-]*$/i.test(alias) ? ` data-route="${escapeHtml(alias)}"` : ''
+    const route = alias ? ` data-route="${escapeHtml(alias)}"` : ''
     const image = slide.frontmatter?.image ?? slide.frontmatter?.background
     const safeImage = typeof image === 'string' && /^(?:https?:\/\/|[./]|[\w-]+\/)/.test(image) ? image : ''
     const background = safeImage && layout.startsWith('image-') && !custom
@@ -266,7 +279,8 @@ export async function renderDeck(deck: Deck, options: RenderOptions = {}): Promi
   })
   const overview = activeSlides.map((slide, index) => `<li><button type="button" value="${index + 1}"><span>${index + 1}</span> ${escapeHtml(slide.title)}</button></li>`)
 
-  return `<!doctype html>
+  const navigation = JSON.stringify(routes).replaceAll('<', '\\u003c')
+  const document = `<!doctype html>
 <html lang="en" data-slide-width="${width}" data-slide-height="${height}" data-theme="${escapeHtml(extensions?.theme.name ?? 'default')}"${options.liveCompile ? ' data-live-compile="true"' : ''}>
 <head>
   <meta charset="utf-8">
@@ -282,6 +296,7 @@ export async function renderDeck(deck: Deck, options: RenderOptions = {}): Promi
 </head>
 <body>
   ${activeExtensions.map(extension => extension.globalTop || '').join('')}
+  <script id="presentation-navigation" type="application/json">${navigation}</script>
   <main id="stage">${slides.join('\n')}</main>
   ${activeExtensions.map(extension => extension.globalBottom || '').join('')}
   <aside id="presenter-notes" hidden aria-label="Speaker notes">
@@ -291,15 +306,29 @@ export async function renderDeck(deck: Deck, options: RenderOptions = {}): Promi
         <span id="presenter-time" aria-label="Elapsed time">0:00</span>
         <button id="presenter-reset" type="button">Reset timer</button>
       </div>
-      <p id="presenter-next"></p>
     </header>
     ${notes.join('\n')}
   </aside>
+  <aside id="presenter-preview" hidden aria-label="Next frame">
+    <p id="presenter-next"></p>
+    <iframe title="Next presentation frame" tabindex="-1" inert></iframe>
+  </aside>
+  <div id="presenter-width" class="presenter-separator" role="separator" aria-label="Panel width" aria-orientation="vertical" tabindex="0" hidden></div>
+  <div id="presenter-height" class="presenter-separator" role="separator" aria-label="Panel height" aria-orientation="horizontal" tabindex="0" hidden></div>
   <nav id="controls" aria-label="Presentation controls">
     <button id="previous" type="button" aria-label="Previous slide">←</button>
     <select id="goto" aria-label="Go to slide">${choices.join('')}</select>
     <button id="next" type="button" aria-label="Next slide">→</button>
     <button id="presenter" type="button">Presenter view</button>
+    <select id="presenter-layout" aria-label="Presenter layout" hidden>
+      <option value="1">Notes below</option>
+      <option value="2">Notes beside slides</option>
+      <option value="3">Large preview</option>
+    </select>
+    <div id="presenter-steps" hidden>
+      <input id="presenter-seek" aria-label="Reveal step" type="range" step="1">
+      <output for="presenter-seek"></output>
+    </div>
     <button id="overview-button" type="button">Overview</button>
     <button id="draw-button" type="button" aria-pressed="false">Draw</button>
     <button id="fullscreen" type="button">Fullscreen</button>
@@ -317,4 +346,5 @@ export async function renderDeck(deck: Deck, options: RenderOptions = {}): Promi
 </body>
 </html>
 `
+  return { html: document, routes }
 }

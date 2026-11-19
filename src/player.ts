@@ -4,6 +4,9 @@ import { codeReveal, showCode } from './code-player.ts'
 import type { EquationReveal } from './equation-steps.ts'
 import { equationReveal, showEquation } from './equation-steps.ts'
 import { setupLiveCode } from './live-code.ts'
+import type { SlidePosition, SlideRoute } from './navigation.ts'
+import { clickBounds, createNavigationContext, nextPosition, previousPosition, readSlideHash, slideHash, slidePosition } from './navigation.ts'
+import { setupPresenter } from './presenter.ts'
 
 const canvasWidth = Number(document.documentElement.dataset.slideWidth) || defaultCanvas.width
 const canvasHeight = Number(document.documentElement.dataset.slideHeight) || defaultCanvas.height
@@ -22,14 +25,15 @@ const imageView = document.querySelector<HTMLDialogElement>('#image-view')!
 const detail = imageView.querySelector('img')!
 const drawButton = control.querySelector<HTMLButtonElement>('#draw-button')!
 const timer = document.querySelector<HTMLElement>('#presenter-time')!
-const nextTitle = document.querySelector<HTMLElement>('#presenter-next')!
+const routes: SlideRoute[] = JSON.parse(document.querySelector('#presentation-navigation')!.textContent ?? '[]')
 const params = new URLSearchParams(location.search)
 const isCapture = params.has('capture')
 const captureSteps = params.has('steps')
-const isPresenter = params.has('presenter')
+const isPreview = params.has('preview')
+const isPresenter = !isPreview && !isCapture && params.has('presenter')
 const opener: Window | null = isPresenter ? window.opener : null
 const messageOrigin = location.protocol === 'file:' ? '*' : location.origin
-const aliases = new Map(articles.flatMap((article, index) => article.dataset.route ? [[article.dataset.route, index + 1]] : []))
+const aliases = new Map(routes.flatMap(route => route.alias ? [[route.alias, route.no]] : []))
 const disclosures = articles.map(article => [...article.querySelectorAll('details')])
 const screenshots = articles.map(article => [...article.querySelectorAll<HTMLImageElement>('img[data-zoom]')])
 const noteSteps = notes.map(note => [...note.querySelectorAll<HTMLElement>('[data-note-step]')])
@@ -67,18 +71,26 @@ const reveals: (Reveal | EquationReveal | CodeReveal)[][] = articles.map((articl
   })
 })
 
-const clickTotals = reveals.map((steps, index) => Math.max(0, ...steps.map(item => item.step), noteSteps[index].length - 1))
-articles.forEach((article, index) => { article.dataset.clicks = String(clickTotals[index]) })
+const bounds = reveals.map((steps, index) => clickBounds(routes[index].frontmatter,
+  steps.reduce((end, step) => Math.max(end, step.step), noteSteps[index].length - 1)))
+articles.forEach((article, index) => {
+  article.dataset.clicks = String(bounds[index].end)
+  article.dataset.clicksStart = String(bounds[index].start)
+})
 let current = 1
 let click = 0
 let popup: Window | null = null
 let startedAt = Date.now()
 let timerTick: ReturnType<typeof setInterval> | undefined
 document.body.classList.add('playing')
+if (isPreview) document.body.classList.add('previewing')
 if (isCapture) document.body.classList.add('capturing')
 
+let presenterControls: ReturnType<typeof setupPresenter> | undefined
+const position = (): SlidePosition => ({ slide: current, click })
+
 function resize(): void {
-  const inset = isCapture ? 0 : 24
+  const inset = isCapture || isPreview ? 0 : 24
   const width = Math.max(1, stage.clientWidth - inset)
   const height = Math.max(1, stage.clientHeight - inset)
   stage.style.setProperty('--slide-scale', String(Math.min(width / canvasWidth, height / canvasHeight)))
@@ -88,18 +100,18 @@ function syncPeer(data: Record<string, unknown>): void {
   (opener ?? popup)?.postMessage(data, messageOrigin)
 }
 
-function show(number: number, step = 0, writeHistory = true, sync = true): void {
-  const selected = Math.max(1, Math.min(articles.length, number))
-  const nextStep = Math.max(0, Math.min(clickTotals[selected - 1], step))
-  const animate = !isCapture && selected === current && nextStep !== click
+function show(number: number, step?: number, writeHistory = true, sync = true): void {
+  const { slide: selected, click: nextStep } = slidePosition(number, step, bounds)
+  if (selected === current && nextStep === click && !articles[current - 1].hidden) return
+  const slideChanged = selected !== current
+  const animate = !isCapture && !isPreview && selected === current && nextStep !== click
   if (writeHistory && (selected !== current || nextStep !== click)) {
-    const hash = articles[selected - 1].dataset.route || `slide-${selected}`
-    const locationHash = `#${hash}${nextStep ? `/${nextStep}` : ''}`
-    if (selected === current) history.replaceState(null, '', locationHash)
-    else history.pushState(null, '', locationHash)
+    const hash = slideHash(routes[selected - 1], nextStep)
+    if (selected === current) history.replaceState(null, '', hash)
+    else history.pushState(null, '', hash)
   }
 
-  if (selected !== current) {
+  if (slideChanged) {
     if (imageView.open) imageView.close()
     articles[current - 1].hidden = true
     notes[current - 1].hidden = true
@@ -114,32 +126,62 @@ function show(number: number, step = 0, writeHistory = true, sync = true): void 
     else reveal.element.toggleAttribute('data-reveal-hidden', reveal.hide ? click >= reveal.step : click < reveal.step)
   }
   noteSteps[current - 1].forEach((note, index) => { note.hidden = index > click })
-  nextTitle.textContent = articles[current]?.getAttribute('aria-label') ? `Next: ${articles[current].getAttribute('aria-label')}` : 'Last slide'
+  if (slideChanged) notesPanel.scrollTop = 0
+  else if (!notesPanel.hidden && click > 0) {
+    const stepNotes = noteSteps[current - 1][click]
+    if (stepNotes) {
+      const overflow = stepNotes.getBoundingClientRect().bottom - notesPanel.getBoundingClientRect().bottom + 14
+      if (overflow > 0) notesPanel.scrollTop += overflow
+    }
+  }
+  const here = position()
   goto.value = String(current)
-  previous.disabled = current === 1 && click === 0
-  next.disabled = current === articles.length && click === clickTotals[current - 1]
+  previous.disabled = previousPosition(here, bounds) === undefined
+  next.disabled = nextPosition(here, bounds) === undefined
+  presenterControls?.update(here)
   if (!canvas.hidden) mountDrawing()
-  window.dispatchEvent(new CustomEvent('presentation:slide', { detail: { slide: current, click, title: articles[current - 1].getAttribute('aria-label') } }))
+  window.dispatchEvent(new CustomEvent('presentation:slide', {
+    detail: { ...here, title: routes[current - 1].title, route: routes[current - 1] },
+  }))
   if (sync) syncPeer({ presentationSlide: current, presentationClick: click })
 }
 
 function nextStep(): void {
-  if (click < clickTotals[current - 1]) show(current, click + 1)
-  else if (current < articles.length) show(current + 1)
+  const upcoming = nextPosition(position(), bounds)
+  if (upcoming) show(upcoming.slide, upcoming.click)
 }
 
 function previousStep(): void {
-  if (click > 0) show(current, click - 1)
-  else if (current > 1) show(current - 1, clickTotals[current - 2])
+  const previous = previousPosition(position(), bounds)
+  if (previous) show(previous.slide, previous.click)
+}
+
+function nextSlide(): void {
+  if (current < articles.length) show(current + 1)
+}
+
+function previousSlide(): void {
+  if (current > 1) show(current - 1)
 }
 
 function readLocation(): void {
-  const hash = location.hash.replace(/^#\/?/, '')
-  const [key, step] = hash.split('/')
-  const numeric = /^(?:slide-)?(\d+)$/.exec(key)
-  const number = numeric ? Number(numeric[1]) : (aliases.get(key) ?? 1)
-  show(number, isCapture && !captureSteps ? Number.MAX_SAFE_INTEGER : (/^\d+$/.test(step ?? '') ? Number(step) : 0), false)
+  const target = readSlideHash(location.hash, aliases)
+  const click = isCapture && !captureSteps ? Number.POSITIVE_INFINITY : target.click
+  show(target.slide, click, false)
 }
+
+window.presentationNavigation = createNavigationContext(routes,
+  () => isPreview ? 'preview' : isCapture ? 'export' : isPresenter || !notesPanel.hidden ? 'presenter' : 'slide',
+  position, bounds, {
+    go(slide, step) {
+      const number = typeof slide === 'number' ? slide : aliases.get(slide) ?? Number(slide)
+      if (Number.isInteger(number) && (step === undefined || Number.isInteger(step))) show(number, step)
+    },
+    next: nextStep,
+    previous: previousStep,
+    nextSlide,
+    previousSlide,
+  })
 
 function updateTimer(): void {
   const elapsed = Math.floor((Date.now() - startedAt) / 1000)
@@ -150,6 +192,9 @@ function togglePresenter(): void {
   notesPanel.hidden = !notesPanel.hidden
   document.body.classList.toggle('presenting', !notesPanel.hidden)
   presenter.setAttribute('aria-pressed', String(!notesPanel.hidden))
+  if (!notesPanel.hidden) presenterControls ??= setupPresenter(routes, bounds, step => show(current, step))
+  presenterControls?.setActive(!notesPanel.hidden)
+  presenterControls?.update(position())
   if (timerTick !== undefined) clearInterval(timerTick)
   timerTick = notesPanel.hidden ? undefined : setInterval(updateTimer, 1000)
   resize()
@@ -162,13 +207,20 @@ function openPresenter(): void {
   }
   const url = new URL(location.href)
   url.searchParams.set('presenter', '1')
-  url.hash = location.hash || `slide-${current}`
+  url.hash = slideHash(routes[current - 1], click)
   popup = window.open(url, 'ts-presentation-presenter', 'popup,width=1130,height=750')
   if (!popup) togglePresenter()
 }
 
 window.addEventListener('message', (event: MessageEvent) => {
-  if (event.origin !== (location.protocol === 'file:' ? 'null' : location.origin) || !event.source || event.source !== (opener ?? popup)) return
+  if (event.origin !== (location.protocol === 'file:' ? 'null' : location.origin) || !event.source) return
+  if (isPreview) {
+    if (event.source !== window.parent || window.parent === window) return
+    const position = event.data?.presentationPreview as Partial<SlidePosition> | undefined
+    if (Number.isInteger(position?.slide) && Number.isInteger(position?.click)) show(position!.slide!, position!.click!, false, false)
+    return
+  }
+  if (event.source !== (opener ?? popup)) return
   const data = event.data as {
     presentationSlide?: unknown
     presentationClick?: unknown
@@ -309,22 +361,26 @@ window.addEventListener('popstate', readLocation)
 new ResizeObserver(resize).observe(stage)
 
 window.addEventListener('keydown', (event) => {
-  if (event.altKey || event.metaKey || event.ctrlKey || event.defaultPrevented || overview.open || imageView.open) return
+  if (isCapture || isPreview || event.altKey || event.metaKey || event.ctrlKey || event.defaultPrevented || overview.open || imageView.open) return
   const field = event.target instanceof HTMLElement && event.target.closest('input, select, textarea, [contenteditable]')
   const activated = (event.key === ' ' || event.key === 'Enter') && event.target instanceof HTMLElement && event.target.closest('button, a, summary, [role=button]')
   if (field || activated) return
 
   switch (event.key) {
     case 'ArrowLeft':
-    case 'ArrowUp':
     case 'PageUp':
       previousStep()
       break
     case ' ':
     case 'ArrowRight':
-    case 'ArrowDown':
     case 'PageDown':
       nextStep()
+      break
+    case 'ArrowUp':
+      previousSlide()
+      break
+    case 'ArrowDown':
+      nextSlide()
       break
     case 'Home':
       show(1)
@@ -368,11 +424,11 @@ if (isPresenter) {
 }
 resize()
 
-if (!isCapture) setupLiveCode()
+if (!isCapture && !isPreview) setupLiveCode()
 
 const recordButton = control.querySelector<HTMLButtonElement>('#record-button')!
 let recorder: MediaRecorder | undefined
-if (!isCapture && navigator.mediaDevices?.getDisplayMedia && typeof MediaRecorder !== 'undefined') {
+if (!isCapture && !isPreview && navigator.mediaDevices?.getDisplayMedia && typeof MediaRecorder !== 'undefined') {
   recordButton.hidden = false
   recordButton.addEventListener('click', async () => {
     if (recorder && recorder.state !== 'inactive') {
