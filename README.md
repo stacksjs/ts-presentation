@@ -60,7 +60,7 @@ the deck and style slides with an optional `style.css`.
 | Navigation | `routeAlias: review`, then links such as `#review` or `#review/2`. Set `clicksStart` or `clicks` to override a slide's reveal range |
 | Per-slide options | `class`, `hide`, `disabled`, and `transition: fade`, `slide-left`, or `slide-up` |
 | Images and component markup | Trusted HTML, with optional `data-zoom` on an image |
-| First-party diagrams | YAML in a `charts` fence. Supports flowcharts, timelines, and user journeys through `ts-charts` |
+| First-party diagrams | YAML in a `charts` fence. Supports flowcharts, timelines, user journeys, Gantt schedules, and Git histories through `ts-charts` |
 | Existing diagrams | Slidev-compatible diagram syntax for flowcharts, sequence, state, class, entity relationship, pie, Gantt, GitGraph, timelines, and user journeys |
 | Math | Native MathML with scoped macros, styled fractions, numbered equations, ruled arrays, commutative diagrams, stacked subscripts, mixed text and math, click highlighting, and chemistry notation |
 | Code walkthroughs | `ts [build.ts] {1\|2-3\|all}{lines:true}` for titles and click highlights, or `md magic-move` around nested fences to animate between frames |

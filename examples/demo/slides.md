@@ -204,19 +204,22 @@ The pie chart shows an estimate. The relationship diagram shows the records behi
 
 # Schedule a release
 
-```mermaid {theme:'neutral'}
-gantt
-  dateFormat YYYY-MM-DD
-  axisFormat %b %d
-  tickInterval 2days
-  excludes weekends
-  todayMarker off
-  section Build
-    Review scope  :done, scope, 2026-03-02, 2d
-    Build changes :active, build, after scope, 3d
-  section Release
-    Verify        :crit, verify, after build, 2d
-    Publish       :milestone, launch, after verify, 0d
+```charts
+type: gantt
+theme: neutral
+axisFormat: '%b %d'
+tickInterval: 2days
+excludes: [weekends]
+todayMarker: false
+sections:
+  - name: Build
+    tasks:
+      - { id: scope, name: Review scope, start: '2026-03-02', duration: 2d, tags: [done] }
+      - { id: build, name: Build changes, after: [scope], duration: 3d, tags: [active] }
+  - name: Release
+    tasks:
+      - { id: verify, name: Verify, after: [build], duration: 2d, tags: [crit] }
+      - { id: launch, name: Publish, after: [verify], duration: 0d, tags: [milestone] }
 ```
 
 <!--
@@ -227,14 +230,17 @@ The verification work spans a weekend. The release milestone marks the end of th
 
 # Follow a branch
 
-```mermaid {theme:'neutral'}
-gitGraph LR:
-  commit id:"Start"
-  branch review
-  commit id:"Draft"
-  checkout main
-  commit id:"Prepare"
-  merge review id:"Approve" tag:"v1.0"
+```charts
+type: gitgraph
+theme: neutral
+direction: LR
+operations:
+  - { op: commit, id: Start }
+  - { op: branch, name: review }
+  - { op: commit, id: Draft }
+  - { op: checkout, name: main }
+  - { op: commit, id: Prepare }
+  - { op: merge, branch: review, id: Approve, tags: [v1.0] }
 ```
 
 <!--

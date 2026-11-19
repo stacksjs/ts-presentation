@@ -32,8 +32,8 @@ function render(code: string, marker: string, options: MermaidOptions): string |
   const title = typeof options.title === 'string' ? options.title : ''
   if (/^timeline(?:\s|$)/i.test(header ?? '')) return timeline(code, marker, options)
   if (/^journey$/i.test(header ?? '')) return journey(code, marker, options)
-  if (header === 'gantt') return gantt(code, options.gantt, title)
-  if (/^gitGraph(?:\s|:|$)/.test(header ?? '')) return gitGraph(code, options.gitGraph, options.themeVariables, title)
+  if (header === 'gantt') return gantt(code, marker, options.gantt, title)
+  if (/^gitGraph(?:\s|:|$)/.test(header ?? '')) return gitGraph(code, marker, options.gitGraph, options.themeVariables, title)
   if (header === 'sequenceDiagram') return sequence(code, marker)
   if (header === 'classDiagram' || header === 'erDiagram') return relationshipsDiagram(code, marker)
   if (/^pie(?:\s|$)/.test(header ?? '')) return pieDiagram(code, options.pie, title)

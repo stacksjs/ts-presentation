@@ -1,11 +1,23 @@
-import type { FlowchartDiagramOptions, JourneyChartOptions, TimelineChartOptions } from 'ts-charts/diagrams'
-import { flowchartDiagram, journeyChart, timelineChart } from 'ts-charts/diagrams'
+import type { FlowchartDiagramOptions, GanttChartOptions, GitGraphOptions, JourneyChartOptions, TimelineChartOptions } from 'ts-charts/diagrams'
+import { flowchartDiagram, ganttChart, gitGraphChart, journeyChart, timelineChart } from 'ts-charts/diagrams'
 import { optionsForSvg } from './diagram-svg.ts'
 
 type Chart =
   | ({ type: 'flowchart' } & FlowchartDiagramOptions)
+  | ({ type: 'gantt' } & GanttChartOptions)
+  | ({ type: 'gitgraph' } & GitGraphOptions)
   | ({ type: 'journey' } & JourneyChartOptions)
   | ({ type: 'timeline' } & TimelineChartOptions)
+
+function chartSvg(chart: Chart): string | undefined {
+  switch (chart.type) {
+    case 'flowchart': return flowchartDiagram(chart)
+    case 'gantt': return ganttChart(chart)
+    case 'gitgraph': return gitGraphChart(chart)
+    case 'journey': return journeyChart(chart)
+    case 'timeline': return timelineChart(chart)
+  }
+}
 
 /** Render a typed ts-charts diagram from an authored YAML fence. */
 export function renderChart(source: string, idPrefix: string): string | undefined {
@@ -14,9 +26,7 @@ export function renderChart(source: string, idPrefix: string): string | undefine
     const parsed: unknown = Bun.YAML.parse(source)
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return
     const chart = { ...parsed, idPrefix } as Chart & Record<string, unknown>
-    const svg = chart.type === 'flowchart' ? flowchartDiagram(chart)
-      : chart.type === 'journey' ? journeyChart(chart)
-        : chart.type === 'timeline' ? timelineChart(chart) : undefined
+    const svg = chartSvg(chart)
     return svg && optionsForSvg(svg, chart)
   }
   catch {

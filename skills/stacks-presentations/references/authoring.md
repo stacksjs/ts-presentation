@@ -71,7 +71,15 @@ deck. For example, `canvasWidth: 800` and `aspectRatio: 4/3` produce an
   quotes so backslashes are preserved.
 - For new diagrams, use a `charts` fence with YAML. Set `type: flowchart`
   and supply `nodes` and `edges`, use `type: timeline` with `sections`,
-  or use `type: journey` with `phases`. These diagrams render through `ts-charts`.
+  or use `type: journey` with `phases`.
+- Use `type: gantt` with `sections` containing tasks. Give each task a
+  `name`, an optional `id`, a `start` date or `after` list, and one
+  of `end`, `duration`, or `until`. A task without a start follows the
+  previous task. Set `excludes: [weekends]` to skip weekends in durations.
+- Use `type: gitgraph` with `operations`. Each operation has an `op` of
+  `commit`, `branch`, `checkout`, `merge`, or `cherry-pick`. Give
+  branches and checkouts a `name`, merges a `branch`, and cherry-picks
+  a source `commit`. When picking a merge, identify its `parent`.
 - The compatibility `mermaid` fence reads existing flowcharts with styled nodes and subgraphs,
   sequence diagrams, simple state transitions, class and entity relationship
   diagrams, pie charts, Gantt schedules, GitGraph histories, timelines, and user journeys. Options like `{scale:0.5, theme:'neutral'}` on the

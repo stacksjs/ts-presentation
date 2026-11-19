@@ -13,7 +13,7 @@ in a new ts-presentation project.
 | Snippets, line highlights, Magic Move | Local file and region imports, numbered click highlights, native token animations |
 | KaTeX | Native MathML with chemistry, ruled and compact arrays, commutative diagrams, bra-ket and set notation, mixed text and math, numbered alignment rows, scoped macros, custom fractions, and click highlighting |
 | PowerPoint export | Image slides or editable text and boxes with separate artwork |
-| First-party diagram authoring | YAML `charts` fences through `ts-charts` for flowcharts, timelines, and user journeys |
+| First-party diagram authoring | YAML `charts` fences through `ts-charts` for flowcharts, timelines, user journeys, Gantt schedules, and Git histories |
 | Mermaid syntax compatibility | Local flowchart, sequence, basic state, class, ER, pie, Gantt, GitGraph, timeline, and user journey rendering |
 | Presenter mode | Two synced browser windows, notes, timer, resizable layouts, next-frame preview, and reveal seeking |
 | Navigation context | Slide-local metadata, route aliases, reveal bounds, and navigation controls |

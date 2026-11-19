@@ -1,7 +1,8 @@
 import { expect, test } from 'bun:test'
+import { renderChart } from '../src/charts.ts'
 import { mermaid } from '../src/diagram.ts'
 import { scheduleGantt } from '../src/mermaid/gantt.ts'
-import { ganttDateParser } from '../src/mermaid/gantt-time.ts'
+import { ganttDateParser } from 'ts-charts/diagrams'
 import { buildGitHistory } from '../src/mermaid/gitgraph.ts'
 import { parseDeck, renderDeck } from '../src/index.ts'
 
@@ -77,4 +78,52 @@ test('supports directed GitGraph layout and checks cherry-pick merge parents', a
   expect(html).toContain('viewBox="0 0 ')
   expect(html).toContain('diagram-git-node diagram-git-merge')
   expect(html).not.toContain('language-mermaid')
+})
+
+test('native Gantt YAML and compatibility syntax render the same schedule', () => {
+  const yaml = `type: gantt
+accessibleTitle: Delivery steps
+description: The preview comes before release.
+todayMarker: false
+sections:
+  - name: Release
+    tasks:
+      - { id: preview, name: Preview, start: '2026-03-06', duration: 1d }
+      - { id: publish, name: Publish, after: [preview], duration: 0d, tags: [milestone] }
+`
+  const legacy = `gantt
+accTitle:Delivery steps
+accDescr {
+  The preview comes before release.
+}
+todayMarker off
+section Release
+  Preview :preview, 2026-03-06, 1d
+  Publish :milestone, publish, after preview, 0d
+`
+  const native = renderChart(yaml, 'release')
+  expect(native).toContain('aria-describedby="release-description"')
+  expect(native).toBe(mermaid(legacy, 'release'))
+})
+
+test('native Git history YAML and compatibility syntax render the same branch graph', () => {
+  const yaml = `type: gitgraph
+direction: BT
+operations:
+  - { op: commit, id: start }
+  - { op: branch, name: test, order: 3 }
+  - { op: commit, id: proof }
+  - { op: checkout, name: main }
+  - { op: merge, branch: test, id: release, tags: [v1.0] }
+`
+  const legacy = `gitGraph BT:
+commit id:"start"
+branch test order:3
+commit id:"proof"
+checkout main
+merge test id:"release" tag:"v1.0"
+`
+  const native = renderChart(yaml, 'history')
+  expect(native).toContain('data-commit-id="release" data-parent-ids="start, proof"')
+  expect(native).toBe(mermaid(legacy, 'history'))
 })
