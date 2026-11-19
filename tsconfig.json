@@ -1,4 +1,5 @@
 {
+  "exclude": ["node_modules", "upstream/slidev"],
   "compilerOptions": {
     "target": "esnext",
     "lib": ["esnext", "dom", "dom.iterable"],
