@@ -283,9 +283,11 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   })
   const overview = activeSlides.map((slide, index) => `<li><button type="button" value="${index + 1}"><span>${index + 1}</span> ${escapeHtml(slide.title)}</button></li>`)
 
+  const preset = deck.headmatter?.clickAnimation
+  const clicksPreset = typeof preset === 'string' ? escapeHtml(preset) : ''
   const navigation = JSON.stringify(routes).replaceAll('<', '\\u003c')
   const document = `<!doctype html>
-<html lang="en" data-slide-width="${width}" data-slide-height="${height}" data-theme="${escapeHtml(extensions?.theme.name ?? 'default')}"${options.liveCompile ? ' data-live-compile="true"' : ''}>
+<html lang="en"${clicksPreset ? ` data-click-animation="${clicksPreset}"` : ''} data-slide-width="${width}" data-slide-height="${height}" data-theme="${escapeHtml(extensions?.theme.name ?? 'default')}"${options.liveCompile ? ' data-live-compile="true"' : ''}>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">

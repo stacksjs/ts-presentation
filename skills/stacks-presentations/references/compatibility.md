@@ -16,6 +16,7 @@ in a new ts-presentation project.
 | First-party diagram authoring | YAML `charts` fences through `ts-charts` for flowcharts, timelines, user journeys, Gantt schedules, and Git histories |
 | Mermaid syntax compatibility | Local flowchart, sequence, basic state, class, ER, pie, Gantt, GitGraph, timeline, and user journey rendering |
 | Presenter mode | Two synced browser windows, notes, timer, resizable layouts, next-frame preview, and reveal seeking |
+| Reveal scheduling | Absolute and relative steps, hide ranges, grouped and nested lists, CSS presets, and switch slots |
 | Navigation context | Slide-local metadata, route aliases, reveal bounds, and navigation controls |
 | Drawing and recording | Canvas drawing and browser screen capture |
 

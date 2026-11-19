@@ -18,6 +18,17 @@ deck. For example, `canvasWidth: 800` and `aspectRatio: 4/3` produce an
 - Use `v-click`, a numbered click such as `v-click="2"`, `v-after`,
   or a `<v-clicks>` list for progressive reveals. Add `[click]` on
   its own line in speaker notes to reveal the next notes segment.
+- Use `v-click="'+2'"` for a relative reveal and `v-click="[2, 4]"`
+  to show at clicks 2 and 3. `v-click.hide` reverses the effect.
+  Absolute steps do not move the relative cursor.
+- Set `depth` and `every` on `<v-clicks>` to reveal nested lists
+  and groups of items. `<v-click-gap size="2" />` advances the cursor.
+- Author a `<v-switch>` with `<template #0>`, `<template #1>`,
+  or ranges such as `<template #2-4>` to replace content over time. The
+  range ends before click 4.
+- Use animation modifiers such as `v-click.fade.up` or define
+  `clickAnimation: fade up` in frontmatter. `v-click.none` disables
+  that transition for one element.
 - Use `data-zoom` on a screenshot so the presenter can enlarge it.
 - Serve local images and fonts from the deck's `public/` directory and
   reference them with relative paths.

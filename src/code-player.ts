@@ -1,3 +1,4 @@
+import { clickSequence, parseClickPosition } from './clicks.ts'
 import { lineMatches } from './equation-steps.ts'
 
 interface TimedFrame {
@@ -13,6 +14,7 @@ export interface CodeReveal {
   steps: CodeStep[]
   start: number
   step: number
+  advance: number
   active?: TimedFrame
 }
 
@@ -26,10 +28,10 @@ export function codeReveal(element: HTMLElement, cursor: number): CodeReveal {
     frame, ranges: ranges(frame), start: Number(frame.dataset.codeStart) || 1,
   }))
   const steps = frames.flatMap(frame => (frame.ranges.length ? frame.ranges : ['all']).map(range => ({ frame, range })))
-  const explicit = element.dataset.codeAt ?? ''
-  const at = /^[+-]?\d{1,3}$/.test(explicit) ? explicit : '+1'
-  const start = !isMotion && !ranges(element).length ? cursor : Math.max(0, (/^[+-]/.test(at) ? cursor : 0) + Number(at) - 1)
-  return { element, frames, steps, start, step: start + Math.max(0, steps.length - 1) }
+  if (!isMotion && !ranges(element).length) return { element, frames, steps, start: 0, step: 0, advance: 0 }
+  const at = parseClickPosition(element.dataset.codeAt ?? null) ?? { value: 1, relative: true }
+  const span = clickSequence(at, cursor, Math.max(0, steps.length - 1))
+  return { element, frames, steps, start: span.start - 1, step: span.step, advance: span.advance }
 }
 
 function tokenPositions(frame: HTMLElement): Map<string, DOMRect[]> {

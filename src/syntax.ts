@@ -9,6 +9,7 @@ import { decoratedCode } from './code-blocks.ts'
 const fenceStart = /^ {0,3}(`{3,}|~{3,})(.*)$/
 const inlineCode = /^`+/
 const protectedHtml = /^<(pre|code|script|style)(?:\s[^>]*)?>[\s\S]*?<\/\1\s*>/i
+const htmlTag = /^<(?:[^>"']|"[^"]*"|'[^']*')+>/
 const runnerOptions = /^(\s*)(js|javascript|ts|typescript)(\s+)\{(monaco-run|monaco|live-run|live)\}(\s*)$/i
 const slotMarker = /^::([a-z][a-z0-9-]*)::\s*$/i
 const bareDisplay = /^ {0,3}\\begin\{((?:equation|align|alignat|gather)\*?|CD)\}/
@@ -23,6 +24,15 @@ function inlineMathEnd(line: string, start: number, delimiter: string): number {
     else if (token === '}' && braces) braces--
   }
   return -1
+}
+
+function closeRevealTag(markup: string): string {
+  if (!markup.endsWith('/>')) return markup
+  const tag = /^<([a-z][\w-]*)\b/i.exec(markup)?.[1]
+  const component = /^(?:v-click(?:-gap|-hide|s)?|v-after|v-switch)$/i.test(tag ?? '')
+  const directed = /^(?:article|aside|b|button|div|em|h[1-6]|li|p|section|span|strong|td|tr)$/i.test(tag ?? '')
+    && /\sv-(?:click(?:-hide)?|after)[.\s=/]/.test(markup)
+  return component || directed ? `${markup.slice(0, -2).trimEnd()}></${tag}>` : markup
 }
 
 export function splitSlots(source: string): Record<string, string> {
@@ -64,7 +74,7 @@ interface MarkdownSyntax {
 }
 
 export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): PreparedMarkdown {
-  if (!source.includes('$') && !source.includes('\\(') && !source.includes('\\[') && !source.includes('\\begin{') && !source.includes('{monaco') && !source.includes('{live') && !source.includes('mermaid') && !source.includes('```') && !source.includes('~~~')) {
+  if (!source.includes('$') && !source.includes('\\(') && !source.includes('\\[') && !source.includes('\\begin{') && !source.includes('{monaco') && !source.includes('{live') && !source.includes('mermaid') && !source.includes('v-click') && !source.includes('v-after') && !source.includes('```') && !source.includes('~~~')) {
     return { source, restore: html => html }
   }
 
@@ -108,8 +118,8 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
         }
       }
       if (char === '<') {
-        const chunk = protectedHtml.exec(line.slice(at))?.[0] ?? /^<[^>]+>/.exec(line.slice(at))?.[0]
-        if (chunk) { result += chunk; at += chunk.length; continue }
+        const chunk = protectedHtml.exec(line.slice(at))?.[0] ?? htmlTag.exec(line.slice(at))?.[0]
+        if (chunk) { result += closeRevealTag(chunk); at += chunk.length; continue }
       }
       if (syntax.mathEnabled !== false && char === '$' && line[at + 1] && !/\s|\$/.test(line[at + 1]) && line[at - 1] !== '$') {
         const end = inlineMathEnd(line, at + 1, '$')

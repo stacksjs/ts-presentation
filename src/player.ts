@@ -1,12 +1,9 @@
 import { defaultCanvas } from './canvas.ts'
-import type { CodeReveal } from './code-player.ts'
-import { codeReveal, showCode } from './code-player.ts'
-import type { EquationReveal } from './equation-steps.ts'
-import { equationReveal, showEquation } from './equation-steps.ts'
 import { setupLiveCode } from './live-code.ts'
 import type { SlidePosition, SlideRoute } from './navigation.ts'
 import { clickBounds, createNavigationContext, nextPosition, previousPosition, readSlideHash, slideHash, slidePosition } from './navigation.ts'
 import { setupPresenter } from './presenter.ts'
+import { collectReveals, prepareSwitchPrint, showReveals } from './reveals.ts'
 
 const canvasWidth = Number(document.documentElement.dataset.slideWidth) || defaultCanvas.width
 const canvasHeight = Number(document.documentElement.dataset.slideHeight) || defaultCanvas.height
@@ -38,44 +35,13 @@ const disclosures = articles.map(article => [...article.querySelectorAll('detail
 const screenshots = articles.map(article => [...article.querySelectorAll<HTMLImageElement>('img[data-zoom]')])
 const noteSteps = notes.map(note => [...note.querySelectorAll<HTMLElement>('[data-note-step]')])
 
-interface Reveal {
-  element: HTMLElement
-  step: number
-  hide: boolean
-}
-
-const reveals: (Reveal | EquationReveal | CodeReveal)[][] = articles.map((article) => {
-  let cursor = 0
-  const groups = article.querySelectorAll('v-clicks')
-  for (const group of groups) {
-    const childNodes = group.firstElementChild?.matches('ol, ul') ? group.firstElementChild.children : group.children
-    for (const child of childNodes) child.setAttribute('v-click', '')
-  }
-  return [...article.querySelectorAll<HTMLElement>('v-click, v-after, [v-click], [v-after], [data-click], [data-equation-steps], [data-code-block]')].map((element) => {
-    if (element.hasAttribute('data-code-block')) {
-      const reveal = codeReveal(element, cursor)
-      cursor = Math.max(cursor, reveal.step)
-      return reveal
-    }
-    if (element.hasAttribute('data-equation-steps')) {
-      const reveal = equationReveal(element, cursor)
-      cursor = Math.max(cursor, reveal.step)
-      return reveal
-    }
-    const raw = element.getAttribute('data-click') ?? element.getAttribute('v-click') ?? element.getAttribute('at')
-    const explicit = raw && /^\d+$/.test(raw) ? Number(raw) : 0
-    const after = element.matches('v-after, [v-after]')
-    const step = explicit || (after ? Math.max(cursor, 1) : cursor + 1)
-    cursor = Math.max(cursor, step)
-    return { element, step, hide: element.hasAttribute('hide') }
-  })
-})
-
-const bounds = reveals.map((steps, index) => clickBounds(routes[index].frontmatter,
-  steps.reduce((end, step) => Math.max(end, step.step), noteSteps[index].length - 1)))
+const defaultClickAnimation = document.documentElement.dataset.clickAnimation
+const reveals = articles.map((article, index) => collectReveals(article, routes[index].frontmatter.clickAnimation || defaultClickAnimation))
+const bounds = reveals.map((reveal, index) => clickBounds(routes[index].frontmatter, Math.max(reveal.total, noteSteps[index].length - 1)))
 articles.forEach((article, index) => {
   article.dataset.clicks = String(bounds[index].end)
   article.dataset.clicksStart = String(bounds[index].start)
+  prepareSwitchPrint(reveals[index], bounds[index].end)
 })
 let current = 1
 let click = 0
@@ -120,11 +86,7 @@ function show(number: number, step?: number, writeHistory = true, sync = true): 
   click = nextStep
   articles[current - 1].hidden = false
   notes[current - 1].hidden = false
-  for (const reveal of reveals[current - 1]) {
-    if ('frames' in reveal) showCode(reveal, click, animate, Number(stage.style.getPropertyValue('--slide-scale')) || 1)
-    else if ('lines' in reveal) showEquation(reveal, click)
-    else reveal.element.toggleAttribute('data-reveal-hidden', reveal.hide ? click >= reveal.step : click < reveal.step)
-  }
+  showReveals(reveals[current - 1], click, animate, Number(stage.style.getPropertyValue('--slide-scale')) || 1)
   noteSteps[current - 1].forEach((note, index) => { note.hidden = index > click })
   if (slideChanged) notesPanel.scrollTop = 0
   else if (!notesPanel.hidden && click > 0) {

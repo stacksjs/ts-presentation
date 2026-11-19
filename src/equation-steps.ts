@@ -1,3 +1,4 @@
+import { clickSequence, parseClickPosition } from './clicks.ts'
 import { readFenceOptions } from './fence-options.ts'
 
 export interface EquationOptions {
@@ -43,18 +44,18 @@ export interface EquationReveal {
   firstLine: number
   start: number
   step: number
+  advance: number
 }
 
 export function equationReveal(element: HTMLElement, cursor: number): EquationReveal {
   const ranges = (element.dataset.equationSteps ?? '').split('|')
-  const requestedAt = element.dataset.equationAt ?? ''
-  const at = /^[+-]?\d{1,3}$/.test(requestedAt) ? requestedAt : '+1'
-  const start = Math.max(0, (/^[+-]/.test(at) ? cursor : 0) + Number(at) - 1)
+  const at = parseClickPosition(element.dataset.equationAt ?? null) ?? { value: 1, relative: true }
+  const span = clickSequence(at, cursor, ranges.length - 1)
   // Use the outer alignment table. Its cells can contain nested matrices.
   const table = element.querySelector('mtable[data-equation-lines]')
   const lines = table ? [...table.children].filter(child => child.localName === 'mtr') : [element.querySelector('math') ?? element]
   const final = element.dataset.equationFinally
-  return { element, lines, ranges, final: !final || final === 'last' ? ranges.at(-1) ?? 'all' : final, firstLine: Number(element.dataset.equationFirst) || 1, start, step: start + ranges.length - 1 }
+  return { element, lines, ranges, final: !final || final === 'last' ? ranges.at(-1) ?? 'all' : final, firstLine: Number(element.dataset.equationFirst) || 1, start: span.start - 1, step: span.step, advance: span.advance }
 }
 
 export function showEquation(reveal: EquationReveal, click: number): void {

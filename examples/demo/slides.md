@@ -378,3 +378,21 @@ The diagram commutes when \(v\circ f=g\circ u\).
 <!--
 Follow the top and right arrows, then the left and bottom arrows. Both paths start at A and end at D.
 -->
+
+---
+
+# Change the status
+
+<v-switch>
+  <template #0><p>Draft ready for review.</p></template>
+  <template #1><p>Review in progress.</p></template>
+  <template #2><p>Approved for release.</p></template>
+</v-switch>
+
+<!--
+Introduce the draft.
+[click]
+Explain what the reviewer checks.
+[click]
+Show the approval.
+-->

@@ -265,8 +265,40 @@ button, select { font: inherit; }
   #stage .slide:last-child { break-after: auto; }
 }
 
-v-click, v-after, v-clicks { display: contents; }
-[data-reveal-hidden] { visibility: hidden; }
+v-click, v-click-hide, v-after, v-clicks { display: contents; }
+v-click-gap { display: none; }
+v-switch { display: block; }
+
+@media screen {
+  [data-switch-hidden] { display: none !important; }
+  [data-reveal-hidden] { visibility: hidden; opacity: 0; pointer-events: none; user-select: none; }
+  [data-reveal-hidden].slidev-vclick-anim-fade { visibility: visible; opacity: 0.5; }
+  [data-reveal-hidden].slidev-vclick-anim-up { translate: 0 20px; }
+  [data-reveal-hidden].slidev-vclick-anim-down { translate: 0 -20px; }
+  [data-reveal-hidden].slidev-vclick-anim-left { translate: 20px 0; }
+  [data-reveal-hidden].slidev-vclick-anim-right { translate: -20px 0; }
+  [data-reveal-hidden].slidev-vclick-anim-scale { scale: 0.9; }
+
+  :is(v-click, v-click-hide, v-after).slidev-vclick-target > :not(.slidev-vclick-target) {
+    transition: inherit;
+  }
+  :is(v-click, v-click-hide, v-after)[data-reveal-hidden] > :not(.slidev-vclick-target) {
+    visibility: inherit;
+    opacity: inherit;
+    translate: inherit;
+    scale: inherit;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .playing:not(.capturing, .previewing) .slidev-vclick-target:not(.slidev-vclick-anim-none) {
+      transition: opacity 100ms ease, translate 100ms ease, scale 100ms ease, visibility 100ms linear;
+    }
+    .playing:not(.capturing, .previewing) .slidev-vclick-anim-fade-in:not(.slidev-vclick-anim-none) {
+      transition-duration: 300ms;
+    }
+  }
+}
+
 
 .slide:is(.layout-cover, .layout-intro, .layout-section) {
   display: grid;
@@ -333,7 +365,7 @@ v-click, v-after, v-clicks { display: contents; }
 .slide-ink { position: absolute; z-index: 10; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
 
 @media print {
-  [data-reveal-hidden] { visibility: visible; }
+  [data-switch-print-hidden] { display: none !important; }
   #overview, #image-view, .slide-ink { display: none !important; }
   #stage .slide:is(.layout-cover, .layout-intro, .layout-section, .layout-image-left, .layout-image-right) {
     display: grid !important;

@@ -135,3 +135,18 @@ test('loads math and Mermaid setup hooks from a standalone deck', async () => {
     await rm(directory, { recursive: true, force: true })
   }
 })
+
+test('closes self-closing reveal components without changing code or void images', async () => {
+  const html = await renderDeck(parseDeck([
+    '# Reveal authoring', '',
+    '<v-click-gap size="1" />',
+    '<div v-click aria-label="Greater than > zero" />',
+    '<img v-click src="./diagram.png" alt="" />', '',
+    '~~~text', '<v-click-gap size="2" />', '~~~',
+  ].join('\n')))
+  expect(html).toContain('<v-click-gap size="1"></v-click-gap>')
+  expect(html).toContain('<div v-click aria-label="Greater than > zero"></div>')
+  expect(html).toContain('<img v-click src="./diagram.png" alt="" />')
+  expect(html).not.toContain('</img>')
+  expect(html).toContain('&lt;v-click-gap size=')
+})
