@@ -4,11 +4,19 @@ import type { ObserveDeckFile } from './deck-modules.ts'
 import type { MathMacros } from './math.ts'
 
 // Setup names and helper signatures follow Slidev's packages/types/src/setups (MIT).
+export type KatexTrustContext =
+  | { command: '\\href' | '\\url' | '\\includegraphics', url: string, protocol: string }
+  | { command: '\\htmlClass', class: string }
+  | { command: '\\htmlId', id: string }
+  | { command: '\\htmlStyle', style: string }
+  | { command: '\\htmlData', attributes: Readonly<Record<string, string>> }
+
 export interface KatexOptions {
   macros?: MathMacros
   errorColor?: string
   throwOnError?: boolean
   leqno?: boolean
+  trust?: boolean | ((context: KatexTrustContext) => boolean)
 }
 
 export type MermaidOptions = Readonly<Record<string, unknown>>

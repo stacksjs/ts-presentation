@@ -1,8 +1,9 @@
 import { escapeHtml } from './html.ts'
-import type { KatexOptions } from './authoring-setup.ts'
+import type { KatexOptions, KatexTrustContext } from './authoring-setup.ts'
 import { chemicalFormula, physicalUnits } from './math-chemistry.ts'
 import { isCenteredGlyph, mathSymbol, textSymbol } from './math-symbols.ts'
 import type { MathSymbol, MathSymbolKind } from './math-symbols.ts'
+import { isMathAttributeCommand, isMathUrlCommand, mathAttributes, mathKeyValues, mathUrl, trustedMath } from './math-trust.ts'
 
 const greek: Record<string, string> = {
   alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε', varepsilon: 'ϵ', zeta: 'ζ', eta: 'η',
@@ -132,15 +133,41 @@ export function resolveMathMacros(headmatter?: Record<string, unknown>): MathMac
 
 const verbPattern = /\\verb(?:\*([^\r\n])([^\r\n]*?)\1|([^*A-Za-z\r\n])([^\r\n]*?)\3)/
 const leadingVerb = new RegExp(`^${verbPattern.source}`, 'u')
-const ordinaryMathTokens = /\\[A-Za-z@]+|\\[^A-Za-z@\r\n]|%[^\r\n]*(?:\r?\n[ \t]*|$)|#[1-9]|\s+|./
-const mathTokens = new RegExp(`${verbPattern.source}|${ordinaryMathTokens.source}`, 'gu')
+const ordinaryMathTokens = /\\[A-Za-z@]+|\\[^A-Za-z@\r\n]|#[1-9]|\s+|./
+const mathComment = /%[^\r\n]*(?:\r?\n[ \t]*|$)/
+const mathTokens = new RegExp(`${verbPattern.source}|${mathComment.source}|${ordinaryMathTokens.source}`, 'gu')
+const rawMathTokens = new RegExp(ordinaryMathTokens, 'gu')
 
 export function mathVerbLength(source: string): number {
   return source.startsWith('\\verb') ? leadingVerb.exec(source)?.[0].length ?? 0 : 0
 }
 
 function tokenize(source: string): string[] {
-  return source.match(mathTokens)?.filter(token => !token.startsWith('%')) ?? []
+  if (!source.includes('%')) return source.match(mathTokens) ?? []
+  const lexer = new RegExp(mathTokens)
+  const tokens: string[] = []
+  for (let match = lexer.exec(source); match; match = lexer.exec(source)) {
+    const token = match[0]
+    if (token.startsWith('%')) continue
+    tokens.push(token)
+    if (!isMathUrlCommand(token)) continue
+    const start = lexer.lastIndex
+    const argument = token === '\\includegraphics' ? /\s*(?:\[[^\]\r\n]*\]\s*)?\{/y : /\s*\{/y
+    argument.lastIndex = start
+    if (!argument.test(source)) continue
+    // Percent signs inside literal URLs belong to the address rather than TeX comments.
+    let group = 1
+    let end = argument.lastIndex
+    while (end < source.length && group) {
+      const character = source[end++]
+      if (character === '\\') end++
+      else if (character === '{') group++
+      else if (character === '}') group--
+    }
+    for (const entry of source.slice(start, end).match(rawMathTokens) ?? []) tokens.push(entry)
+    lexer.lastIndex = end
+  }
+  return tokens
 }
 
 type MathStyle = 0 | 1 | 2 | 3
@@ -414,6 +441,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   let delimiterDepth = 0
   let equationNumber = 0
   let fontScale = 1
+  let linkDepth = 0
 
   const macros = new Map<string, Macro>()
   const scopes: Map<string, Macro | undefined>[] = []
@@ -645,6 +673,58 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return xml`<mpadded width="0"><mrow class="math-overlap-${direction}">${content}</mrow></mpadded>`
   }
 
+  function untrusted(command: string): string {
+    const color = safeColor(state?.options.errorColor ?? '') || '#cc0000'
+    return `<mtext class="math-untrusted" style="color:${color}">${escapeHtml(command)}</mtext>`
+  }
+
+  function imageMarkup(url: string, options: string): string {
+    const values = new Map(mathKeyValues(options))
+    for (const key of values.keys()) {
+      if (!['width', 'height', 'totalheight', 'alt'].includes(key)) throw new Error(`Unknown math image option: ${key}`)
+    }
+    function size(key: string): string | undefined {
+      const value = values.get(key)?.trim()
+      if (value === undefined) return
+      const normalized = /^[+\-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(value) ? `${Number(value)}bp` : value
+      const parsed = dimension(normalized)
+      if (!parsed || Number.parseFloat(parsed) < 0) throw new Error(`Invalid math image size: ${key}`)
+      return parsed
+    }
+    const width = size('width')
+    const height = size('height') ?? '0.9em'
+    const total = size('totalheight')
+    const sizing = `height:${total ?? height}${width && Number.parseFloat(width) > 0 ? `;width:${width}` : ''}${total ? `;vertical-align:calc(${height} - ${total})` : ''}`
+    const filename = url.split(/[?#]/)[0].split('/').at(-1)?.replace(/\.[^.]+$/, '') ?? ''
+    const alt = values.get('alt')?.trim() || filename
+    return `<mtext class="math-image"><img src="${escapeHtml(url)}" alt="${escapeHtml(alt)}" style="${sizing}"></mtext>`
+  }
+
+  function htmlCommand(command: KatexTrustContext['command'], text = false): Markup {
+    const body = () => text ? textArgument('text') : argument()
+    if (isMathUrlCommand(command)) {
+      const options = command === '\\includegraphics' ? bracket() : undefined
+      const raw = expandDefinition(rawGroup()).join('')
+      let content: Markup = ''
+      if (command === '\\href') {
+        linkDepth++
+        try { content = body() }
+        finally { linkDepth-- }
+      }
+      const context = mathUrl(command, raw)
+      if (!context || !trustedMath(context, state?.options.trust)) return untrusted(command)
+      if (command === '\\includegraphics') return imageMarkup(context.url, options ?? '')
+      if (linkDepth) return command === '\\url' ? tag('mtext', context.url) : content
+      const href = escapeHtml(context.url)
+      if (command === '\\url') return `<mtext class="math-link math-url"><a href="${href}">${escapeHtml(context.url)}</a></mtext>`
+      // HTML anchors remain operable in browsers that do not implement MathML href.
+      return style => `<mtext class="math-link"><a href="${href}"><math displaystyle="${style === 0}"><mrow>${renderMarkup(content, style)}</mrow></math></a></mtext>`
+    }
+    const { context, attributes } = mathAttributes(command, literalGroup())
+    const content = body()
+    return trustedMath(context, state?.options.trust) ? xml`<mrow ${attributes}>${content}</mrow>` : untrusted(command)
+  }
+
   function textArgument(name: string): Markup {
     if (depth++ > 100) throw new Error('Math text is nested too deeply')
     const properties = textFonts[name]
@@ -710,6 +790,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
         else if (token === '\\llap' || token === '\\clap' || token === '\\rlap') {
           flush()
           parts.push(overlap(token[1], textArgument('text')))
+        }
+        else if (isMathAttributeCommand(token) || token === '\\href' || token === '\\url') {
+          flush()
+          parts.push(htmlCommand(token, true))
         }
         else if (Object.hasOwn(textAccents, token)) {
           const character = literalGroup().trim()
@@ -1129,6 +1213,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (name === 'ce' || name === 'pu') {
       return { markup: (name === 'ce' ? chemicalFormula : physicalUnits)(literalGroup()) }
     }
+    if (isMathAttributeCommand(token) || isMathUrlCommand(token)) return { markup: htmlCommand(token) }
     if (Object.hasOwn(classSpacing, name)) return classifiedAtom(name, argument())
     if (['def', 'gdef', 'edef', 'xdef'].includes(name)) {
       const command = literalGroup()

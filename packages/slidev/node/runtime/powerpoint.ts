@@ -12,6 +12,7 @@ export interface FrameLink {
   y: number
   width: number
   height: number
+  inArtwork?: boolean
 }
 
 export type PowerPointFrame = {
@@ -156,19 +157,22 @@ export function createPowerPoint(frames: readonly PowerPointFrame[], options: Po
     }
     let background = ''
     let shapes: string
+    let shapeId = 2
     if (frame.editable) {
       const drawing = drawEditable(frame.editable, png => image(Buffer.from(png, 'base64')), hyperlink)
       background = drawing.background
       shapes = drawing.shapes
+      shapeId = drawing.lastShapeId
     }
     else {
       shapes = embeddedPicture(2, image(frame.image), { x: 0, y: 0, w: width, h: height }, frame.title)
-      shapes += (frame.links ?? []).filter(validRectangle).map((link, at) => {
-        const action = drawHyperlink(hyperlink(link.href))
-        return action ? `<p:sp><p:nvSpPr><p:cNvPr id="${at + 3}" name="${xml(link.label)}">${action}</p:cNvPr><p:cNvSpPr/><p:nvPr/></p:nvSpPr>
-        <p:spPr>${extents(link.width, link.height, link.x, link.y)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:solidFill><a:srgbClr val="FFFFFF"><a:alpha val="0"/></a:srgbClr></a:solidFill><a:ln><a:noFill/></a:ln></p:spPr></p:sp>` : ''
-      }).join('')
     }
+    // Links inside raster artwork need their own hit areas even in an editable deck.
+    shapes += (frame.links ?? []).filter(link => (!frame.editable || link.inArtwork) && validRectangle(link)).map((link) => {
+      const action = drawHyperlink(hyperlink(link.href))
+      return action ? `<p:sp><p:nvSpPr><p:cNvPr id="${++shapeId}" name="${xml(link.label)}">${action}</p:cNvPr><p:cNvSpPr/><p:nvPr/></p:nvSpPr>
+      <p:spPr>${extents(link.width, link.height, link.x, link.y)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:solidFill><a:srgbClr val="FFFFFF"><a:alpha val="0"/></a:srgbClr></a:solidFill><a:ln><a:noFill/></a:ln></p:spPr></p:sp>` : ''
+    }).join('')
     add(`ppt/slides/slide${slide}.xml`, `<p:sld ${presentationNS}><p:cSld name="${xml(frame.title)}">${background}<p:spTree>${group}${shapes}</p:spTree></p:cSld>${mapped}</p:sld>`, 'presentationml.slide')
     add(`ppt/slides/_rels/slide${slide}.xml.rels`, relationships(rels))
     add(`ppt/notesSlides/notesSlide${slide}.xml`, `<p:notes ${presentationNS}><p:cSld><p:spTree>${group}${notesShape(frame.notes)}</p:spTree></p:cSld>${mapped}</p:notes>`, 'presentationml.notesSlide')

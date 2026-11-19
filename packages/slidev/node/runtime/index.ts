@@ -29,7 +29,7 @@ import { snippetRevision } from './snippet-write.ts'
 
 export { defineAddon, defineStxLayout, defineTheme } from './extensions.ts'
 export { defineCodeHighlightSetup, defineShikiSetup, defineKatexSetup, defineMermaidRendererSetup, defineMermaidSetup } from './authoring-setup.ts'
-export type { CodeHighlightOptions, KatexOptions, MermaidOptions, MermaidRenderer } from './authoring-setup.ts'
+export type { CodeHighlightOptions, KatexOptions, KatexTrustContext, MermaidOptions, MermaidRenderer } from './authoring-setup.ts'
 export type { PresentationNavigation, SlideRoute } from '../../../client/runtime/navigation.ts'
 export type { LayoutContext, PresentationAddon, PresentationLayout, PresentationTheme } from './extensions.ts'
 export type { DrawingOptions } from '../../../types/src/drawings.ts'
@@ -81,8 +81,11 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     saved: Object.fromEntries([...(options.savedDrawings ?? [])].map(([slide, drawing]) => [slide, drawing.sketch])),
   }
   const configuration = options.setup
+  const mathOptions = deck.headmatter?.math ?? deck.headmatter?.katex
+  const trust = mathOptions && typeof mathOptions === 'object' && 'trust' in mathOptions ? mathOptions.trust : undefined
   const renderMath = createMathRenderer({
     ...configuration?.katex,
+    trust: typeof trust === 'boolean' ? trust : configuration?.katex?.trust,
     macros: { ...configuration?.katex?.macros, ...resolveMathMacros(deck.headmatter) },
   })
   const mermaidConfig = deck.headmatter?.mermaid

@@ -130,7 +130,7 @@ export function drawEditable(
   slide: SlideIr,
   image: (png: string) => string,
   hyperlink: (href: string) => HyperlinkRef | undefined,
-): { background: string, shapes: string } {
+): { background: string, shapes: string, lastShapeId: number } {
   let id = 1
   const next = () => ++id
   const shapes = slide.nodes.map((node) => {
@@ -140,5 +140,5 @@ export function drawEditable(
     return embeddedPicture(next(), image(node.data), node.rect, label, node.kind === 'image' && node.link ? hyperlink(node.link) : undefined)
   }).join('')
   const background = slide.background ? `<p:bg><p:bgPr>${fill(slide.background)}<a:effectLst/></p:bgPr></p:bg>` : ''
-  return { background, shapes }
+  return { background, shapes, lastShapeId: id }
 }

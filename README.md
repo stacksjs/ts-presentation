@@ -87,6 +87,7 @@ the deck and style slides with an optional `style.css`.
 | PlantUML sequence diagrams | `plantuml` fences render messages, participants, notes, and groups locally through `ts-charts` |
 | Markdown alerts | Start a blockquote with `[!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, or `[!CAUTION]` |
 | Math | Native MathML with scoped macros, styled fractions, numbered equations, ruled arrays, commutative diagrams, stacked subscripts, mixed text and math, click highlighting, and chemistry notation |
+| Math links and images | `\href`, `\url`, `\includegraphics`, and `\html*` attributes honor `math.trust` in deck frontmatter or the `trust` callback in `setup/katex.ts` |
 | Code walkthroughs | `ts [build.ts] {1\|2-3\|all}{lines:true}` for titles and click highlights, or `md magic-move` around nested fences to animate between frames |
 | Code groups | Enable `comark: true` and place titled fences between `::code-group` and `::` to create keyboard-accessible tabs |
 | Source snippets | `<<< @/snippets/build.ts#example` for a named region. Use `{monaco-write}` with a whole JavaScript or TypeScript file to allow saving from the local dev editor |
@@ -149,7 +150,7 @@ The port branches from [Slidev v53.1.0](https://github.com/slidevjs/slidev/tree/
 Credit goes to Anthony Fu and the Slidev community. The original MIT
 license is included in [licenses/Slidev-MIT.txt](licenses/Slidev-MIT.txt).
 
-The supplemental TeX symbol mappings draw on KaTeX. Credit goes to Khan
+The supplemental TeX symbol mappings and trust option draw on KaTeX. Credit goes to Khan
 Academy and the KaTeX contributors. Their MIT notice is included in
 [licenses/KaTeX-MIT.txt](licenses/KaTeX-MIT.txt).
 
