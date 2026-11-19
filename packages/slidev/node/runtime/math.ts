@@ -352,6 +352,8 @@ const fractionFences: Record<string, [string, string]> = {
   '\\brack': ['[', ']'],
 }
 const boundary = '\u0000math-expansion-boundary'
+const literalToken = '\u0000math-literal:'
+const inhibitedToken = '\u0000math-inhibited:'
 
 function labelledOperator(symbol: string, above: string, below: string, size = ''): string {
   const base = `<mo stretchy="true" movablelimits="false"${size ? ` minsize="${size}"` : ''}>${symbol}</mo>`
@@ -438,31 +440,62 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
   }
 
+  function expandable(token: string): boolean {
+    return token === '\\expandafter' || token === '\\noexpand' || macros.has(token)
+  }
+
+  function expandOnce(): boolean {
+    const token = tokens[cursor]
+    if (!expandable(token)) return false
+    if (++expandedCount > 300) throw new Error('Too many math macro expansions')
+    if (token === '\\expandafter' || token === '\\noexpand') {
+      tokens.splice(cursor, 1)
+      space()
+      const next = tokens[cursor]
+      if (!next || next === boundary) throw new Error('Missing math expansion token')
+      if (token === '\\noexpand') {
+        if (expandable(next)) tokens[cursor] = inhibitedToken + next
+        return true
+      }
+      tokens.splice(cursor, 1)
+      space()
+      if (!tokens[cursor] || tokens[cursor] === boundary) throw new Error('Missing token after delayed math expansion')
+      expandOnce()
+      tokens.splice(cursor, 0, next)
+      return true
+    }
+
+    const macro = macros.get(token)!
+    const start = cursor++
+    space()
+    for (const token of macro.prefix) {
+      if (tokens[cursor++] !== token) throw new Error('Missing macro prefix')
+    }
+    const values = macro.parameters.map((delimiter, index) => {
+      if (index === 0 && macro.optional !== undefined) return rawBracket() ?? macro.optional
+      return delimiter.length ? delimitedArgument(delimiter) : rawGroup()
+    })
+    const body = macro.body.flatMap(token => /^#[1-9]$/.test(token) ? values[Number(token[1]) - 1] ?? [] : [token])
+    if (tokens.length + body.length > 12000) throw new Error('Expanded equation is too long')
+    tokens.splice(start, cursor - start, ...body)
+    cursor = start
+    return true
+  }
+
   function expand(skipSpace = true): void {
     if (skipSpace) space()
-    let macro = macros.get(tokens[cursor])
-    while (macro) {
-      if (++expandedCount > 300) throw new Error('Too many math macro expansions')
-      const start = cursor++
-      space()
-      for (const token of macro.prefix) {
-        if (tokens[cursor++] !== token) throw new Error('Missing macro prefix')
-      }
-      const values = macro.parameters.map((delimiter, index) => {
-        if (index === 0 && macro!.optional !== undefined) return rawBracket() ?? macro!.optional
-        return delimiter.length ? delimitedArgument(delimiter) : rawGroup()
-      })
-      const body = macro.body.flatMap(token => /^#[1-9]$/.test(token) ? values[Number(token[1]) - 1] ?? [] : [token])
-      if (tokens.length + body.length > 12000) throw new Error('Expanded equation is too long')
-      tokens.splice(start, cursor - start, ...body)
-      cursor = start
+    while (expandOnce()) {
       if (skipSpace) space()
-      macro = macros.get(tokens[cursor])
     }
   }
 
-  const peek = () => { expand(); return tokens[cursor] ?? '' }
-  const take = () => { expand(); return tokens[cursor++] ?? '' }
+  function tokenValue(token: string): string {
+    if (token.startsWith(literalToken)) return token.slice(literalToken.length)
+    return token.startsWith(inhibitedToken) ? '\\relax' : token
+  }
+
+  const peek = () => { expand(); return tokenValue(tokens[cursor] ?? '') }
+  const take = () => { expand(); return tokenValue(tokens[cursor++] ?? '') }
 
   function rawGroup(): string[] {
     space()
@@ -509,16 +542,17 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return delimitedArgument([']'])
   }
 
-  function expandDefinition(body: string[]): string[] {
+  function expandDefinition(body: string[], preserveLiterals = false): string[] {
     const begin = cursor
     tokens.splice(begin, 0, ...body, boundary)
     const definition: string[] = []
     try {
       while (tokens[cursor] !== boundary) {
-        if (tokens[cursor] === '\\noexpand') cursor++
-        else expand(false)
+        expand(false)
         if (tokens[cursor] === boundary) break
-        definition.push(tokens[cursor++])
+        const token = tokens[cursor++]
+        if (token.startsWith(inhibitedToken)) definition.push(token.slice(inhibitedToken.length))
+        else definition.push(preserveLiterals ? token : tokenValue(token))
       }
     }
     finally {
@@ -630,9 +664,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
     inScope(() => {
       while (true) {
         expand(false)
-        const token = tokens[cursor++]
+        const token = tokenValue(tokens[cursor++] ?? '')
         if (!token || token === boundary) throw new Error('Unclosed math text')
         if (token === '}') break
+        if (token === '\\relax') continue
         if (Object.hasOwn(sizeCommands, token)) {
           flushSize()
           fontScale = sizeCommands[token]
@@ -1099,17 +1134,29 @@ export function renderMath(source: string, display = false, configured: MathMacr
         else sequence.push(token)
       }
       const body = rawGroup()
-      const replacement = name === 'edef' || name === 'xdef' ? expandDefinition(body) : body
+      const replacement = name === 'edef' || name === 'xdef' ? expandDefinition(body, true) : body
       assign(command, { body: replacement, parameters, prefix }, global || name === 'gdef' || name === 'xdef')
       return { markup: '' }
     }
-    if (name === 'let') {
+    if (name === 'let' || name === 'futurelet') {
       const target = literalGroup()
       space()
-      if (tokens[cursor] === '=') cursor++
-      const source = rawGroup()
-      const existing = source.length === 1 ? macros.get(source[0]) : undefined
-      assign(target, existing ?? plainMacro(source), global)
+      let source: string[]
+      if (name === 'futurelet') {
+        let following = cursor + 1
+        while (/^\s+$/.test(tokens[following] ?? '')) following++
+        if (!tokens[cursor] || tokens[cursor] === boundary || !tokens[following] || tokens[following] === boundary)
+          throw new Error('Missing math lookahead token')
+        source = [tokens[following]]
+      }
+      else {
+        if (tokens[cursor] === '=') cursor++
+        source = rawGroup()
+      }
+      const value = source.length === 1 ? source[0] : undefined
+      const existing = value === undefined ? undefined : macros.get(value)
+      const snapshot = value?.startsWith('\\') ? [literalToken + value] : source
+      assign(target, existing ?? plainMacro(snapshot), global)
       return { markup: '' }
     }
     if (name === 'newcommand' || name === 'renewcommand' || name === 'providecommand') {

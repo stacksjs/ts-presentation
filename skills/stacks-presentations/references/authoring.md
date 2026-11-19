@@ -179,6 +179,7 @@ speaker notes. Each hook can be asynchronous.
   `name`, an optional `id`, a `start` date or `after` list, and one
   of `end`, `duration`, or `until`. A task without a start follows the
   previous task. Set `excludes: [weekends]` to skip weekends in durations.
+  Holiday lists accept ISO dates alongside dates in the chart's `dateFormat`.
   A task's `href` can point to a URL or slide. Use `weekday` to start weekly
   ticks on a chosen day and `todayMarkerStyle` to style the current-date line.
   Set `width`, `fontSize`, `sectionFontSize`, and `sectionColors` to size and
@@ -188,7 +189,8 @@ speaker notes. Each hook can be asynchronous.
 - Use `type: gitgraph` with `operations`. Each operation has an `op` of
   `commit`, `branch`, `checkout`, `merge`, or `cherry-pick`. Give
   branches and checkouts a `name`, merges a `branch`, and cherry-picks
-  a source `commit`. When picking a merge, identify its `parent`. Set
+  a source `commit`. A dashed line traces the source commit. When picking a
+  merge, identify its `parent`. Set
   `rotateCommitLabel: true` for diagonal commit labels.
   Set `branchLabelColors` and `highlightColors` for the branch palette.
   `commitLabel` and `tagLabel` accept `color`, `background`, `border`, and
@@ -204,6 +206,8 @@ speaker notes. Each hook can be asynchronous.
   Imported GitGraph diagrams support branch ordering, checkout, merges, tags,
   cherry-picking, horizontal or vertical lanes, `rotateCommitLabel`, and the
   diagram's branch, commit, and tag theme variables.
+  Imported Gantt tasks without IDs receive `task1`, `task2`, and so on for
+  dependencies, links, and callbacks.
 - Use `timeline` or `timeline TD` for chronological periods. A period can
   have several events on one line or continuation lines starting with `:`.
   Add `section` headings and use `<br>` to break a label manually.

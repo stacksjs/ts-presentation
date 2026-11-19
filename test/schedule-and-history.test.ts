@@ -45,6 +45,23 @@ test('uses strict input dates, validates dependencies and supports timezone offs
   expect(mermaid('gantt\nA :a, after missing, 2d', 'missing')).toBeUndefined()
 })
 
+test('uses automatic Gantt task IDs for dependencies and task links', () => {
+  const source = `gantt
+dateFormat DD/MM/YYYY
+excludes 2026-03-07
+Draft :06/03/2026, 1d
+Review :review, after task1, 1d
+Ship :after review, 1d
+click task2 href "#notes"`
+  const schedule = scheduleGantt(source)!
+  expect(schedule.tasks.map(task => [task.id, task.start, task.end])).toEqual([
+    ['task1', Date.UTC(2026, 2, 6), Date.UTC(2026, 2, 7)],
+    ['review', Date.UTC(2026, 2, 7), Date.UTC(2026, 2, 9)],
+    ['task2', Date.UTC(2026, 2, 9), Date.UTC(2026, 2, 10)],
+  ])
+  expect(mermaid(source, 'gantt', { securityLevel: 'loose' })).toMatch(/href="#notes"[^>]*><g[^>]*data-task-id="task2"/)
+})
+
 const history = `gitGraph LR:
   commit id: "base"
   branch "feature/review" order: 3
@@ -74,6 +91,10 @@ test('supports directed GitGraph layout and checks cherry-pick merge parents', a
   expect(buildGitHistory(branched + '  cherry-pick id: "release"\n')).toBeUndefined()
   expect(buildGitHistory(branched + '  cherry-pick id: "release" parent: "base"\n')).toBeUndefined()
   expect(buildGitHistory(branched + '  cherry-pick id: "release" parent: "c4"\n')?.commits.at(-1)?.picked).toBe('release')
+  const picked = mermaid(branched + '  cherry-pick id: "release" parent: "c4"\n', 'provenance')!
+  expect(picked).toMatch(/stroke-dasharray="5 3" data-from-commit="release" data-to-commit="c7"/)
+  expect(picked).toContain('data-parent-ids="maintenance" data-picked-id="release" data-picked-parent="c4"')
+  expect(picked).toContain('cherry-pick:release|parent:c4')
   const input = `# Timelines\n\n\`\`\`mermaid\n${history.replace('LR:', 'BT:')}\`\`\``
   const html = await renderDeck(parseDeck(input))
   expect(html).toContain('viewBox="0 0 ')

@@ -3,6 +3,27 @@ import { findChrome } from '../packages/slidev/node/runtime/chrome.ts'
 import { collectSnapshot } from '../packages/slidev/node/runtime/editable/walker.ts'
 import { createMathRenderer, renderMath } from '../packages/slidev/node/runtime/math.ts'
 
+test('expands a token after a delayed definition target and preserves noexpand through edef', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const delayed = math(String.raw`\def\target{X}\def\name{\target}\expandafter\def\name{A}\target`, false)
+  expect(delayed).toContain('<mrow><mi>A</mi></mrow>')
+  const eager = math(String.raw`\def\pick{A}\def\keep{\noexpand\pick}\edef\saved{\keep}\def\pick{B}\saved`, false)
+  expect(eager).toContain('<mrow><mi>B</mi></mrow>')
+  expect(math(String.raw`\def\skipme{A}x\noexpand\skipme B `, false)).toContain('<mrow><mi>x</mi><mi>B</mi></mrow>')
+  expect(() => math(String.raw`\expandafter\def`, false)).toThrow('Missing token after delayed math expansion')
+})
+
+test('keeps a snapshot of the lookahead and primitive meanings when using let', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const clauses = math(String.raw`\def\original{A}\def\action{\def\original{B}\next}\futurelet\next\action\original`, false)
+  expect(clauses).toContain('<mrow><mi>A</mi><mi>B</mi></mrow>')
+  const local = math(String.raw`\def\next{Z}{\def\action{\next}\futurelet\next\action A}\next`, false)
+  expect(local).toContain('<mrow><mrow><mi>A</mi><mi>A</mi></mrow><mi>Z</mi></mrow>')
+  const primitive = math(String.raw`\let\oldfrac=\frac\edef\copy{\oldfrac}\def\frac{X}\copy{1}{2}\frac`, false)
+  expect(primitive).toContain('<mfrac><mrow><mn>1</mn></mrow><mrow><mn>2</mn></mrow></mfrac><mi>X</mi>')
+  expect(math(String.raw`\let\word=\textunderscore\text{literal: \word.}`, false)).toContain('literal: _.')
+})
+
 test('renders phase angles, actuarial notation, pseudo-bold, and strikeout as MathML', () => {
   const math = createMathRenderer({ throwOnError: true })
   const html = math(String.raw`\phase{-78^\circ} + a_{\angl{n+1}}+b_\angln + \pmb{\mu} + \text{old \sout{term $x^2$}}`, true)

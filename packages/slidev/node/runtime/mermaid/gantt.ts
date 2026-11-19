@@ -82,6 +82,7 @@ function parseGantt(source: string, interactionsEnabled = false): GanttChartOpti
   const inclusions: string[] = []
   const sections: { name?: string, tasks: GanttTask[] }[] = [{ tasks: [] }]
   const interactions = new Map<string, TaskInteraction>()
+  let generatedIds = 0
   for (const line of chart.rows) {
     const [directive, ...words] = line.split(/\s+/)
     const text = words.join(' ')
@@ -121,7 +122,7 @@ function parseGantt(source: string, interactionsEnabled = false): GanttChartOpti
     const tags: GanttTaskTag[] = []
     while (isTag(segments[0])) tags.push(segments.shift() as GanttTaskTag)
     if (segments.length < 1 || segments.length > 3 || segments.some(segment => !segment)) return
-    const id = segments.length === 3 ? segments.shift()! : undefined
+    const id = segments.length === 3 ? segments.shift()! : `task${++generatedIds}`
     const [start, end] = segments.length === 2 ? segments : [undefined, segments[0]]
     const task: GanttTask = { id, name, tags }
     if (start?.startsWith('after ')) task.after = start.slice(6).trim().split(/\s+/)
