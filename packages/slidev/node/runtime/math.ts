@@ -19,6 +19,7 @@ const operators: Record<string, string> = {
   emptyset: '∅', ldots: '…', cdots: '⋯', vdots: '⋮', ddots: '⋱', angle: '∠',
   mid: '∣', parallel: '∥', perp: '⊥', circ: '∘', ast: '∗', setminus: '∖',
   coprod: '∐', bigcup: '⋃', bigcap: '⋂', bigvee: '⋁', bigwedge: '⋀',
+  bigodot: '⨀', bigoplus: '⨁', bigotimes: '⨂', biguplus: '⨄', bigsqcup: '⨆',
   iiint: '∭', oiint: '∯', oiiint: '∰', intop: '∫', smallint: '∫', imath: 'ı', jmath: 'ȷ', ell: 'ℓ', hbar: 'ℏ',
   Re: 'ℜ', Im: 'ℑ', aleph: 'ℵ', empty: '∅', cong: '≅', ll: '≪', gg: '≫',
   uparrow: '↑', downarrow: '↓', updownarrow: '↕', Uparrow: '⇑', Downarrow: '⇓', Updownarrow: '⇕',
@@ -30,10 +31,18 @@ const operators: Record<string, string> = {
   otimes: '⊗', oplus: '⊕', odot: '⊙', wedge: '∧', vee: '∨', colon: ':',
 }
 const functions = new Set(['sin', 'cos', 'tan', 'cot', 'sec', 'csc', 'arcsin', 'arccos', 'arctan', 'sinh', 'cosh', 'tanh',
-  'log', 'ln', 'exp', 'min', 'max', 'argmin', 'argmax', 'det', 'lim', 'sup', 'inf', 'gcd', 'Pr'])
+  'log', 'ln', 'exp', 'min', 'max', 'argmin', 'argmax', 'det', 'lim', 'sup', 'inf', 'gcd', 'Pr',
+  'arg', 'arctg', 'arcctg', 'ch', 'cosec', 'cotg', 'coth', 'ctg', 'cth', 'deg', 'dim', 'hom', 'ker', 'lg', 'sh', 'tg', 'th'])
 const big = new Set(['sum', 'prod', 'coprod', 'bigcup', 'bigcap', 'bigvee', 'bigwedge', 'intop', 'smallint',
+  'bigodot', 'bigoplus', 'bigotimes', 'biguplus', 'bigsqcup',
   'lim', 'min', 'max', 'argmin', 'argmax', 'sup', 'inf', 'det', 'gcd', 'Pr'])
 const integrals = new Set(['int', 'iint', 'iiint', 'oint', 'oiint', 'oiiint'])
+const integralGlyphs = new Set([...integrals].map(name => operators[name]))
+const largeOperatorGlyphs = new Set([...big].filter(name => !integralGlyphs.has(operators[name]) && Object.hasOwn(operators, name)).map(name => operators[name]))
+const classSpacing: Record<string, readonly [number, number]> = {
+  mathord: [0, 0], mathopen: [0, 0], mathclose: [0, 0], mathpunct: [0, 3],
+  mathbin: [4, 4], mathrel: [5, 5], mathinner: [3, 3], mathop: [3, 3],
+}
 const namedLimits: Record<string, string> = {
   liminf: 'lim inf', limsup: 'lim sup', injlim: 'inj lim', projlim: 'proj lim',
 }
@@ -182,6 +191,7 @@ const textAccents: Record<string, string> = {
 
 interface Atom {
   markup: Markup
+  spacing?: readonly [number, number]
   limits?: boolean
   brace?: 'lower' | 'upper'
 }
@@ -271,6 +281,31 @@ function spaceMarkup(width: string): string {
 
 function muSpace(mu: number): string {
   return spaceMarkup(`${mu / 18}em`)
+}
+
+function classifiedAtom(name: string, content: Markup): Atom {
+  const [left, right] = classSpacing[name]
+  const limits = name === 'mathop' ? false : undefined
+  if (typeof content === 'string' && name !== 'mathinner') {
+    const token = /^(?:<mrow>)*<(mn|mi|mo|mtext)( stretchy="(?:true|false)")?>([^<]*)<\/\1>(?:<\/mrow>)*$/.exec(content)
+    if (token) {
+      const [, kind, stretchy = '', glyph] = token
+      if (name === 'mathord') {
+        const normal = kind === 'mo' ? ' mathvariant="normal"' : ''
+        const element = kind === 'mo' ? 'mi' : kind
+        return { markup: `<${element}${normal}>${glyph}</${element}>` }
+      }
+      const spacing = `lspace="${left / 18}em" rspace="${right / 18}em"`
+      const font = kind === 'mi' ? ' style="font-style:italic"' : ''
+      const role = name === 'mathopen' || name === 'mathclose'
+        ? ` fence="true" form="${name === 'mathopen' ? 'prefix' : 'postfix'}"`
+        : name === 'mathpunct' ? ' separator="true"' : ''
+      return { markup: `<mo ${spacing}${font}${stretchy}${role}>${glyph}</mo>`, limits }
+    }
+  }
+  // MathML token elements contain text. Space composite atoms outside their
+  // script base so fractions, styles, and accents remain valid MathML.
+  return { markup: xml`<mrow>${content}</mrow>`, limits, spacing: [left, right] }
 }
 
 function negatedMarkup(markup: string): string {
@@ -723,12 +758,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
       else part = atom(token)
       let lower: Markup = ''
       let upper: Markup = ''
-      let forceLimits: boolean | undefined
+      let forceLimits: boolean | 'display' | undefined
       for (let kind = peek(); kind; kind = peek()) {
-        if (kind === '\\limits' || kind === '\\nolimits') {
+        if (kind === '\\limits' || kind === '\\nolimits' || kind === '\\displaylimits') {
           cursor++
           if (part.limits === undefined) throw new Error('Limit control requires a math operator')
-          forceLimits = kind === '\\limits'
+          forceLimits = kind === '\\displaylimits' ? 'display' : kind === '\\limits'
           continue
         }
         if (kind === '_' || unicodeSubscripts.has(kind)) {
@@ -748,21 +783,25 @@ export function renderMath(source: string, display = false, configured: MathMacr
         part.markup = xml`<munder>${part.markup}${lower}</munder>`
         lower = ''
       }
-      if (!lower && !upper) parts.push(part.markup)
-      else {
+      let content = part.markup
+      if (lower || upper) {
         const normal = lower && upper ? 'msubsup' : lower ? 'msub' : 'msup'
         const stacked = lower && upper ? 'munderover' : lower ? 'munder' : 'mover'
         const wrap = (tag: string) => xml`<${tag}>${part.markup}${lower}${upper}</${tag}>`
-        if (forceLimits !== undefined || !part.limits) {
+        if (typeof forceLimits === 'boolean' || (forceLimits !== 'display' && !part.limits)) {
           if (forceLimits) part.markup = stackOperator(part.markup)
-          parts.push(wrap(forceLimits ? stacked : normal))
+          content = wrap(forceLimits ? stacked : normal)
         }
         else {
           const display = wrap(stacked)
           const inline = wrap(normal)
-          parts.push(style => renderMarkup(style === 0 ? display : inline, style))
+          content = style => renderMarkup(style === 0 ? display : inline, style)
         }
       }
+      const [left, right] = part.spacing ?? []
+      if (left) parts.push(muSpace(left))
+      parts.push(content)
+      if (right) parts.push(muSpace(right))
     }
     depth--
     const result = joinMarkup(parts)
@@ -979,7 +1018,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (!token.startsWith('\\')) {
       if (/^\d/.test(token)) return { markup: tag('mn', token) }
       if (token !== '.' && delimiterGlyphs.has(token)) return { markup: fence(token, false) }
-      return { markup: tag(/^\p{L}$/u.test(token) ? 'mi' : 'mo', token === '-' ? '−' : token) }
+      const limits = largeOperatorGlyphs.has(token) ? true : integralGlyphs.has(token) ? false : undefined
+      return { markup: tag(/^\p{L}$/u.test(token) ? 'mi' : 'mo', token === '-' ? '−' : token), limits }
     }
 
     if (mathVerbLength(token)) {
@@ -1000,6 +1040,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (name === 'ce' || name === 'pu') {
       return { markup: (name === 'ce' ? chemicalFormula : physicalUnits)(literalGroup()) }
     }
+    if (Object.hasOwn(classSpacing, name)) return classifiedAtom(name, argument())
     if (['def', 'gdef', 'edef', 'xdef'].includes(name)) {
       const command = literalGroup()
       space()

@@ -13,6 +13,15 @@ function mapping(value: unknown): MermaidOptions {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as MermaidOptions : {}
 }
 
+function mergeDiagramOptions(base: MermaidOptions = {}, override: MermaidOptions = {}): MermaidOptions {
+  const result = { ...base, ...override }
+  for (const key of ['flowchart', 'gantt', 'gitGraph', 'journey', 'pie', 'timeline', 'themeVariables']) {
+    if (base[key] && override[key] && typeof base[key] === 'object' && typeof override[key] === 'object')
+      result[key] = { ...mapping(base[key]), ...mapping(override[key]) }
+  }
+  return result
+}
+
 function prepare(source: string, options?: MermaidOptions): { code: string, options: MermaidOptions } {
   let code = source.trim()
   let inline: MermaidOptions = {}
@@ -24,7 +33,7 @@ function prepare(source: string, options?: MermaidOptions): { code: string, opti
     inline = fields ? { ...mapping(options.config), ...(typeof options.title === 'string' ? { title: options.title } : {}) } : options
     code = code.slice(header[0].length).trimStart()
   }
-  return { code, options: { ...options, ...inline } }
+  return { code, options: mergeDiagramOptions(options, inline) }
 }
 
 function render(code: string, marker: string, options: MermaidOptions): string | undefined {
@@ -32,7 +41,7 @@ function render(code: string, marker: string, options: MermaidOptions): string |
   const title = typeof options.title === 'string' ? options.title : ''
   if (/^timeline(?:\s|$)/i.test(header ?? '')) return timeline(code, marker, options)
   if (/^journey$/i.test(header ?? '')) return journey(code, marker, options)
-  if (header === 'gantt') return gantt(code, marker, options.gantt, title)
+  if (header === 'gantt') return gantt(code, marker, options.gantt, title, options.securityLevel === 'loose')
   if (/^gitGraph(?:\s|:|$)/.test(header ?? '')) return gitGraph(code, marker, options.gitGraph, options.themeVariables, title)
   if (header === 'sequenceDiagram') return sequence(code, marker)
   if (header === 'classDiagram' || header === 'erDiagram') return relationshipsDiagram(code, marker)
@@ -64,7 +73,7 @@ export async function renderMermaid(
   if (source.length > 30_000) return
   try {
     const diagram = prepare(source, config)
-    const options = { ...diagram.options, ...fence }
+    const options = mergeDiagramOptions(diagram.options, fence)
     const svg = renderer ? await renderer(diagram.code, options) : render(diagram.code, marker, options)
     return svg && optionsForSvg(svg, options)
   }

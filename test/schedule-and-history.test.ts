@@ -109,6 +109,7 @@ section Release
 test('native Git history YAML and compatibility syntax render the same branch graph', () => {
   const yaml = `type: gitgraph
 direction: BT
+rotateCommitLabel: true
 operations:
   - { op: commit, id: start }
   - { op: branch, name: test, order: 3 }
@@ -126,4 +127,58 @@ merge test id:"release" tag:"v1.0"
   const native = renderChart(yaml, 'history')
   expect(native).toContain('data-commit-id="release" data-parent-ids="start, proof"')
   expect(native).toBe(mermaid(legacy, 'history'))
+})
+
+test('imports Gantt layout options and routes enabled task links to a slide reveal', async () => {
+  const today = new Date().toISOString().slice(0, 10)
+  const source = `gantt
+axisFormat %A
+tickInterval 1week
+weekday monday
+todayMarker stroke-width:5px,stroke:#058,opacity:.5
+Delivery :task, ${today}, 14d
+Next :unsafe, after task, 1d
+click task href "#review/1"
+click unsafe href "javascript:alert(1)"`
+  const options = { gantt: { topAxis: true, barHeight: 30, barGap: 8, leftPadding: 112, rightPadding: 40 } }
+  const plain = mermaid(source, 'plain', options)
+  expect(plain).toContain('viewBox="0 0 862 ')
+  expect(plain).toContain('style="stroke:#058;stroke-width:5px;opacity:0.5"')
+  expect(plain).toMatch(/class="diagram-gantt-bar"[^>]*height="30"/)
+  expect(plain?.match(/>monday<\/tspan>/g)?.length).toBeGreaterThanOrEqual(4)
+  expect(plain).not.toContain('<a ')
+  const loose = mermaid(source, 'linked', { ...options, securityLevel: 'loose' })
+  expect(loose).toContain('href="#review/1"')
+  expect(loose).not.toContain('javascript:')
+  const frontmatter = ['---', 'config:', '  gantt:', '    barHeight: 20', '---', source].join('\n')
+  const override = mermaid(frontmatter, 'override', options)
+  expect(override).toContain('viewBox="0 0 862 ')
+  expect(override).toMatch(/class="diagram-gantt-bar"[^>]*height="20"/)
+  const deck = [
+    '---', 'mermaid:', '  securityLevel: loose', '---', '', '# Schedule',
+    '', '```mermaid', source, '```',
+    '', '---', 'routeAlias: review', '---', '', '# Review', '', '<p v-click>Details</p>',
+  ].join('\n')
+  expect(await renderDeck(parseDeck(deck))).toContain('<a href="#slide-2" data-slide-link="2" data-slide-click="1" class="diagram-gantt-link"')
+})
+
+test('imports GitGraph rotation and multiline accessible descriptions', () => {
+  const graph = `gitGraph:
+  accTitle: Release history
+  accDescr {
+    Main and review lanes
+    converge ahead of release.
+  }
+  commit id: "prepare the release notes"
+  branch review
+  commit id: "apply reviewer corrections" tag:"v1"`
+  const defaultSvg = mermaid(graph, 'rotation')
+  expect(defaultSvg).toContain('aria-describedby="rotation-description"')
+  expect(defaultSvg).toContain('<desc id="rotation-description">Main and review lanes converge ahead of release.</desc>')
+  expect(defaultSvg).toMatch(/rotate\(45 /)
+  expect(defaultSvg).toContain('>apply reviewer corrections</tspan>')
+  const frontmatter = ['---', 'config:', '  gitGraph:', '    rotateCommitLabel: false', '---', graph].join('\n')
+  const horizontal = mermaid(frontmatter, 'horizontal')
+  expect(horizontal).not.toContain('rotate(')
+  expect(horizontal).toContain('>v1</tspan>')
 })

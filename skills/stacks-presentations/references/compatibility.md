@@ -15,7 +15,7 @@ in a new ts-presentation project.
 | Snippets, line highlights, Magic Move | Local file and region imports, numbered click highlights, native token animations |
 | Syntax highlighting themes | `codeTheme` or a local `setup/code-highlighter.ts` selects a first-party palette |
 | Code groups and copying | Comark code tabs, synchronized presenter selection, source and live editor copying |
-| KaTeX | Native MathML with chemistry, ruled and compact arrays, commutative diagrams, sized and paired delimiters, prime and Unicode scripts, modular and negated relations, mixed text and math, colored and raised boxes, zero-width overlaps, numbered alignment rows, scoped macros, infix and generalized fractions, and click highlighting |
+| KaTeX | Native MathML with chemistry, ruled and compact arrays, commutative diagrams, sized and paired delimiters, prime and Unicode scripts, explicit atom classes and operator limits, modular and negated relations, mixed text and math, colored and raised boxes, zero-width overlaps, numbered alignment rows, scoped macros, infix and generalized fractions, and click highlighting |
 | PowerPoint export | Image slides or editable text and boxes with separate artwork |
 | First-party diagram authoring | YAML `charts` fences through `ts-charts` for flowcharts, sequence, state, class, ER, pie, timeline, journey, Gantt, and Git history |
 | Draggable elements | Inline directives, drag and arrow components, frontmatter positions, scaled editing, and local Markdown saves |

@@ -3,6 +3,27 @@ import { findChrome } from '../packages/slidev/node/runtime/chrome.ts'
 import { collectSnapshot } from '../packages/slidev/node/runtime/editable/walker.ts'
 import { createMathRenderer, renderMath } from '../packages/slidev/node/runtime/math.ts'
 
+test('sets spacing and fences for explicit TeX atom classes', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const markup = math(String.raw`a\mathbin{*}b\mathrel{:}c\mathpunct{!}\mathopen{[}d\mathclose{]}\mathord{+}\mathinner{\frac e f}`, false)
+  expect(markup).toContain('<mo lspace="0.2222222222222222em" rspace="0.2222222222222222em">*</mo>')
+  expect(markup).toContain('<mo lspace="0.2777777777777778em" rspace="0.2777777777777778em">:</mo>')
+  expect(markup).toContain('<mo lspace="0em" rspace="0.16666666666666666em" separator="true">!</mo>')
+  expect(markup).toContain('form="prefix">[</mo>')
+  expect(markup).toContain('form="postfix">]</mo>')
+  expect(markup).toContain('<mi mathvariant="normal">+</mi>')
+  expect(markup).toMatch(/<mspace width="0\.1666[^"]+"\/><mrow><mrow><mfrac>/)
+})
+
+test('handles operator limits and literal Unicode large operators in display and inline math', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const source = String.raw`\mathop{\mathrm{select}}\displaylimits_{i=1}^n + \bigotimes_i X_i + ${'∑'}_j a_j`
+  expect(math(source, true).match(/<munderover>|<munder>/g)).toHaveLength(3)
+  expect(math(source, false)).not.toMatch(/<munderover>|<munder>/)
+  expect(math(String.raw`\mathop{X}\limits_i + ${'∫'}\limits_0^1`, false)).toContain('<munderover><mo movablelimits="false">∫</mo>')
+  expect(math('∑' + String.raw`\nolimits_i + \mathop{\mathrm{arg\,min}}_j`, true)).not.toContain('<munder>')
+})
+
 test('handles general fractions, TeX math styles, and continued fractions', () => {
   const html = renderMath(String.raw`\genfrac{(}{]}{2pt}{0}{a}{b}+\cfrac[r]{1}{1+\tfrac12}`)
   expect(html).toContain('<mstyle displaystyle="true" scriptlevel="0"><mfrac linethickness="2pt">')

@@ -109,8 +109,9 @@ export async function captureFrames(options: CaptureOptions, onFrame: (frame: Po
           const value = link.getAttribute('href').trim()
           const click = link.getAttribute('data-slide-click')
           const internal = /^#slide-[1-9]\\d*$/.test(value) && link.hasAttribute('data-slide-link')
-          const href = internal ? value + (click && /^\\d+$/.test(click) ? '/' + click : '') : link.href
           if ((!internal && !/^(https?:|mailto:|\\/\\/)/i.test(value)) || getComputedStyle(link).visibility !== 'visible') return []
+          const href = internal ? value + (click && /^\\d+$/.test(click) ? '/' + click : '') : URL.parse(value, document.baseURI)?.href
+          if (!href) return []
           return [...link.getClientRects()].flatMap(rect => {
             const x = Math.max(bounds.left, rect.left)
             const y = Math.max(bounds.top, rect.top)

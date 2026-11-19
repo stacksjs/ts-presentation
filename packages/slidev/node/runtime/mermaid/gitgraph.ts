@@ -1,5 +1,6 @@
 import type { GitCommitStyle, GitGraphDirection, GitGraphOperation, GitGraphOptions, GitHistory } from 'ts-charts/diagrams'
 import { buildGitHistory as buildHistory, gitGraphChart } from 'ts-charts/diagrams'
+import { readChronology } from './chronology.ts'
 import { syntaxMask } from './syntax.ts'
 
 function commands(source: string): string[] {
@@ -48,16 +49,14 @@ function settings(value: unknown): Record<string, unknown> {
 }
 
 function parseGitHistory(source: string, options?: unknown): GitGraphOptions | undefined {
-  const rows = commands(source)
+  const chart = readChronology(source, '')
+  if (!chart) return
+  const rows = commands([chart.header, ...chart.rows].join('\n'))
   const header = /^gitGraph(?:\s+(LR|TB|BT))?\s*:?$/.exec(rows.shift() ?? '')
   if (!header || rows.length > 450) return
   const config = settings(options)
-  let accessibleTitle = ''
-  let description = ''
   const operations: GitGraphOperation[] = []
   for (const row of rows) {
-    if (row.startsWith('accTitle:')) { accessibleTitle = row.slice(9).trim(); continue }
-    if (row.startsWith('accDescr:')) { description = row.slice(9).trim(); continue }
     const fieldsForLine = lex(row)
     if (!fieldsForLine) return
     const [op, first, ...rest] = fieldsForLine
@@ -90,10 +89,12 @@ function parseGitHistory(source: string, options?: unknown): GitGraphOptions | u
     return
   }
   return {
-    operations, accessibleTitle, description, direction: header[1] as GitGraphDirection | undefined,
+    operations, title: chart.title, accessibleTitle: chart.accessibleTitle, description: chart.description,
+    direction: header[1] as GitGraphDirection | undefined,
     mainBranchName: typeof config.mainBranchName === 'string' ? config.mainBranchName : undefined,
     mainBranchOrder: typeof config.mainBranchOrder === 'number' ? config.mainBranchOrder : undefined,
     parallelCommits: Boolean(config.parallelCommits), showBranches: config.showBranches !== false, showCommitLabel: config.showCommitLabel !== false,
+    rotateCommitLabel: config.rotateCommitLabel !== false,
   }
 }
 
@@ -110,5 +111,5 @@ export function gitGraph(source: string, idPrefix: string, options?: unknown, th
     const color = variables[`git${index}`]
     return typeof color === 'string' ? color : undefined
   })
-  return gitGraphChart({ ...chart, idPrefix, title: fallbackTitle, colors })
+  return gitGraphChart({ ...chart, idPrefix, title: chart.title || fallbackTitle, colors })
 }

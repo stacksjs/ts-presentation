@@ -179,17 +179,22 @@ speaker notes. Each hook can be asynchronous.
   `name`, an optional `id`, a `start` date or `after` list, and one
   of `end`, `duration`, or `until`. A task without a start follows the
   previous task. Set `excludes: [weekends]` to skip weekends in durations.
+  A task's `href` can point to a URL or slide. Use `weekday` to start weekly
+  ticks on a chosen day and `todayMarkerStyle` to style the current-date line.
 - Use `type: gitgraph` with `operations`. Each operation has an `op` of
   `commit`, `branch`, `checkout`, `merge`, or `cherry-pick`. Give
   branches and checkouts a `name`, merges a `branch`, and cherry-picks
-  a source `commit`. When picking a merge, identify its `parent`.
+  a source `commit`. When picking a merge, identify its `parent`. Set
+  `rotateCommitLabel: true` for diagonal commit labels.
 - Imported Slidev diagram fences pass through a compatibility parser.
   Styled flowchart groups, sequence and state diagrams, relationships,
   pie charts, Gantt schedules, Git histories, timelines, and journeys use
   the same `ts-charts` renderers as `charts` fences.
-- Gantt supports date and axis formats, weekday and date exclusions,
-  task dependencies, and milestones. GitGraph supports branch ordering,
-  checkout, merges, tags, cherry-picking, and horizontal or vertical lanes.
+- Imported Gantt schedules support date and axis formats, exclusions, task
+  dependencies, milestones, today-marker styling, and chart spacing. Enable
+  imported `href` task links with `securityLevel: loose` in diagram settings.
+  Imported GitGraph diagrams support branch ordering, checkout, merges, tags,
+  cherry-picking, horizontal or vertical lanes, and `rotateCommitLabel`.
 - Use `timeline` or `timeline TD` for chronological periods. A period can
   have several events on one line or continuation lines starting with `:`.
   Add `section` headings and use `<br>` to break a label manually.

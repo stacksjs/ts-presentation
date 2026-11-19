@@ -313,8 +313,9 @@ imageView.addEventListener('close', () => syncPeer({ slide: current, screenshot:
 stage.addEventListener('click', event => zoom(event.target))
 stage.addEventListener('click', (event) => {
   if (isCapture || isPreview || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
-  const link = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>('a[data-slide-link]') : null
-  if (!link || (link.target && link.target !== '_self') || link.hasAttribute('download')) return
+  const link = event.target instanceof Element ? event.target.closest<HTMLAnchorElement | SVGAElement>('a[data-slide-link]') : null
+  const target = link?.getAttribute('target')
+  if (!link || (target && target !== '_self') || link.hasAttribute('download')) return
   const slide = Number(link.dataset.slideLink)
   const click = link.dataset.slideClick === undefined ? undefined : Number(link.dataset.slideClick)
   if (!Number.isInteger(slide) || slide < 1 || slide > articles.length || (click !== undefined && !Number.isSafeInteger(click))) return
@@ -369,7 +370,7 @@ new ResizeObserver(resize).observe(stage)
 window.addEventListener('keydown', (event) => {
   if (isCapture || isPreview || event.altKey || event.metaKey || event.ctrlKey || event.defaultPrevented || overview.open || imageView.open) return
   const field = event.target instanceof HTMLElement && event.target.closest('input, select, textarea, [contenteditable]')
-  const activated = (event.key === ' ' || event.key === 'Enter') && event.target instanceof HTMLElement && event.target.closest('button, a, summary, [role=button]')
+  const activated = (event.key === ' ' || event.key === 'Enter') && event.target instanceof Element && event.target.closest('button, a, summary, [role=button]')
   if (field || activated) return
 
   switch (event.key) {

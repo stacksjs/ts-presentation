@@ -1,3 +1,5 @@
+import { syntaxMask } from './syntax.ts'
+
 export interface Chronology {
   header: string
   title: string
@@ -23,7 +25,8 @@ export function readChronology(source: string, title: string): Chronology | unde
       }
       continue
     }
-    const row = line.replace(/\s+%%.*$/, '').trim()
+    const comment = syntaxMask(line).indexOf('%%')
+    const row = (comment < 0 ? line : line.slice(0, comment)).trim()
     if (!row || /^(?:%%|#)/.test(row)) continue
     const title = /^title\s+(.+)$/i.exec(row)?.[1]
     const accTitle = /^accTitle\s*:\s*(.*)$/i.exec(row)?.[1]
