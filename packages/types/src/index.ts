@@ -2,6 +2,7 @@ export type { Deck, PreparserContext, PreparserExtension, PreparserSetup, Slide 
 export type { ClickBounds, PresentationNavigation, SlidePosition, SlideRoute } from '../../client/runtime/navigation.ts'
 export type { SlideCanvas } from './canvas.ts'
 export type { DrawingOptions } from './drawings.ts'
+export type { TocItem } from './toc.ts'
 export type { FrontmatterDocument, FrontmatterStyle, PreparserExtensionLoader, SlideInfo, SlideInfoBase, SlidePatch, SlidevData, SlidevDetectedFeatures, SlidevMarkdown, SlidevPreparserExtension, SlidevThemeConfig, SlidevThemeMeta, SourceSlideInfo } from './types.ts'
 export type { SlidevConfig } from './config.ts'
 export type { Headmatter, Frontmatter } from './frontmatter.ts'

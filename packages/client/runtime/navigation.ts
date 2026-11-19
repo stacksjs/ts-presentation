@@ -1,7 +1,12 @@
+import { activeTocTree, createTocTree } from './toc.ts'
+import type { ActiveTocItem } from './toc.ts'
+
 export interface SlideRoute {
   no: number
   alias?: string
   title: string
+  level?: number
+  untitled?: boolean
   layout: string
   frontmatter: Record<string, unknown>
 }
@@ -104,7 +109,7 @@ export interface PresentationNavigation extends NavigationActions {
   readonly clicksStart: number
   readonly clicksTotal: number
   readonly total: number
-  readonly tocTree: { no: number, title: string, active: boolean }[]
+  readonly tocTree: ActiveTocItem[]
 }
 
 declare global {
@@ -131,12 +136,7 @@ export function createNavigationContext(
     get clicksStart() { return bounds[position().slide - 1].start },
     get clicksTotal() { return bounds[position().slide - 1].end },
     get total() { return routes.length },
-    get tocTree() {
-      const active = position().slide
-      return routes.filter(slide => slide.frontmatter.hideInToc !== true).map(slide => ({
-        no: slide.no, title: slide.title, active: slide.no === active,
-      }))
-    },
+    get tocTree() { return activeTocTree(createTocTree(routes), position().slide) },
     ...actions,
   }
 }

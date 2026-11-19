@@ -3,6 +3,9 @@ import { escapeHtml, unescapeHtml } from './html.ts'
 import { arrowGeometry, defaultDragPosition, dragKey, dragStyle, parseDragPosition } from '../../../types/src/drag.ts'
 import type { DragKind } from '../../../types/src/drag.ts'
 import type { SlideRoute } from '../../../client/runtime/navigation.ts'
+import { activeTocTree, filterTocTree } from '../../../client/runtime/toc.ts'
+import type { ActiveTocItem, TocMode } from '../../../client/runtime/toc.ts'
+import type { TocItem } from '../../../types/src/toc.ts'
 import { scopeSlideStyles } from './scoped-style.ts'
 
 export const htmlTag: RegExp = /<(\/?)([a-z][\w:-]*)(?=[\s/>])((?:[^>"']|"[^"]*"|'[^']*')*)>/gi
@@ -11,6 +14,35 @@ const rawText = new Set(['style', 'script', 'textarea', 'title', 'xmp', 'iframe'
 const destinationPattern = /^(?:#\/?|\.\/|\/)?([a-z][a-z0-9-]*|\d+)(?:\/(\d+)|\?clicks=(\d+))?$/i
 interface StyleBlock { attributes: string, content: string }
 interface Attribute { value: string, source: string, offset: number }
+
+export interface SlideOutline {
+  tree: readonly TocItem[]
+  labels: readonly string[]
+}
+
+export function firstSlideHeading(input: string): { level: number, html: string } | undefined {
+  if (!/<h[1-6]\b/i.test(input)) return
+  const tags = new RegExp(htmlTags)
+  for (let token = tags.exec(input); token; token = tags.exec(input)) {
+    const [, closing, rawName] = token
+    const name = rawName?.toLowerCase()
+    if (closing || !name) continue
+    const heading = /^h([1-6])$/.exec(name)
+    if (!heading && !rawText.has(name)) continue
+    const close = new RegExp(`</${name}\\s*>`, 'gi')
+    const start = tags.lastIndex
+    close.lastIndex = start
+    const end = close.exec(input)
+    if (!end) return
+    if (heading) return { level: Number(heading[1]), html: input.slice(start, end.index) }
+    tags.lastIndex = close.lastIndex
+  }
+}
+
+export function titleLabel(html: string): string {
+  if (!/<\/?a(?=[\s/>])/i.test(html)) return html
+  return html.replace(new RegExp(htmlTags), (tag, _closing, name) => name?.toLowerCase() === 'a' ? '' : tag)
+}
 
 function attributeValues(source: string): Map<string, Attribute> {
   const attributes = new Map<string, Attribute>()
@@ -51,30 +83,104 @@ function serialized(attributes: Map<string, Attribute>): string {
   return [...attributes.values()].map(attribute => attribute.source).join('')
 }
 
-function mediaLiteral(attributes: Map<string, Attribute>, name: string): string | undefined {
+function literalAttribute(attributes: Map<string, Attribute>, name: string): string | undefined {
   const plain = attributes.get(name)
   if (plain) return plain.value
   const value = attributes.get(`:${name}`)?.value.trim()
   if (value === undefined) return
   const quoted = /^(?:"([^"]*)"|'([^']*)')$/.exec(value)
   if (quoted) return quoted[1] ?? quoted[2]
-  if (/^(?:true|false|\d+(?:\.\d+)?)$/.test(value)) return value
+  if (/^(?:true|false|-?\d+(?:\.\d+)?)$/.test(value)) return value
+}
+
+function listProp(attributes: Map<string, Attribute>, name: string): string[] {
+  const prop = literalAttribute(attributes, name)
+  if (prop !== undefined) return prop ? [prop] : []
+  const value = attributes.get(`:${name}`)?.value.trim()
+  if (!value?.startsWith('[') || !value.endsWith(']')) return []
+  const entries = value.slice(1, -1).trim()
+  if (!entries) return []
+  const item = /\s*(?:"([^"]*)"|'([^']*)')\s*(?:,|$)/gy
+  const values: string[] = []
+  while (item.lastIndex < entries.length) {
+    const match = item.exec(entries)
+    if (!match) return []
+    values.push(match[1] ?? match[2])
+  }
+  return values
+}
+
+const outlineComponents = new Set(['Toc', 'TitleRenderer', 'SlideCurrentNo', 'SlidesTotal'])
+
+function outlineMarkup(name: string, source: string, slide: number, outline: SlideOutline): string {
+  const attributes = attributeValues(source.replace(/\/\s*$/, ''))
+  const integer = (key: string, fallback: number) => {
+    const value = literalAttribute(attributes, key)?.trim()
+    if (!value || !/^-?\d+$/.test(value)) return fallback
+    const number = Number(value)
+    return Number.isSafeInteger(number) ? number : fallback
+  }
+  const removeProps = (keys: string[]) => {
+    for (const key of keys) {
+      attributes.delete(key)
+      attributes.delete(`:${key}`)
+    }
+  }
+  if (name !== 'Toc') {
+    const no = integer('no', slide)
+    const label = name === 'TitleRenderer' ? outline.labels[no - 1] ?? ''
+      : name === 'SlideCurrentNo' ? slide : outline.labels.length
+    if (name === 'TitleRenderer') removeProps(['no'])
+    return `<span${serialized(attributes)}>${label}</span>`
+  }
+
+  const columns = Math.max(1, integer('columns', 1))
+  const start = integer('start', 1)
+  const minDepth = integer('mindepth', integer('min-depth', 1))
+  const maxDepth = integer('maxdepth', integer('max-depth', Number.POSITIVE_INFINITY))
+  const mode = literalAttribute(attributes, 'mode')
+  const tocMode: TocMode = mode === 'onlyCurrentTree' || mode === 'onlySiblings' ? mode : 'all'
+  const listClass = listProp(attributes, 'listclass').concat(listProp(attributes, 'list-class'))
+  const listStyle = listProp(attributes, 'liststyle').concat(listProp(attributes, 'list-style'))
+  removeProps(['columns', 'start', 'mindepth', 'min-depth', 'maxdepth', 'max-depth', 'mode', 'listclass', 'list-class', 'liststyle', 'list-style'])
+  const tree = filterTocTree(activeTocTree(outline.tree, slide), tocMode, minDepth, maxDepth)
+
+  function list(items: ActiveTocItem[], level: number): string {
+    if (!items.length) return ''
+    const classes = escapeHtml([...listClass, 'slidev-toc-list', `slidev-toc-list-level-${level}`].join(' '))
+    const style = listStyle[level - 1]
+    const rules = style && !/[;{}]/.test(style) ? ` style="list-style:${escapeHtml(style)}"` : ''
+    const number = level === 1 && start !== 1 ? ` start="${start}"` : ''
+    const entries = items.map((item) => {
+      const state = item.active ? ' slidev-toc-item-active' : item.activeParent ? ' slidev-toc-item-parent-active' : ''
+      const current = item.active ? ' aria-current="page"' : ''
+      const label = outline.labels[item.no - 1] || escapeHtml(item.title)
+      return `<li class="slidev-toc-item${state}"><a${destinationAttributes({ slide: item.no })}${current}>${label}</a>${list(item.children, level + 1)}</li>`
+    })
+    return `<ol class="${classes}"${number}${rules}>${entries.join('')}</ol>`
+  }
+  const classes = attributes.get('class')?.value
+  const style = attributes.get('style')?.value
+  setAttribute(attributes, 'class', classes ? `slidev-toc ${classes}` : 'slidev-toc')
+  setAttribute(attributes, 'style', `column-count:${columns}${style ? `;${style}` : ''}`)
+  if (!attributes.has('aria-label') && !attributes.has('aria-labelledby')) setAttribute(attributes, 'aria-label', 'Contents')
+  return `<nav${serialized(attributes)}>${list(tree, 1)}</nav>`
 }
 
 function videoMarkup(source: string, selfClosing: boolean): string {
   const attrs = attributeValues(selfClosing ? source.replace(/\/\s*$/, '') : source)
-  const autoplay = mediaLiteral(attrs, 'autoplay')
-  const autoreset = mediaLiteral(attrs, 'autoreset')
-  const timestamp = mediaLiteral(attrs, 'timestamp')
-  const printTimestamp = mediaLiteral(attrs, 'printtimestamp') ?? mediaLiteral(attrs, 'print-timestamp')
-  const printPoster = mediaLiteral(attrs, 'printposter') ?? mediaLiteral(attrs, 'print-poster')
+  const autoplay = literalAttribute(attrs, 'autoplay')
+  const autoreset = literalAttribute(attrs, 'autoreset')
+  const timestamp = literalAttribute(attrs, 'timestamp')
+  const printTimestamp = literalAttribute(attrs, 'printtimestamp') ?? literalAttribute(attrs, 'print-timestamp')
+  const printPoster = literalAttribute(attrs, 'printposter') ?? literalAttribute(attrs, 'print-poster')
   const timePattern = /^\d+(?:\.\d+)?$/
   for (const key of ['autoplay', 'autoreset', 'timestamp', 'printtimestamp', 'print-timestamp', 'printposter', 'print-poster']) {
     attrs.delete(key)
     attrs.delete(`:${key}`)
   }
   for (const key of ['src', 'poster', 'preload', 'width', 'height', 'crossorigin', 'controls', 'loop', 'muted', 'playsinline']) {
-    const value = mediaLiteral(attrs, key)
+    const value = literalAttribute(attrs, key)
     attrs.delete(`:${key}`)
     if (value === undefined) continue
     if (['controls', 'loop', 'muted', 'playsinline'].includes(key)) {
@@ -95,12 +201,12 @@ function videoMarkup(source: string, selfClosing: boolean): string {
 
 function youtubeMarkup(source: string): string {
   const attrs = attributeValues(source.replace(/\/\s*$/, ''))
-  const match = /^([\w-]{11})(?:\?start=(\d{1,10}))?$/.exec(mediaLiteral(attrs, 'id') ?? '')
+  const match = /^([\w-]{11})(?:\?start=(\d{1,10}))?$/.exec(literalAttribute(attrs, 'id') ?? '')
   const dimensions = ['width', 'height'].map((key) => {
-    const value = mediaLiteral(attrs, key)
+    const value = literalAttribute(attrs, key)
     return value && /^\d{1,5}$/.test(value) ? ` ${key}="${value}"` : ''
   }).join('')
-  const title = escapeHtml(mediaLiteral(attrs, 'title') || 'YouTube video')
+  const title = escapeHtml(literalAttribute(attrs, 'title') || 'YouTube video')
   for (const key of ['id', 'width', 'height', 'title']) {
     attrs.delete(key)
     attrs.delete(`:${key}`)
@@ -186,8 +292,8 @@ function tweetMarkup(source: string, theme: 'light' | 'dark'): string {
 }
 
 /** Adapted from Slidev's Markdown link and scoped style transforms (MIT). */
-export function prepareSlideHtml(input: string, destination: (value: string) => SlideDestination | undefined, slide: number, frontmatter: Record<string, unknown> = {}, theme: 'light' | 'dark' = 'dark'): { html: string, css: string } {
-  if (!/<(?:style|(?:a|Link|Tweet|SlidevVideo|Youtube)(?=[\s/>])|v-?drag)|\sv-drag\b/i.test(input)) return { html: input, css: '' }
+export function prepareSlideHtml(input: string, destination: (value: string) => SlideDestination | undefined, slide: number, frontmatter: Record<string, unknown> = {}, theme: 'light' | 'dark' = 'dark', outline?: SlideOutline): { html: string, css: string } {
+  if (!/<(?:style|(?:a|Link|Tweet|SlidevVideo|Youtube|Toc|TitleRenderer|SlideCurrentNo|SlidesTotal)(?=[\s/>])|v-?drag)|\sv-drag\b/i.test(input)) return { html: input, css: '' }
   const blocks: StyleBlock[] = []
   const tags = new RegExp(htmlTags)
   let offset = 0
@@ -221,6 +327,9 @@ export function prepareSlideHtml(input: string, destination: (value: string) => 
     }
     else if (rawName === 'Youtube' || rawName === 'YouTube') {
       replacement = closing ? '' : youtubeMarkup(source)
+    }
+    else if (outline && outlineComponents.has(rawName)) {
+      replacement = closing ? '' : outlineMarkup(rawName, source, slide, outline)
     }
     else if (rawName === 'Link') {
       if (closing && componentOpen) {

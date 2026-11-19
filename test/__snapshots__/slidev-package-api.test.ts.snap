@@ -2,10 +2,13 @@
 
 exports[`keeps the public parser declarations stable 1`] = `
 "// packages/client/runtime/navigation.d.ts
+import type { ActiveTocItem } from './toc.ts';
 export interface SlideRoute {
     no: number;
     alias?: string;
     title: string;
+    level?: number;
+    untitled?: boolean;
     layout: string;
     frontmatter: Record<string, unknown>;
 }
@@ -50,11 +53,7 @@ export interface PresentationNavigation extends NavigationActions {
     readonly clicksStart: number;
     readonly clicksTotal: number;
     readonly total: number;
-    readonly tocTree: {
-        no: number;
-        title: string;
-        active: boolean;
-    }[];
+    readonly tocTree: ActiveTocItem[];
 }
 declare global {
     interface Window {
@@ -62,6 +61,21 @@ declare global {
     }
 }
 export declare function createNavigationContext(routes: SlideRoute[], mode: () => SlideMode, position: () => SlidePosition, bounds: ClickBounds[], actions: NavigationActions): PresentationNavigation;
+
+// packages/client/runtime/toc.d.ts
+import type { SlideRoute } from './navigation.ts';
+import type { TocItem } from '../../types/src/toc.ts';
+export interface ActiveTocItem extends TocItem {
+    title: string;
+    active: boolean;
+    activeParent: boolean;
+    hasActiveParent: boolean;
+    children: ActiveTocItem[];
+}
+export type TocMode = 'all' | 'onlyCurrentTree' | 'onlySiblings';
+export declare function createTocTree(routes: readonly SlideRoute[]): TocItem[];
+export declare function activeTocTree(entries: readonly TocItem[], slide: number): ActiveTocItem[];
+export declare function filterTocTree(items: readonly ActiveTocItem[], mode: TocMode, minDepth: number, maxDepth: number): ActiveTocItem[];
 
 // packages/parser/src/config.d.ts
 import type { ResolvedFontOptions, SlidevConfig } from '../../types/src/config.ts';
@@ -913,6 +927,20 @@ export interface SeoMeta {
     twitterUrl?: string;
 }
 
+// packages/types/src/toc.d.ts
+export interface TocItem {
+    no: number;
+    active?: boolean;
+    activeParent?: boolean;
+    children: TocItem[];
+    hasActiveParent?: boolean;
+    level: number;
+    titleLevel: number;
+    path: string;
+    hideInToc?: boolean;
+    title?: string;
+}
+
 // packages/types/src/types.d.ts
 import type { SlidevConfig } from './config.ts';
 export interface FrontmatterDocument {
@@ -1051,10 +1079,13 @@ export type { SlideRoute } from '../../client/runtime/navigation.ts';"
 
 exports[`keeps the public types declarations stable 1`] = `
 "// packages/client/runtime/navigation.d.ts
+import type { ActiveTocItem } from './toc.ts';
 export interface SlideRoute {
     no: number;
     alias?: string;
     title: string;
+    level?: number;
+    untitled?: boolean;
     layout: string;
     frontmatter: Record<string, unknown>;
 }
@@ -1099,11 +1130,7 @@ export interface PresentationNavigation extends NavigationActions {
     readonly clicksStart: number;
     readonly clicksTotal: number;
     readonly total: number;
-    readonly tocTree: {
-        no: number;
-        title: string;
-        active: boolean;
-    }[];
+    readonly tocTree: ActiveTocItem[];
 }
 declare global {
     interface Window {
@@ -1111,6 +1138,21 @@ declare global {
     }
 }
 export declare function createNavigationContext(routes: SlideRoute[], mode: () => SlideMode, position: () => SlidePosition, bounds: ClickBounds[], actions: NavigationActions): PresentationNavigation;
+
+// packages/client/runtime/toc.d.ts
+import type { SlideRoute } from './navigation.ts';
+import type { TocItem } from '../../types/src/toc.ts';
+export interface ActiveTocItem extends TocItem {
+    title: string;
+    active: boolean;
+    activeParent: boolean;
+    hasActiveParent: boolean;
+    children: ActiveTocItem[];
+}
+export type TocMode = 'all' | 'onlyCurrentTree' | 'onlySiblings';
+export declare function createTocTree(routes: readonly SlideRoute[]): TocItem[];
+export declare function activeTocTree(entries: readonly TocItem[], slide: number): ActiveTocItem[];
+export declare function filterTocTree(items: readonly ActiveTocItem[], mode: TocMode, minDepth: number, maxDepth: number): ActiveTocItem[];
 
 // packages/parser/src/deck.d.ts
 export interface Slide {
@@ -1917,9 +1959,24 @@ export type { Deck, PreparserContext, PreparserExtension, PreparserSetup, Slide 
 export type { ClickBounds, PresentationNavigation, SlidePosition, SlideRoute } from '../../client/runtime/navigation.ts';
 export type { SlideCanvas } from './canvas.ts';
 export type { DrawingOptions } from './drawings.ts';
+export type { TocItem } from './toc.ts';
 export type { FrontmatterDocument, FrontmatterStyle, PreparserExtensionLoader, SlideInfo, SlideInfoBase, SlidePatch, SlidevData, SlidevDetectedFeatures, SlidevMarkdown, SlidevPreparserExtension, SlidevThemeConfig, SlidevThemeMeta, SourceSlideInfo } from './types.ts';
 export type { SlidevConfig } from './config.ts';
 export type { Headmatter, Frontmatter } from './frontmatter.ts';
+
+// packages/types/src/toc.d.ts
+export interface TocItem {
+    no: number;
+    active?: boolean;
+    activeParent?: boolean;
+    children: TocItem[];
+    hasActiveParent?: boolean;
+    level: number;
+    titleLevel: number;
+    path: string;
+    hideInToc?: boolean;
+    title?: string;
+}
 
 // packages/types/src/types.d.ts
 import type { SlidevConfig } from './config.ts';

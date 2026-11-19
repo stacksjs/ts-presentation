@@ -19,8 +19,10 @@ import { liveBlock } from './live-markup.ts'
 import { createMathRenderer, resolveMathMacros } from './math.ts'
 import type { SlideRoute } from '../../../client/runtime/navigation.ts'
 import { slideAlias } from '../../../client/runtime/navigation.ts'
+import { createTocTree } from '../../../client/runtime/toc.ts'
 import type { Deck, PreparserContext, Slide } from '../../../parser/src/deck.ts'
-import { createSlideDestinations, prepareSlideHtml } from './slide-html.ts'
+import { plainMarkdown } from '../../../parser/src/plain-markdown.ts'
+import { createSlideDestinations, firstSlideHeading, prepareSlideHtml, titleLabel } from './slide-html.ts'
 import { prepareMarkdown, renderAlerts, splitSlots } from './syntax.ts'
 import type { WritableSnippet } from './snippet-write.ts'
 import { snippetRevision } from './snippet-write.ts'
@@ -149,17 +151,33 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     if (!layoutHooks[layout] && !hasBuiltinLayoutSlots(layout)) return { default: markdown(slide.content, comark) }
     return Object.fromEntries(Object.entries(splitSlots(slide.content)).map(([name, content]) => [name, markdown(content, comark)]))
   })
-  const routes = activeSlides.map((slide, index): SlideRoute => ({
-    no: index + 1,
-    alias: slideAlias(slide.frontmatter?.routeAlias),
-    title: slide.title,
-    layout: layoutNames[index],
-    frontmatter: slide.frontmatter ?? {},
-  }))
+  const labels: string[] = []
+  const routes = activeSlides.map((slide, index): SlideRoute => {
+    const frontmatter = slide.frontmatter ?? {}
+    const override = frontmatter.title || frontmatter.name
+    const heading = Object.values(html[index]).map(firstSlideHeading).find(Boolean)
+    const fallbackTitle = !override && !slide.level && /^Slide \d+$/.test(slide.title)
+    const title = fallbackTitle && heading ? plainMarkdown(heading.html) || slide.title : slide.title
+    const level = typeof frontmatter.level === 'number' ? frontmatter.level
+      : override ? undefined : heading?.level ?? slide.level
+    const inline = override ? Bun.markdown.html(String(override).replace(/\s*\r?\n\s*/g, ' '), { tagFilter: true }).trim().replace(/^<p>|<\/p>$/g, '')
+      : heading?.html ?? escapeHtml(slide.title)
+    labels.push(fallbackTitle && !heading ? '' : titleLabel(inline))
+    return {
+      no: index + 1,
+      alias: slideAlias(frontmatter.routeAlias),
+      title,
+      layout: layoutNames[index],
+      frontmatter,
+      ...(level === undefined ? {} : { level }),
+      ...(fallbackTitle && !heading ? { untitled: true } : {}),
+    }
+  })
+  const outline = { labels, tree: createTocTree(routes) }
   const destination = createSlideDestinations(routes)
   const slides = await Promise.all(activeSlides.map(async (slide, index) => {
     let diagram = 0
-    const { layout, alias } = routes[index]
+    const { layout, alias, title } = routes[index]
     const lineNumbers = (slide.frontmatter?.lineNumbers ?? deck.headmatter?.lineNumbers) === true
     const renderCode = async (block: string, language = 'text', code: string) => {
       const decoded = unescapeHtml(code)
@@ -219,7 +237,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     const body = custom
       ? await custom({ slide, index, html: slots.default, slots })
       : builtInBody ?? slots.default
-    const prepared = prepareSlideHtml(body, destination, index + 1, slide.frontmatter, socialTheme)
+    const prepared = prepareSlideHtml(body, destination, index + 1, slide.frontmatter, socialTheme, outline)
     const className = [defaults?.className, slide.className].filter(Boolean).join(' ')
     const transition = String(slide.frontmatter?.transition ?? '')
     const motion = ['fade', 'slide-left', 'slide-up'].includes(transition) ? ` data-transition="${transition}"` : ''
@@ -230,12 +248,12 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     const magic = (slide.frontmatter?.magicMoveCopy ?? deck.headmatter?.magicMoveCopy ?? settings?.magicMoveCopy) === false ? ' data-magic-copy-disabled' : ''
     const builtin = builtInBody === undefined ? '' : ' data-builtin-layout'
     return {
-      html: `<article id="slide-${index + 1}" class="slide slidev-layout layout-${escapeHtml(layout)} ${escapeHtml(className)}" aria-label="${escapeHtml(slide.title)}"${route}${motion}${copy}${magic}${builtin}>${prepared.html}${overlay}</article>`,
+      html: `<article id="slide-${index + 1}" class="slide slidev-layout layout-${escapeHtml(layout)} ${escapeHtml(className)}" aria-label="${escapeHtml(title)}"${route}${motion}${copy}${magic}${builtin}>${prepared.html}${overlay}</article>`,
       css: prepared.css,
     }
   }))
 
-  const choices = activeSlides.map((slide, index) => `<option value="${index + 1}">${index + 1}. ${escapeHtml(slide.title)}</option>`)
+  const choices = routes.map(({ no, title }) => `<option value="${no}">${no}. ${escapeHtml(title)}</option>`)
   const ruby = deck.headmatter?.notesAutoRuby
   const annotations = ruby && typeof ruby === 'object' && !Array.isArray(ruby)
     ? ruby as Record<string, unknown>
@@ -244,7 +262,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     const segments = (slide.notes || 'No speaker notes for this slide.').split(/^\[click\]\s*$/m)
     return `<section hidden${slide.notes ? ' data-has-notes="true"' : ''}>${segments.map((text, index) => `<div data-note-step="${index}">${markdown(annotations ? applyNotesAutoRuby(text, annotations) : text)}</div>`).join('')}</section>`
   })
-  const overview = activeSlides.map((slide, index) => `<li><button type="button" value="${index + 1}"><span>${index + 1}</span> ${escapeHtml(slide.title)}</button></li>`)
+  const overview = routes.map(({ no, title }) => `<li><button type="button" value="${no}"><span>${no}</span> ${escapeHtml(title)}</button></li>`)
 
   const preset = deck.headmatter?.clickAnimation
   const clicksPreset = typeof preset === 'string' ? escapeHtml(preset) : ''
