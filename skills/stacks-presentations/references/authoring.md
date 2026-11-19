@@ -15,6 +15,12 @@ deck. For example, `canvasWidth: 800` and `aspectRatio: 4/3` produce an
 - Add a label on a separator, as in `---chapter`. A leading `yaml`
   fence can supply frontmatter when the slide has no dashed YAML block.
 - Use per-slide `layout`, `class`, `routeAlias`, `hide`, or `transition`.
+- Put CSS in a `<style>` block on a slide to style that slide. Inside that
+  block, use `:scope` to target the slide itself. Keyframes defined in
+  slide styles are named per slide. Put imports and shared CSS in `style.css`.
+- Link to a slide with a number or route alias such as `#review/2`.
+  The optional suffix selects a reveal step. A
+  `<Link :to="2" title="Review" />` also creates a slide link.
 - Include another Markdown file with `src: ./chapter.md`. A suffix such as
   `#2-4` selects the authored slide range before nested includes expand.
   Use `src: /chapters/intro.md` for a path relative to the entry deck.

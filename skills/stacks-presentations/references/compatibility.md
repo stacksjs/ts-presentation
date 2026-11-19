@@ -9,7 +9,7 @@ in a new ts-presentation project.
 | --- | --- |
 | Markdown, frontmatter, slide includes, click steps | Native Bun parser and browser player with labeled separators, fenced YAML, and source ranges |
 | Preparser extensions | Async raw-line, slide, and speaker-note hooks from `setup/preparser.ts` |
-| Scoped layouts and themes | TypeScript theme and addon modules, named slots, deck CSS |
+| Scoped styles, layouts, and themes | Slide-local CSS and keyframes, TypeScript theme and addon modules, and named slots |
 | Monaco editor and runner | Local editor and timed browser-worker runner. Bun compiles TypeScript edits in dev and can save opted-in snippets |
 | Snippets, line highlights, Magic Move | Local file and region imports, numbered click highlights, native token animations |
 | KaTeX | Native MathML with chemistry, ruled and compact arrays, commutative diagrams, bra-ket and set notation, mixed text and math, colored and raised boxes, zero-width overlaps, numbered alignment rows, scoped macros, infix and generalized fractions, operator limits, and click highlighting |
@@ -18,7 +18,7 @@ in a new ts-presentation project.
 | Mermaid syntax compatibility | Local flowchart, sequence, basic state, class, ER, pie, Gantt, GitGraph, timeline, and user journey rendering |
 | Presenter mode | Two synced browser windows, notes, timer, resizable layouts, next-frame preview, and reveal seeking |
 | Reveal scheduling | Absolute and relative steps, hide ranges, grouped and nested lists, CSS presets, and switch slots |
-| Navigation context | Slide-local metadata, route aliases, reveal bounds, and navigation controls |
+| Navigation context | Slide-local metadata, route aliases, reveal bounds, and native links to slides and reveal steps |
 | Drawing and recording | Native SVG ink, mouse and stylus input, same-browser sync, SVG persistence, drawing options, and screen capture |
 
 Existing Vue components, UnoCSS configuration, Monaco IntelliSense, Shiki

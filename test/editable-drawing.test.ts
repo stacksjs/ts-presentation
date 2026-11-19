@@ -2,6 +2,7 @@
 import type { IrRun, IrText, SlideIr } from '../src/editable/ir.ts'
 import { describe, expect, it } from 'bun:test'
 import { createPowerPoint } from '../src/powerpoint.ts'
+import type { PowerPointFrame } from '../src/powerpoint.ts'
 
 /**
  * These assert on the generated OOXML, not on the JavaScript that produced it.
@@ -67,6 +68,34 @@ function textNode(runs: IrRun[]): IrText {
     runs,
   }
 }
+
+describe('presentation links', () => {
+  for (const mode of ['image', 'editable'] as const) {
+    it(`targets an exported reveal from a ${mode} slide`, async () => {
+      const image = new Uint8Array([0])
+      const label = ['Jump', 'Missing', 'External']
+      const destination = ['#slide-9/2', '#slide-8', 'https://example.com/']
+      const position = { slide: 4, click: 0 }
+      const from: PowerPointFrame = mode === 'editable'
+        ? { title: 'Links', notes: '', position, editable: slide([textNode(label.map((text, index) =>
+            ({ text, fontSize: 32, fontFamily: 'Arial', link: destination[index] })))]) }
+        : { title: 'Links', notes: '', position, image, links: label.map((label, index) =>
+            ({ href: destination[index], label, x: 10, y: 50 + index * 20, width: 40, height: 15 })) }
+      const file = createPowerPoint([
+        from,
+        { title: 'First reveal', notes: '', image, position: { slide: 9, click: 1 } },
+        { title: 'Second reveal', notes: '', image, position: { slide: 9, click: 2 } },
+      ], dimensions)
+      const markup = await part(file, 'ppt/slides/slide1.xml')
+      const relationships = await part(file, 'ppt/slides/_rels/slide1.xml.rels')
+      expect(markup.match(/<a:hlinkClick\b/g)).toHaveLength(2)
+      expect(markup).toContain('action="ppaction://hlinksldjump"')
+      expect(relationships).toMatch(/\/slide" Target="slide3\.xml"\/>/)
+      expect(relationships).not.toContain('slide2.xml')
+      expect(relationships).toContain('Target="https://example.com/" TargetMode="External"')
+    })
+  }
+})
 
 describe('unit conversions', () => {
   it('writes font size in points, not pixels', async () => {

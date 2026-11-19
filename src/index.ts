@@ -14,6 +14,7 @@ import { createMathRenderer, resolveMathMacros } from './math.ts'
 import type { SlideRoute } from './navigation.ts'
 import { slideAlias } from './navigation.ts'
 import type { Deck, PreparserContext, Slide } from './parser.ts'
+import { createSlideDestinations, prepareSlideHtml } from './slide-html.ts'
 import { prepareMarkdown, splitSlots } from './syntax.ts'
 import type { WritableSnippet } from './snippet-write.ts'
 
@@ -110,6 +111,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     layout: effectiveLayout(slide),
     frontmatter: slide.frontmatter ?? {},
   }))
+  const destination = createSlideDestinations(routes)
   const slides = await Promise.all(activeSlides.map(async (slide, index) => {
     let diagram = 0
     const { layout, alias } = routes[index]
@@ -167,6 +169,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     })))
     const custom = layoutHooks[layout]
     const body = custom ? custom({ slide, index, html: slots.default, slots }) : slots.default
+    const prepared = prepareSlideHtml(body, destination, index + 1)
     const className = [defaults?.className, slide.className].filter(Boolean).join(' ')
     const transition = String(slide.frontmatter?.transition ?? '')
     const motion = ['fade', 'slide-left', 'slide-up'].includes(transition) ? ` data-transition="${transition}"` : ''
@@ -178,7 +181,11 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
       : ''
     const drawing = options.savedDrawings?.get(index + 1)
     const overlay = drawing && (drawing.sketch.strokes.length || drawing.legacy) ? drawingOverlay(drawing, { width, height }) : ''
-    return `<article id="slide-${index + 1}" class="slide slidev-layout layout-${escapeHtml(layout)} ${escapeHtml(className)}" aria-label="${escapeHtml(slide.title)}"${route}${motion}>${background ? `${background}<div class="slide-content">${body}</div>` : body}${overlay}</article>`
+    const content = background ? `${background}<div class="slide-content">${prepared.html}</div>` : prepared.html
+    return {
+      html: `<article id="slide-${index + 1}" class="slide slidev-layout layout-${escapeHtml(layout)} ${escapeHtml(className)}" aria-label="${escapeHtml(slide.title)}"${route}${motion}>${content}${overlay}</article>`,
+      css: prepared.css,
+    }
   }))
 
   const choices = activeSlides.map((slide, index) => `<option value="${index + 1}">${index + 1}. ${escapeHtml(slide.title)}</option>`)
@@ -202,6 +209,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   <link rel="stylesheet" href="./presentation.css">
   ${extensions?.styles ? '<link rel="stylesheet" href="./extensions.css">' : ''}
   <link rel="stylesheet" href="./deck.css">
+  ${slides.map(slide => slide.css).filter(Boolean).join('\n  ')}
   <style>:root { --slide-width: ${width}px; --slide-height: ${height}px; } @page { size: ${width}px ${height}px; margin: 0; }</style>
   ${extensions?.client ? '<script defer src="./extensions.js"></script>' : ''}
   <script defer src="./presentation.js"></script>
@@ -210,7 +218,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   ${activeExtensions.map(extension => extension.globalTop || '').join('')}
   <script id="presentation-navigation" type="application/json">${navigation}</script>
   <script id="presentation-drawings" type="application/json">${drawingConfig}</script>
-  <main id="stage">${slides.join('\n')}</main>
+  <main id="stage">${slides.map(slide => slide.html).join('\n')}</main>
   ${activeExtensions.map(extension => extension.globalBottom || '').join('')}
   <aside id="presenter-notes" hidden aria-label="Speaker notes">
     <header class="presenter-header">

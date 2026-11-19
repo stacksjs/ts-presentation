@@ -128,6 +128,9 @@ function previousSlide(): void {
 }
 
 function readLocation(): void {
+  const id = location.hash.slice(1)
+  const key = id.replace(/^\//, '').split('/')[0]
+  if (id && !aliases.has(key) && !/^(?:slide-)?\d+$/.test(key) && document.getElementById(id) && !articles[current - 1].hidden) return
   const target = readSlideHash(location.hash, aliases)
   const click = isCapture && !captureSteps ? Number.POSITIVE_INFINITY : target.click
   show(target.slide, click, false)
@@ -261,6 +264,16 @@ stage.addEventListener('toggle', (event) => {
 }, true)
 imageView.addEventListener('close', () => syncPeer({ slide: current, screenshot: -1 }))
 stage.addEventListener('click', event => zoom(event.target))
+stage.addEventListener('click', (event) => {
+  if (isCapture || isPreview || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+  const link = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>('a[data-slide-link]') : null
+  if (!link || (link.target && link.target !== '_self') || link.hasAttribute('download')) return
+  const slide = Number(link.dataset.slideLink)
+  const click = link.dataset.slideClick === undefined ? undefined : Number(link.dataset.slideClick)
+  if (!Number.isInteger(slide) || slide < 1 || slide > articles.length || (click !== undefined && !Number.isSafeInteger(click))) return
+  event.preventDefault()
+  show(slide, click)
+})
 stage.addEventListener('keydown', (event) => {
   if (event.key !== 'Enter' && event.key !== ' ') return
   if (event.target instanceof HTMLImageElement && event.target.hasAttribute('data-zoom')) {

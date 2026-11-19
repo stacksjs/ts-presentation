@@ -11,7 +11,7 @@ const inlineCode = /^`+/
 const protectedHtml = /^<(pre|code|script|style)(?:\s[^>]*)?>[\s\S]*?<\/\1\s*>/i
 const htmlTag = /^<(?:[^>"']|"[^"]*"|'[^']*')+>/
 const runnerOptions = /^(\s*)(js|javascript|ts|typescript)(\s+)\{(monaco-run|monaco|live-run|live)\}(\s*)$/i
-const slotMarker = /^::([a-z][a-z0-9-]*)::\s*$/i
+const slotMarker = /^::\s*([\w.:-]+?)\s*::\s*$/
 const bareDisplay = /^ {0,3}\\begin\{((?:equation|align|alignat|gather)\*?|CD)\}/
 
 function inlineMathEnd(line: string, start: number, delimiter: string): number {
@@ -40,22 +40,28 @@ export function splitSlots(source: string): Record<string, string> {
   let name = 'default'
   let lines: string[] = []
   let fence = ''
+  let raw = ''
   function save(): void {
     slots[name] = name in slots ? `${slots[name]}\n\n${lines.join('\n')}` : lines.join('\n')
   }
   for (const line of source.split('\n')) {
     const marker = fenceStart.exec(line)
-    if (marker) {
+    if (!raw && marker) {
       if (!fence) fence = marker[1]
       else if (marker[1][0] === fence[0] && marker[1].length >= fence.length && !marker[2].trim()) fence = ''
     }
-    const slot = !fence && slotMarker.exec(line)
+    if (!fence && !raw) {
+      if (/^ {0,3}<!--/.test(line)) raw = 'comment'
+      else raw = /^ {0,3}<(pre|code|script|style|textarea)(?:[\s>])/i.exec(line)?.[1].toLowerCase() ?? ''
+    }
+    const slot = !fence && !raw && slotMarker.exec(line)
     if (slot) {
       save()
-      name = slot[1].toLowerCase()
+      name = slot[1]
       lines = []
     }
     else lines.push(line)
+    if (raw === 'comment' ? line.includes('-->') : raw && new RegExp(`</${raw}\\s*>`, 'i').test(line)) raw = ''
   }
   save()
   return slots

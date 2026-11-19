@@ -36,7 +36,7 @@ bun src/cli.ts export examples/demo/slides.md --format png --range 1,3-5 --out o
 ```
 
 PowerPoint uses slide images with editable speaker notes and clickable web
-links. It includes each reveal by default. Pass `--without-clicks` for one
+and slide links. It includes each reveal by default. Pass `--without-clicks` for one
 frame per slide, or `--with-clicks` to include reveals in a PNG export.
 
 `pptx-editable` rebuilds text, backgrounds, and boxes as PowerPoint
@@ -57,9 +57,10 @@ the deck and style slides with an optional `style.css`.
 | Drawing annotations | Draw with a mouse or stylus. Set `drawings.persist: true` to save SVG overlays for the built site and exports |
 | Progressive reveals | `v-click`, explicit and relative clicks, enter/leave ranges, animated modifiers, grouped `<v-clicks>` lists, and replacement content with `<v-switch>` |
 | Layouts | `layout: default`, `center`, `cover`, `intro`, `section`, `image-left`, or `image-right`. Set `image` for an image layout |
+| Slide CSS | A `<style>` block styles its authored slide. Use `style.css` for deck-wide rules |
 | Local slides and ranges | `src: ./chapter.md#2-4` selects authored slides before nested imports expand. A leading slash resolves from the deck directory |
 | Markdown preparser | `setup/preparser.ts` can transform raw lines, per-slide Markdown, frontmatter, and speaker notes before rendering |
-| Navigation | `routeAlias: review`, then links such as `#review` or `#review/2`. Set `clicksStart` or `clicks` to override a slide's reveal range |
+| Navigation | `routeAlias: review`, then links such as `#review` or `#review/2`. Use `clicksStart` and `clicks` to set reveal bounds |
 | Per-slide options | `class`, `hide`, `disabled`, and `transition: fade`, `slide-left`, or `slide-up` |
 | Images and component markup | Trusted HTML, with optional `data-zoom` on an image |
 | First-party diagrams | YAML in a `charts` fence. Supports flowcharts, timelines, user journeys, Gantt schedules, and Git histories through `ts-charts` |

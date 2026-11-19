@@ -1,6 +1,8 @@
 import type { ZipPart } from './zip.ts'
 import type { SlideIr } from './editable/ir.ts'
-import { drawEditable, embeddedPicture, extents, xml } from './editable/drawing.ts'
+import { drawEditable, drawHyperlink, embeddedPicture, extents, xml } from './editable/drawing.ts'
+import type { HyperlinkRef } from './editable/drawing.ts'
+import type { SlidePosition } from './navigation.ts'
 import { zipParts } from './zip.ts'
 
 export interface FrameLink {
@@ -16,6 +18,7 @@ export type PowerPointFrame = {
   title: string
   notes: string
   links?: FrameLink[]
+  position?: SlidePosition
 } & ({ image: Uint8Array<ArrayBuffer>, editable?: never } | { editable: SlideIr, image?: never })
 
 export interface PowerPointOptions {
@@ -67,9 +70,8 @@ function notesShape(notes: string): string {
     <p:spPr>${extents(620, 408, 50, 466)}</p:spPr><p:txBody><a:bodyPr/><a:lstStyle/>${paragraphs}</p:txBody></p:sp>`
 }
 
-function validExternal(link: FrameLink): boolean {
-  return /^(?:https?:\/\/|mailto:)/i.test(link.href)
-    && [link.x, link.y, link.width, link.height].every(Number.isFinite)
+function validRectangle(link: FrameLink): boolean {
+  return [link.x, link.y, link.width, link.height].every(Number.isFinite)
     && link.width > 0 && link.height > 0
 }
 
@@ -111,21 +113,39 @@ export function createPowerPoint(frames: readonly PowerPointFrame[], options: Po
   add('docProps/core.xml', `<cp:coreProperties xmlns:cp="${coreNS}" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>${xml(title)}</dc:title><dc:creator>${xml(author)}</dc:creator></cp:coreProperties>`)
   types.push('<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>')
 
+  const firstFrame = new Map<number, number>()
+  const revealFrames = new Map<string, number>()
+  for (const [index, frame] of frames.entries()) {
+    const position = frame.position ?? { slide: index + 1, click: 0 }
+    if (!firstFrame.has(position.slide)) firstFrame.set(position.slide, index + 1)
+    revealFrames.set(`${position.slide}/${position.click}`, index + 1)
+  }
+
   for (const [index, frame] of frames.entries()) {
     const slide = index + 1
     const rels: XmlRelation[] = [
       ['rId1', 'slideLayout', '../slideLayouts/slideLayout1.xml'],
       ['rId2', 'notesSlide', `../notesSlides/notesSlide${slide}.xml`],
     ]
-    const urls = new Map<string, string>()
-    const hyperlink = (href: string) => {
-      if (!/^(?:https?:\/\/|mailto:)/i.test(href)) return
+    const urls = new Map<string, HyperlinkRef>()
+    const hyperlink = (href: string): HyperlinkRef | undefined => {
       const previous = urls.get(href)
       if (previous) return previous
+      const internal = /^#slide-([1-9]\d*)(?:\/(\d+))?$/.exec(href)
       const id = `rId${rels.length + 1}`
-      rels.push([id, 'hyperlink', href, true])
-      urls.set(href, id)
-      return id
+      const link: HyperlinkRef = { id }
+      if (internal) {
+        const frame = revealFrames.get(`${internal[1]}/${internal[2]}`) ?? firstFrame.get(Number(internal[1]))
+        if (!frame) return
+        rels.push([id, 'slide', `slide${frame}.xml`])
+        link.slideJump = true
+      }
+      else {
+        if (!/^(?:https?:\/\/|mailto:)/i.test(href)) return
+        rels.push([id, 'hyperlink', href, true])
+      }
+      urls.set(href, link)
+      return link
     }
     const image = (bytes: Uint8Array<ArrayBuffer>) => {
       const id = `rId${rels.length + 1}`
@@ -143,9 +163,11 @@ export function createPowerPoint(frames: readonly PowerPointFrame[], options: Po
     }
     else {
       shapes = embeddedPicture(2, image(frame.image), { x: 0, y: 0, w: width, h: height }, frame.title)
-      shapes += (frame.links ?? []).filter(validExternal).map((link, at) =>
-        `<p:sp><p:nvSpPr><p:cNvPr id="${at + 3}" name="${xml(link.label)}"><a:hlinkClick r:id="${hyperlink(link.href)}"/></p:cNvPr><p:cNvSpPr/><p:nvPr/></p:nvSpPr>
-        <p:spPr>${extents(link.width, link.height, link.x, link.y)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:solidFill><a:srgbClr val="FFFFFF"><a:alpha val="0"/></a:srgbClr></a:solidFill><a:ln><a:noFill/></a:ln></p:spPr></p:sp>`).join('')
+      shapes += (frame.links ?? []).filter(validRectangle).map((link, at) => {
+        const action = drawHyperlink(hyperlink(link.href))
+        return action ? `<p:sp><p:nvSpPr><p:cNvPr id="${at + 3}" name="${xml(link.label)}">${action}</p:cNvPr><p:cNvSpPr/><p:nvPr/></p:nvSpPr>
+        <p:spPr>${extents(link.width, link.height, link.x, link.y)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:solidFill><a:srgbClr val="FFFFFF"><a:alpha val="0"/></a:srgbClr></a:solidFill><a:ln><a:noFill/></a:ln></p:spPr></p:sp>` : ''
+      }).join('')
     }
     add(`ppt/slides/slide${slide}.xml`, `<p:sld ${presentationNS}><p:cSld name="${xml(frame.title)}">${background}<p:spTree>${group}${shapes}</p:spTree></p:cSld>${mapped}</p:sld>`, 'presentationml.slide')
     add(`ppt/slides/_rels/slide${slide}.xml.rels`, relationships(rels))

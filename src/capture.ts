@@ -82,13 +82,17 @@ export async function captureFrames(options: CaptureOptions, onFrame: (frame: Po
           }).join('\\n')).filter(Boolean).join('\\n\\n')
           const bounds = active.getBoundingClientRect()
           const links = [...active.querySelectorAll('a[href]')].flatMap(link => {
-            if (!/^(https?:|mailto:)/i.test(link.getAttribute('href').trim()) || getComputedStyle(link).visibility !== 'visible') return []
+            const value = link.getAttribute('href').trim()
+            const click = link.getAttribute('data-slide-click')
+            const internal = /^#slide-[1-9]\\d*$/.test(value) && link.hasAttribute('data-slide-link')
+            const href = internal ? value + (click && /^\\d+$/.test(click) ? '/' + click : '') : link.href
+            if ((!internal && !/^(https?:|mailto:|\\/\\/)/i.test(value)) || getComputedStyle(link).visibility !== 'visible') return []
             return [...link.getClientRects()].flatMap(rect => {
               const x = Math.max(bounds.left, rect.left)
               const y = Math.max(bounds.top, rect.top)
               const width = Math.min(bounds.right, rect.right) - x
               const height = Math.min(bounds.bottom, rect.bottom) - y
-              return width > 0 && height > 0 ? [{ href: link.href, label: link.textContent.trim() || link.href, x: x - bounds.left, y: y - bounds.top, width, height }] : []
+              return width > 0 && height > 0 ? [{ href, label: link.textContent.trim() || href, x: x - bounds.left, y: y - bounds.top, width, height }] : []
             })
           })
           return { title: active.getAttribute('aria-label') || '', notes, links }
@@ -104,13 +108,13 @@ export async function captureFrames(options: CaptureOptions, onFrame: (frame: Po
             console.warn(`Slide ${position.slide}, step ${position.step}: ${error instanceof Error ? error.message : 'could not measure editable content'}`)
           }
           if (editable) {
-            await onFrame({ ...metadata, editable }, index, positions.length)
+            await onFrame({ ...metadata, position: { slide: position.slide, click: position.step }, editable }, index, positions.length)
             continue
           }
           console.warn(`Slide ${position.slide}, step ${position.step}: using a slide image`)
         }
         const image = new Uint8Array(await (await chrome.screenshot()).arrayBuffer())
-        await onFrame({ ...metadata, image }, index, positions.length)
+        await onFrame({ ...metadata, position: { slide: position.slide, click: position.step }, image }, index, positions.length)
       }
     }
 

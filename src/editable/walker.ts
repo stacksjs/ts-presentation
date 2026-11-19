@@ -377,9 +377,12 @@ export function collectSnapshot(options: {
           record.alt = alt
       }
       if (el.tagName.toUpperCase() === 'A') {
-        const href = (el as HTMLAnchorElement).href
-        if (/^(https?:|mailto:)/i.test(el.getAttribute('href') ?? ''))
-          record.href = href
+        const href = el.getAttribute('href')?.trim() ?? ''
+        if (/^#slide-[1-9]\d*$/.test(href) && el.hasAttribute('data-slide-link')) {
+          const click = el.getAttribute('data-slide-click')
+          record.href = click && /^\d+$/.test(click) ? `${href}/${click}` : href
+        }
+        else if (/^(https?:|mailto:|\/\/)/i.test(href)) record.href = (el as HTMLAnchorElement).href
       }
       if (el.tagName.toUpperCase() === 'SVG' && el.querySelector('foreignObject'))
         // Mermaid puts its labels in <foreignObject> HTML with no <text>
