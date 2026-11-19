@@ -1,0 +1,7 @@
+[data-theme="starter"] .slide {
+  background: #faf7f0;
+  color: #252334;
+  font-family: system-ui, sans-serif;
+}
+
+[data-theme="starter"] .slide h1 { color: #433983; }

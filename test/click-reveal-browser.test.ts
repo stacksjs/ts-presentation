@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { resolve } from 'node:path'
-import { findChrome } from '../src/chrome.ts'
-import { parseDeck, renderDeck } from '../src/index.ts'
+import { findChrome } from '../packages/slidev/node/runtime/chrome.ts'
+import { parseDeck, renderDeck } from '../packages/slidev/node/runtime/index.ts'
 
 const chrome = await findChrome()
 const project = resolve(import.meta.dir, '..')
@@ -115,7 +115,7 @@ const b = 2
 // Adapted from Slidev's basic Cypress fixtures for click maps, nested lists, and presets.
 test.skipIf(!chrome)('applies click maps, group depth, ranges, and switches in the bundled player', async () => {
   const html = await renderDeck(parseDeck(deck))
-  const bundle = await Bun.build({ entrypoints: [resolve(project, 'src/player.ts')], target: 'browser', format: 'iife', minify: true })
+  const bundle = await Bun.build({ entrypoints: [resolve(project, 'packages/client/runtime/player.ts')], target: 'browser', format: 'iife', minify: true })
   expect(bundle.success).toBe(true)
   const server = Bun.serve({
     hostname: '127.0.0.1',
@@ -124,7 +124,7 @@ test.skipIf(!chrome)('applies click maps, group depth, ranges, and switches in t
       switch (new URL(request.url).pathname) {
         case '/': return new Response(html, { headers: { 'Content-Type': 'text/html' } })
         case '/presentation.js': return new Response(bundle.outputs[0])
-        case '/presentation.css': return new Response(Bun.file(resolve(project, 'src/player.css')))
+        case '/presentation.css': return new Response(Bun.file(resolve(project, 'packages/client/runtime/player.css')))
         default: return new Response(null, { status: 404 })
       }
     },

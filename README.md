@@ -1,8 +1,8 @@
 # ts-presentation
 
-A Bun-first fork of [Slidev](https://sli.dev/) with a TypeScript player
-and CLI. It uses Bun’s Markdown, YAML, bundler and HTTP server plus
-Stacks’ syntax highlighter and graph layout.
+A Bun-first fork of [Slidev](https://sli.dev/) with an STX slide shell, a TypeScript player,
+and a Bun CLI. It uses Bun’s Markdown, YAML, bundler, and HTTP server plus
+Stacks’ syntax highlighter and ts-charts.
 
 ## Run the example
 
@@ -61,7 +61,7 @@ the deck and style slides with an optional `style.css`.
 | Speaker notes | Trailing HTML comment, with `[click]` on its own line for notes revealed on the next click |
 | Drawing annotations | Draw with a mouse or stylus. Set `drawings.persist: true` to save SVG overlays for the built site and exports |
 | Progressive reveals | `v-click`, explicit and relative clicks, enter/leave ranges, animated modifiers, grouped `<v-clicks>` lists, and replacement content with `<v-switch>` |
-| Layouts | `layout: default`, `center`, `cover`, `intro`, `section`, `image-left`, or `image-right`. Set `image` for an image layout |
+| Layouts | `layout: default`, `center`, `cover`, `intro`, `section`, `image-left`, `image-right`, `two-cols`, `two-cols-header`, `iframe`, `iframe-left`, or `iframe-right`. Use named slots in column layouts and set `url` for iframe layouts |
 | Slide CSS | A `<style>` block styles its authored slide. Use `style.css` for deck-wide rules |
 | Draggable elements | Use `v-drag`, `<v-drag>`, or `<v-drag-arrow>`. Double-click to move, resize, or rotate. Dev saves positions to the Markdown |
 | Local slides and ranges | `src: ./chapter.md#2-4` selects authored slides before nested imports expand. A leading slash resolves from the deck directory |
@@ -91,8 +91,13 @@ edges:
 ```
 
 The dev server shares an in-flight compilation and reuses rendered HTML
-until an included source or the preparser entry changes. The browser renders local decks
-without a framework, and slide navigation updates only the active slide.
+until an included source or the preparser entry changes. STX compiles the presentation shell and built-in layout templates once per process.
+The TypeScript player updates only the active slide and its reveal state.
+
+Theme and addon authors can register an STX layout with
+`defineStxLayout(new URL('./layouts/hero.stx', import.meta.url))`. In that
+template, use `{!! content !!}` for the default slot, `{!! right !!}` for
+a named slot, and `{{ title }}` or `{{ slideNumber }}` for escaped metadata.
 
 TypeScript edits run when served by the Bun dev command. The offline build
 can run the original TypeScript and offers an editable JavaScript version.
@@ -105,16 +110,25 @@ The port branches from [Slidev v53.1.0](https://github.com/slidevjs/slidev/tree/
 Credit goes to Anthony Fu and the Slidev community. The original MIT
 license is included in [licenses/Slidev-MIT.txt](licenses/Slidev-MIT.txt).
 
-All seven Slidev packages and the complete test tree are preserved in the
-[source snapshot in Git history](https://github.com/stacksjs/ts-presentation/tree/fd663ef704a3dbd27ad07cf7151003490f3c21b1/upstream/slidev).
-The active checkout contains the Bun port. The editable exporter ports
-Slidev's DOM walker and layout normalization to Bun WebView and the native
-PowerPoint writer. Adapted tests for export, code blocks, math, and diagrams run with
-`bun test`.
+The seven Slidev packages are carried in `packages/`. The Bun CLI and render
+pipeline are in `packages/slidev`, the STX presentation templates and player in
+`packages/client`, and Markdown parsing and shared contracts in `packages/parser`
+and `packages/types`.
 
-Open compatibility work includes Vue components and extensions, Monaco tooling,
-Shiki transformers, the full TeX and Mermaid grammars, PlantUML, and remote slide
-control. See the
-[compatibility guide](skills/stacks-presentations/references/compatibility.md).
+```sh
+bun packages/create-app/index.mjs my-deck
+bun packages/create-theme/index.mjs my-theme
+bun run --filter ts-presentation-vscode build
+```
+
+The VS Code build provides Markdown syntax, audience and presenter commands,
+and a command to stop previews. It launches the project’s local Bun CLI.
+
+The original test tree lives in `packages/slidev/test`. `bun test` runs
+the adapted parser fixtures and the copied package tests that target the
+ported APIs, alongside the Bun regression suite. The remaining copied Vue components, Vite integrations, VS Code
+language tooling, and their tests still need porting. See the
+[compatibility guide](skills/stacks-presentations/references/compatibility.md)
+for authoring support and known gaps.
 
 Tooling conventions come from [ts-starter](https://github.com/stacksjs/ts-starter).

@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test'
-import { within } from '../src/assets.ts'
-import { parseAspectRatio, resolveCanvas } from '../src/canvas.ts'
-import { equationReveal, showEquation } from '../src/equation-steps.ts'
-import { slideRange } from '../src/selection.ts'
+import { within } from '../packages/slidev/node/runtime/assets.ts'
+import { parseAspectRatio, resolveCanvas } from '../packages/types/src/canvas.ts'
+import { equationReveal, showEquation } from '../packages/client/runtime/equation-steps.ts'
+import { slideRange } from '../packages/slidev/node/runtime/selection.ts'
 
 // Range and aspect-ratio cases adapted from Slidev's test/utils.test.ts (MIT).
 test('selects slides using Slidev ranges', () => {

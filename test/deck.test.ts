@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { parseDeck, renderDeck } from '../src/index.ts'
+import { parseDeck, renderDeck } from '../packages/slidev/node/runtime/index.ts'
 
 const demo = [
   '---', 'title: Test deck', 'class: custom', '---',

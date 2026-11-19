@@ -3,10 +3,10 @@ import { expect, test } from 'bun:test'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { findChrome } from '../src/chrome.ts'
-import { saveDrag } from '../src/drag-source.ts'
-import { parseDeck, renderDeck } from '../src/index.ts'
-import { createDeckCompiler } from '../src/loader.ts'
+import { findChrome } from '../packages/slidev/node/runtime/chrome.ts'
+import { saveDrag } from '../packages/slidev/node/runtime/drag-source.ts'
+import { parseDeck, renderDeck } from '../packages/slidev/node/runtime/index.ts'
+import { createDeckCompiler } from '../packages/slidev/node/runtime/loader.ts'
 
 test.each([
   ['component', '<v-drag>Content</v-drag>'],
@@ -112,7 +112,7 @@ test.skipIf(!chrome)('moves, resizes, rotates, and saves from the player with sc
     '<v-drag-arrow id="arrow" pos="420, 140, 220, 100"/>',
     '', '---', '', '# Second slide',
   ].join('\n'))
-  const server = Bun.spawn([process.execPath, new URL('../src/cli.ts', import.meta.url).pathname, 'dev', entry, '--port', '0'], {
+  const server = Bun.spawn([process.execPath, new URL('../packages/slidev/node/runtime/cli.ts', import.meta.url).pathname, 'dev', entry, '--port', '0'], {
     cwd: root, stdout: 'pipe', stderr: 'pipe',
   })
   const view = new Bun.WebView({ width: 1150, height: 690, backend: { type: 'chrome', path: chrome!, url: false } })

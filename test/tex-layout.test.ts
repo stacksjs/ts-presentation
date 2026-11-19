@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
-import { findChrome } from '../src/chrome.ts'
-import { collectSnapshot } from '../src/editable/walker.ts'
-import { createMathRenderer, renderMath } from '../src/math.ts'
+import { findChrome } from '../packages/slidev/node/runtime/chrome.ts'
+import { collectSnapshot } from '../packages/slidev/node/runtime/editable/walker.ts'
+import { createMathRenderer, renderMath } from '../packages/slidev/node/runtime/math.ts'
 
 test('handles general fractions, TeX math styles, and continued fractions', () => {
   const html = renderMath(String.raw`\genfrac{(}{]}{2pt}{0}{a}{b}+\cfrac[r]{1}{1+\tfrac12}`)
@@ -203,7 +203,7 @@ test.skipIf(!chrome)('positions lap contents and explicit operator limits in Chr
   ]
   const body = formulas.map(({ id, tex }) => `<div id="${id}">${renderMath(tex)}</div>`).join('')
   const limits = `<section id="limits">${renderMath(String.raw`\sum\limits_{k=0} + \sum_{k=0}`)}</section>`
-  const css = Bun.file(new URL('../src/player.css', import.meta.url))
+  const css = Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url))
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,

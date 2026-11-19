@@ -3,9 +3,9 @@ import { expect, test } from 'bun:test'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { findChrome } from '../src/chrome.ts'
-import { createDeckCompiler } from '../src/loader.ts'
-import { readSlideSource, saveSlideSource } from '../src/side-editor-source.ts'
+import { findChrome } from '../packages/slidev/node/runtime/chrome.ts'
+import { createDeckCompiler } from '../packages/slidev/node/runtime/loader.ts'
+import { readSlideSource, saveSlideSource } from '../packages/slidev/node/runtime/side-editor-source.ts'
 
 test.each([
   ['frontmatter only', '---\nlayout: image\nimage: /example.png\n---'],
@@ -74,7 +74,7 @@ test.skipIf(!chrome)('edits native Markdown and applies body and title changes w
   ].join('\n')
   await writeFile(entry, first)
   await writeFile(chapter, second)
-  const server = Bun.spawn([process.execPath, new URL('../src/cli.ts', import.meta.url).pathname, 'dev', entry, '--port', '0'], {
+  const server = Bun.spawn([process.execPath, new URL('../packages/slidev/node/runtime/cli.ts', import.meta.url).pathname, 'dev', entry, '--port', '0'], {
     cwd: root, stdout: 'pipe', stderr: 'pipe',
   })
   const view = new Bun.WebView({ width: 1340, height: 820, backend: { type: 'chrome', path: chrome!, url: false } })

@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createDeckRenderer } from '../src/loader.ts'
+import { createDeckRenderer } from '../packages/slidev/node/runtime/loader.ts'
 
 test('resolves an include range, hides disabled slides and invalidates cached output', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'deck-loader-'))

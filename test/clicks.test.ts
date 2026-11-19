@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { clickSequence, clickSpan, isActive, parseClickPosition } from '../src/clicks.ts'
+import { clickSequence, clickSpan, isActive, parseClickPosition } from '../packages/client/runtime/clicks.ts'
 
 test('keeps absolute positions out of the relative offset', () => {
   expect(clickSpan('4', 1, '+1', true)).toEqual({ start: 4, end: Infinity, step: 4, advance: 0 })

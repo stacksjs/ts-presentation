@@ -10,7 +10,7 @@ in a new ts-presentation project.
 | Markdown, frontmatter, slide includes, click steps | Native Bun parser and browser player with labeled separators, fenced YAML, and source ranges |
 | Preparser extensions | Async raw-line, slide, and speaker-note hooks from `setup/preparser.ts` |
 | Integrated editor and live preview | Dev Markdown pane with autosave, included-file support, conflict detection, and in-place body and title refreshes |
-| Scoped styles, layouts, and themes | Slide-local CSS and keyframes, TypeScript theme and addon modules, and named slots |
+| Scoped styles, layouts, and themes | Slide-local CSS and keyframes, TypeScript theme and addon modules, and STX layouts with named slots |
 | Monaco editor and runner | Local editor and timed browser-worker runner. Bun compiles TypeScript edits in dev and can save opted-in snippets |
 | Snippets, line highlights, Magic Move | Local file and region imports, numbered click highlights, native token animations |
 | Code groups and copying | Comark code tabs, synchronized presenter selection, source and live editor copying |
@@ -24,8 +24,7 @@ in a new ts-presentation project.
 | Navigation context | Slide-local metadata, route aliases, reveal bounds, and native links to slides and reveal steps |
 | Drawing and recording | Native SVG ink, mouse and stylus input, same-browser sync, SVG persistence, drawing options, and screen capture |
 
-Existing Vue components, UnoCSS configuration, Monaco IntelliSense, Shiki
-transformers, PlantUML, and the full KaTeX and Mermaid grammars need
-additional ports. Keep the source deck when
-a user needs those features later. Refer to the [Slidev guide](slidev-source/skills/slidev/SKILL.md)
-for interpreting that source.
+Copied Vue components, Vite integrations, Monaco IntelliSense, Shiki transformers,
+VS Code language tooling, PlantUML, and the full KaTeX and Mermaid grammars still
+need porting. Refer to the [original Slidev skill](slidev-source/skills/slidev/SKILL.md)
+for upstream deck syntax.

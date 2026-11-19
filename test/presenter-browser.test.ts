@@ -2,8 +2,8 @@ import { expect, test } from 'bun:test'
 import { mkdtemp, readdir, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
-import { asset } from '../src/assets.ts'
-import { findChrome } from '../src/chrome.ts'
+import { asset } from '../packages/slidev/node/runtime/assets.ts'
+import { findChrome } from '../packages/slidev/node/runtime/chrome.ts'
 
 const chrome = await findChrome()
 const project = resolve(import.meta.dir, '..')

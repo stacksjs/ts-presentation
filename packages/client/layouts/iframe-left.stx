@@ -1,0 +1,6 @@
+<div class="frame-layout frame-layout-split">
+  <div class="layout-frame" style="--frame-scale: {{ scale }}; --frame-size: {{ percent }}%">
+    <iframe src="{{ url }}" title="Embedded page" loading="lazy"></iframe>
+  </div>
+  <div>{!! content !!}</div>
+</div>

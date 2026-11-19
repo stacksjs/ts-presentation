@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
-import { parseDeck, renderDeck } from '../src/index.ts'
-import { renderMath } from '../src/math.ts'
-import { mermaid } from '../src/diagram.ts'
+import { parseDeck, renderDeck } from '../packages/slidev/node/runtime/index.ts'
+import { renderMath } from '../packages/slidev/node/runtime/math.ts'
+import { mermaid } from '../packages/slidev/node/runtime/diagram.ts'
 
 test('renders deck macros with arguments, TeX delimiters, and numbered equations', async () => {
   const deck = parseDeck(String.raw`---

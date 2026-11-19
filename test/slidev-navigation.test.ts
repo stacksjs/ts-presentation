@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
-import { parseDeck, renderPresentation } from '../src/index.ts'
-import type { SlideMode, SlidePosition, SlideRoute } from '../src/navigation.ts'
-import { clickBounds, createNavigationContext, getSlideRoutePath, legacySlideLocation, nextPosition, previousPosition, readSlideHash, slideHash, slidePosition } from '../src/navigation.ts'
+import { parseDeck, renderPresentation } from '../packages/slidev/node/runtime/index.ts'
+import type { SlideMode, SlidePosition, SlideRoute } from '../packages/client/runtime/navigation.ts'
+import { clickBounds, createNavigationContext, getSlideRoutePath, legacySlideLocation, nextPosition, previousPosition, readSlideHash, slideHash, slidePosition } from '../packages/client/runtime/navigation.ts'
 
 const routes: SlideRoute[] = [
   { no: 1, title: 'First', layout: 'cover', frontmatter: { section: 'start' } },

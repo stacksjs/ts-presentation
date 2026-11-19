@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en"{!! clickAnimation !!} data-slide-width="{{ width }}" data-slide-height="{{ height }}" data-theme="{{ theme }}"{!! liveAttribute !!}>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>{{ title }}</title>
+  <link rel="stylesheet" href="./presentation.css">
+  {!! extensionStyles !!}
+  <link rel="stylesheet" id="deck-styles" href="./deck.css">
+  {!! scopedStyles !!}
+  <style>:root { --slide-width: {{ width }}px; --slide-height: {{ height }}px; } @page { size: {{ width }}px {{ height }}px; margin: 0; }</style>
+  {!! extensionScript !!}
+  {!! playerScript !!}
+</head>
+<body>
+  {!! globalTop !!}
+  {!! navigation !!}
+  {!! drawingConfig !!}
+  {!! liveData !!}
+  <main id="stage">{!! slideMarkup !!}</main>
+  {!! globalBottom !!}
+  {!! editorPanel !!}
+  <aside id="presenter-notes" hidden aria-label="Speaker notes">
+    <header class="presenter-header">
+      <h2>Speaker notes</h2>
+      <div class="presenter-timing">
+        <span id="presenter-time" aria-label="Elapsed time">0:00</span>
+        <button id="presenter-reset" type="button">Reset timer</button>
+      </div>
+    </header>
+    {!! notesMarkup !!}
+  </aside>
+  <aside id="presenter-preview" hidden aria-label="Next frame">
+    <p id="presenter-next"></p>
+    <iframe title="Next presentation frame" tabindex="-1" inert></iframe>
+  </aside>
+  <div id="presenter-width" class="presenter-separator" role="separator" aria-label="Panel width" aria-orientation="vertical" tabindex="0" hidden></div>
+  <div id="presenter-height" class="presenter-separator" role="separator" aria-label="Panel height" aria-orientation="horizontal" tabindex="0" hidden></div>
+  <nav id="controls" aria-label="Presentation controls">
+    <button id="previous" type="button" aria-label="Previous slide">←</button>
+    <select id="goto" aria-label="Go to slide">{!! slideChoices !!}</select>
+    <button id="next" type="button" aria-label="Next slide">→</button>
+    <button id="presenter" type="button">Presenter view</button>
+    <select id="presenter-layout" aria-label="Presenter layout" hidden>
+      <option value="1">Notes below</option>
+      <option value="2">Notes beside slides</option>
+      <option value="3">Large preview</option>
+    </select>
+    <div id="presenter-steps" hidden>
+      <input id="presenter-seek" aria-label="Reveal step" type="range" step="1">
+      <output for="presenter-seek"></output>
+    </div>
+    <button id="overview-button" type="button">Overview</button>
+    {!! editorButton !!}
+    <button id="draw-button" type="button" aria-pressed="false"{!! drawHidden !!}>Draw</button>
+    <button id="clear-drawing" type="button" hidden>Clear drawing</button>
+    <span id="drawing-status" role="status" hidden></span>
+    <button id="fullscreen" type="button">Fullscreen</button>
+    <button id="record-button" type="button" hidden>Record</button>
+    {!! liveStatus !!}
+  </nav>
+  <dialog id="overview" aria-label="Slide overview">
+    <form method="dialog"><button aria-label="Close overview">Close</button></form>
+    <h2>Slide overview</h2>
+    <ol>{!! slideOverview !!}</ol>
+  </dialog>
+  <dialog id="image-view" aria-label="Screenshot detail">
+    <form method="dialog"><button aria-label="Close screenshot">Close</button></form>
+    <img alt="">
+  </dialog>
+</body>
+</html>

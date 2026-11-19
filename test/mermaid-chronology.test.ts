@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
-import { mermaid, renderMermaid } from '../src/diagram.ts'
-import { parseDeck, renderDeck } from '../src/index.ts'
+import { mermaid, renderMermaid } from '../packages/slidev/node/runtime/diagram.ts'
+import { parseDeck, renderDeck } from '../packages/slidev/node/runtime/index.ts'
 
 const timeline = `timeline TD
   title A new feature

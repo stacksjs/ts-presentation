@@ -1,0 +1,11 @@
+{
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "name": "create-ts-presentation-theme",
+  "bin": {
+    "create-ts-presentation-theme": "./index.mjs"
+  },
+  "exports": "./index.mjs"
+}

@@ -3,9 +3,9 @@ import { expect, test } from 'bun:test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { findChrome } from '../src/chrome.ts'
-import { parseDeck, renderDeck } from '../src/index.ts'
-import { createDeckRenderer } from '../src/loader.ts'
+import { findChrome } from '../packages/slidev/node/runtime/chrome.ts'
+import { parseDeck, renderDeck } from '../packages/slidev/node/runtime/index.ts'
+import { createDeckRenderer } from '../packages/slidev/node/runtime/loader.ts'
 
 const serverCode = [
   'const label = "<tag> & value"',
@@ -92,7 +92,7 @@ test('expands local snippet imports before building tab panels', async () => {
 const chrome = await findChrome()
 test.skipIf(!chrome)('shares reveal timing, keyboard tabs, and live copying with the presenter', async () => {
   const html = await renderDeck(parseDeck(fixture))
-  const entry = new URL('../src/player.ts', import.meta.url).pathname
+  const entry = new URL('../packages/client/runtime/player.ts', import.meta.url).pathname
   const bundle = await Bun.build({ entrypoints: [entry], target: 'browser', format: 'iife' })
   expect(bundle.success).toBe(true)
   const server = Bun.serve({
@@ -102,7 +102,7 @@ test.skipIf(!chrome)('shares reveal timing, keyboard tabs, and live copying with
       switch (new URL(request.url).pathname) {
         case '/': return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
         case '/presentation.js': return new Response(bundle.outputs[0])
-        case '/presentation.css': return new Response(Bun.file(new URL('../src/player.css', import.meta.url)))
+        case '/presentation.css': return new Response(Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url)))
         default: return new Response(null, { status: 404 })
       }
     },

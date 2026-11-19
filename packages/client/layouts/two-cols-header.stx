@@ -1,0 +1,6 @@
+<div class="two-cols-header">
+  <div class="col-header">{!! content !!}</div>
+  <div class="col-left">{!! left !!}</div>
+  <div class="col-right">{!! right !!}</div>
+  <div class="col-bottom">{!! bottom !!}</div>
+</div>

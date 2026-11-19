@@ -1,0 +1,14 @@
+{
+  "name": "ts-presentation-theme-starter",
+  "version": "0.0.1",
+  "type": "module",
+  "exports": "./index.ts",
+  "files": ["index.ts", "styles"],
+  "scripts": {
+    "dev": "ts-presentation dev example.md",
+    "build": "ts-presentation build example.md"
+  },
+  "devDependencies": {
+    "ts-presentation": "github:stacksjs/ts-presentation#main"
+  }
+}

@@ -2,9 +2,9 @@ import { expect, test } from 'bun:test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createDeckCompiler } from '../src/loader.ts'
-import { parseDeck, renderDeck } from '../src/index.ts'
-import { splitSlots } from '../src/syntax.ts'
+import { createDeckCompiler } from '../packages/slidev/node/runtime/loader.ts'
+import { parseDeck, renderDeck } from '../packages/slidev/node/runtime/index.ts'
+import { splitSlots } from '../packages/slidev/node/runtime/syntax.ts'
 
 test('isolates math and live fences from inline and fenced code', async () => {
   const source = [

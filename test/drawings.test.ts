@@ -4,10 +4,10 @@ import { describe, expect, test } from 'bun:test'
 import { mkdir, mkdtemp, realpath, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { drawingOverlay, isSafeDrawingKey, loadSavedDrawings, saveDrawing } from '../src/drawing-store.ts'
-import type { DrawingStore } from '../src/drawing-store.ts'
-import { drawingEnabled, emptySketch, mergeSketches, resolveDrawings, validateSketch } from '../src/drawings.ts'
-import type { DrawingStroke } from '../src/drawings.ts'
+import { drawingOverlay, isSafeDrawingKey, loadSavedDrawings, saveDrawing } from '../packages/slidev/node/runtime/drawing-store.ts'
+import type { DrawingStore } from '../packages/slidev/node/runtime/drawing-store.ts'
+import { drawingEnabled, emptySketch, mergeSketches, resolveDrawings, validateSketch } from '../packages/types/src/drawings.ts'
+import type { DrawingStroke } from '../packages/types/src/drawings.ts'
 
 const stroke = (number: number): DrawingStroke => ({ id: String(number).padStart(16, '0') + '-0000000000000000', points: [[10, 20], [30, 40]] })
 

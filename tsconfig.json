@@ -1,12 +1,18 @@
 {
   "compilerOptions": {
     "target": "esnext",
-    "lib": ["esnext", "dom", "dom.iterable"],
+    "lib": [
+      "esnext",
+      "dom",
+      "dom.iterable"
+    ],
     "moduleDetection": "force",
     "module": "esnext",
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
-    "types": ["bun"],
+    "types": [
+      "bun"
+    ],
     "allowImportingTsExtensions": true,
     "strict": true,
     "strictNullChecks": true,
@@ -20,5 +26,22 @@
     "verbatimModuleSyntax": true,
     "skipDefaultLibCheck": true,
     "skipLibCheck": true
-  }
+  },
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts",
+    "examples/**/*.ts",
+    "packages/client/index.ts",
+    "packages/client/runtime/**/*.ts",
+    "packages/slidev/node/runtime/**/*.ts",
+    "packages/parser/src/index.ts",
+    "packages/types/src/index.ts",
+    "packages/vscode/src/native/**/*.ts",
+    "packages/slidev/node/index.ts",
+    "packages/slidev/node/cli.ts"
+  ],
+  "exclude": [
+    "**/dist",
+    "node_modules"
+  ]
 }

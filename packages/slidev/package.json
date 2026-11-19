@@ -1,0 +1,18 @@
+{
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "name": "@ts-presentation/cli",
+  "bin": {
+    "ts-presentation": "./bin/slidev.mjs"
+  },
+  "exports": {
+    ".": "./node/index.ts"
+  },
+  "dependencies": {
+    "ts-charts": "https://codeload.github.com/stacksjs/ts-charts/tar.gz/94611a723ff014413ed9e761dbfa2b63dc555148",
+    "ts-syntax-highlighter": "^0.2.20",
+    "@stacksjs/stx": "0.2.919"
+  }
+}

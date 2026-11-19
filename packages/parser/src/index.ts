@@ -1,0 +1,5 @@
+export * from './deck.ts'
+export { detectFeatures, getDefaultConfig, parse, parseAspectRatio, parseRangeString, parseSlide, parseSync, parseTimesplits, parseTimeString, prettify, prettifySlide, resolveConfig, resolveFonts, stringify, stringifySlide, verifyConfig } from './core.ts'
+export type { SlidevParserOptions } from './core.ts'
+export { injectPreparserExtensionLoader, isPathInsideRoots, load, save } from './fs.ts'
+export type { LoadedSlidevData, LoadRootsInfo } from './fs.ts'

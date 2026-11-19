@@ -1,10 +1,10 @@
 import { expect, test } from 'bun:test'
-import { renderChart } from '../src/charts.ts'
-import { mermaid } from '../src/diagram.ts'
-import { scheduleGantt } from '../src/mermaid/gantt.ts'
+import { renderChart } from '../packages/slidev/node/runtime/charts.ts'
+import { mermaid } from '../packages/slidev/node/runtime/diagram.ts'
+import { scheduleGantt } from '../packages/slidev/node/runtime/mermaid/gantt.ts'
 import { ganttDateParser } from 'ts-charts/diagrams'
-import { buildGitHistory } from '../src/mermaid/gitgraph.ts'
-import { parseDeck, renderDeck } from '../src/index.ts'
+import { buildGitHistory } from '../packages/slidev/node/runtime/mermaid/gitgraph.ts'
+import { parseDeck, renderDeck } from '../packages/slidev/node/runtime/index.ts'
 
 // Fixtures exercise the documented Mermaid Gantt and GitGraph syntax through the native renderer.
 const project = `gantt

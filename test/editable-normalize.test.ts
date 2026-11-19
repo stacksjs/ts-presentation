@@ -1,8 +1,8 @@
 // Adapted from Slidev v53.1.0. See licenses/Slidev-MIT.txt.
-import type { IrBox, IrText, RawNode, RawSlide, RawSnapshot, RawStyle } from '../src/editable/ir.ts'
+import type { IrBox, IrText, RawNode, RawSlide, RawSnapshot, RawStyle } from '../packages/slidev/node/runtime/editable/ir.ts'
 import { describe, expect, it } from 'bun:test'
-import { parseColor } from '../src/editable/color.ts'
-import { normalize, parseLength, parseShadow, rasterReasonFor } from '../src/editable/normalize.ts'
+import { parseColor } from '../packages/slidev/node/runtime/editable/color.ts'
+import { normalize, parseLength, parseShadow, rasterReasonFor } from '../packages/slidev/node/runtime/editable/normalize.ts'
 
 /**
  * One named case per rule.

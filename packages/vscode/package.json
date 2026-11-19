@@ -1,0 +1,146 @@
+{
+  "publisher": "stacksjs",
+  "name": "ts-presentation-vscode",
+  "displayName": "ts-presentation",
+  "type": "module",
+  "preview": true,
+  "version": "0.1.0",
+  "private": true,
+  "description": "Markdown syntax and Bun preview for ts-presentation",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/stacksjs/ts-presentation"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/index.cjs",
+  "engines": {
+    "vscode": "^1.99.0"
+  },
+  "activationEvents": [],
+  "contributes": {
+    "languages": [
+      {
+        "id": "markdown",
+        "configuration": "./syntaxes/language-configuration.json"
+      },
+      {
+        "id": "slidev"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "slidev",
+        "scopeName": "source.slidev",
+        "path": "./syntaxes/slidev.tmLanguage.json",
+        "embeddedLanguages": {
+          "source.ts": "typescript",
+          "source.yaml": "yaml"
+        }
+      },
+      {
+        "path": "./syntaxes/markdown.json",
+        "scopeName": "inject-to-markdown.main.slidev",
+        "injectTo": [
+          "text.html.markdown"
+        ],
+        "embeddedLanguages": {
+          "source.slidev": "slidev"
+        }
+      },
+      {
+        "path": "./syntaxes/codeblock.json",
+        "scopeName": "inject-to-markdown.codeblock.slidev",
+        "injectTo": [
+          "text.html.markdown"
+        ],
+        "embeddedLanguages": {
+          "source.slidev": "slidev",
+          "source.ts": "typescript"
+        }
+      },
+      {
+        "path": "./syntaxes/codeblock-patch.json",
+        "scopeName": "inject-to-markdown.codeblock.patch.slidev",
+        "injectTo": [
+          "text.html.markdown"
+        ],
+        "embeddedLanguages": {
+          "source.slidev": "slidev",
+          "meta.embedded.block.html": "html",
+          "source.js": "javascript",
+          "source.css": "css",
+          "meta.embedded.block.frontmatter": "yaml",
+          "meta.embedded.block.css": "css",
+          "meta.embedded.block.ini": "ini",
+          "meta.embedded.block.java": "java",
+          "meta.embedded.block.lua": "lua",
+          "meta.embedded.block.makefile": "makefile",
+          "meta.embedded.block.perl": "perl",
+          "meta.embedded.block.r": "r",
+          "meta.embedded.block.ruby": "ruby",
+          "meta.embedded.block.php": "php",
+          "meta.embedded.block.sql": "sql",
+          "meta.embedded.block.vs_net": "vs_net",
+          "meta.embedded.block.xml": "xml",
+          "meta.embedded.block.xsl": "xsl",
+          "meta.embedded.block.yaml": "yaml",
+          "meta.embedded.block.dosbatch": "dosbatch",
+          "meta.embedded.block.clojure": "clojure",
+          "meta.embedded.block.coffee": "coffee",
+          "meta.embedded.block.c": "c",
+          "meta.embedded.block.cpp": "cpp",
+          "meta.embedded.block.diff": "diff",
+          "meta.embedded.block.dockerfile": "dockerfile",
+          "meta.embedded.block.go": "go",
+          "meta.embedded.block.groovy": "groovy",
+          "meta.embedded.block.pug": "jade",
+          "meta.embedded.block.javascript": "javascript",
+          "meta.embedded.block.json": "json",
+          "meta.embedded.block.jsonc": "jsonc",
+          "meta.embedded.block.latex": "latex",
+          "meta.embedded.block.less": "less",
+          "meta.embedded.block.objc": "objc",
+          "meta.embedded.block.scss": "scss",
+          "meta.embedded.block.perl6": "perl6",
+          "meta.embedded.block.powershell": "powershell",
+          "meta.embedded.block.python": "python",
+          "meta.embedded.block.rust": "rust",
+          "meta.embedded.block.scala": "scala",
+          "meta.embedded.block.shellscript": "shellscript",
+          "meta.embedded.block.typescript": "typescript",
+          "meta.embedded.block.typescriptreact": "typescriptreact",
+          "meta.embedded.block.csharp": "csharp",
+          "meta.embedded.block.fsharp": "fsharp"
+        }
+      }
+    ],
+    "commands": [
+      {
+        "command": "slidev.open-in-browser",
+        "category": "ts-presentation",
+        "title": "Open Audience View"
+      },
+      {
+        "command": "ts-presentation.open-presenter",
+        "category": "ts-presentation",
+        "title": "Open Presenter View"
+      },
+      {
+        "command": "ts-presentation.stop-preview",
+        "category": "ts-presentation",
+        "title": "Stop Previews"
+      }
+    ]
+  },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false
+    }
+  },
+  "scripts": {
+    "build": "bun build src/native/index.mjs --target node --format cjs --external vscode --outfile dist/index.cjs"
+  }
+}

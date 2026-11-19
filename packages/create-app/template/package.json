@@ -1,0 +1,13 @@
+{
+  "name": "presentation",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "ts-presentation dev slides.md",
+    "build": "ts-presentation build slides.md",
+    "export": "ts-presentation export slides.md"
+  },
+  "dependencies": {
+    "ts-presentation": "github:stacksjs/ts-presentation#main"
+  }
+}

@@ -16,6 +16,19 @@ const config: PickierConfig = {
     '**/.zed/**',
     '**/skills/stacks-presentations/references/slidev-source/**',
     '**/test/fixtures/slidev-markdown/**',
+    '**/packages/slidev/test/fixtures/**',
+    // Retained Slidev sources that have yet to be ported to the Bun/STX runtime.
+    '**/packages/client/context.ts',
+    '**/packages/client/logic/slides.ts',
+    '**/packages/slidev/node/commands/export.ts',
+    '**/packages/slidev/node/syntax/shiki.ts',
+    '**/packages/slidev/node/syntax/snippet.ts',
+    '**/packages/slidev/node/virtual/nav-controls.ts',
+    '**/packages/slidev/node/vite/**',
+    '**/packages/slidev/template.md',
+    '**/packages/create-app/template/slides.md',
+    '**/packages/vscode/language-server/**',
+    '**/packages/vscode/syntaxes/slidev.example.md',
   ],
 
   lint: {

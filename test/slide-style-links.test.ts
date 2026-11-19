@@ -1,8 +1,8 @@
 // Adapted from Slidev v53.1.0's scoped CSS, link, and slot syntax cases (MIT).
 import { expect, test } from 'bun:test'
-import { findChrome } from '../src/chrome.ts'
-import { parseDeck, renderDeck } from '../src/index.ts'
-import { splitSlots } from '../src/syntax.ts'
+import { findChrome } from '../packages/slidev/node/runtime/chrome.ts'
+import { parseDeck, renderDeck } from '../packages/slidev/node/runtime/index.ts'
+import { splitSlots } from '../packages/slidev/node/runtime/syntax.ts'
 
 const draft = [
   '# Prepare',
@@ -103,7 +103,7 @@ test('preserves slot text inside raw blocks and accepts compound, case-sensitive
 const chrome = await findChrome()
 test.skipIf(!chrome)('keeps computed styles local and follows native links to their reveal step', async () => {
   const html = await renderDeck(parseDeck(draft))
-  const compiled = await Bun.build({ entrypoints: [new URL('../src/player.ts', import.meta.url).pathname], target: 'browser', format: 'iife' })
+  const compiled = await Bun.build({ entrypoints: [new URL('../packages/client/runtime/player.ts', import.meta.url).pathname], target: 'browser', format: 'iife' })
   expect(compiled.success).toBe(true)
   const server = Bun.serve({
     hostname: '127.0.0.1',
@@ -112,7 +112,7 @@ test.skipIf(!chrome)('keeps computed styles local and follows native links to th
       switch (new URL(request.url).pathname) {
         case '/': return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
         case '/presentation.js': return new Response(compiled.outputs[0])
-        case '/presentation.css': return new Response(Bun.file(new URL('../src/player.css', import.meta.url)))
+        case '/presentation.css': return new Response(Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url)))
         default: return new Response(null, { status: 404 })
       }
     },

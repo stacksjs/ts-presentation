@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { findChrome } from '../src/chrome.ts'
+import { findChrome } from '../packages/slidev/node/runtime/chrome.ts'
 
 const chrome = await findChrome()
 const project = resolve(import.meta.dir, '..')

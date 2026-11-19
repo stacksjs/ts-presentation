@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
-import { createDeckCompiler } from '../src/loader.ts'
-import { parseDeck, renderDeck } from '../src/index.ts'
+import { createDeckCompiler } from '../packages/slidev/node/runtime/loader.ts'
+import { parseDeck, renderDeck } from '../packages/slidev/node/runtime/index.ts'
 
 test('compiles native flowcharts from structured YAML data', async () => {
   const html = await renderDeck(parseDeck(`# Prepare

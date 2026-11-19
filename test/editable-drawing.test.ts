@@ -1,8 +1,8 @@
 // Adapted from Slidev v53.1.0. See licenses/Slidev-MIT.txt.
-import type { IrRun, IrText, SlideIr } from '../src/editable/ir.ts'
+import type { IrRun, IrText, SlideIr } from '../packages/slidev/node/runtime/editable/ir.ts'
 import { describe, expect, it } from 'bun:test'
-import { createPowerPoint } from '../src/powerpoint.ts'
-import type { PowerPointFrame } from '../src/powerpoint.ts'
+import { createPowerPoint } from '../packages/slidev/node/runtime/powerpoint.ts'
+import type { PowerPointFrame } from '../packages/slidev/node/runtime/powerpoint.ts'
 
 /**
  * These assert on the generated OOXML, not on the JavaScript that produced it.

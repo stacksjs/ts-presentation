@@ -2,11 +2,11 @@ import { expect, test } from 'bun:test'
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { lineMatches, parseEquationOptions } from '../src/equation-steps.ts'
-import { readFenceOptions } from '../src/fence-options.ts'
-import { parseDeck, renderDeck } from '../src/index.ts'
-import { createDeckCompiler } from '../src/loader.ts'
-import { mermaid } from '../src/diagram.ts'
+import { lineMatches, parseEquationOptions } from '../packages/client/runtime/equation-steps.ts'
+import { readFenceOptions } from '../packages/slidev/node/runtime/fence-options.ts'
+import { parseDeck, renderDeck } from '../packages/slidev/node/runtime/index.ts'
+import { createDeckCompiler } from '../packages/slidev/node/runtime/loader.ts'
+import { mermaid } from '../packages/slidev/node/runtime/diagram.ts'
 
 // Adapted from Slidev's packages/slidev/node/syntax/katex.test.ts and
 // integration.test.ts. See licenses/Slidev-MIT.txt.

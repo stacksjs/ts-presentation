@@ -1,0 +1,4 @@
+<div class="two-columns">
+  <div class="col-left">{!! content !!}{!! left !!}</div>
+  <div class="col-right">{!! right !!}</div>
+</div>

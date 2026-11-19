@@ -13,10 +13,15 @@
     "bun": ">=1.4.0"
   },
   "bin": {
-    "ts-presentation": "./src/cli.ts"
+    "ts-presentation": "./src/cli.ts",
+    "create-ts-presentation": "./packages/create-app/index.mjs",
+    "create-ts-presentation-theme": "./packages/create-theme/index.mjs"
   },
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./parser": "./packages/parser/src/index.ts",
+    "./types": "./packages/types/src/index.ts",
+    "./cli": "./src/cli.ts"
   },
   "scripts": {
     "dev": "bun --watch src/cli.ts dev examples/demo/slides.md",
@@ -29,7 +34,8 @@
   },
   "dependencies": {
     "ts-charts": "https://codeload.github.com/stacksjs/ts-charts/tar.gz/94611a723ff014413ed9e761dbfa2b63dc555148",
-    "ts-syntax-highlighter": "^0.2.20"
+    "ts-syntax-highlighter": "^0.2.20",
+    "@stacksjs/stx": "0.2.919"
   },
   "devDependencies": {
     "better-dx": "^0.2.15"
@@ -39,6 +45,23 @@
     "README.md",
     "LICENSE.md",
     "src",
-    "skills"
+    "skills",
+    "packages/client/index.ts",
+    "packages/client/runtime",
+    "packages/client/layouts/*.stx",
+    "packages/create-app/index.mjs",
+    "packages/create-app/scaffold.mjs",
+    "packages/create-app/template/{README.md,_gitignore,package.json,slides.md}",
+    "packages/create-theme/index.mjs",
+    "packages/create-theme/template/{README.md,_gitignore,example.md,index.ts,package.json,styles/layout.css}",
+    "packages/parser/src",
+    "packages/types/src",
+    "packages/slidev/bin/slidev.mjs",
+    "packages/slidev/node/{cli.ts,index.ts}",
+    "packages/slidev/node/runtime",
+    "!packages/parser/src/**/*.test.ts"
+  ],
+  "workspaces": [
+    "packages/*"
   ]
 }

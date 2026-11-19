@@ -2,8 +2,8 @@
 import vm from 'node:vm'
 import { fileURLToPath } from 'node:url'
 import { beforeAll, describe, expect, it } from 'bun:test'
-import type { RawSnapshot } from '../src/editable/ir.ts'
-import { collectSnapshot } from '../src/editable/walker.ts'
+import type { RawSnapshot } from '../packages/slidev/node/runtime/editable/ir.ts'
+import { collectSnapshot } from '../packages/slidev/node/runtime/editable/walker.ts'
 
 /**
  * The walker is serialized by Bun WebView and evaluated in a page where this
@@ -301,7 +301,7 @@ describe('walker self-containedness', () => {
 let bundledWalker: string
 beforeAll(async () => {
   const built = await Bun.build({
-    entrypoints: [fileURLToPath(new URL('../src/editable/walker.ts', import.meta.url))],
+    entrypoints: [fileURLToPath(new URL('../packages/slidev/node/runtime/editable/walker.ts', import.meta.url))],
     target: 'bun',
     format: 'esm',
   })

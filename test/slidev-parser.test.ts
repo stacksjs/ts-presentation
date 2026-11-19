@@ -1,8 +1,8 @@
 // Adapted from Slidev v53.1.0's test/parser.test.ts (MIT). See licenses/Slidev-MIT.txt.
 import { describe, expect, test } from 'bun:test'
 import { join } from 'node:path'
-import { createDeckRenderer } from '../src/loader.ts'
-import { extractImagesUsage, parseDeck, parseDeckAsync } from '../src/index.ts'
+import { createDeckRenderer } from '../packages/slidev/node/runtime/loader.ts'
+import { extractImagesUsage, parseDeck, parseDeckAsync } from '../packages/slidev/node/runtime/index.ts'
 
 const fixtures = join(import.meta.dir, 'fixtures', 'slidev-markdown')
 

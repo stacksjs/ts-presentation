@@ -1,0 +1,5 @@
+import '../packages/slidev/node/utils.test.ts'
+import '../packages/slidev/node/integrations/drawings.test.ts'
+import '../packages/slidev/node/syntax/escape-code.test.ts'
+import '../packages/slidev/node/syntax/slot-sugar.test.ts'
+import '../packages/vscode/src/utils/isSamePath.test.ts'
