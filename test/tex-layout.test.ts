@@ -459,3 +459,13 @@ test('renders TeX character codes, zero-width struts, and common font aliases', 
   expect(renderMath('\\char`\\&')).toContain('<mtext>&amp;</mtext>')
   expect(renderMath(String.raw`\char"110000`)).toContain('math-unrendered')
 })
+
+test('renders verbatim math without opening Markdown or TeX delimiters inside it', async () => {
+  const { parseDeck, renderDeck } = await import('../src/index.ts')
+  const html = await renderDeck(parseDeck(String.raw`Examples $\verb|x $ y % { <em>| + z$ and \(\verb*+a b+\).`))
+  expect(html).toContain('>x $ y % { &lt;em&gt;</mtext><mo>+</mo><mi>z</mi>')
+  expect(html).toContain('>a␣b</mtext>')
+  expect(html).not.toContain('<em>')
+  expect(renderMath(String.raw`\verb@  a b  @`)).toContain('>  a b  </mtext>')
+  expect(renderMath(String.raw`\verb*xa bx`)).toContain('>a␣b</mtext>')
+})

@@ -15,6 +15,7 @@ import { drawingEnabled, resolveDrawings } from '../../../types/src/drawings.ts'
 import { bindDragSources } from './drag-source.ts'
 import type { WritableDrag } from './drag-source.ts'
 import { loadExtensions } from './extensions.ts'
+import { findWorkspaceRoot } from './extension-resolver.ts'
 import { renderPresentation } from './index.ts'
 import { markdownDocument, maxDeckSourceBytes } from './markdown-source.ts'
 import { extractImagesUsage, parseDeckAsync, readHeadmatter } from '../../../parser/src/deck.ts'
@@ -94,29 +95,41 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
     if (!within(directory, filepath)) throw new Error('Slide source must stay inside the deck directory')
     await observe(filepath)
     const source = await readFile(filepath, 'utf8')
-    const preparserPath = join(directory, 'setup', 'preparser.ts')
-    let preparsers: readonly PreparserExtension[] = []
-    if (await observeOptional(preparserPath) !== undefined) {
-      const { default: setup } = await importDeckModule<PreparserSetup>(preparserPath, directory, observe)
-      if (typeof setup !== 'function') throw new Error('setup/preparser.ts must export a setup function')
-      const result = await setup({ filepath, headmatter: readHeadmatter(source), mode })
-      if (result !== undefined && !Array.isArray(result)) throw new Error('setup/preparser.ts must return a list of extensions')
-      preparsers = result ?? []
+    async function loadPreparsers(root: string, headmatter: Record<string, unknown>): Promise<PreparserExtension[]> {
+      const path = join(root, 'setup', 'preparser.ts')
+      if (await observeOptional(path) === undefined) return []
+      const { default: setup } = await importDeckModule<PreparserSetup>(path, root, observe)
+      if (typeof setup !== 'function') throw new Error(`${path} must export a setup function`)
+      const result = await setup({ filepath, headmatter, mode })
+      if (result !== undefined && !Array.isArray(result)) throw new Error(`${path} must return a list of extensions`)
+      return result ?? []
     }
+    const rawHeadmatter = readHeadmatter(source)
+    const projectPreparsers = await loadPreparsers(directory, rawHeadmatter)
+    const bootstrap = await parseDeckAsync(source, projectPreparsers)
+    const extensions = await loadExtensions(bootstrap, directory, observe, options.theme)
+    const roots = extensions.roots ?? []
+    const extraPreparsers = (await Promise.all(roots.filter(root => root !== directory).map(root =>
+      loadPreparsers(root, bootstrap.headmatter ?? rawHeadmatter)))).flat()
+    const preparsers = [...extraPreparsers, ...projectPreparsers]
+    const workspace = await findWorkspaceRoot(directory)
+    const allowedRoots = [...new Set([directory, ...roots, workspace])]
+    const allowed = (path: string) => allowedRoots.some(root => within(root, path))
+
     const documents = new Map<string, Deck>()
-    async function parseDocument(path: string, input: string): Promise<Deck> {
-      const deck = await parseDeckAsync(input, preparsers)
+    async function parseDocument(path: string, input: string, parsed?: Deck): Promise<Deck> {
+      const deck = parsed ?? await parseDeckAsync(input, preparsers)
       documents.set(path, deck)
-      if (writerKey && !preparsers.length && Buffer.byteLength(input, 'utf8') <= maxDeckSourceBytes)
+      if (writerKey && !preparsers.length && within(directory, path) && Buffer.byteLength(input, 'utf8') <= maxDeckSourceBytes)
         sourceDocuments.set(path, markdownDocument(path, directory, input, writerKey))
       return deck
     }
-    const entryDeck = await parseDocument(filepath, source)
+    const entryDeck = await parseDocument(filepath, source, extraPreparsers.length ? undefined : bootstrap)
 
     async function read(path: string, stack: string[], range?: string): Promise<Deck> {
-      if (!within(directory, path)) throw new Error('Slide source must stay inside the deck directory')
+      if (!allowed(path)) throw new Error('Slide source must stay inside the deck directory or a configured extension or workspace root')
       const filePath = await realpath(path)
-      if (!within(directory, filePath)) throw new Error('Slide source must stay inside the deck directory')
+      if (!allowed(filePath)) throw new Error('Slide source must stay inside the deck directory or a configured extension or workspace root')
       if (stack.includes(filePath)) throw new Error(`Circular slide source: ${relative(directory, filePath)}`)
       let deck = documents.get(filePath)
       if (!deck) {
@@ -164,11 +177,11 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
       const doc = sourceDocuments.get(origin.path)
       const marked = doc ? bindDragSources(doc, slide, origin.slide, origin.index, writableDrags) : slide.content
       const content = await expandSnippets(marked, directory, origin.path, observe, (path, source) => {
-        if (!writerKey || source.length > maxCodeLength || source.includes('\0')) return
+        if (!writerKey || !within(directory, path) || source.length > maxCodeLength || source.includes('\0')) return
         const token = snippetToken(writerKey, path)
         writableSnippets.set(token, { path, root: directory, revision: snippetRevision(source) })
         return token
-      })
+      }, allowedRoots)
       const result = content === slide.content ? slide : { ...slide, content }
       const editable = doc && bindSlideSource(doc, origin.slide, origin.index)
       if (editable) {
@@ -177,10 +190,14 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
       }
       return result
     }))
-    const [extensions, setup] = await Promise.all([
-      loadExtensions(deck, directory, observe, options.theme),
-      loadAuthoringSetup(directory, observe, observeOptional),
-    ])
+    const setup = await loadAuthoringSetup(directory, observe, observeOptional)
+    if (extensions.references && deck.headmatter) {
+      deck.headmatter = {
+        ...deck.headmatter,
+        theme: extensions.references.theme,
+        addons: extensions.references.addons,
+      }
+    }
     const canvas = resolveCanvas(deck.headmatter)
     const drawings = resolveDrawings(deck.headmatter, extensions.theme.defaults?.drawings, basename(filepath, '.md'))
     const store = drawings.persist ? { root: directory, directory: resolve(directory, drawings.persist), canvas, slideCount: deck.slides.length } : undefined

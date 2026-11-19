@@ -1,10 +1,12 @@
 import { compileTemplate } from '../../../client/index.ts'
 import { realpath, stat } from 'node:fs/promises'
-import { dirname, isAbsolute, join, resolve } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import type { DrawingOptions } from '../../../types/src/drawings.ts'
 import type { Deck, Slide } from './index.ts'
 import { importDeckModule } from './deck-modules.ts'
+import { within } from './assets.ts'
+import { resolveExtension } from './extension-resolver.ts'
 
 export interface LayoutContext {
   slide: Readonly<Slide>
@@ -31,7 +33,7 @@ export interface PresentationAddon {
 }
 
 export interface PresentationTheme extends PresentationAddon {
-  defaults?: { layout?: string, className?: string, drawings?: DrawingOptions }
+  defaults?: { layout?: string, className?: string, drawings?: DrawingOptions, addons?: string | string[] }
 }
 
 export interface ExtensionAssets {
@@ -43,6 +45,8 @@ export interface ExtensionAssets {
 export interface LoadedExtensions extends ExtensionAssets {
   theme: PresentationTheme
   addons: PresentationAddon[]
+  roots?: string[]
+  references?: { theme: string, addons: string[] }
 }
 
 const stxLayouts = new WeakMap<PresentationLayout, (observe: (path: string) => Promise<string>) => Promise<void>>()
@@ -73,6 +77,7 @@ export function defineAddon(addon: PresentationAddon): PresentationAddon {
 
 const builtin: Record<string, PresentationTheme> = {
   default: { name: 'default' },
+  none: { name: 'none' },
   paper: {
     name: 'paper',
     styles: `
@@ -94,38 +99,6 @@ const builtin: Record<string, PresentationTheme> = {
   },
 }
 
-async function localEntry(candidate: string): Promise<string | undefined> {
-  const info = await stat(candidate).catch(() => undefined)
-  if (info?.isFile()) return realpath(candidate)
-  const possible = info?.isDirectory()
-    ? ['index.ts', 'index.js', 'index.mjs'].map(name => join(candidate, name))
-    : ['.ts', '.js', '.mjs'].map(extension => candidate + extension)
-  for (const path of possible) {
-    if (await stat(path).then(info => info.isFile()).catch(() => false)) return realpath(path)
-  }
-}
-
-async function extensionEntry(reference: string, kind: 'theme' | 'addon', directory: string): Promise<string> {
-  const local = reference.startsWith('.') || isAbsolute(reference)
-    ? resolve(directory, reference)
-    : join(directory, `${kind}s`, reference)
-  const path = await localEntry(local)
-  if (path) return path
-  if (reference.startsWith('.') || isAbsolute(reference)) throw new Error(`Could not find presentation ${kind}: ${reference}`)
-
-  const from = pathToFileURL(join(directory, 'slides.md')).href
-  for (const name of [reference, `ts-presentation-${kind}-${reference}`]) {
-    try {
-      const url = new URL(import.meta.resolve(name, from))
-      if (url.protocol === 'file:') return await realpath(fileURLToPath(url))
-    }
-    catch {
-      // The next convention may resolve the installed package.
-    }
-  }
-  throw new Error(`Could not find presentation ${kind}: ${reference}`)
-}
-
 function moduleAsset(module: string, value: string | URL): string {
   return value instanceof URL ? fileURLToPath(value) : resolve(dirname(module), value)
 }
@@ -136,14 +109,13 @@ export async function loadExtensions(
   observe: (path: string) => Promise<string>,
   override?: string,
 ): Promise<LoadedExtensions> {
-  const themeName = override ?? (typeof deck.headmatter?.theme === 'string' ? deck.headmatter.theme : 'default')
-  const rawAddons = deck.headmatter?.addons ?? []
-  const addons = typeof rawAddons === 'string' ? [rawAddons] : rawAddons
-  if (!Array.isArray(addons) || addons.some(name => typeof name !== 'string'))
-    throw new Error('Presentation addons must be a string or a list of names')
+  const config = deck.headmatter?.config as Record<string, unknown> | undefined
+  const specifiedTheme = deck.headmatter?.theme === undefined ? config?.theme : deck.headmatter.theme
+  const themeName = override ?? (specifiedTheme === null ? 'none' : typeof specifiedTheme === 'string' ? specifiedTheme : 'default')
   const seen = new Set<string>()
   const styles: string[] = []
   const scripts: string[] = []
+  const roots = new Set<string>()
   const mounts: Record<string, string> = Object.create(null)
 
   async function load(reference: string, kind: 'theme' | 'addon'): Promise<PresentationTheme> {
@@ -154,8 +126,11 @@ export async function loadExtensions(
       return core
     }
 
-    const entry = await extensionEntry(reference, kind, directory)
-    const { default: data } = await importDeckModule<PresentationTheme>(entry, directory, observe)
+    const resolved = await resolveExtension(reference, kind, directory)
+    if (!resolved) throw new Error(`Could not find presentation ${kind}: ${reference}`)
+    const { entry, root } = resolved
+    roots.add(root)
+    const { default: data } = await importDeckModule<PresentationTheme>(entry, within(directory, root) ? directory : root, observe)
     if (!data || typeof data.name !== 'string' || !/^[a-z][a-z0-9-]+$/i.test(data.name))
       throw new Error(`Presentation ${kind} ${reference} requires a default export with a name`)
     if (seen.has(data.name)) throw new Error(`Duplicate presentation extension: ${data.name}`)
@@ -189,7 +164,11 @@ export async function loadExtensions(
   }
 
   const theme = await load(themeName, 'theme')
+  const rawAddons = deck.headmatter?.addons ?? config?.addons ?? theme.defaults?.addons ?? []
+  const addons = typeof rawAddons === 'string' ? [rawAddons] : rawAddons
+  if (!Array.isArray(addons) || addons.some(name => typeof name !== 'string'))
+    throw new Error('Presentation addons must be a string or a list of names')
   const loadedAddons = []
   for (const name of addons) loadedAddons.push(await load(name, 'addon'))
-  return { theme, addons: loadedAddons, styles: styles.join('\n'), client: scripts.join('\n;\n'), mounts }
+  return { theme, addons: loadedAddons, roots: [...roots], references: { theme: themeName, addons }, styles: styles.join('\n'), client: scripts.join('\n;\n'), mounts }
 }

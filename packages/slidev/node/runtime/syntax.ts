@@ -1,4 +1,4 @@
-import { renderMath } from './math.ts'
+import { mathVerbLength, renderMath } from './math.ts'
 import type { EquationOptions } from '../../../client/runtime/equation-steps.ts'
 import { parseEquationOptions } from '../../../client/runtime/equation-steps.ts'
 import type { FenceScalar } from './fence-options.ts'
@@ -19,7 +19,10 @@ function inlineMathEnd(line: string, start: number, delimiter: string): number {
   for (let at = start; at < line.length; at++) {
     const token = line[at]
     if (!braces && line.startsWith(delimiter, at)) return at
-    if (token === '\\') at++
+    if (token === '\\') {
+      const length = line.startsWith('\\verb', at) ? mathVerbLength(line.slice(at)) : 0
+      at += length ? length - 1 : 1
+    }
     else if (token === '{') braces++
     else if (token === '}' && braces) braces--
   }

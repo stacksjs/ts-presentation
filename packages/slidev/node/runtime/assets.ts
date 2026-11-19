@@ -7,6 +7,8 @@ export function within(root: string, path: string): boolean {
 }
 
 export async function asset(root: string, path: string): Promise<Response> {
+  if (!path.startsWith('/') || path.startsWith('//') || path.includes('\\') || path.includes('\0'))
+    return new Response('Not found', { status: 404 })
   const file = await realpath(resolve(root, `.${path}`)).catch(() => undefined)
   if (file && within(root, file)) {
     const item = Bun.file(file)

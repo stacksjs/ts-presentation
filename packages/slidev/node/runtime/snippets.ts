@@ -40,7 +40,7 @@ function extractRegion(source: string, name: string): string {
 }
 
 /** Ported from Slidev's snippet resolver. The filesystem path stays inside the deck root. */
-export async function resolveSnippet(line: string, root: string, entry: string): Promise<Snippet | undefined> {
+export async function resolveSnippet(line: string, root: string, entry: string, allowedRoots: string[] = [root]): Promise<Snippet | undefined> {
   const [, indent, double, single, bare, suffix] = directive.exec(line) ?? []
   const fileRef = double ?? single ?? bare
   if (!fileRef) return
@@ -48,10 +48,13 @@ export async function resolveSnippet(line: string, root: string, entry: string):
   const [, languageOverride, meta] = /^(?:\s+([\w+#.-]+))?\s*((?:\[.*|\{.*)?)\s*$/.exec(suffix) ?? []
   if (meta === undefined) return
   const requested = path.startsWith('@/') ? resolve(root, path.slice(2)) : resolve(dirname(entry), path)
-  if (!within(root, requested)) throw new Error(`Code snippet path escapes the project root: ${fileRef}`)
+  if (!allowedRoots.some(base => within(base, requested))) throw new Error(`Code snippet path escapes the project root: ${fileRef}`)
   const file = await realpath(requested).catch(() => undefined)
   if (!file) throw new Error(`Code snippet path not found: ${fileRef}`)
-  if (!within(root, file) && !within(await realpath(root), file)) throw new Error(`Code snippet path escapes the project root: ${fileRef}`)
+  if (!allowedRoots.some(base => within(base, file))) {
+    const canonical = await Promise.all(allowedRoots.map(base => realpath(base)))
+    if (!canonical.some(base => within(base, file))) throw new Error(`Code snippet path escapes the project root: ${fileRef}`)
+  }
   const input = Bun.file(file)
   const stat = await input.stat()
   if (!stat.isFile()) throw new Error(`Code snippet path is not a file: ${fileRef}`)
@@ -69,6 +72,7 @@ export async function expandSnippets(
   entry: string,
   observe: (file: string) => Promise<unknown>,
   writable?: (path: string, source: string) => string | undefined,
+  allowedRoots: string[] = [root],
 ): Promise<string> {
   if (!source.includes('<<<')) return source
   const rows: string[] = []
@@ -108,7 +112,7 @@ export async function expandSnippets(
       if (tag && !new RegExp(`</${tag}(?:\\s|>)`, 'i').test(row)) rawHtml = tag
       if (line.startsWith('<!--') && !line.includes('-->')) comment = true
     }
-    const resolved = (!outer || (magic && !inner)) && line.includes('<<<') ? await resolveSnippet(row, root, entry) : undefined
+    const resolved = (!outer || (magic && !inner)) && line.includes('<<<') ? await resolveSnippet(row, root, entry, allowedRoots) : undefined
     if (!resolved) {
       rows.push(row)
       continue

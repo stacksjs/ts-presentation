@@ -116,9 +116,17 @@ export function resolveMathMacros(headmatter?: Record<string, unknown>): MathMac
     : {}
 }
 
+const verbPattern = /\\verb(?:\*([^\r\n])([^\r\n]*?)\1|([^*A-Za-z\r\n])([^\r\n]*?)\3)/
+const leadingVerb = new RegExp(`^${verbPattern.source}`, 'u')
+const ordinaryMathTokens = /\\[A-Za-z@]+|\\[^A-Za-z@\r\n]|%[^\r\n]*(?:\r?\n[ \t]*|$)|#[1-9]|\s+|./
+const mathTokens = new RegExp(`${verbPattern.source}|${ordinaryMathTokens.source}`, 'gu')
+
+export function mathVerbLength(source: string): number {
+  return source.startsWith('\\verb') ? leadingVerb.exec(source)?.[0].length ?? 0 : 0
+}
+
 function tokenize(source: string): string[] {
-  return source.match(/\\[A-Z@]+|\\[^A-Z@\r\n]|%[^\r\n]*(?:\r?\n[ \t]*|$)|#[1-9]|\s+|./giu)
-    ?.filter(token => !token.startsWith('%')) ?? []
+  return source.match(mathTokens)?.filter(token => !token.startsWith('%')) ?? []
 }
 
 type MathStyle = 0 | 1 | 2 | 3
@@ -972,6 +980,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
       if (/^\d/.test(token)) return { markup: tag('mn', token) }
       if (token !== '.' && delimiterGlyphs.has(token)) return { markup: fence(token, false) }
       return { markup: tag(/^\p{L}$/u.test(token) ? 'mi' : 'mo', token === '-' ? '−' : token) }
+    }
+
+    if (mathVerbLength(token)) {
+      const [, star, withSpaces, , literal] = leadingVerb.exec(token)!
+      const content = star === undefined ? literal : withSpaces.replaceAll(' ', '␣')
+      return { markup: `<mtext class="math-verbatim" style="font-family:monospace;white-space:pre">${escapeHtml(content)}</mtext>` }
     }
 
     let name = token.slice(1)

@@ -1,170 +1,74 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { resolveOptions } from './options'
+import { describe, expect, it } from 'bun:test'
+import { mkdtemp, realpath, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { createDeckCompiler } from './runtime/loader.ts'
 
-const mocks = vi.hoisted(() => ({
-  getRoots: vi.fn(),
-  getThemeMeta: vi.fn(),
-  load: vi.fn(),
-  resolveAddons: vi.fn(),
-  resolveConfig: vi.fn(),
-  resolveEntry: vi.fn(),
-  resolveTheme: vi.fn(),
-}))
+async function project(run: (root: string) => Promise<void>): Promise<void> {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'presentation-options-')))
+  try { await run(root) }
+  finally { await rm(root, { recursive: true, force: true }) }
+}
 
-vi.mock('./integrations/addons', () => ({
-  resolveAddons: mocks.resolveAddons,
-}))
+describe('bootstrap deck options', () => {
+  it('locks extension selection while letting the selected preparsers update the deck', () => project(async (root) => {
+    const entry = join(root, 'deck/slides.md')
+    const themeRoot = join(root, 'theme')
+    const addonRoot = join(root, 'addon')
+    await Bun.write(entry, [
+      '---', 'theme: ../theme', 'title: Before', 'canvasWidth: 960', '---',
+      '', '# Before', '', 'HOOKS', '', '---', 'src: ../addon/shared.md', '---',
+    ].join('\n'))
+    await Bun.write(join(themeRoot, 'index.ts'), "export default { name: 'bootstrap', defaults: { addons: ['../addon'] } }")
+    await Bun.write(join(themeRoot, 'setup/preparser.ts'), "export default () => [{ transformSlide(content) { return content.replace('HOOKS', 'HOOKS Theme') } }]")
+    await Bun.write(join(addonRoot, 'index.ts'), "export default { name: 'selected-addon', globalBottom: '<div id=\"selected-addon\"></div>' }")
+    await Bun.write(join(addonRoot, 'setup/preparser.ts'), [
+      'export default ({ mode }) => [{',
+      '  transformRawLines(lines) {',
+      "    if (lines.includes('title: Before')) {",
+      "      lines[lines.indexOf('theme: ../theme')] = 'theme: missing-theme'",
+      "      lines[lines.indexOf('title: Before')] = 'title: After'",
+      "      lines[lines.indexOf('canvasWidth: 960')] = 'canvasWidth: 840'",
+      "      lines.splice(4, 0, 'addons: [missing-addon]')",
+      '    }',
+      '  },',
+      "  transformSlide(content) { return content.replace('HOOKS Theme', 'HOOKS Theme Addon ' + mode) },",
+      '}]',
+    ].join('\n'))
+    await Bun.write(join(addonRoot, 'shared.md'), '# Packaged chapter')
+    await Bun.write(join(root, 'deck/setup/preparser.ts'), "export default () => [{ transformSlide(content) { return content.replace('HOOKS', 'HOOKS Local') } }]")
 
-vi.mock('./integrations/themes', () => ({
-  getThemeMeta: mocks.getThemeMeta,
-  resolveTheme: mocks.resolveTheme,
-}))
+    const deck = await createDeckCompiler(entry, { mode: 'dev', liveCompile: true })()
+    expect(deck.title).toBe('After')
+    expect(deck.canvas.width).toBe(840)
+    expect(deck.headmatter).toMatchObject({ theme: '../theme', addons: ['../addon'], title: 'After' })
+    expect(deck.html).toContain('data-theme="bootstrap"')
+    expect(deck.html).toContain('HOOKS Local Theme Addon dev')
+    expect(deck.html).toContain('id="selected-addon"')
+    expect(deck.html).toContain('<h1>Packaged chapter</h1>')
+    expect(deck.writableSlides.size).toBe(0)
+  }))
 
-vi.mock('./parser', () => ({
-  parser: {
-    load: mocks.load,
-    resolveConfig: mocks.resolveConfig,
-  },
-}))
+  it('uses a theme override and supports theme-less decks', () => project(async (root) => {
+    const entry = join(root, 'slides.md')
+    await Bun.write(entry, '---\ntheme: missing-theme\n---\n\n# Override')
+    expect((await createDeckCompiler(entry, { theme: 'paper' })()).html).toContain('data-theme="paper"')
+    await Bun.write(entry, '---\nconfig:\n  theme: null\n---\n\n# Theme-less')
+    expect((await createDeckCompiler(entry)()).html).toContain('data-theme="none"')
+  }))
 
-vi.mock('./resolver', () => ({
-  getRoots: mocks.getRoots,
-  resolveEntry: mocks.resolveEntry,
-  toAtFS: (value: string) => value,
-}))
+  it('allows declared workspace chapters and leaves their files read-only in the deck editor', () => project(async (root) => {
+    const entry = join(root, 'packages/show/slides.md')
+    await Bun.write(join(root, 'package.json'), JSON.stringify({ workspaces: ['packages/*'] }))
+    await Bun.write(entry, '# Presentation\n\n---\nsrc: ../shared/chapter.md\n---\n')
+    const chapter = join(root, 'packages/shared/chapter.md')
+    await Bun.write(chapter, '# Shared chapter\n\n<<< ./sample.ts {monaco-write}')
+    await Bun.write(join(root, 'packages/shared/sample.ts'), 'export const shared = 1')
 
-vi.mock('./setups/indexHtml', () => ({
-  default: vi.fn().mockResolvedValue(''),
-}))
-vi.mock('./setups/katex', () => ({
-  default: vi.fn().mockResolvedValue({}),
-}))
-vi.mock('./setups/shiki', () => ({
-  default: vi.fn().mockResolvedValue({}),
-}))
-
-describe('resolveOptions', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mocks.resolveEntry.mockResolvedValue('/project/slides.md')
-    mocks.getRoots.mockResolvedValue({
-      clientRoot: '/client',
-      userPkgJson: {},
-      userRoot: '/project',
-      userWorkspaceRoot: '/workspace',
-    })
-    mocks.resolveTheme.mockResolvedValue(['slidev-theme-test', '/theme'])
-    mocks.getThemeMeta.mockResolvedValue({})
-    mocks.resolveAddons.mockResolvedValue(['/addon'])
-    mocks.resolveConfig.mockReturnValue({
-      addons: ['slidev-addon-test'],
-      browserExporter: false,
-      drawings: { enabled: false, persist: false },
-      monacoTypesIgnorePackages: [],
-      presenter: false,
-      pwa: false,
-      record: false,
-      routerMode: 'history',
-    })
-  })
-
-  it('reloads with bootstrap roots while resolving final non-discovery config', async () => {
-    const initialData = {
-      headmatter: {
-        addons: ['slidev-addon-bootstrap'],
-        routerMode: 'hash',
-        theme: 'bootstrap',
-        title: 'before',
-      },
-      slides: [
-        { content: 'before addon preparser' },
-      ],
-    }
-    const reloadedData = {
-      headmatter: {
-        addons: ['slidev-addon-final'],
-        routerMode: 'memory',
-        theme: 'final',
-        title: 'after',
-      },
-      slides: [
-        { content: 'after addon preparser' },
-      ],
-    }
-    const initialConfig = {
-      addons: ['slidev-addon-bootstrap'],
-      routerMode: 'hash',
-      theme: 'bootstrap',
-    }
-    const finalConfig = {
-      addons: ['slidev-addon-final'],
-      browserExporter: false,
-      download: false,
-      drawings: { enabled: false, persist: false },
-      monacoTypesIgnorePackages: [],
-      presenter: false,
-      pwa: false,
-      record: false,
-      routerMode: 'memory',
-      theme: 'final',
-      title: 'after',
-    }
-    mocks.load
-      .mockResolvedValueOnce(initialData)
-      .mockResolvedValueOnce(reloadedData)
-    mocks.resolveConfig
-      .mockReturnValueOnce(initialConfig)
-      .mockReturnValueOnce(finalConfig)
-
-    const options = await resolveOptions({
-      download: true,
-      entry: '/project/slides.md',
-    }, 'dev')
-
-    expect(mocks.load).toHaveBeenNthCalledWith(1, {
-      allowedRoots: ['/workspace', '/project'],
-      roots: ['/project'],
-      userRoot: '/project',
-    }, '/project/slides.md', undefined, 'dev')
-    expect(mocks.resolveTheme).toHaveBeenCalledWith('bootstrap', '/project/slides.md')
-    expect(mocks.resolveConfig).toHaveBeenNthCalledWith(
-      1,
-      initialData.headmatter,
-      {},
-      '/project/slides.md',
-    )
-    expect(mocks.resolveAddons).toHaveBeenCalledWith(initialConfig.addons)
-    expect(mocks.load).toHaveBeenNthCalledWith(2, {
-      allowedRoots: [
-        '/workspace',
-        '/theme',
-        '/addon',
-        '/project',
-      ],
-      roots: ['/theme', '/addon', '/project'],
-      userRoot: '/project',
-    }, '/project/slides.md', undefined, 'dev')
-    expect(mocks.resolveConfig).toHaveBeenNthCalledWith(
-      2,
-      reloadedData.headmatter,
-      {},
-      '/project/slides.md',
-    )
-    expect(mocks.load).toHaveBeenCalledTimes(2)
-    expect(mocks.resolveTheme).toHaveBeenCalledTimes(1)
-    expect(mocks.resolveAddons).toHaveBeenCalledTimes(1)
-    expect(mocks.resolveConfig).toHaveBeenCalledTimes(2)
-    expect(options.roots).toEqual(['/theme', '/addon', '/project'])
-    expect(options.data.config).toBe(finalConfig)
-    expect(options.data.config).toMatchObject({
-      addons: ['slidev-addon-bootstrap'],
-      download: true,
-      routerMode: 'memory',
-      theme: 'bootstrap',
-      title: 'after',
-    })
-    expect(options.data.config.theme).toBe(options.themeRaw)
-    expect(options.data.headmatter).toEqual(reloadedData.headmatter)
-    expect(options.data.slides).toEqual(reloadedData.slides)
-  })
+    const deck = await createDeckCompiler(entry, { liveCompile: true })()
+    expect(deck.html).toContain('<h1>Shared chapter</h1>')
+    expect(deck.html).toContain('export const shared = 1')
+    expect(deck.writableSlides.size).toBe(1)
+    expect(deck.writableSnippets.size).toBe(0)
+  }))
 })

@@ -108,6 +108,13 @@ Use `setup/code-highlighter.ts` to set the palette in code. Existing
 mode, edits to setup files, their local imports, and STX layouts refresh the
 preview.
 
+Use a deck directory or an entry path without the `.md` suffix on the CLI.
+Theme and addon resolution checks the deck project first, then the package
+installation that launched the CLI. Both local extensions and compatible
+installed packages can provide `setup/preparser.ts`. Include Markdown from
+selected extensions or from a declared workspace. The side editor writes
+only within the deck directory.
+
 Theme and addon authors can register an STX layout with
 `defineStxLayout(new URL('./layouts/hero.stx', import.meta.url))`. In that
 template, use `{!! content !!}` for the default slot, `{!! right !!}` for

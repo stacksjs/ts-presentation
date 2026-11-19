@@ -6,6 +6,7 @@ import { parseArgs } from 'node:util'
 import { asset, within } from './assets.ts'
 import { findChrome } from './chrome.ts'
 import { resolveExportSettings } from './export-options.ts'
+import { resolveDeckEntry } from './extension-resolver.ts'
 import { compileLiveCode, maxCodeLength } from './compile-code.ts'
 import { saveDrag } from './drag-source.ts'
 import { saveDrawing } from './drawing-store.ts'
@@ -57,7 +58,7 @@ async function main(): Promise<void> {
     throw new Error(help)
   }
 
-  const source = resolve(entry)
+  const source = await resolveDeckEntry(entry)
   const directory = dirname(source)
   const publicDir = join(directory, 'public')
   const baseStyle = Bun.file(new URL('../../../client/runtime/player.css', import.meta.url))
