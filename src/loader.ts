@@ -5,19 +5,23 @@ import { pathToFileURL } from 'node:url'
 import type { Deck, RenderOptions, Slide } from './index.ts'
 import type { ExtensionAssets } from './extensions.ts'
 import type { SlideCanvas } from './canvas.ts'
+import type { LiveDeck } from './dev-protocol.ts'
 import { loadAuthoringSetup } from './authoring-setup.ts'
 import { within } from './assets.ts'
 import { resolveCanvas } from './canvas.ts'
 import { loadSavedDrawings } from './drawing-store.ts'
 import type { DrawingStore } from './drawing-store.ts'
 import { drawingEnabled, resolveDrawings } from './drawings.ts'
-import { bindDragSources, dragDocument } from './drag-source.ts'
+import { bindDragSources } from './drag-source.ts'
 import type { WritableDrag } from './drag-source.ts'
 import { loadExtensions } from './extensions.ts'
 import { renderPresentation } from './index.ts'
+import { markdownDocument, maxDeckSourceBytes } from './markdown-source.ts'
 import { extractImagesUsage, parseDeckAsync, readHeadmatter } from './parser.ts'
 import type { PreparserExtension, PreparserSetup } from './parser.ts'
 import { slideRange } from './selection.ts'
+import type { WritableSlide } from './side-editor-source.ts'
+import { bindSlideSource } from './side-editor-source.ts'
 import type { WritableSnippet } from './snippet-write.ts'
 import { snippetRevision, snippetToken } from './snippet-write.ts'
 import { maxCodeLength } from './compile-code.ts'
@@ -31,6 +35,8 @@ export interface CompiledDeck extends ExtensionAssets {
   routeAliases: ReadonlySet<string>
   writableSnippets: ReadonlyMap<string, WritableSnippet>
   writableDrags: ReadonlyMap<string, WritableDrag>
+  writableSlides: ReadonlyMap<string, WritableSlide>
+  live?: LiveDeck
   drawingStore?: DrawingStore
 }
 
@@ -63,7 +69,9 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
     const origins = new WeakMap<Slide, { path: string, slide: Slide, index: number }>()
     const writableSnippets = new Map<string, WritableSnippet>()
     const writableDrags = new Map<string, WritableDrag>()
-    const dragSources = new Map<string, ReturnType<typeof dragDocument>>()
+    const sourceDocuments = new Map<string, ReturnType<typeof markdownDocument>>()
+    const writableSlides = new Map<string, WritableSlide>()
+    const sourceBindings = new WeakMap<Slide, { token: string, revision: string }>()
     const directory = await realpath(root)
     async function observe(path: string): Promise<string> {
       const revision = await fileRevision(path)
@@ -94,8 +102,8 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
     async function parseDocument(path: string, input: string): Promise<Deck> {
       const deck = await parseDeckAsync(input, preparsers)
       documents.set(path, deck)
-      if (writerKey && !preparsers.length && /v-?drag/i.test(input))
-        dragSources.set(path, dragDocument(path, directory, input, writerKey))
+      if (writerKey && !preparsers.length && Buffer.byteLength(input, 'utf8') <= maxDeckSourceBytes)
+        sourceDocuments.set(path, markdownDocument(path, directory, input, writerKey))
       return deck
     }
     const entryDeck = await parseDocument(filepath, source)
@@ -148,15 +156,21 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
     deck.slides = await Promise.all(deck.slides.map(async (slide) => {
       if (slide.frontmatter?.hide === true || slide.frontmatter?.disabled === true) return slide
       const origin = origins.get(slide)!
-      const dragSource = dragSources.get(origin.path)
-      const marked = dragSource ? bindDragSources(dragSource, slide, origin.slide, origin.index, writableDrags) : slide.content
+      const doc = sourceDocuments.get(origin.path)
+      const marked = doc ? bindDragSources(doc, slide, origin.slide, origin.index, writableDrags) : slide.content
       const content = await expandSnippets(marked, directory, origin.path, observe, (path, source) => {
         if (!writerKey || source.length > maxCodeLength || source.includes('\0')) return
         const token = snippetToken(writerKey, path)
         writableSnippets.set(token, { path, root: directory, revision: snippetRevision(source) })
         return token
       })
-      return content === slide.content ? slide : { ...slide, content }
+      const result = content === slide.content ? slide : { ...slide, content }
+      const editable = doc && bindSlideSource(doc, origin.slide, origin.index)
+      if (editable) {
+        writableSlides.set(editable.token, editable)
+        sourceBindings.set(result, { token: editable.token, revision: editable.revision })
+      }
+      return result
     }))
     const [extensions, setup] = await Promise.all([
       loadExtensions(deck, directory, observe, options.theme),
@@ -171,11 +185,16 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
       return revision
     })
     const saveDrawings = store !== undefined && mode === 'dev' && drawingEnabled(drawings, mode)
-    const { html, routes } = await renderPresentation(deck, { liveCompile: options.liveCompile, mode, extensions, setup, writableSnippets, savedDrawings, saveDrawings })
+    const deckCss = options.liveCompile ? await observe(join(directory, 'style.css')).catch(() => undefined) : undefined
+    if (options.liveCompile && deckCss === undefined) files.set(join(directory, 'style.css'), undefined)
+    const { html, routes, live } = await renderPresentation(deck, {
+      liveCompile: options.liveCompile, mode, extensions, setup, writableSnippets, savedDrawings, saveDrawings,
+      deckCssRevision: deckCss && snippetRevision(deckCss), sourceBindings,
+    })
     const author = typeof deck.headmatter?.author === 'string' ? deck.headmatter.author : undefined
     const routeAliases = new Set(routes.flatMap(route => route.alias ? [route.alias] : []))
     const drawingStore = saveDrawings ? { ...store, slideCount: routes.length } : undefined
-    const compiled = { title: deck.title, author, canvas, html, styles: extensions.styles, client: extensions.client, mounts: extensions.mounts, writableSnippets, writableDrags, routeAliases, drawingStore }
+    const compiled = { title: deck.title, author, canvas, html, styles: extensions.styles, client: extensions.client, mounts: extensions.mounts, writableSnippets, writableDrags, writableSlides, routeAliases, drawingStore, live }
     cached = { files, deck: compiled }
     return compiled
   }

@@ -4,9 +4,9 @@ import type { Slide } from './parser.ts'
 import { slideSourceOf } from './parser.ts'
 import { describeDrag, htmlTag, prepareSlideHtml } from './slide-html.ts'
 import type { WritableSnippet } from './snippet-write.ts'
-import { snippetRevision, snippetToken, writeDeckFile } from './snippet-write.ts'
-
-const maxDeckBytes = 2_000_000
+import { snippetToken, writeDeckFile } from './snippet-write.ts'
+import type { MarkdownDocument } from './markdown-source.ts'
+import { maxDeckSourceBytes } from './markdown-source.ts'
 
 type Edit = { start: number, end: number, replacement: (position: DragPosition) => string }
 export interface WritableDrag extends WritableSnippet {
@@ -14,42 +14,7 @@ export interface WritableDrag extends WritableSnippet {
   edit: Edit
 }
 
-interface DragDocument {
-  path: string
-  root: string
-  source: string
-  revision: string
-  file: string
-  secret: string
-  lines: number[]
-  rawIndex: (normalized: number) => number
-}
-
-/** Map parser offsets to the original file, including a BOM and mixed newline sequences. */
-export function dragDocument(path: string, root: string, source: string, secret: string): DragDocument {
-  const bom = Number(source.startsWith('\uFEFF'))
-  const lines = [0]
-  const removed: number[] = []
-  for (const match of source.matchAll(/\r?\n/g)) {
-    if (match[0].length === 2) removed.push(match.index - removed.length - bom)
-    lines.push(match.index + match[0].length - removed.length - bom)
-  }
-  function rawIndex(normalized: number): number {
-    let left = 0
-    let right = removed.length
-    while (left < right) {
-      const middle = (left + right) >>> 1
-      if (removed[middle] < normalized) left = middle + 1
-      else right = middle
-    }
-    return normalized + left + bom
-  }
-  const revision = snippetRevision(source)
-  const file = snippetToken(secret, path)
-  return { path, root, source, revision, file, secret, lines, rawIndex }
-}
-
-function namedEdit(doc: DragDocument, slide: NonNullable<ReturnType<typeof slideSourceOf>>, name: string, kind: DragKind, positions: unknown): Edit | undefined {
+function namedEdit(doc: MarkdownDocument, slide: NonNullable<ReturnType<typeof slideSourceOf>>, name: string, kind: DragKind, positions: unknown): Edit | undefined {
   const { lines, rawIndex, source } = doc
   const { matter, bodyLine } = slide
   const newline = source.includes('\r\n') ? '\r\n' : '\n'
@@ -97,14 +62,14 @@ function namedEdit(doc: DragDocument, slide: NonNullable<ReturnType<typeof slide
  * source token in the deck that is sent to the client.
  */
 export function bindDragSources(
-  doc: DragDocument,
+  doc: MarkdownDocument,
   slide: Slide,
   sourceSlide: Slide,
   authoredIndex: number,
   files: Map<string, WritableDrag>,
 ): string {
   const { content } = slide
-  if (content.length > maxDeckBytes || doc.source.length > maxDeckBytes || !/v-?drag/i.test(content)) return content
+  if (content.length > maxDeckSourceBytes || doc.source.length > maxDeckSourceBytes || !/v-?drag/i.test(content)) return content
   const range = slideSourceOf(sourceSlide)
   if (!range) return content
   const base = doc.lines[range.bodyLine] + range.leading
@@ -167,6 +132,6 @@ export function saveDrag(files: ReadonlyMap<string, WritableDrag>, input: unknow
   const parsed = parseDragPosition(position, file.kind)
   if (!parsed) return new Response('Invalid position', { status: 400 })
   const { edit } = file
-  return writeDeckFile(file, revision, maxDeckBytes, 'slide source', source =>
+  return writeDeckFile(file, revision, maxDeckSourceBytes, 'slide source', source =>
     source.slice(0, edit.start) + edit.replacement(parsed) + source.slice(edit.end))
 }

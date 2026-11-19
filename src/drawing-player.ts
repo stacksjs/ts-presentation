@@ -52,14 +52,17 @@ export function setupDrawings(config: DrawingClientConfig, options: DrawingPlaye
   }
 
   function layer(slide: number): SVGSVGElement {
-    const existing = layers[slide - 1]
-    if (existing) return existing
+    const article = articles[slide - 1]
+    const previous = layers[slide - 1]
+    if (previous?.parentElement === article) return previous
+    const existing = article.querySelector<SVGSVGElement>(':scope > svg[data-presentation-drawing]')
+    if (existing) return layers[slide - 1] = existing
     const element = document.createElementNS(ns, 'svg')
     element.setAttribute('class', 'slide-ink')
     element.setAttribute('aria-hidden', 'true')
     element.setAttribute('viewBox', `0 0 ${canvas.width} ${canvas.height}`)
     element.setAttribute('data-presentation-drawing', '')
-    articles[slide - 1].append(element)
+    article.append(element)
     layers[slide - 1] = element
     return element
   }

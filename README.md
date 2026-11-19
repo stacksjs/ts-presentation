@@ -25,6 +25,11 @@ as a video.
 
 Left and right move through reveals. Up and down jump between slides.
 
+In dev, **Edit slide** or **E** opens the slide's Markdown beside the
+preview. The editor saves frontmatter, body, and speaker notes to the
+source file. Use **Ctrl+S** or **Cmd+S** to save immediately. Changes
+from an external editor update the open preview and navigation titles.
+
 `bun run build` emits an offline browser deck. `bun run export` creates a
 PDF with Chrome or Chromium. Set `CHROME_BIN` or pass `--executable-path`
 if the executable is installed elsewhere.
@@ -61,6 +66,7 @@ the deck and style slides with an optional `style.css`.
 | Draggable elements | Use `v-drag`, `<v-drag>`, or `<v-drag-arrow>`. Double-click to move, resize, or rotate. Dev saves positions to the Markdown |
 | Local slides and ranges | `src: ./chapter.md#2-4` selects authored slides before nested imports expand. A leading slash resolves from the deck directory |
 | Markdown preparser | `setup/preparser.ts` can transform raw lines, per-slide Markdown, frontmatter, and speaker notes before rendering |
+| Slide editor | Edit the Markdown of the current slide and preview file changes in dev |
 | Navigation | `routeAlias: review`, then links such as `#review` or `#review/2`. Use `clicksStart` and `clicks` to set reveal bounds |
 | Per-slide options | `class`, `hide`, `disabled`, and `transition: fade`, `slide-left`, or `slide-up` |
 | Images and component markup | Trusted HTML, with optional `data-zoom` on an image |

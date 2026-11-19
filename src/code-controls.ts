@@ -9,15 +9,25 @@ export interface CodeTabSelection { group: string, tab: number }
 interface CodeTabs {
   select: (group: string, tab: number) => boolean
   selections: () => CodeTabSelection[]
+  refresh: () => void
 }
 
 export function setupCodeTabs(stage: HTMLElement, onSelect: (selection: CodeTabSelection) => void): CodeTabs {
   const groups = new Map<string, Group>()
-  for (const element of stage.querySelectorAll<HTMLElement>('[data-code-group]')) {
-    const tabs = [...element.querySelectorAll<HTMLButtonElement>(':scope > [role="tablist"] > [role="tab"]')]
-    const panels = [...element.querySelectorAll<HTMLElement>(':scope > .code-group-panel')]
-    if (tabs.length > 0 && tabs.length === panels.length) groups.set(element.dataset.codeGroup!, { element, tabs, panels, selected: 0 })
+  function refresh(): void {
+    const current = new Set<string>()
+    for (const element of stage.querySelectorAll<HTMLElement>('[data-code-group]')) {
+      const id = element.dataset.codeGroup!
+      current.add(id)
+      if (groups.get(id)?.element === element) continue
+      const tabs = [...element.querySelectorAll<HTMLButtonElement>(':scope > [role="tablist"] > [role="tab"]')]
+      const panels = [...element.querySelectorAll<HTMLElement>(':scope > .code-group-panel')]
+      if (tabs.length > 0 && tabs.length === panels.length) groups.set(id, { element, tabs, panels, selected: 0 })
+      else groups.delete(id)
+    }
+    for (const id of groups.keys()) if (!current.has(id)) groups.delete(id)
   }
+  refresh()
 
   function select(id: string, tab: number, notify: boolean): boolean {
     const group = groups.get(id)
@@ -64,6 +74,7 @@ export function setupCodeTabs(stage: HTMLElement, onSelect: (selection: CodeTabS
   return {
     select: (id, tab) => select(id, tab, false),
     selections: () => [...groups].flatMap(([group, { selected }]) => selected ? [{ group, tab: selected }] : []),
+    refresh,
   }
 }
 
@@ -102,7 +113,7 @@ async function writeClipboard(value: string): Promise<boolean> {
   }
 }
 
-export function setupCodeCopy(stage: HTMLElement): void {
+export function setupCodeCopy(stage: HTMLElement): (article: HTMLElement) => void {
   const sources = new WeakMap<HTMLButtonElement, () => string>()
   const timers = new WeakMap<HTMLButtonElement, ReturnType<typeof setTimeout>>()
   function install(parent: HTMLElement, source: () => string): void {
@@ -115,7 +126,7 @@ export function setupCodeCopy(stage: HTMLElement): void {
     parent.append(button)
     sources.set(button, source)
   }
-  for (const article of stage.querySelectorAll(':scope > article')) {
+  function prepare(article: HTMLElement): void {
     for (const code of article.querySelectorAll<HTMLElement>('pre > code')) {
       if (code.closest('.live-code')) continue
       const disabled = code.closest('[data-code-motion]')
@@ -128,13 +139,14 @@ export function setupCodeCopy(stage: HTMLElement): void {
       pre.prepend(overlay)
       install(overlay, () => codeText(code))
     }
-    if (article.hasAttribute('data-code-copy-disabled')) continue
+    if (article.hasAttribute('data-code-copy-disabled')) return
     for (const live of article.querySelectorAll('.live-code')) {
       const toolbar = live.querySelector<HTMLElement>('.live-code-toolbar')
       const input = live.querySelector('textarea')
       if (toolbar && input) install(toolbar, () => input.value)
     }
   }
+  stage.querySelectorAll<HTMLElement>(':scope > article').forEach(prepare)
   stage.addEventListener('click', async (event) => {
     const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>('button.code-copy-action') : null
     const source = button && sources.get(button)
@@ -144,4 +156,5 @@ export function setupCodeCopy(stage: HTMLElement): void {
     clearTimeout(timers.get(button))
     timers.set(button, setTimeout(() => { button.textContent = 'Copy' }, 1500))
   })
+  return prepare
 }

@@ -176,6 +176,7 @@ interface SlideDraft {
 
 interface SlideSource {
   bodyLine: number
+  endLine: number
   leading: number
   matter?: Pick<Matter, 'start' | 'end'>
 }
@@ -207,7 +208,7 @@ function splitSlides(lines: string[]): SlideDraft[] {
       notes: note ? raw.slice(note.start + 4, note.end - 3).trim() : undefined,
       visible: visible?.join('\n') ?? content,
       attributes: matter?.attributes ?? {},
-      source: { bodyLine: start, leading, matter },
+      source: { bodyLine: start, endLine: end, leading, matter },
     })
   }
 

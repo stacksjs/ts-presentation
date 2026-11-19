@@ -12,6 +12,7 @@ import type { CompiledDeck } from './loader.ts'
 import type { PowerPointFrame } from './powerpoint.ts'
 import { createDeckCompiler } from './loader.ts'
 import { legacySlideLocation } from './navigation.ts'
+import { maxSlideEditLength, readSlideSource, saveSlideSource } from './side-editor-source.ts'
 import { saveSnippet } from './snippet-write.ts'
 
 const options = {
@@ -58,7 +59,7 @@ async function main(): Promise<void> {
   const directory = dirname(source)
   const publicDir = join(directory, 'public')
   const baseStyle = Bun.file(new URL('./player.css', import.meta.url))
-  const customStyle = Bun.file(join(directory, 'style.css'))
+  const customStyle = join(directory, 'style.css')
   const player = await Bun.build({
     entrypoints: [join(import.meta.dir, 'player.ts')],
     target: 'browser',
@@ -73,6 +74,7 @@ async function main(): Promise<void> {
   async function writeSite(output: string): Promise<CompiledDeck> {
     if (within(publicDir, output)) throw new Error('Build output must be outside the deck’s public directory')
     const deck = await compile()
+    const css = Bun.file(customStyle)
     await mkdir(output, { recursive: true })
     if (await realpath(publicDir).catch(() => undefined)) {
       await cp(publicDir, output, { recursive: true })
@@ -88,7 +90,7 @@ async function main(): Promise<void> {
       deck.client ? Bun.write(join(output, 'extensions.js'), deck.client) : undefined,
       Bun.write(join(output, 'presentation.css'), baseStyle),
       Bun.write(join(output, 'presentation.js'), javascript),
-      Bun.write(join(output, 'deck.css'), await customStyle.exists() ? customStyle : emptyStyle),
+      Bun.write(join(output, 'deck.css'), await css.exists() ? css : emptyStyle),
     ])
     return deck
   }
@@ -101,7 +103,7 @@ async function main(): Promise<void> {
     const server = Bun.serve({
       hostname: '127.0.0.1',
       port,
-      maxRequestBodySize: maxCodeLength * 4,
+      maxRequestBodySize: Math.max(maxCodeLength * 4, maxSlideEditLength * 6 + 1024),
       async fetch(request) {
         let path: string
         const url = new URL(request.url)
@@ -119,6 +121,39 @@ async function main(): Promise<void> {
             return new Response((await compile()).styles, { headers: { 'Content-Type': 'text/css; charset=utf-8' } })
           case '/extensions.js':
             return new Response((await compile()).client, { headers: { 'Content-Type': 'text/javascript; charset=utf-8' } })
+          case '/__presentation/live': {
+            if (request.method !== 'GET') return new Response(null, { status: 405, headers: { Allow: 'GET' } })
+            const headers = { 'Cache-Control': 'no-store' }
+            try {
+              const { live } = await compile()
+              return live && live.revision !== url.searchParams.get('revision')
+                ? Response.json(live, { headers })
+                : new Response(null, { status: 204, headers })
+            }
+            catch (error) {
+              return new Response(error instanceof Error ? error.message : 'Could not update the deck.', { status: 422, headers })
+            }
+          }
+          case '/__presentation/source': {
+            if (request.method !== 'POST' && request.method !== 'PUT')
+              return new Response(null, { status: 405, headers: { Allow: 'POST, PUT' } })
+            if (!localAuthorRequest(request, url)) return new Response('Source requests must come from the local presenter.', { status: 403 })
+            const input = await request.json().catch(() => undefined)
+            if (!input || typeof input !== 'object') return new Response('Invalid source request.', { status: 400 })
+            let deck: CompiledDeck
+            try { deck = await compile() }
+            catch (error) {
+              return new Response(error instanceof Error ? error.message : 'Could not read the deck source.', { status: 422 })
+            }
+            if (request.method === 'PUT') return saveSlideSource(deck.writableSlides, input)
+            if (input.deckRevision !== deck.live?.revision) return new Response('The deck changed. Waiting for the preview to update.', { status: 409 })
+            const index = input.slide
+            const token = Number.isSafeInteger(index) && index > 0 ? deck.live?.slides[index - 1]?.sourceToken : undefined
+            const editable = token && deck.writableSlides.get(token)
+            return editable
+              ? Response.json(readSlideSource(editable), { headers: { 'Cache-Control': 'no-store' } })
+              : new Response('This slide has no editable Markdown source.', { status: 404 })
+          }
           case '/__presentation/compile':
             if (request.method !== 'POST') return new Response(null, { status: 405, headers: { Allow: 'POST' } })
             if (!localAuthorRequest(request, url))
@@ -148,8 +183,10 @@ async function main(): Promise<void> {
           }
           case '/presentation.css':
             return new Response(baseStyle, { headers: { 'Content-Type': 'text/css' } })
-          case '/deck.css':
-            return new Response(await customStyle.exists() ? customStyle : emptyStyle, { headers: { 'Content-Type': 'text/css' } })
+          case '/deck.css': {
+            const css = Bun.file(customStyle)
+            return new Response(await css.exists() ? css : emptyStyle, { headers: { 'Content-Type': 'text/css' } })
+          }
           case '/presentation.js':
             return new Response(javascript, { headers: { 'Content-Type': 'text/javascript' } })
           default: {

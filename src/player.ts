@@ -1,13 +1,17 @@
 import { defaultCanvas } from './canvas.ts'
 import { setupCodeCopy, setupCodeTabs } from './code-controls.ts'
+import type { LiveDeck } from './dev-protocol.ts'
+import type { LiveManifest } from './dev-updates.ts'
+import { watchLiveDeck } from './dev-updates.ts'
 import { setupDrags } from './drag-player.ts'
 import { setupDrawings } from './drawing-player.ts'
 import type { DrawingClientConfig } from './drawings.ts'
 import { setupLiveCode } from './live-code.ts'
-import type { SlidePosition, SlideRoute } from './navigation.ts'
+import type { ClickBounds, SlidePosition, SlideRoute } from './navigation.ts'
 import { clickBounds, createNavigationContext, nextPosition, previousPosition, readSlideHash, slideHash, slidePosition } from './navigation.ts'
 import { setupPresenter } from './presenter.ts'
 import { collectReveals, prepareSwitchPrint, showReveals } from './reveals.ts'
+import { setupSideEditor } from './side-editor.ts'
 
 const canvasWidth = Number(document.documentElement.dataset.slideWidth) || defaultCanvas.width
 const canvasHeight = Number(document.documentElement.dataset.slideHeight) || defaultCanvas.height
@@ -34,18 +38,31 @@ const isPresenter = !isPreview && !isCapture && params.has('presenter')
 const opener: Window | null = isPresenter ? window.opener : null
 const messageOrigin = location.protocol === 'file:' ? '*' : location.origin
 const aliases = new Map(routes.flatMap(route => route.alias ? [[route.alias, route.no]] : []))
-const disclosures = articles.map(article => [...article.querySelectorAll('details')])
-const screenshots = articles.map(article => [...article.querySelectorAll<HTMLImageElement>('img[data-zoom]')])
-const noteSteps = notes.map(note => [...note.querySelectorAll<HTMLElement>('[data-note-step]')])
+const disclosures: HTMLDetailsElement[][] = []
+const screenshots: HTMLImageElement[][] = []
+const noteSteps: HTMLElement[][] = []
 
 const defaultClickAnimation = document.documentElement.dataset.clickAnimation
-const reveals = articles.map((article, index) => collectReveals(article, routes[index].frontmatter.clickAnimation || defaultClickAnimation))
-const bounds = reveals.map((reveal, index) => clickBounds(routes[index].frontmatter, Math.max(reveal.total, noteSteps[index].length - 1)))
-articles.forEach((article, index) => {
+const reveals: ReturnType<typeof collectReveals>[] = []
+const bounds: ClickBounds[] = []
+const isLive = !isCapture && document.documentElement.dataset.liveCompile === 'true'
+
+function mountSlide(article: HTMLElement, index: number): void {
+  disclosures[index] = [...article.querySelectorAll('details')]
+  screenshots[index] = [...article.querySelectorAll<HTMLImageElement>('img[data-zoom]')]
+  for (const image of screenshots[index]) {
+    image.tabIndex = 0
+    image.setAttribute('role', 'button')
+    image.setAttribute('aria-label', `Enlarge ${image.alt || 'image'}`)
+  }
+  noteSteps[index] = [...notes[index].querySelectorAll<HTMLElement>('[data-note-step]')]
+  reveals[index] = collectReveals(article, routes[index].frontmatter.clickAnimation || defaultClickAnimation)
+  bounds[index] = clickBounds(routes[index].frontmatter, Math.max(reveals[index].total, noteSteps[index].length - 1))
   article.dataset.clicks = String(bounds[index].end)
   article.dataset.clicksStart = String(bounds[index].start)
   prepareSwitchPrint(reveals[index], bounds[index].end)
-})
+}
+articles.forEach(mountSlide)
 let current = 1
 let click = 0
 let popup: Window | null = null
@@ -56,6 +73,7 @@ if (isPreview) document.body.classList.add('previewing')
 if (isCapture) document.body.classList.add('capturing')
 
 let presenterControls: ReturnType<typeof setupPresenter> | undefined
+let sideEditor: ReturnType<typeof setupSideEditor> | undefined
 const position = (): SlidePosition => ({ slide: current, click })
 
 function resize(): void {
@@ -76,11 +94,11 @@ const codeTabs = !isCapture && !isPreview ? setupCodeTabs(stage, (codeTab) => {
 }) : undefined
 const drags = !isCapture && !isPreview ? setupDrags(stage, (slide, presentationDrag) => {
   syncPeer({ dragSlide: articles.indexOf(slide) + 1, presentationDrag })
-}) : undefined
+}, isLive) : undefined
 
-function show(number: number, step?: number, writeHistory = true, sync = true): void {
+function show(number: number, step?: number, writeHistory = true, sync = true, refresh = false): void {
   const { slide: selected, click: nextStep } = slidePosition(number, step, bounds)
-  if (selected === current && nextStep === click && !articles[current - 1].hidden) return
+  if (!refresh && selected === current && nextStep === click && !articles[current - 1].hidden) return
   const slideChanged = selected !== current
   const animate = !isCapture && !isPreview && selected === current && nextStep !== click
   if (writeHistory && (selected !== current || nextStep !== click)) {
@@ -115,6 +133,7 @@ function show(number: number, step?: number, writeHistory = true, sync = true): 
   next.disabled = nextPosition(here, bounds) === undefined
   presenterControls?.update(here)
   drawing?.refresh()
+  if (!refresh) sideEditor?.follow()
   window.dispatchEvent(new CustomEvent('presentation:slide', {
     detail: { ...here, title: routes[current - 1].title, route: routes[current - 1] },
   }))
@@ -185,6 +204,7 @@ function openPresenter(): void {
     return
   }
   const url = new URL(location.href)
+  url.searchParams.delete('editor')
   url.searchParams.set('presenter', '1')
   url.hash = slideHash(routes[current - 1], click)
   popup = window.open(url, 'ts-presentation-presenter', 'popup,width=1130,height=750')
@@ -280,11 +300,6 @@ function zoom(target: EventTarget | null): void {
   syncPeer({ slide: current, screenshot })
 }
 
-for (const image of screenshots.flat()) {
-  image.tabIndex = 0
-  image.setAttribute('role', 'button')
-  image.setAttribute('aria-label', `Enlarge ${image.alt || 'image'}`)
-}
 stage.addEventListener('toggle', (event) => {
   if (!(event.target instanceof HTMLDetailsElement)) return
   const disclosure = disclosures[current - 1].indexOf(event.target)
@@ -372,6 +387,11 @@ window.addEventListener('keydown', (event) => {
     case 'O':
       overview.showModal()
       break
+    case 'e':
+    case 'E':
+      if (!sideEditor || document.body.classList.contains('presenting')) return
+      sideEditor.toggle()
+      break
     case 'd':
     case 'D':
       if (!drawing?.toggle()) return
@@ -394,9 +414,104 @@ if (isPresenter) {
 }
 resize()
 
-if (!isCapture && !isPreview) {
-  setupCodeCopy(stage)
-  setupLiveCode()
+const mountCopy = !isCapture && !isPreview ? setupCodeCopy(stage) : undefined
+if (mountCopy) setupLiveCode()
+
+function template(html: string): DocumentFragment {
+  const template = document.createElement('template')
+  template.innerHTML = html
+  return template.content
+}
+
+function updateSlideTitles(): void {
+  const choices = document.createDocumentFragment()
+  const items = document.createDocumentFragment()
+  for (const { no, title } of routes) {
+    const option = document.createElement('option')
+    option.value = String(no)
+    option.textContent = `${no}. ${title}`
+    choices.append(option)
+    const item = document.createElement('li')
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.value = String(no)
+    const digit = document.createElement('span')
+    digit.textContent = String(no)
+    button.append(digit, ` ${title}`)
+    item.append(button)
+    items.append(item)
+  }
+  goto.replaceChildren(choices)
+  overview.querySelector('ol')!.replaceChildren(items)
+}
+
+function applyLiveDeck(deck: LiveDeck, before: LiveManifest): boolean {
+  if (deck.frame !== before.frame) {
+    if (!sideEditor?.dirty()) location.reload()
+    return false
+  }
+  if (drags?.active() || document.activeElement?.matches('.live-code textarea')) return false
+  const previous = routes[current - 1]
+  const previousClick = click
+  const titlesChanged = routes.length !== deck.slides.length
+    || deck.slides.some(({ route }, index) => route.title !== routes[index]?.title)
+  routes.splice(0, routes.length, ...deck.slides.map(slide => slide.route))
+  aliases.clear()
+  for (const route of routes) if (route.alias) aliases.set(route.alias, route.no)
+  if (titlesChanged) updateSlideTitles()
+  if (document.title !== deck.title) document.title = deck.title
+  if (deck.deckCss !== before.deckCss) {
+    document.querySelector<HTMLLinkElement>('#deck-styles')!.href = `./deck.css?revision=${encodeURIComponent(deck.deckCss)}`
+  }
+  const replaced: HTMLElement[] = []
+  for (const [index, slide] of deck.slides.entries()) {
+    if (before.revisions[index] === slide.revision) continue
+    const article = template(slide.html).firstElementChild as HTMLElement
+    const note = template(slide.notes).firstElementChild as HTMLElement
+    article.hidden = true
+    const oldArticle = articles[index]
+    const oldInk = oldArticle?.querySelector(':scope > svg[data-presentation-drawing]')
+    if (oldInk) {
+      article.querySelector(':scope > svg[data-presentation-drawing]')?.remove()
+      article.append(oldInk)
+    }
+    if (oldArticle) oldArticle.replaceWith(article)
+    else stage.append(article)
+    if (notes[index]) notes[index].replaceWith(note)
+    else notesPanel.append(note)
+    articles[index] = article
+    notes[index] = note
+    document.querySelectorAll(`style[data-slide-style="${index + 1}"]`).forEach((style) => { style.remove() })
+    if (slide.css) document.head.append(template(slide.css))
+    mountSlide(article, index)
+    replaced.push(article)
+  }
+  const length = deck.slides.length
+  for (const element of [...articles.slice(length), ...notes.slice(length)]) element.remove()
+  for (const list of [articles, notes, bounds, reveals, disclosures, screenshots, noteSteps]) list.length = length
+  for (const style of document.querySelectorAll<HTMLElement>('style[data-slide-style]'))
+    if (Number(style.dataset.slideStyle) > length) style.remove()
+  if (replaced.length) {
+    if (imageView.open) imageView.close()
+    codeTabs?.refresh()
+    drags?.updateElements()
+    if (mountCopy) for (const article of replaced) { mountCopy(article); setupLiveCode(article) }
+  }
+  current = Math.min(current, length)
+  const selected = previous.alias ? aliases.get(previous.alias) ?? current : current
+  show(selected, previousClick, false, false, true)
+  if (location.hash && (selected !== previous.no || click !== previousClick || previous.alias !== routes[selected - 1].alias))
+    history.replaceState(null, '', slideHash(routes[selected - 1], click))
+  return true
+}
+
+if (isLive) {
+  const notice = control.querySelector<HTMLElement>('#live-update-status')!
+  const updates = watchLiveDeck(applyLiveDeck, () => sideEditor?.follow(true), (issue) => {
+    notice.textContent = issue
+    notice.hidden = !issue
+  })
+  if (updates && !isPreview && !isPresenter) sideEditor = setupSideEditor({ slide: () => current, ...updates })
 }
 
 const recordButton = control.querySelector<HTMLButtonElement>('#record-button')!

@@ -50,6 +50,18 @@ before splitting, `transformSlide(content, frontmatter)` to change slide
 Markdown or frontmatter, and `transformNote(note, frontmatter)` to change
 speaker notes. Each hook can be asynchronous.
 
+## Edit slides beside the preview
+
+- In the dev server, choose **Edit slide** or press **E** to open the source
+  for the current slide. The pane includes its frontmatter and speaker notes.
+  Edits save after a short pause. Use **Ctrl+S** or **Cmd+S** to save right away.
+- An included slide writes to the file shown at the top of the pane. If that
+  file changes on disk, the editor keeps your draft and prompts you to reload
+  the source. Copy your draft before replacing it with the file on disk.
+- External edits refresh slide bodies, speaker notes, and titles in open dev
+  views. Deck-wide theme, canvas, or client settings may reload the page.
+  Slides transformed by a preparser need to be edited in their source files.
+
 ## Draw on slides
 
 - Click **Draw** or press **D** to turn on mouse and touch drawing. A stylus

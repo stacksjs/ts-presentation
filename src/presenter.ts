@@ -114,15 +114,13 @@ export function setupPresenter(
 
   function showUpcoming(position: SlidePosition): void {
     const next = nextPosition(position, bounds)
-    if (upcoming?.slide === next?.slide && upcoming?.click === next?.click && label.textContent) return
+    const text = next ? `${next.slide === position.slide ? 'Next reveal' : 'Next slide'} · ${routes[next.slide - 1].title}` : 'End of presentation'
+    if (upcoming?.slide === next?.slide && upcoming?.click === next?.click && label.textContent === text) return
     upcoming = next
     frame.hidden = !next
-    if (!next) {
-      label.textContent = 'End of presentation'
-      return
-    }
+    label.textContent = text
+    if (!next) return
     const route = routes[next.slide - 1]
-    label.textContent = `${next.slide === position.slide ? 'Next reveal' : 'Next slide'} · ${route.title}`
     if (!frame.hasAttribute('src')) {
       const url = new URL(location.href)
       url.searchParams.delete('presenter')

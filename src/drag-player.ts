@@ -92,29 +92,36 @@ function nextPosition(gesture: Gesture, point: ScreenPoint, scale: number, snap:
   return handle === 'arrow-start' ? [left + dx, top + dy, width - dx, h - dy, 0] : [left, top, width + dx, h + dy, 0]
 }
 
-export function setupDrags(stage: HTMLElement, onChange: (slide: HTMLElement, edit: DragChange) => void): {
+export function setupDrags(stage: HTMLElement, onChange: (slide: HTMLElement, edit: DragChange) => void, dynamic = false): {
   clear: () => void
+  active: () => boolean
+  updateElements: () => void
   receive: (slide: HTMLElement, input: unknown) => void
 } | undefined {
-  const items = [...stage.querySelectorAll<Draggable>(elementSelector)]
-  if (!items.length) return
+  let items = [...stage.querySelectorAll<Draggable>(elementSelector)]
+  if (!items.length && !dynamic) return
   const editors = new Map<HTMLElement, Draggable[]>()
   const copies = new Map<string, Draggable[]>()
-  for (const element of items) {
-    const slide = element.closest<HTMLElement>('article.slide')
-    if (!slide) continue
-    const list = editors.get(slide) ?? []
-    list.push(element)
-    editors.set(slide, list)
-    const token = element.dataset.dragToken
-    if (token) {
-      const mirrored = copies.get(token) ?? []
-      mirrored.push(element)
-      copies.set(token, mirrored)
+  function register(): void {
+    editors.clear()
+    copies.clear()
+    for (const element of items) {
+      const slide = element.closest<HTMLElement>('article.slide')
+      if (!slide) continue
+      const list = editors.get(slide) ?? []
+      list.push(element)
+      editors.set(slide, list)
+      const token = element.dataset.dragToken
+      if (token) {
+        const mirrored = copies.get(token) ?? []
+        mirrored.push(element)
+        copies.set(token, mirrored)
+      }
+      if (!element.hasAttribute('tabindex') && !element.matches('a[href], button, input, select, textarea, summary'))
+        element.setAttribute('tabindex', '0')
     }
-    if (!element.hasAttribute('tabindex') && !element.matches('a[href], button, input, select, textarea, summary'))
-      element.setAttribute('tabindex', '0')
   }
+  register()
 
   const frame = document.createElement('div')
   frame.className = 'drag-controls'
@@ -357,6 +364,11 @@ export function setupDrags(stage: HTMLElement, onChange: (slide: HTMLElement, ed
   monitor.observe(stage)
   return {
     clear,
+    active: () => Boolean(selected),
+    updateElements() {
+      items = [...stage.querySelectorAll<Draggable>(elementSelector)]
+      register()
+    },
     receive(slide, input) {
       if (!input || typeof input !== 'object') return
       const { index, position, file, revision } = input as Partial<DragChange>

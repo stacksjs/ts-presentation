@@ -1,6 +1,7 @@
 import type { AuthoringSetup, MermaidOptions } from './authoring-setup.ts'
 import type { LoadedExtensions, PresentationAddon } from './extensions.ts'
 import { resolveCanvas } from './canvas.ts'
+import type { LiveDeck } from './dev-protocol.ts'
 import { renderChart } from './charts.ts'
 import type { CodeBlockInfo } from './code-blocks.ts'
 import { codeBlock, codeFrame, createCodeHighlighter, magicFrames, parseCodeInfo } from './code-blocks.ts'
@@ -17,6 +18,7 @@ import type { Deck, PreparserContext, Slide } from './parser.ts'
 import { createSlideDestinations, prepareSlideHtml } from './slide-html.ts'
 import { prepareMarkdown, splitSlots } from './syntax.ts'
 import type { WritableSnippet } from './snippet-write.ts'
+import { snippetRevision } from './snippet-write.ts'
 
 export { defineAddon, defineTheme } from './extensions.ts'
 export { defineKatexSetup, defineMermaidRendererSetup, defineMermaidSetup } from './authoring-setup.ts'
@@ -38,13 +40,28 @@ export interface RenderOptions {
   writableSnippets?: ReadonlyMap<string, WritableSnippet>
   savedDrawings?: ReadonlyMap<number, SavedDrawing>
   saveDrawings?: boolean
+  deckCssRevision?: string
+  sourceBindings?: WeakMap<Slide, { token: string, revision: string }>
 }
+
+const sideEditor = `<aside id="side-editor" aria-labelledby="side-editor-heading" hidden>
+  <header>
+    <div><h2 id="side-editor-heading">Slide Markdown</h2><p id="side-editor-path"></p></div>
+    <button id="side-editor-close" type="button" aria-label="Close editor">Close</button>
+  </header>
+  <textarea aria-label="Slide Markdown" spellcheck="false" autocomplete="off" autocapitalize="off" disabled></textarea>
+  <footer>
+    <button id="side-editor-save" type="button" disabled>Save</button>
+    <button id="side-editor-reload" type="button" hidden>Reload source</button>
+    <span id="side-editor-status" role="status"></span>
+  </footer>
+</aside>`
 
 export async function renderDeck(deck: Deck, options?: RenderOptions): Promise<string> {
   return (await renderPresentation(deck, options)).html
 }
 
-export async function renderPresentation(deck: Deck, options: RenderOptions = {}): Promise<{ html: string, routes: SlideRoute[] }> {
+export async function renderPresentation(deck: Deck, options: RenderOptions = {}): Promise<{ html: string, routes: SlideRoute[], live?: LiveDeck }> {
   const { width, height } = resolveCanvas(deck.headmatter)
   const drawSettings = resolveDrawings(deck.headmatter, options.extensions?.theme.defaults?.drawings)
   const drawings: DrawingClientConfig = {
@@ -74,6 +91,8 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   const adapted = transforms.length ? await Promise.all(deck.slides.map(async (slide, index) => {
     let result = slide
     for (const transform of transforms) result = await transform(result, index)
+    const source = options.sourceBindings?.get(slide)
+    if (source) options.sourceBindings?.set(result, source)
     return result
   })) : deck.slides
   const activeSlides = adapted.filter(slide => slide.frontmatter?.hide !== true && slide.frontmatter?.disabled !== true)
@@ -203,6 +222,25 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   const clicksPreset = typeof preset === 'string' ? escapeHtml(preset) : ''
   const navigation = JSON.stringify(routes).replaceAll('<', '\\u003c')
   const drawingConfig = JSON.stringify(drawings).replaceAll('<', '\\u003c')
+  const globalTop = activeExtensions.map(extension => extension.globalTop || '').join('')
+  const globalBottom = activeExtensions.map(extension => extension.globalBottom || '').join('')
+  let live: LiveDeck | undefined
+  let liveData = ''
+  if (options.liveCompile) {
+    const drawingOptions = [drawings.enabled, drawings.presenterOnly, drawings.syncAll, drawings.persist]
+    const theme = extensions?.theme.name
+    const frame = snippetRevision(JSON.stringify([width, height, clicksPreset, drawingOptions, theme, extensions?.styles, extensions?.client, globalTop, globalBottom]))
+    const parts = slides.map((slide, index) => {
+      const source = options.sourceBindings?.get(activeSlides[index])
+      const part = { ...slide, notes: notes[index], route: routes[index], sourceToken: source?.token }
+      return { ...part, sourceRevision: source?.revision, revision: snippetRevision(JSON.stringify(part)) }
+    })
+    const deckCss = options.deckCssRevision ?? 'missing'
+    const revisions = parts.map(slide => slide.revision)
+    const revision = snippetRevision(JSON.stringify([frame, deck.title, deckCss, revisions, parts.map(slide => slide.sourceRevision)]))
+    live = { revision, frame, title: deck.title, deckCss, slides: parts }
+    liveData = `<script id="presentation-live" type="application/json">${JSON.stringify({ revision, frame, deckCss, revisions })}</script>`
+  }
   const document = `<!doctype html>
 <html lang="en"${clicksPreset ? ` data-click-animation="${clicksPreset}"` : ''} data-slide-width="${width}" data-slide-height="${height}" data-theme="${escapeHtml(extensions?.theme.name ?? 'default')}"${options.liveCompile ? ' data-live-compile="true"' : ''}>
 <head>
@@ -212,18 +250,20 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   <title>${escapeHtml(deck.title)}</title>
   <link rel="stylesheet" href="./presentation.css">
   ${extensions?.styles ? '<link rel="stylesheet" href="./extensions.css">' : ''}
-  <link rel="stylesheet" href="./deck.css">
+  <link rel="stylesheet" id="deck-styles" href="./deck.css">
   ${slides.map(slide => slide.css).filter(Boolean).join('\n  ')}
   <style>:root { --slide-width: ${width}px; --slide-height: ${height}px; } @page { size: ${width}px ${height}px; margin: 0; }</style>
   ${extensions?.client ? '<script defer src="./extensions.js"></script>' : ''}
   <script defer src="./presentation.js"></script>
 </head>
 <body>
-  ${activeExtensions.map(extension => extension.globalTop || '').join('')}
+  ${globalTop}
   <script id="presentation-navigation" type="application/json">${navigation}</script>
   <script id="presentation-drawings" type="application/json">${drawingConfig}</script>
+  ${liveData}
   <main id="stage">${slides.map(slide => slide.html).join('\n')}</main>
-  ${activeExtensions.map(extension => extension.globalBottom || '').join('')}
+  ${globalBottom}
+  ${options.liveCompile ? sideEditor : ''}
   <aside id="presenter-notes" hidden aria-label="Speaker notes">
     <header class="presenter-header">
       <h2>Speaker notes</h2>
@@ -255,11 +295,13 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
       <output for="presenter-seek"></output>
     </div>
     <button id="overview-button" type="button">Overview</button>
+    ${options.liveCompile ? '<button id="edit-slide" type="button" aria-controls="side-editor" aria-expanded="false" hidden>Edit slide</button>' : ''}
     <button id="draw-button" type="button" aria-pressed="false"${!drawings.enabled || drawings.presenterOnly ? ' hidden' : ''}>Draw</button>
     <button id="clear-drawing" type="button" hidden>Clear drawing</button>
     <span id="drawing-status" role="status" hidden></span>
     <button id="fullscreen" type="button">Fullscreen</button>
     <button id="record-button" type="button" hidden>Record</button>
+    ${options.liveCompile ? '<span id="live-update-status" role="status" hidden></span>' : ''}
   </nav>
   <dialog id="overview" aria-label="Slide overview">
     <form method="dialog"><button aria-label="Close overview">Close</button></form>
@@ -273,5 +315,5 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
 </body>
 </html>
 `
-  return { html: document, routes }
+  return { html: document, routes, live }
 }

@@ -145,6 +145,61 @@ button, select { font: inherit; }
 
 .playing #stage { position: relative; grid-area: stage; min-width: 0; min-height: 0; }
 
+.playing.editing-deck:not(.presenting) {
+  grid-template: "stage editor" minmax(0, 1fr) "controls controls" auto / minmax(0, 1fr) minmax(360px, 38vw);
+}
+
+#side-editor {
+  grid-area: editor;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
+  padding: 18px;
+  gap: 12px;
+  border-inline-start: 1px solid #363c47;
+  background: #141820;
+  color: #edf3fb;
+}
+
+#side-editor :is(header, footer) { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+#side-editor h2 { font-size: 18px; font-weight: 650; margin: 0; }
+#side-editor-path { margin: 2px 0 0; font-size: 13px; color: #b0bdce; overflow-wrap: anywhere; }
+#side-editor-path:empty { display: none; }
+#side-editor textarea {
+  width: 100%;
+  min-height: 0;
+  padding: 14px;
+  border: 1px solid #414b59;
+  border-radius: 7px;
+  resize: none;
+  background: #0c1017;
+  color: #edf3fb;
+  font: 14px/1.6 ui-monospace, monospace;
+  tab-size: 2;
+}
+#side-editor button { padding: 6px 11px; border: 1px solid #414b59; border-radius: 6px; background: #232b38; color: inherit; white-space: nowrap; }
+#side-editor button:enabled { cursor: pointer; }
+#side-editor button:disabled { opacity: 0.55; }
+#side-editor :is(button, textarea):focus-visible { outline: 2px solid #8ecbff; outline-offset: 2px; }
+#side-editor footer { justify-content: flex-start; min-height: 36px; }
+#side-editor-status { font-size: 13px; color: #b0bdce; overflow-wrap: anywhere; }
+#side-editor-status[data-error], #live-update-status { color: #ffc8b5; }
+#live-update-status { max-width: min(100%, 50em); display: inline-flex; align-items: center; font-size: 13px; }
+.presenting :is(#side-editor, #edit-slide) { display: none !important; }
+#controls #edit-slide[aria-expanded="true"] { border-color: #8ecbff; color: #bde0ff; }
+
+@media (max-width: 780px) {
+  .playing.editing-deck:not(.presenting) {
+    grid-template: "stage" minmax(0, 0.9fr) "editor" minmax(0, 1.1fr) "controls" auto / minmax(0, 1fr);
+  }
+  #side-editor { padding: 12px; border-inline-start: 0; border-block-start: 1px solid #363c47; }
+}
+
+@media print {
+  #side-editor { display: none !important; }
+}
+
 .playing .slide {
   position: absolute;
   left: 50%;

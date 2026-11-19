@@ -100,9 +100,9 @@ async function execute(program: string, append: (text: string) => void, signal: 
   })
 }
 
-export function setupLiveCode(): void {
+export function setupLiveCode(root: ParentNode = document): void {
   const canCompile = document.documentElement.dataset.liveCompile === 'true'
-  for (const block of document.querySelectorAll<HTMLElement>('.live-code')) {
+  for (const block of root.querySelectorAll<HTMLElement>('.live-code')) {
     const editor = block.querySelector('textarea')!
     const reset = block.querySelector<HTMLButtonElement>('[data-live-reset]')!
     const run = block.querySelector<HTMLButtonElement>('[data-live-run]')
