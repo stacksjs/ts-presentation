@@ -184,6 +184,78 @@ test('imports GitGraph rotation and multiline accessible descriptions', () => {
   expect(horizontal).toContain('>v1</tspan>')
 })
 
+test('imports Gantt compact frontmatter, dimensions, fonts, and themed section bands', () => {
+  const source = `---
+displayMode: compact
+config:
+  gantt:
+    useWidth: 460
+    fontSize: 18
+    sectionFontSize: 20
+    gridLineStartPadding: 14
+    titleTopMargin: 28
+    numberSectionStyles: 2
+  themeVariables:
+    sectionBkgColor: '#4a6072'
+    altSectionBkgColor: '#a06528'
+---
+gantt
+title Overview
+todayMarker off
+section Prepare
+  Draft :draft, 2026-03-01, 1d
+  Review :review, 2026-03-03, 1d
+section Ship
+  Publish :publish, after review, 1d`
+  const svg = mermaid(source, 'styled-gantt')!
+  expect(svg).toContain('viewBox="0 0 460 ')
+  expect(svg).toMatch(/y="28" class="diagram-title"/)
+  expect(svg).toMatch(/class="diagram-gantt-label"[^>]*style="font-size:18px;"/)
+  expect(svg).toMatch(/class="diagram-gantt-section-label"[^>]*style="font-size:20px;"/)
+  expect(svg).toContain('style="fill:#4a6072;opacity:0.2"')
+  expect(svg).toContain('style="fill:#a06528;opacity:0.2"')
+  expect(svg).toMatch(/class="diagram-gantt-grid"[^>]*d="M[\d.]+ 14V/)
+  const height = (html: string) => Number(/viewBox="0 0 460 ([\d.]+)/.exec(html)?.[1])
+  expect(height(svg)).toBeLessThan(height(mermaid(source.replace('displayMode: compact\n', ''), 'ordinary-gantt')!))
+})
+
+test('maps imported GitGraph palette and label styles onto structured charts', () => {
+  const source = `---
+config:
+  gitGraph:
+    rotateCommitLabel: false
+  themeVariables:
+    git0: '#28536b'
+    gitBranchLabel0: '#ead99b'
+    gitInv0: '#77aa66'
+    commitLabelColor: '#173652'
+    commitLabelBackground: '#d9eef6'
+    commitLabelFontSize: '18px'
+    tagLabelColor: '#370b16'
+    tagLabelBackground: '#f7c4ca'
+    tagLabelBorder: '#db8492'
+    tagLabelFontSize: '14px'
+---
+gitGraph
+  commit id:"first" type:HIGHLIGHT tag:"v1"
+  commit id:"second"`
+  const native = `type: gitgraph
+rotateCommitLabel: false
+colors: ['#28536b']
+branchLabelColors: ['#ead99b']
+highlightColors: ['#77aa66']
+commitLabel: { color: '#173652', background: '#d9eef6', fontSize: 18 }
+tagLabel: { color: '#370b16', background: '#f7c4ca', border: '#db8492', fontSize: 14 }
+operations:
+  - { op: commit, id: first, style: HIGHLIGHT, tags: [v1] }
+  - { op: commit, id: second }`
+  const svg = mermaid(source, 'styled-git')
+  expect(svg).toContain('fill="#77aa66"')
+  expect(svg).toContain('style="fill:#173652;font-size:18px;"')
+  expect(svg).toContain('fill="#f7c4ca" stroke="#db8492"')
+  expect(svg).toBe(renderChart(native, 'styled-git'))
+})
+
 const actions = `gantt
 todayMarker off
 Draft :draft, 2026-11-01, 1d

@@ -1,6 +1,6 @@
 import type { GanttChartOptions, GanttMarkerStyle, GanttSchedule, GanttTask, GanttTaskCallback, GanttTaskTag, GanttWeekday } from 'ts-charts/diagrams'
 import { ganttChart, ganttDurationEnd, scheduleGantt as scheduleTasks } from 'ts-charts/diagrams'
-import { readChronology } from './chronology.ts'
+import { diagramPixels, readChronology } from './chronology.ts'
 
 function isTag(value: string): value is GanttTaskTag {
   return ['active', 'done', 'crit', 'milestone', 'vert'].includes(value)
@@ -145,11 +145,15 @@ export function scheduleGantt(source: string, now: number = Date.now()): GanttSc
   if (options) return scheduleTasks({ ...options, now })
 }
 
-export function gantt(source: string, idPrefix: string, options?: unknown, fallbackTitle = '', interactionsEnabled = false): string | undefined {
+export function gantt(source: string, idPrefix: string, options?: unknown, fallbackTitle = '', interactionsEnabled = false, theme?: unknown): string | undefined {
   const chart = parseGantt(source, interactionsEnabled)
   if (!chart) return
   const config = options && typeof options === 'object' ? options as Record<string, unknown> : {}
-  const number = (key: string) => typeof config[key] === 'number' ? config[key] as number : undefined
+  const variables = theme && typeof theme === 'object' ? theme as Record<string, unknown> : {}
+  const number = (key: string) => diagramPixels(config[key])
+  const color = (key: string) => typeof variables[key] === 'string' ? variables[key] as string : undefined
+  const alternateSection = color('altSectionBkgColor')
+  const sectionColors = [color('sectionBkgColor'), alternateSection, color('sectionBkgColor2'), alternateSection]
   return ganttChart({
     ...chart, idPrefix, title: chart.title || fallbackTitle,
     axisFormat: chart.axisFormat || (typeof config.axisFormat === 'string' ? config.axisFormat : undefined),
@@ -157,8 +161,12 @@ export function gantt(source: string, idPrefix: string, options?: unknown, fallb
     weekday: chart.weekday ?? (isWeekday(config.weekday) ? config.weekday : undefined),
     topAxis: chart.topAxis ?? config.topAxis === true,
     todayMarker: chart.todayMarker ?? config.todayMarker !== false,
+    todayMarkerStyle: { stroke: color('todayLineColor'), ...chart.todayMarkerStyle },
     displayMode: config.displayMode === 'compact' ? 'compact' : undefined,
     barHeight: number('barHeight'), barGap: number('barGap'), topPadding: number('topPadding'),
     leftPadding: number('leftPadding'), rightPadding: number('rightPadding'),
+    width: number('useWidth'), titleTopMargin: number('titleTopMargin'), bottomMarginAdj: number('bottomMarginAdj'),
+    gridLineStartPadding: number('gridLineStartPadding'), fontSize: number('fontSize'), sectionFontSize: number('sectionFontSize'),
+    numberSectionStyles: number('numberSectionStyles') ?? 1, sectionColors,
   })
 }

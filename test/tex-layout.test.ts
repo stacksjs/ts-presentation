@@ -3,6 +3,17 @@ import { findChrome } from '../packages/slidev/node/runtime/chrome.ts'
 import { collectSnapshot } from '../packages/slidev/node/runtime/editable/walker.ts'
 import { createMathRenderer, renderMath } from '../packages/slidev/node/runtime/math.ts'
 
+test('renders phase angles, actuarial notation, pseudo-bold, and strikeout as MathML', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const html = math(String.raw`\phase{-78^\circ} + a_{\angl{n+1}}+b_\angln + \pmb{\mu} + \text{old \sout{term $x^2$}}`, true)
+  expect(html).toContain('<mrow class="math-phase">')
+  expect(html.match(/class="math-angl"/g)).toHaveLength(2)
+  expect(html).toContain('<mrow class="math-angl"><mi>n</mi></mrow>')
+  expect(html).toContain('<mrow class="math-pmb"><mrow><mi>μ</mi>')
+  expect(html).toContain('<mrow class="math-sout"><mrow><mtext>term')
+  expect(html).toContain('<msup><mi>x</mi><mn>2</mn></msup>')
+})
+
 test('scopes TeX font sizing across groups, text, and nested math', () => {
   const math = createMathRenderer({ throwOnError: true })
   const markup = math(String.raw`A {\tiny b {\normalsize c} \large d} + \text{\Large Wide {\small note} end} + E `, true)

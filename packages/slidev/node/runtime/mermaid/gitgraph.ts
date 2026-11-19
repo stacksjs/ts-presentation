@@ -1,6 +1,6 @@
 import type { GitCommitStyle, GitGraphDirection, GitGraphOperation, GitGraphOptions, GitHistory } from 'ts-charts/diagrams'
 import { buildGitHistory as buildHistory, gitGraphChart } from 'ts-charts/diagrams'
-import { readChronology } from './chronology.ts'
+import { diagramPixels, readChronology } from './chronology.ts'
 import { syntaxMask } from './syntax.ts'
 
 function commands(source: string): string[] {
@@ -93,6 +93,7 @@ function parseGitHistory(source: string, options?: unknown): GitGraphOptions | u
     direction: header[1] as GitGraphDirection | undefined,
     mainBranchName: typeof config.mainBranchName === 'string' ? config.mainBranchName : undefined,
     mainBranchOrder: typeof config.mainBranchOrder === 'number' ? config.mainBranchOrder : undefined,
+    titleTopMargin: diagramPixels(config.titleTopMargin),
     parallelCommits: Boolean(config.parallelCommits), showBranches: config.showBranches !== false, showCommitLabel: config.showCommitLabel !== false,
     rotateCommitLabel: config.rotateCommitLabel !== false,
   }
@@ -107,9 +108,14 @@ export function gitGraph(source: string, idPrefix: string, options?: unknown, th
   const chart = parseGitHistory(source, options)
   if (!chart) return
   const variables = settings(theme)
-  const colors = Array.from({ length: 8 }, (_, index) => {
-    const color = variables[`git${index}`]
-    return typeof color === 'string' ? color : undefined
+  const color = (key: string) => typeof variables[key] === 'string' ? variables[key] as string : undefined
+  const palette = (prefix: string) => Array.from({ length: 8 }, (_, index) => color(`${prefix}${index}`))
+  return gitGraphChart({
+    ...chart, idPrefix, title: chart.title || fallbackTitle,
+    colors: palette('git'),
+    branchLabelColors: palette('gitBranchLabel'),
+    highlightColors: palette('gitInv'),
+    commitLabel: { color: color('commitLabelColor'), background: color('commitLabelBackground'), fontSize: diagramPixels(variables.commitLabelFontSize) },
+    tagLabel: { color: color('tagLabelColor'), background: color('tagLabelBackground'), border: color('tagLabelBorder'), fontSize: diagramPixels(variables.tagLabelFontSize) },
   })
-  return gitGraphChart({ ...chart, idPrefix, title: chart.title || fallbackTitle, colors })
 }

@@ -181,6 +181,8 @@ speaker notes. Each hook can be asynchronous.
   previous task. Set `excludes: [weekends]` to skip weekends in durations.
   A task's `href` can point to a URL or slide. Use `weekday` to start weekly
   ticks on a chosen day and `todayMarkerStyle` to style the current-date line.
+  Set `width`, `fontSize`, `sectionFontSize`, and `sectionColors` to size and
+  style the schedule.
   Use `callback: { name: delivery.review, args: [draft] }` to call a function
   exposed by your deck or addon client, such as `window.delivery.review`.
 - Use `type: gitgraph` with `operations`. Each operation has an `op` of
@@ -188,6 +190,9 @@ speaker notes. Each hook can be asynchronous.
   branches and checkouts a `name`, merges a `branch`, and cherry-picks
   a source `commit`. When picking a merge, identify its `parent`. Set
   `rotateCommitLabel: true` for diagonal commit labels.
+  Set `branchLabelColors` and `highlightColors` for the branch palette.
+  `commitLabel` and `tagLabel` accept `color`, `background`, `border`, and
+  `fontSize`.
 - Imported Slidev diagram fences pass through a compatibility parser.
   Styled flowchart groups, sequence and state diagrams, relationships,
   pie charts, Gantt schedules, Git histories, timelines, and journeys use
@@ -197,7 +202,8 @@ speaker notes. Each hook can be asynchronous.
   imported `href` and `call` interactions with `securityLevel: loose` in diagram
   settings. An empty callback argument list passes the task ID.
   Imported GitGraph diagrams support branch ordering, checkout, merges, tags,
-  cherry-picking, horizontal or vertical lanes, and `rotateCommitLabel`.
+  cherry-picking, horizontal or vertical lanes, `rotateCommitLabel`, and the
+  diagram's branch, commit, and tag theme variables.
 - Use `timeline` or `timeline TD` for chronological periods. A period can
   have several events on one line or continuation lines starting with `:`.
   Add `section` headings and use `<br>` to break a label manually.

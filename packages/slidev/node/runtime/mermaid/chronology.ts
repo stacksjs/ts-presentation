@@ -8,6 +8,11 @@ export interface Chronology {
   rows: string[]
 }
 
+export function diagramPixels(value: unknown): number | undefined {
+  if (typeof value === 'number') return value
+  if (typeof value === 'string' && /^\d+(?:\.\d+)?(?:px)?$/i.test(value.trim())) return Number.parseFloat(value)
+}
+
 export function readChronology(source: string, title: string): Chronology | undefined {
   const lines = source.split(/\r?\n/).map(line => line.trim())
   const header = lines.findIndex(line => line && !/^(?:%%|#)/.test(line))

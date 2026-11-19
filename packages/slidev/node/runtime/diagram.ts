@@ -29,8 +29,14 @@ function prepare(source: string, options?: MermaidOptions): { code: string, opti
   const init = !fields && /^%%\{\s*(?:init|initialize)\s*:\s*(\{[\s\S]*?\})\s*\}%%/.exec(code)
   const header = fields || init
   if (header) {
-    const options = mapping(Bun.YAML.parse(header[1]))
-    inline = fields ? { ...mapping(options.config), ...(typeof options.title === 'string' ? { title: options.title } : {}) } : options
+    const defined = mapping(Bun.YAML.parse(header[1]))
+    if (fields) {
+      const config = { ...mapping(defined.config) }
+      if (typeof defined.title === 'string') config.title = defined.title
+      if (defined.displayMode === 'compact') config.gantt = { ...mapping(config.gantt), displayMode: defined.displayMode }
+      inline = config
+    }
+    else inline = defined
     code = code.slice(header[0].length).trimStart()
   }
   return { code, options: mergeDiagramOptions(options, inline) }
@@ -41,7 +47,7 @@ function render(code: string, marker: string, options: MermaidOptions): string |
   const title = typeof options.title === 'string' ? options.title : ''
   if (/^timeline(?:\s|$)/i.test(header ?? '')) return timeline(code, marker, options)
   if (/^journey$/i.test(header ?? '')) return journey(code, marker, options)
-  if (header === 'gantt') return gantt(code, marker, options.gantt, title, options.securityLevel === 'loose')
+  if (header === 'gantt') return gantt(code, marker, options.gantt, title, options.securityLevel === 'loose', options.themeVariables)
   if (/^gitGraph(?:\s|:|$)/.test(header ?? '')) return gitGraph(code, marker, options.gitGraph, options.themeVariables, title)
   if (header === 'sequenceDiagram') return sequence(code, marker)
   if (header === 'classDiagram' || header === 'erDiagram') return relationshipsDiagram(code, marker)

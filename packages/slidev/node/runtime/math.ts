@@ -657,6 +657,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
           flush()
           parts.push(textBox(token.slice(1)))
         }
+        else if (token === '\\sout') {
+          flush()
+          parts.push(xml`<mrow class="math-sout">${textArgument('text')}</mrow>`)
+        }
         else if (token === '\\llap' || token === '\\clap' || token === '\\rlap') {
           flush()
           parts.push(overlap(token[1], textArgument('text')))
@@ -1142,6 +1146,11 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (name === 'boxed' || name === 'cancel' || name === 'bcancel' || name === 'xcancel') {
       return { markup: xml`<mrow class="math-${name}">${argument()}</mrow>` }
     }
+    if (name === 'sout') return { markup: xml`<mrow class="math-sout">${textArgument('text')}</mrow>` }
+    if (name === 'pmb' || name === 'phase' || name === 'angl') {
+      return { markup: xml`<mrow class="math-${name}">${argument()}</mrow>` }
+    }
+    if (name === 'angln') return { markup: '<mrow class="math-angl"><mi>n</mi></mrow>' }
     if (name === 'textcolor') {
       const color = safeColor(literalGroup())
       const content = argument()

@@ -612,6 +612,22 @@ v-switch { display: block; }
 .slide math .math-monospace { font-family: monospace; }
 math .math-overline { border-top: 0.06em solid currentColor; }
 math .math-underline { border-bottom: 0.06em solid currentColor; }
+math .math-pmb { text-shadow: 0.035em 0 currentColor; }
+math .math-sout {
+  background: linear-gradient(to bottom, transparent 47%, currentColor 48% 52%, transparent 53%);
+}
+math .math-phase {
+  padding-inline-start: 0.55em;
+  padding-block-end: 0.08em;
+  border-block-end: 0.05em solid currentColor;
+  background: linear-gradient(to bottom right, transparent 45%, currentColor 46% 54%, transparent 55%) left / 0.55em 100% no-repeat;
+}
+math .math-angl {
+  padding-block-start: 0.08em;
+  padding-inline-end: 0.12em;
+  border-block-start: 0.06em solid currentColor;
+  border-inline-end: 0.06em solid currentColor;
+}
 math .math-cd mtd { padding: 0.12em 0.28em; math-style: normal; }
 math .math-cd-vertical { padding-inline: 0.08em; }
 math .math-boxed { border: 1px solid currentColor; padding-inline: 0.14em; }
