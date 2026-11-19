@@ -167,7 +167,7 @@ click unsafe href "javascript:alert(1)"`
   expect(plain).toContain('viewBox="0 0 862 ')
   expect(plain).toContain('style="stroke:#058;stroke-width:5px;opacity:0.5"')
   expect(plain).toMatch(/class="diagram-gantt-bar"[^>]*height="30"/)
-  expect(plain?.match(/>monday<\/tspan>/g)?.length).toBeGreaterThanOrEqual(4)
+  expect(plain?.match(/>Monday<\/tspan>/g)?.length).toBeGreaterThanOrEqual(4)
   expect(plain).not.toContain('<a ')
   const loose = mermaid(source, 'linked', { ...options, securityLevel: 'loose' })
   expect(loose).toContain('href="#review/1"')
@@ -238,6 +238,48 @@ section Ship
   expect(svg).toMatch(/class="diagram-gantt-grid"[^>]*d="M[\d.]+ 14V/)
   const height = (html: string) => Number(/viewBox="0 0 460 ([\d.]+)/.exec(html)?.[1])
   expect(height(svg)).toBeLessThan(height(mermaid(source.replace('displayMode: compact\n', ''), 'ordinary-gantt')!))
+})
+
+test('applies Mermaid Gantt status colors, reference labels, and full date axis directives', () => {
+  const source = [
+    '---',
+    'config:',
+    '  themeVariables:',
+    '    taskBkgColor: "#224466"',
+    '    taskBorderColor: "#2288bb"',
+    '    activeTaskBkgColor: "#994466"',
+    '    doneTaskBkgColor: "#336655"',
+    '    critBkgColor: "#aa5533"',
+    '    critBorderColor: "#cc2211"',
+    '    titleColor: "#cceeff"',
+    '    textColor: "#ffeedd"',
+    '    gridColor: "#887766"',
+    '    taskTextOutsideColor: "#ddeeff"',
+    '    vertLineColor: "#bb8866"',
+    '---',
+    'gantt',
+    '  title Review schedule',
+    '  axisFormat %G-W%V  %-d',
+    '  tickInterval 1day',
+    '  section Deliverables',
+    '    Baseline : base, 2026-01-04, 1d',
+    '    Active : active, crit, activeTask, after\tbase, 1d',
+    '    Done : done, crit, doneTask, 2026-01-04, 2d',
+    '    Critical : crit, criticalTask, 2026-01-05, 1d',
+    '    Review opens : vert, opens, 2026-01-05, 2d',
+  ].join('\n')
+  const svg = mermaid(source, 'schedule-theme')!
+  expect(svg).toContain('style="fill:#224466;stroke:#2288bb;stroke-width:2px"')
+  expect(svg).toContain('style="fill:#994466;stroke:#cc2211;stroke-width:2px"')
+  expect(svg).toContain('style="fill:#336655;stroke:#cc2211;stroke-width:2px"')
+  expect(svg).toContain('style="fill:#aa5533;stroke:#cc2211;stroke-width:2px"')
+  expect(svg).toMatch(/class="diagram-title"[^>]*style="fill:#cceeff;"/)
+  expect(svg).toMatch(/class="diagram-gantt-section-label"[^>]*style="fill:#cceeff;"/)
+  expect(svg).toMatch(/class="diagram-gantt-label"[^>]*style="fill:#ddeeff;"/)
+  expect(svg).toMatch(/class="diagram-gantt-grid"[^>]*style="stroke:#887766"/)
+  expect(svg).toMatch(/class="diagram-gantt-tick"[^>]*style="fill:#ffeedd;"[^>]*><tspan[^>]*>2026-W02  5</)
+  expect(svg).toMatch(/class="diagram-gantt-reference-label"[^>]*style="fill:#bb8866;[^"]*"[^>]*><tspan[^>]*>Review opens</)
+  expect(svg).toContain('data-task-id="activeTask" data-task-start="2026-01-05T00:00:00.000Z"')
 })
 
 test('maps imported GitGraph palette and label styles onto structured charts', () => {

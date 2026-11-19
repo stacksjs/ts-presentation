@@ -84,8 +84,7 @@ function parseGantt(source: string, interactionsEnabled = false): GanttChartOpti
   const interactions = new Map<string, TaskInteraction>()
   let generatedIds = 0
   for (const line of chart.rows) {
-    const [directive, ...words] = line.split(/\s+/)
-    const text = words.join(' ')
+    const [, directive, text = ''] = /^(\S+)(?:\s+(.+))?$/.exec(line) ?? []
     switch (directive) {
       case 'dateFormat': if (!text || text.length > 72) return; dateFormat = text; continue
       case 'axisFormat': axisFormat = text; continue
@@ -125,9 +124,11 @@ function parseGantt(source: string, interactionsEnabled = false): GanttChartOpti
     const id = segments.length === 3 ? segments.shift()! : `task${++generatedIds}`
     const [start, end] = segments.length === 2 ? segments : [undefined, segments[0]]
     const task: GanttTask = { id, name, tags }
-    if (start?.startsWith('after ')) task.after = start.slice(6).trim().split(/\s+/)
+    const after = start && /^after\s+(.+)$/.exec(start)?.[1]
+    const until = /^until\s+(.+)$/.exec(end)?.[1]
+    if (after) task.after = after.split(/\s+/)
     else if (start) task.start = start
-    if (end.startsWith('until ')) task.until = end.slice(6).trim().split(/\s+/)
+    if (until) task.until = until.split(/\s+/)
     else if (ganttDurationEnd(0, end) !== undefined) task.duration = end
     else task.end = end
     sections.at(-1)!.tasks.push(task)
@@ -169,5 +170,16 @@ export function gantt(source: string, idPrefix: string, options?: unknown, fallb
     width: number('useWidth'), titleTopMargin: number('titleTopMargin'), bottomMarginAdj: number('bottomMarginAdj'),
     gridLineStartPadding: number('gridLineStartPadding'), fontSize: number('fontSize'), sectionFontSize: number('sectionFontSize'),
     numberSectionStyles: number('numberSectionStyles') ?? 1, sectionColors,
+    palette: {
+      task: { fill: color('taskBkgColor'), border: color('taskBorderColor') },
+      active: { fill: color('activeTaskBkgColor'), border: color('activeTaskBorderColor') },
+      done: { fill: color('doneTaskBkgColor'), border: color('doneTaskBorderColor') },
+      critical: { fill: color('critBkgColor'), border: color('critBorderColor') },
+      insideText: color('taskTextColor'), statusText: color('taskTextDarkColor'),
+      outsideText: color('taskTextOutsideColor'), clickableText: color('taskTextClickableColor'),
+      title: color('titleColor') ?? color('textColor'), sectionText: color('titleColor'),
+      grid: color('gridColor'), axisText: color('textColor'),
+      excluded: color('excludeBkgColor'), reference: color('vertLineColor'),
+    },
   })
 }
