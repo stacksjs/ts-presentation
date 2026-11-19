@@ -1,12 +1,14 @@
 import { realpath } from 'node:fs/promises'
-import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
-import type { Deck, RenderOptions, Slide } from './index.ts'
+import { dirname, relative, resolve } from 'node:path'
+import type { Deck, RenderOptions } from './index.ts'
 import type { ExtensionAssets } from './extensions.ts'
 import type { SlideCanvas } from './canvas.ts'
 import { loadAuthoringSetup } from './authoring-setup.ts'
+import { within } from './assets.ts'
 import { resolveCanvas } from './canvas.ts'
 import { loadExtensions } from './extensions.ts'
 import { parseDeck, renderDeck } from './index.ts'
+import { slideRange } from './selection.ts'
 
 export interface CompiledDeck extends ExtensionAssets {
   html: string
@@ -17,16 +19,6 @@ export interface CompiledDeck extends ExtensionAssets {
 
 export interface CompileOptions extends Pick<RenderOptions, 'liveCompile'> {
   theme?: string
-}
-
-function rangeFor(reference: string | undefined, slides: Slide[]): Slide[] {
-  if (!reference) return slides
-  const match = /^(\d+)(?:-(\d+))?$/.exec(reference)
-  if (!match) throw new Error(`Invalid slide source range: ${reference}`)
-  const first = Number(match[1])
-  const last = Number(match[2] ?? match[1])
-  if (first < 1 || last < first || last > slides.length) throw new Error(`Slide source range is out of bounds: ${reference}`)
-  return slides.slice(first - 1, last)
 }
 
 export function createDeckCompiler(entry: string, options: CompileOptions = {}): () => Promise<CompiledDeck> {
@@ -55,7 +47,7 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
     async function read(path: string, stack: string[]): Promise<Deck> {
       const filePath = await realpath(path)
       const position = relative(directory, filePath)
-      if (position === '..' || position.startsWith(`..${sep}`) || isAbsolute(position)) throw new Error('Slide source must stay inside the deck directory')
+      if (!within(directory, filePath)) throw new Error('Slide source must stay inside the deck directory')
       if (stack.includes(filePath)) throw new Error(`Circular slide source: ${position}`)
       const source = Bun.file(filePath)
       await observe(filePath)
@@ -67,12 +59,15 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
         const [file, range] = reference.split('#')
         if (!file || !file.endsWith('.md')) throw new Error(`Expected a Markdown slide source: ${reference}`)
         const included = await read(resolve(dirname(filePath), file), [...stack, filePath])
-        return rangeFor(range, included.slides).map(item => ({
-          ...item,
-          layout: typeof attributes.layout === 'string' ? slide.layout : item.layout,
-          className: [item.className, slide.className].filter(Boolean).join(' '),
-          frontmatter: { ...item.frontmatter, ...attributes, src: undefined },
-        }))
+        return slideRange(included.slides.length, range).map((number) => {
+          const item = included.slides[number - 1]
+          return {
+            ...item,
+            layout: typeof attributes.layout === 'string' ? slide.layout : item.layout,
+            className: [item.className, slide.className].filter(Boolean).join(' '),
+            frontmatter: { ...item.frontmatter, ...attributes, src: undefined },
+          }
+        })
       }))
       return { ...deck, slides: slides.flat() }
     }

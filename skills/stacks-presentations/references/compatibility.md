@@ -10,9 +10,9 @@ in a new ts-presentation project.
 | Markdown, frontmatter, slide includes, click steps | Native Bun parser and browser player |
 | Scoped layouts and themes | TypeScript theme and addon modules, named slots, deck CSS |
 | Monaco editor and runner | Local editor and timed browser-worker runner. TypeScript compilation for edits uses Bun in dev |
-| KaTeX | Native MathML with chemistry, numbered alignment rows, deck macros, and click highlighting |
+| KaTeX | Native MathML with chemistry, numbered alignment rows, scoped macros, custom fractions and box layout, and click highlighting |
 | PowerPoint export | Image slides or editable text and boxes with separate artwork |
-| Mermaid | Local flowchart, sequence, basic state, class, ER, and pie rendering |
+| Mermaid | Local flowchart, sequence, basic state, class, ER, pie, Gantt, and GitGraph rendering |
 | Presenter mode | Two synced browser windows, notes and timer |
 | Drawing and recording | Canvas drawing and browser screen capture |
 

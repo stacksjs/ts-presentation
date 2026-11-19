@@ -1,6 +1,8 @@
 import type { MermaidOptions, MermaidRenderer } from './authoring-setup.ts'
 import { escapeHtml } from './html.ts'
 import { flowchart } from './mermaid/flowchart.ts'
+import { gantt } from './mermaid/gantt.ts'
+import { gitGraph } from './mermaid/gitgraph.ts'
 import { pieDiagram } from './mermaid/pie.ts'
 import { relationshipsDiagram } from './mermaid/relationships.ts'
 import { sequence } from './mermaid/sequence.ts'
@@ -25,9 +27,12 @@ function prepare(source: string, options?: MermaidOptions): { code: string, opti
 
 function render(code: string, marker: string, options: MermaidOptions): string | undefined {
   const header = code.split('\n').find(line => line.trim() && !line.trimStart().startsWith('%%'))?.trim()
+  const title = typeof options.title === 'string' ? options.title : ''
+  if (header === 'gantt') return gantt(code, options.gantt, title)
+  if (/^gitGraph(?:\s|:|$)/.test(header ?? '')) return gitGraph(code, options.gitGraph, options.themeVariables, title)
   if (header === 'sequenceDiagram') return sequence(code, marker)
   if (header === 'classDiagram' || header === 'erDiagram') return relationshipsDiagram(code, marker)
-  if (/^pie(?:\s|$)/.test(header ?? '')) return pieDiagram(code, options.pie, typeof options.title === 'string' ? options.title : '')
+  if (/^pie(?:\s|$)/.test(header ?? '')) return pieDiagram(code, options.pie, title)
   return flowchart(code, marker)
 }
 

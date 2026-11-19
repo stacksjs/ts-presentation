@@ -55,14 +55,24 @@ function drawBox(box: IrBox, nextId: () => number): string {
     result += shape(nextId(), 'Box', transform(box.rect) + rectShape(box.radius ?? 0, box.rect) + fill(box.fill) + line(uniform ? first : undefined) + effects)
   }
   if (!uniform) {
-    const edges: Rect[] = [
-      { x, y: y + (borders[0]?.width ?? 0) / 2, w, h: 0 },
-      { x: x + w - (borders[1]?.width ?? 0) / 2, y, w: 0, h },
-      { x, y: y + h - (borders[2]?.width ?? 0) / 2, w, h: 0 },
-      { x: x + (borders[3]?.width ?? 0) / 2, y, w: 0, h },
-    ]
     borders.forEach((border, side) => {
-      if (border) result += shape(nextId(), 'Border', `${transform(edges[side])}<a:prstGeom prst="line"><a:avLst/></a:prstGeom>${line(border)}`)
+      if (!border) return
+      const horizontal = side % 2 === 0
+      const thickness = Math.min(border.width, horizontal ? h : w)
+      const edge = {
+        x: side === 1 ? x + w - thickness : x,
+        y: side === 2 ? y + h - thickness : y,
+        w: horizontal ? w : thickness,
+        h: horizontal ? thickness : h,
+      }
+      if (border.style === 'solid') {
+        result += shape(nextId(), 'Border', transform(edge) + rectShape(0, edge) + fill(border.color) + line())
+      }
+      else {
+        const stroke = horizontal ? extents(edge.w, 0, edge.x, edge.y + thickness / 2)
+          : extents(0, edge.h, edge.x + thickness / 2, edge.y)
+        result += shape(nextId(), 'Border', `${stroke}<a:prstGeom prst="line"><a:avLst/></a:prstGeom>${line(border)}`)
+      }
     })
   }
   return result
@@ -78,7 +88,10 @@ function drawRun(run: IrRun, value: string, hyperlink: (href: string) => string 
   const fontSize = run.fontSize * (besideArtwork ? 0.96 : 1)
   const size = Math.max(100, Math.min(400000, Math.round(fontSize * PT_PER_PX * 100)))
   const tracking = run.letterSpacing
-  const spacing = tracking ? ` spc="${Math.max(-400000, Math.min(400000, Math.round(tracking * PT_PER_PX * 100)))}"` : ''
+  // DrawingML's kern value is the minimum size for kerning, in hundredths of a point.
+  const spacing = tracking
+    ? ` spc="${Math.max(-400000, Math.min(400000, Math.round(tracking * PT_PER_PX * 100)))}" kern="${Math.min(400000, size + 1)}"`
+    : ''
   return `<a:r><a:rPr sz="${size}" b="${Number(Boolean(run.bold))}" i="${Number(Boolean(run.italic))}" u="${underline === 'dotted' ? 'dotted' : underline}" strike="${run.strike ? 'sngStrike' : 'noStrike'}"${spacing}>${run.color ? fill(run.color) : ''}<a:latin typeface="${font}"/><a:ea typeface="${font}"/><a:cs typeface="${font}"/>${link}</a:rPr><a:t xml:space="preserve">${xml(value)}</a:t></a:r>`
 }
 

@@ -64,7 +64,8 @@ function tokenize(source: string): string[] {
   return source.match(/\\[A-Z@]+|\\[^A-Z@\r\n]|#[1-9]|\s+|./giu) ?? []
 }
 
-interface Macro { body: string[], arguments: number }
+type MathStyle = 0 | 1 | 2 | 3
+interface Macro { body: string[], parameters: string[][], prefix: string[], optional?: string[] }
 interface MathState { globals: Map<string, Macro>, options: KatexOptions }
 
 export function createMathRenderer(options: KatexOptions = {}): (source: string, display: boolean) => string {
@@ -106,6 +107,22 @@ function fence(token: string): string {
   return `<mo stretchy="true">${escapeHtml(delimiters[token] ?? token)}</mo>`
 }
 
+const styleCommands: Record<string, MathStyle> = {
+  '\\displaystyle': 0, '\\textstyle': 1, '\\scriptstyle': 2, '\\scriptscriptstyle': 3,
+}
+const boundary = '\u0000math-expansion-boundary'
+
+function mathSize(style: MathStyle, markup: string): string {
+  return `<mstyle displaystyle="${style === 0}" scriptlevel="${Math.max(0, style - 1)}">${markup}</mstyle>`
+}
+
+function dimension(value: string): string | undefined {
+  const [, amount, unit] = /^([+-]?(?:\d+(?:\.\d+)?|\.\d+))\s*(px|em|ex|pt|bp|cm|mm|in|mu)?$/.exec(value.trim()) ?? []
+  if (!amount || (!unit && Number(amount) !== 0) || Math.abs(Number(amount)) > 1000) return
+  if (unit === 'mu') return `${Number(amount) / 18}em`
+  return `${amount}${unit === 'bp' ? 'pt' : unit ?? 'px'}`
+}
+
 /** Translate a bounded TeX math subset to native MathML, with the source retained for accessibility. */
 export function renderMath(source: string, display = false, configured: MathMacros = {}, state?: MathState): string {
   const tokens = tokenize(source)
@@ -116,33 +133,70 @@ export function renderMath(source: string, display = false, configured: MathMacr
   let tagState = { label: '', suppressed: false }
   let environmentDepth = 0
   let equationNumber = 0
+  let style: MathStyle = display ? 0 : 1
 
   const macros = new Map<string, Macro>()
-  function define(name: string, replacement: string, arity = 0, global = false): void {
-    if (!/^\\[A-Za-z@]+$/.test(name) || replacement.length > 8192 || arity < 0 || arity > 9) return
-    const body = tokenize(replacement)
-    const inferred = Math.max(0, ...body.map(token => /^#[1-9]$/.test(token) ? Number(token[1]) : 0))
-    const definition = { body, arguments: Math.max(arity, inferred) }
+  const scopes: Map<string, Macro | undefined>[] = []
+  function assign(name: string, definition: Macro, global = false): void {
+    if (!/^\\(?:[A-Za-z@]+|[^\s])$/.test(name)) return
+    if (global) {
+      state?.globals.set(name, definition)
+      for (const scope of scopes) scope.delete(name)
+    }
+    const scope = scopes.at(-1)
+    if (!global && scope && !scope.has(name)) scope.set(name, macros.get(name))
     macros.set(name, definition)
-    if (global) state?.globals.set(name, definition)
   }
-  for (const [name, replacement] of Object.entries(configured)) define(name, replacement)
+  function plainMacro(body: string[], arity = 0, optional?: string[]): Macro {
+    const count = Math.max(arity, ...body.map(token => /^#[1-9]$/.test(token) ? Number(token[1]) : 0))
+    return { body, parameters: Array.from({ length: count }, () => []), prefix: [], optional }
+  }
+  for (const [name, replacement] of Object.entries(configured)) {
+    if (replacement.length <= 8192) assign(name, plainMacro(tokenize(replacement)))
+  }
   for (const [name, definition] of state?.globals ?? []) macros.set(name, definition)
 
   const space = () => { while (/^\s+$/.test(tokens[cursor] ?? '')) cursor++ }
 
-  function expand(): void {
-    space()
+  function withStyle<T>(value: MathStyle, render: () => T): T {
+    const before = style
+    style = value
+    try { return render() }
+    finally { style = before }
+  }
+
+  function inScope<T>(render: () => T): T {
+    const saved = new Map<string, Macro | undefined>()
+    scopes.push(saved)
+    try { return render() }
+    finally {
+      scopes.pop()
+      for (const [command, previous] of saved) {
+        if (previous) macros.set(command, previous)
+        else macros.delete(command)
+      }
+    }
+  }
+
+  function expand(skipSpace = true): void {
+    if (skipSpace) space()
     let macro = macros.get(tokens[cursor])
     while (macro) {
       if (++expandedCount > 300) throw new Error('Too many math macro expansions')
       const start = cursor++
-      const values = Array.from({ length: macro.arguments }, () => tokenize(literalGroup()))
+      space()
+      for (const token of macro.prefix) {
+        if (tokens[cursor++] !== token) throw new Error('Missing macro prefix')
+      }
+      const values = macro.parameters.map((delimiter, index) => {
+        if (index === 0 && macro!.optional !== undefined) return rawBracket() ?? macro!.optional
+        return delimiter.length ? delimitedArgument(delimiter) : rawGroup()
+      })
       const body = macro.body.flatMap(token => /^#[1-9]$/.test(token) ? values[Number(token[1]) - 1] ?? [] : [token])
       if (tokens.length + body.length > 12000) throw new Error('Expanded equation is too long')
       tokens.splice(start, cursor - start, ...body)
       cursor = start
-      space()
+      if (skipSpace) space()
       macro = macros.get(tokens[cursor])
     }
   }
@@ -150,19 +204,69 @@ export function renderMath(source: string, display = false, configured: MathMacr
   const peek = () => { expand(); return tokens[cursor] ?? '' }
   const take = () => { expand(); return tokens[cursor++] ?? '' }
 
-  function literalGroup(): string {
+  function rawGroup(): string[] {
     space()
-    if (tokens[cursor] !== '{') return tokens[cursor++] ?? ''
+    if (tokens[cursor] === undefined || tokens[cursor] === boundary) throw new Error('Missing math argument')
+    if (tokens[cursor] !== '{') return [tokens[cursor++]]
     cursor++
     let level = 1
-    let text = ''
+    const begin = cursor
     while (cursor < tokens.length && level) {
       const next = tokens[cursor++]
+      if (next === boundary) throw new Error('Unclosed math argument')
       if (next === '{') level++
       if (next === '}') level--
-      if (level) text += next
     }
-    return text
+    if (level) throw new Error('Unclosed math argument')
+    return tokens.slice(begin, cursor - 1)
+  }
+
+  function literalGroup(): string {
+    return rawGroup().join('')
+  }
+
+  function delimitedArgument(delimiter: string[]): string[] {
+    const start = cursor
+    let level = 0
+    while (cursor < tokens.length && tokens[cursor] !== boundary) {
+      if (level === 0 && delimiter.every((token, index) => tokens[cursor + index] === token)) {
+        const argument = tokens.slice(start, cursor)
+        cursor += delimiter.length
+        return argument
+      }
+      const token = tokens[cursor++]
+      if (token === '{') level++
+      else if (token === '}') level--
+      if (level < 0) break
+    }
+    throw new Error('Missing macro delimiter')
+  }
+
+  function rawBracket(): string[] | undefined {
+    space()
+    if (tokens[cursor] !== '[') return
+    cursor++
+    return delimitedArgument([']'])
+  }
+
+  function expandDefinition(body: string[]): string[] {
+    const begin = cursor
+    tokens.splice(begin, 0, ...body, boundary)
+    const definition: string[] = []
+    try {
+      while (tokens[cursor] !== boundary) {
+        if (tokens[cursor] === '\\noexpand') cursor++
+        else expand(false)
+        if (tokens[cursor] === boundary) break
+        definition.push(tokens[cursor++])
+      }
+    }
+    finally {
+      const end = tokens.indexOf(boundary, begin)
+      tokens.splice(begin, end - begin + 1)
+      cursor = begin
+    }
+    return definition
   }
 
   function argument(): string {
@@ -173,12 +277,37 @@ export function renderMath(source: string, display = false, configured: MathMacr
   }
 
   function bracket(): string | undefined {
-    if (peek() !== '[') return
-    take()
-    const start = cursor
-    while (cursor < tokens.length && tokens[cursor] !== ']') cursor++
-    if (cursor === tokens.length) throw new Error('Unclosed optional math argument')
-    return tokens.slice(start, cursor++).join('')
+    return rawBracket()?.join('')
+  }
+
+  function readDimension(): string {
+    space()
+    if (tokens[cursor] === '{') {
+      const length = dimension(literalGroup())
+      if (length !== undefined) return length
+    }
+    else {
+      for (let end = cursor + 1; end <= Math.min(cursor + 15, tokens.length); end++) {
+        const candidate = tokens.slice(cursor, end).join('')
+        if (!/[a-z]$/i.test(candidate)) continue
+        const value = dimension(candidate)
+        if (value !== undefined) {
+          cursor = end
+          return value
+        }
+      }
+    }
+    throw new Error('Invalid math dimension')
+  }
+
+  function fraction(targetStyle: MathStyle, thickness?: string, align?: string): string {
+    const script = Math.min(3, targetStyle + 1) as MathStyle
+    const first = withStyle(script, argument)
+    const second = withStyle(script, argument)
+    const settings = thickness !== undefined ? ` linethickness="${thickness}"` : ''
+    const numerator = align ? ` numalign="${align}"` : ''
+    const markup = `<mfrac${settings}${numerator}>${first}${second}</mfrac>`
+    return style === targetStyle ? markup : mathSize(targetStyle, markup)
   }
 
   function nextTag(automatic: boolean): string {
@@ -191,6 +320,17 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const parts: string[] = []
     while (peek() && !stop.includes(peek())) {
       const token = take()
+      if (Object.hasOwn(styleCommands, token)) {
+        const selected = styleCommands[token]
+        parts.push(mathSize(selected, withStyle(selected, () => row(stop))))
+        break
+      }
+      if (token === '\\color') {
+        const color = safeColor(literalGroup())
+        const content = row(stop)
+        parts.push(color ? `<mrow style="color:${color}">${content}</mrow>` : content)
+        break
+      }
       let part: Atom
       if (/^\d$/.test(token)) {
         let number = token
@@ -204,12 +344,13 @@ export function renderMath(source: string, display = false, configured: MathMacr
       else part = atom(token)
       let lower = ''
       let upper = ''
-      let forceLimits = part.limits && display
+      let forceLimits = part.limits && style === 0
       if (peek() === '\\limits' || peek() === '\\nolimits') forceLimits = take() === '\\limits'
       while (peek() === '_' || peek() === '^' || peek() === "'") {
         const kind = take()
-        if (kind === '_') lower = argument()
-        else if (kind === '^') upper = argument()
+        const scriptStyle = Math.max(2, Math.min(3, style + 1)) as MathStyle
+        if (kind === '_') lower = withStyle(scriptStyle, argument)
+        else if (kind === '^') upper = withStyle(scriptStyle, argument)
         else {
           let primes = '′'
           while (peek() === "'") { take(); primes += '′' }
@@ -280,8 +421,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
   function atom(token: string): Atom {
     if (!token) return { markup: '<mrow/>' }
     if (token === '{') {
-      const content = row(['}'])
-      if (peek() === '}') take()
+      const content = inScope(() => row(['}']))
+      if (take() !== '}') throw new Error('Unclosed math group')
       return { markup: `<mrow>${content}</mrow>` }
     }
     if (!token.startsWith('\\')) {
@@ -289,39 +430,63 @@ export function renderMath(source: string, display = false, configured: MathMacr
       return { markup: tag(/^\p{L}$/u.test(token) ? 'mi' : 'mo', token === '-' ? '−' : token) }
     }
 
-    const name = token.slice(1)
+    let name = token.slice(1)
+    const global = name === 'global'
+    if (global) name = take().slice(1)
+    if (name === 'begingroup' || name === 'bgroup') {
+      const close = name === 'begingroup' ? '\\endgroup' : '\\egroup'
+      const content = inScope(() => row([close]))
+      if (take() !== close) throw new Error('Unclosed math group')
+      return { markup: `<mrow>${content}</mrow>` }
+    }
     if (name === 'ce' || name === 'pu') {
       return { markup: (name === 'ce' ? chemicalFormula : physicalUnits)(literalGroup()) }
     }
-    if (name === 'def' || name === 'gdef') {
+    if (['def', 'gdef', 'edef', 'xdef'].includes(name)) {
       const command = literalGroup()
-      let arity = 0
       space()
-      while (/^#[1-9]$/.test(tokens[cursor] ?? '')) arity = Math.max(arity, Number(tokens[cursor++][1]))
-      define(command, literalGroup(), arity, name === 'gdef')
+      const prefix: string[] = []
+      const parameters: string[][] = []
+      let sequence = prefix
+      while (tokens[cursor] !== '{') {
+        const token = tokens[cursor++]
+        if (!token || token === boundary || token === '}' || sequence.length > 80) throw new Error('Invalid macro parameter')
+        if (/^#[1-9]$/.test(token)) {
+          if (Number(token[1]) !== parameters.length + 1) throw new Error('Macro parameters must be sequential')
+          sequence = []
+          parameters.push(sequence)
+        }
+        else sequence.push(token)
+      }
+      const body = rawGroup()
+      const replacement = name === 'edef' || name === 'xdef' ? expandDefinition(body) : body
+      assign(command, { body: replacement, parameters, prefix }, global || name === 'gdef' || name === 'xdef')
       return { markup: '' }
     }
     if (name === 'let') {
       const target = literalGroup()
       space()
       if (tokens[cursor] === '=') cursor++
-      const source = literalGroup()
-      const existing = macros.get(source)
-      if (existing && /^\\[A-Za-z@]+$/.test(target)) macros.set(target, existing)
-      else define(target, source)
+      const source = rawGroup()
+      const existing = source.length === 1 ? macros.get(source[0]) : undefined
+      assign(target, existing ?? plainMacro(source), global)
       return { markup: '' }
     }
     if (name === 'newcommand' || name === 'renewcommand' || name === 'providecommand') {
       const command = literalGroup().trim()
-      space()
-      let arity = 0
-      if (tokens[cursor] === '[' && /^\d$/.test(tokens[cursor + 1] ?? '') && tokens[cursor + 2] === ']') {
-        arity = Number(tokens[cursor + 1])
-        cursor += 3
-      }
-      const value = literalGroup()
-      if (name !== 'providecommand' || !macros.has(command)) define(command, value, arity)
+      const count = bracket()
+      if (count !== undefined && !/^\d$/.test(count)) throw new Error('Invalid macro argument count')
+      const arity = Number(count ?? 0)
+      const optional = arity ? rawBracket() : undefined
+      const body = rawGroup()
+      if (name !== 'providecommand' || !macros.has(command)) assign(command, plainMacro(body, arity, optional))
       return { markup: '' }
+    }
+    if (name === 'mathchoice' || name === '@firstoftwo' || name === '@secondoftwo') {
+      const choices = Array.from({ length: name === 'mathchoice' ? 4 : 2 }, rawGroup)
+      const selected = choices[name === 'mathchoice' ? style : name === '@firstoftwo' ? 0 : 1]
+      tokens.splice(cursor, 0, '{', ...selected, '}')
+      return { markup: argument() }
     }
     if (name === 'tag') {
       if (peek() === '*') { take(); tagState.label = literalGroup() }
@@ -341,17 +506,57 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
     if (name === 'left') {
       const left = fence(take())
-      const content = row(['\\right'])
+      const content = inScope(() => row(['\\right']))
       const right = peek() === '\\right' ? (take(), fence(take())) : ''
       return { markup: `<mrow>${left}${content}${right}</mrow>` }
     }
     if (name === 'right' || name === 'middle' || /^(?:big|Big|bigg|Bigg)[lrm]?$/.test(name)) return { markup: fence(take()) }
-    if (name === 'begin') return { markup: matrix(literalGroup()) }
+    if (name === 'begin') return { markup: inScope(() => matrix(literalGroup())) }
     if (name === 'end') return { markup: tag('mtext', `\\end{${literalGroup()}}`) }
     if (['frac', 'dfrac', 'tfrac', 'binom', 'dbinom', 'tbinom'].includes(name)) {
       const binomial = name.endsWith('binom')
-      const fraction = `<mfrac${binomial ? ' linethickness="0"' : ''}>${argument()}${argument()}</mfrac>`
-      return { markup: binomial ? `<mrow>${fence('(')}${fraction}${fence(')')}</mrow>` : fraction }
+      const targetStyle = name.startsWith('d') ? 0 : name.startsWith('t') ? 1 : style
+      const content = fraction(targetStyle, binomial ? '0' : undefined)
+      return { markup: binomial ? `<mrow>${fence('(')}${content}${fence(')')}</mrow>` : content }
+    }
+    if (name === 'genfrac') {
+      const left = literalGroup()
+      const right = literalGroup()
+      const bar = literalGroup()
+      const mode = literalGroup()
+      if (mode && !/^[0-3]$/.test(mode)) throw new Error('Invalid fraction style')
+      const content = fraction(mode ? Number(mode) as MathStyle : style, dimension(bar))
+      return { markup: `<mrow>${fence(left)}${content}${fence(right)}</mrow>` }
+    }
+    if (name === 'cfrac') {
+      const align = bracket()
+      return { markup: fraction(0, undefined, align === 'l' ? 'left' : align === 'r' ? 'right' : undefined) }
+    }
+    if (name === 'raisebox' || name === 'rule') {
+      if (name === 'rule') {
+        const offset = dimension(bracket() ?? '')
+        const width = readDimension()
+        const height = readDimension()
+        const rule = `<mspace width="${width}" height="${height}" style="background:currentColor"/>`
+        return { markup: offset ? `<mpadded voffset="${offset}">${rule}</mpadded>` : rule }
+      }
+      const offset = readDimension()
+      const height = dimension(bracket() ?? '')
+      const depth = dimension(bracket() ?? '')
+      return { markup: `<mpadded voffset="${offset}"${height ? ` height="${height}"` : ''}${depth ? ` depth="${depth}"` : ''}>${argument()}</mpadded>` }
+    }
+    if (name === 'smash') {
+      const side = bracket()
+      return { markup: `<mpadded${side !== 'b' ? ' height="0"' : ''}${side !== 't' ? ' depth="0"' : ''}>${argument()}</mpadded>` }
+    }
+    if (['hspace', 'kern', 'mkern', 'mskip', 'hskip'].includes(name)) {
+      if (name === 'hspace' && peek() === '*') take()
+      return { markup: `<mspace width="${readDimension()}"/>` }
+    }
+    if (name === 'prescript') {
+      const upper = withStyle(2, argument)
+      const lower = withStyle(2, argument)
+      return { markup: `<mmultiscripts>${argument()}<mprescripts/>${lower}${upper}</mmultiscripts>` }
     }
     if (name === 'sqrt') {
       let degree = ''
@@ -364,7 +569,9 @@ export function renderMath(source: string, display = false, configured: MathMacr
       return { markup: degree ? `<mroot>${base}<mrow>${degree}</mrow></mroot>` : `<msqrt>${base}</msqrt>` }
     }
     if (name === 'text' || name === 'operatorname') {
-      return { markup: tag(name === 'text' ? 'mtext' : 'mo', literalGroup().replace(/\\([_%#$&{}])/g, '$1')) }
+      const star = name === 'operatorname' && peek() === '*'
+      if (star) take()
+      return { markup: tag(name === 'text' ? 'mtext' : 'mo', literalGroup().replace(/\\([_%#$&{}])/g, '$1')), limits: star }
     }
     if (name === 'overbrace' || name === 'underbrace' || name === 'underline') {
       const above = name === 'overbrace'

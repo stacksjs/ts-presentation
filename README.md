@@ -55,8 +55,8 @@ the deck and style slides with an optional `style.css`.
 | Navigation | `routeAlias: review`, then links such as `#review` |
 | Per-slide options | `class`, `hide`, `disabled`, and `transition: fade`, `slide-left`, or `slide-up` |
 | Images and component markup | Trusted HTML, with optional `data-zoom` on an image |
-| Diagrams | Mermaid flowcharts, sequence, basic state, class, entity relationship, and pie diagrams |
-| Math | Native MathML with TeX macros, numbered equations, click-based equation highlighting, and common chemistry notation |
+| Diagrams | Mermaid flowcharts, sequence, basic state, class, entity relationship, pie, Gantt, and GitGraph diagrams |
+| Math | Native MathML with scoped and optional-argument macros, styled fractions, numbered equations, click highlighting, and chemistry notation |
 | Live code | A `js` or `ts` fence followed by `{live-run}` or `{monaco-run}`. Use `{live}` or `{monaco}` for an editor |
 | Themes and addons | Set `theme: paper` or `theme: serif`, or load trusted local modules through `theme` and `addons` |
 | Canvas size | Set `canvasWidth: 800` and `aspectRatio: 4/3` in deck frontmatter for an 800 × 600 canvas |

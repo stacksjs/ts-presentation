@@ -5,11 +5,20 @@ export interface SlideCanvas {
 
 export const defaultCanvas: SlideCanvas = { width: 960, height: 540 }
 
+/** Accept the numeric and composite aspect ratios used by Slidev. */
+export function parseAspectRatio(value: unknown): number {
+  const formatted = typeof value === 'string' ? value.trim() : ''
+  const match = /^(\d+(?:\.\d+)?)\s*[:/x|]\s*(\d+(?:\.\d+)?)$/i.exec(formatted)
+  const number = match ? Number(match[1]) / Number(match[2])
+    : typeof value === 'number' ? value
+      : /^\d+(?:\.\d+)?$/.test(formatted) ? Number(formatted) : NaN
+  if (!Number.isFinite(number) || number <= 0) throw new Error(`Invalid aspectRatio: ${String(value)}`)
+  return number
+}
+
 export function resolveCanvas(headmatter?: Record<string, unknown>): SlideCanvas {
   const width = headmatter?.canvasWidth ?? defaultCanvas.width
-  const ratio = headmatter?.aspectRatio ?? (16 / 9)
-  const match = typeof ratio === 'string' ? /^(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/.exec(ratio.trim()) : null
-  const aspect = match ? Number(match[1]) / Number(match[2]) : typeof ratio === 'number' ? ratio : NaN
+  const aspect = parseAspectRatio(headmatter?.aspectRatio ?? (16 / 9))
   if (typeof width !== 'number' || !Number.isInteger(width) || width < 1 || width > 10000)
     throw new Error('canvasWidth must be an integer from 1 to 10000 pixels')
   const height = Math.round(width / aspect)

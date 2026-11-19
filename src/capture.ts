@@ -2,6 +2,7 @@ import { realpath } from 'node:fs/promises'
 import type { FrameLink, PowerPointFrame } from './powerpoint.ts'
 import type { SlideCanvas } from './canvas.ts'
 import { asset } from './assets.ts'
+import { slideRange } from './selection.ts'
 
 interface CaptureOptions {
   root: string
@@ -17,20 +18,6 @@ interface FrameDetails {
   title: string
   notes: string
   links: FrameLink[]
-}
-
-export function slideRange(count: number, range?: string): number[] {
-  if (!range) return Array.from({ length: count }, (_, index) => index + 1)
-  const order = new Set<number>()
-  for (const segment of range.split(',')) {
-    const match = /^(\d+)(?:-(\d+))?$/.exec(segment.trim())
-    if (!match) throw new Error(`Invalid slide selection: ${segment}`)
-    const first = Number(match[1])
-    const last = Number(match[2] ?? match[1])
-    if (first > last || first < 1 || last > count) throw new Error(`Slide selection is outside 1-${count}: ${segment}`)
-    for (let number = first; number <= last; number++) order.add(number)
-  }
-  return [...order]
 }
 
 export async function captureFrames(options: CaptureOptions, onFrame: (frame: PowerPointFrame, index: number, count: number) => void | Promise<void>): Promise<void> {
@@ -72,7 +59,9 @@ export async function captureFrames(options: CaptureOptions, onFrame: (frame: Po
       if (!steps.length || steps.some(count => !Number.isSafeInteger(count) || count < 0)) {
         throw new Error('The browser did not load the presentation player')
       }
-      const positions = slideRange(steps.length, options.range).flatMap((slide) =>
+      const selected = slideRange(steps.length, options.range)
+      if (!selected.length) throw new Error('Select at least one slide for export')
+      const positions = selected.flatMap((slide) =>
         Array.from({ length: options.withClicks ? steps[slide - 1] + 1 : 1 }, (_, step) => ({ slide, step })),
       )
       for (const [index, position] of positions.entries()) {

@@ -193,3 +193,60 @@ erDiagram
 <!--
 The pie chart shows an estimate. The relationship diagram shows the records behind it.
 -->
+
+---
+
+# Schedule a release
+
+```mermaid {theme:'neutral'}
+gantt
+  dateFormat YYYY-MM-DD
+  axisFormat %b %d
+  tickInterval 2days
+  excludes weekends
+  todayMarker off
+  section Build
+    Review scope  :done, scope, 2026-03-02, 2d
+    Build changes :active, build, after scope, 3d
+  section Release
+    Verify        :crit, verify, after build, 2d
+    Publish       :milestone, launch, after verify, 0d
+```
+
+<!--
+The verification work spans a weekend. The release milestone marks the end of that work.
+-->
+
+---
+
+# Follow a branch
+
+```mermaid {theme:'neutral'}
+gitGraph LR:
+  commit id:"Start"
+  branch review
+  commit id:"Draft"
+  checkout main
+  commit id:"Prepare"
+  merge review id:"Approve" tag:"v1.0"
+```
+
+<!--
+The release combines the review branch with work on main.
+-->
+
+---
+
+# Build a continued fraction
+
+$$
+\cfrac[l]{1}{1+\cfrac[l]{1}{1+\cfrac[l]{1}{1+x}}}
+\qquad
+\genfrac{(}{]}{1pt}{0}{a}{b}
+$$
+
+Between terms, use a rule or an explicit space. For example, \(\rule{0.65em}{0.8pt}\kern4mu x\).
+
+<!--
+The left expression uses continued fractions. The right expression changes delimiters and bar thickness.
+-->

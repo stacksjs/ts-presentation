@@ -39,13 +39,20 @@ deck. For example, `canvasWidth: 800` and `aspectRatio: 4/3` produce an
   Row numbers and explicit tags work in `align` and `gather`.
 - Use `\ce{...}` for common reactions and molecular notation, and
   `\pu{...}` for quantities and units.
+- Use `\genfrac` or `\cfrac` for custom or continued fractions, and
+  `\mathchoice` for style-dependent notation. TeX macro definitions support
+  groups, delimited arguments, optional arguments, and eager expansion.
+  `\raisebox`, `\rule`, and `\kern` control placement and spacing.
 - Use deck-wide macros under `math.macros`. Quote TeX with YAML single
   quotes so backslashes are preserved.
 - A `mermaid` fence supports flowcharts with styled nodes and subgraphs,
   sequence diagrams, simple state transitions, class and entity relationship
-  diagrams, and pie charts. Options like `{scale:0.5, theme:'neutral'}` on the
+  diagrams, pie charts, Gantt schedules, and GitGraph histories. Options like `{scale:0.5, theme:'neutral'}` on the
   fence override deck defaults. Diagram YAML can also provide a title and
   configuration, including pie legend placement and donut radius.
+- Gantt supports date and axis formats, weekday and date exclusions,
+  task dependencies, and milestones. GitGraph supports branch ordering,
+  checkout, merges, tags, cherry-picking, and horizontal or vertical lanes.
   Use an external SVG if a diagram requires unsupported syntax.
 
 ```yaml
