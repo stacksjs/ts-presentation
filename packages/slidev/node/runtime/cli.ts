@@ -16,6 +16,7 @@ import { createDeckCompiler } from './loader.ts'
 import { legacySlideLocation } from '../../../client/runtime/navigation.ts'
 import { maxSlideEditLength, readSlideSource, saveSlideSource } from './side-editor-source.ts'
 import { saveSnippet } from './snippet-write.ts'
+import { version } from '../../../../package.json'
 
 const options = {
   out: { type: 'string' },
@@ -25,20 +26,22 @@ const options = {
   'with-clicks': { type: 'boolean' },
   'without-clicks': { type: 'boolean' },
   port: { type: 'string' },
+  mcp: { type: 'boolean' },
   format: { type: 'string' },
   theme: { type: 'string' },
   'executable-path': { type: 'string' },
   help: { type: 'boolean', short: 'h' },
 } as const
 
-const help = `ts-presentation <dev|build|export> [slides.md]
+const help = `ts-presentation <dev|build|export|mcp> [slides.md]
 
-  dev     Serve a local presentation. Optional --port (default: 3030).
+  dev     Serve a local presentation. Optional --port (default: 3030) and --mcp.
   build   Build a static site. Optional --out (default: dist beside the deck).
   export  Write PDF, PNG, PPTX or editable PPTX using Chrome. Use --format pptx-editable for editable slides.
           Optional --out and --executable-path.
           Use --range and --with-clicks to select PDF, PNG, or PPTX frames.
           PNG/PPTX also support --scale.
+  mcp     Serve deck editing tools over stdio.
   --theme   Override the deck's theme for any command.
 `
 
@@ -54,11 +57,16 @@ async function main(): Promise<void> {
     console.log(help)
     return
   }
-  if ((command !== 'dev' && command !== 'build' && command !== 'export') || positionals.length > 2) {
+  if ((command !== 'dev' && command !== 'build' && command !== 'export' && command !== 'mcp') || positionals.length > 2) {
     throw new Error(help)
   }
 
   const source = await resolveDeckEntry(entry)
+  if (command === 'mcp') {
+    const { startMcpStdioServer } = await import('../mcp/stdio.ts')
+    await startMcpStdioServer(source)
+    return
+  }
   const directory = dirname(source)
   const publicDir = join(directory, 'public')
   const baseStyle = Bun.file(new URL('../../../client/runtime/player.css', import.meta.url))
@@ -72,7 +80,7 @@ async function main(): Promise<void> {
   if (!player.success || !player.outputs[0]) throw new Error('Could not build the browser player')
   const javascript = await player.outputs[0].text()
   const emptyStyle = '/* This deck has no custom styles. */\n'
-  const compile = createDeckCompiler(source, { liveCompile: command === 'dev', mode: command, theme: values.theme })
+  const compile = createDeckCompiler(source, { liveCompile: command === 'dev', mcpNavigation: command === 'dev' && values.mcp, mode: command, theme: values.theme })
 
   async function writeSite(output: string, compiled?: CompiledDeck): Promise<CompiledDeck> {
     if (within(publicDir, output)) throw new Error('Build output must be outside the deck’s public directory')
@@ -103,6 +111,22 @@ async function main(): Promise<void> {
     const root = await realpath(publicDir).catch(() => undefined)
     const port = Number(values.port ?? 3030)
     if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('Invalid port')
+    let position = { page: 0, clicks: 0 }
+    let requestedPosition: { id: string, page: number, clicks: number } | undefined
+    const mcp = values.mcp ? await import('../mcp/http.ts') : undefined
+    const handleMcp = mcp ? (await import('../mcp/server.ts')).createSlidevMcpServer({
+      entry: source,
+      version,
+      getServerUrl: (): string => server.url.href,
+      getData: async () => (await import('../mcp/operations.ts')).loadEditingDeck(source),
+      nav: {
+        getState: () => position,
+        go(page, clicks) {
+          position = { page, clicks }
+          requestedPosition = { id: crypto.randomUUID(), page, clicks }
+        },
+      },
+    }) : undefined
     const server = Bun.serve({
       hostname: '127.0.0.1',
       port,
@@ -124,11 +148,22 @@ async function main(): Promise<void> {
             return new Response((await compile()).styles, { headers: { 'Content-Type': 'text/css; charset=utf-8' } })
           case '/extensions.js':
             return new Response((await compile()).client, { headers: { 'Content-Type': 'text/javascript; charset=utf-8' } })
+          case '/__mcp':
+            if (mcp && handleMcp && (await compile()).headmatter?.mcp !== false) return mcp.handleMcpHttp(request, handleMcp)
+            return new Response(null, { status: 404 })
           case '/__presentation/live': {
             if (request.method !== 'GET') return new Response(null, { status: 405, headers: { Allow: 'GET' } })
-            const headers = { 'Cache-Control': 'no-store' }
+            const headers = new Headers({ 'Cache-Control': 'no-store' })
             try {
-              const { live } = await compile()
+              const { live, headmatter } = await compile()
+              if (mcp && headmatter?.mcp !== false && request.headers.get('Sec-Fetch-Site') !== 'cross-site') {
+                const page = Number(url.searchParams.get('mcp-page'))
+                const clicks = Number(url.searchParams.get('mcp-click'))
+                const seen = url.searchParams.get('mcp-seen') ?? ''
+                if (requestedPosition && seen !== requestedPosition.id) headers.set('X-Presentation-Mcp-Position', JSON.stringify(requestedPosition))
+                else if (Number.isSafeInteger(page) && page > 0 && page <= (live?.slides.length ?? 0) && Number.isSafeInteger(clicks) && clicks >= 0)
+                  position = { page, clicks }
+              }
               return live && live.revision !== url.searchParams.get('revision')
                 ? Response.json(live, { headers })
                 : new Response(null, { status: 204, headers })

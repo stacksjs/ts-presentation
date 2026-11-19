@@ -510,7 +510,10 @@ if (isLive) {
   const updates = watchLiveDeck(applyLiveDeck, () => sideEditor?.follow(true), (issue) => {
     notice.textContent = issue
     notice.hidden = !issue
-  })
+  }, document.documentElement.dataset.mcpNavigation === 'true' && !isPreview ? {
+    getPosition: position,
+    go: (page, clicks) => show(page, clicks, true, false),
+  } : undefined)
   if (updates && !isPreview && !isPresenter) sideEditor = setupSideEditor({ slide: () => current, ...updates })
 }
 

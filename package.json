@@ -59,6 +59,7 @@
     "packages/slidev/bin/slidev.mjs",
     "packages/slidev/node/{cli.ts,index.ts}",
     "packages/slidev/node/runtime",
+    "packages/slidev/node/mcp",
     "!packages/parser/src/**/*.test.ts"
   ],
   "workspaces": [

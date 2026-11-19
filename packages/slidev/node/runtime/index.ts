@@ -38,6 +38,7 @@ const escapedCode = /<pre><code(?: class="language-([\w+#.-]+)")?>([\s\S]*?)<\/c
 
 export interface RenderOptions {
   liveCompile?: boolean
+  mcpNavigation?: boolean
   mode?: PreparserContext['mode']
   extensions?: LoadedExtensions
   setup?: AuthoringSetup
@@ -241,12 +242,13 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   const drawingConfig = JSON.stringify(drawings).replaceAll('<', '\\u003c')
   const globalTop = activeExtensions.map(extension => extension.globalTop || '').join('')
   const globalBottom = activeExtensions.map(extension => extension.globalBottom || '').join('')
+  const mcpNavigation = options.mcpNavigation && deck.headmatter?.mcp !== false
   let live: LiveDeck | undefined
   let liveData = ''
   if (options.liveCompile) {
     const drawingOptions = [drawings.enabled, drawings.presenterOnly, drawings.syncAll, drawings.persist]
     const theme = extensions?.theme.name
-    const frame = snippetRevision(JSON.stringify([width, height, clicksPreset, drawingOptions, theme, codeTheme, extensions?.styles, extensions?.client, globalTop, globalBottom]))
+    const frame = snippetRevision(JSON.stringify([width, height, clicksPreset, drawingOptions, theme, codeTheme, mcpNavigation, extensions?.styles, extensions?.client, globalTop, globalBottom]))
     const parts = slides.map((slide, index) => {
       const source = options.sourceBindings?.get(activeSlides[index])
       const part = { ...slide, notes: notes[index], route: routes[index], sourceToken: source?.token }
@@ -263,7 +265,9 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     width,
     height,
     theme: extensions?.theme.name ?? 'default',
-    liveAttribute: options.liveCompile ? ' data-live-compile="true"' : '',
+    liveAttribute: options.liveCompile
+      ? ' data-live-compile="true"' + (mcpNavigation ? ' data-mcp-navigation="true"' : '')
+      : '',
     title: deck.title,
     extensionStyles: extensions?.styles ? '<link rel="stylesheet" href="./extensions.css">' : '',
     scopedStyles: [codeTheme, ...slides.map(slide => slide.css)].filter(Boolean).join('\n  '),

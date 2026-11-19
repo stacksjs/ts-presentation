@@ -1,34 +1,104 @@
-import type { LoadedSlidevData } from '@slidev/parser/fs'
-import type { SlideInfo, SlidePatch, SourceSlideInfo } from '@slidev/types'
-import * as parser from '@slidev/parser/fs'
-import YAML from 'yaml'
-import { updateFrontmatterPatch } from '../utils'
+import { readFile, realpath } from 'node:fs/promises'
+import { dirname, normalize } from 'node:path'
+import type { LoadedSlidevData } from '../../../parser/src/fs.ts'
+import * as parser from '../../../parser/src/fs.ts'
+import type { FrontmatterDocument, SlideInfo, SlidePatch, SlidevMarkdown, SourceSlideInfo } from '../../../types/src/types.ts'
+import { within } from '../runtime/assets.ts'
+import { markdownDocument, maxDeckSourceBytes } from '../runtime/markdown-source.ts'
+import { snippetRevision, writeDeckFile } from '../runtime/snippet-write.ts'
 
-/**
- * Resolve a rendered slide (1-based, as displayed in the presentation) or
- * throw a descriptive error.
- */
-export function resolveSlide(data: LoadedSlidevData, no: number): SlideInfo {
-  const slide = data.slides[no - 1]
-  if (!slide)
-    throw new Error(`Slide ${no} does not exist. The deck has ${data.slides.length} slides (1-${data.slides.length}).`)
+export interface EditingDeck extends LoadedSlidevData {
+  root: string
+  sourceFiles: ReadonlyMap<string, string>
+}
+
+export async function loadEditingDeck(entry: string): Promise<EditingDeck> {
+  const filepath = await realpath(entry)
+  const root = dirname(filepath)
+  const sourceFiles = new Map<string, string>()
+  const data = await parser.load({ userRoot: root, roots: [root], allowedRoots: [root] }, filepath, async (source) => {
+    const path = await realpath(source)
+    if (!within(root, path)) throw new Error('Slide source escapes the deck directory')
+    const snapshot = sourceFiles.get(path)
+    if (snapshot !== undefined) return snapshot
+    const raw = await readFile(path, 'utf8')
+    sourceFiles.set(path, raw)
+    return raw
+  })
+  return { ...data, root, sourceFiles }
+}
+
+/** Rendered slides have 1-based numbers, including expanded Markdown imports. */
+export function resolveSlide(data: EditingDeck, no: number): SlideInfo {
+  const slide = Number.isSafeInteger(no) ? data.slides[no - 1] : undefined
+  if (!slide) throw new Error(`Slide ${no} does not exist. The deck has ${data.slides.length} slides.`)
   return slide
 }
 
-function getMarkdown(data: LoadedSlidevData, source: SourceSlideInfo) {
+function getMarkdown(data: EditingDeck, source: SourceSlideInfo): SlidevMarkdown {
   const md = data.markdownFiles[source.filepath]
-  if (!md)
-    throw new Error(`Markdown file not loaded: ${source.filepath}`)
+  if (!md) throw new Error(`Markdown file not loaded: ${source.filepath}`)
   return md
 }
 
-function assertNotEntryHeadmatter(data: LoadedSlidevData, source: SourceSlideInfo, action: string) {
-  if (source.filepath === data.entry.filepath && data.entry.slides.indexOf(source) === 0) {
-    throw new Error(
-      `Cannot ${action} the first slide of the entry file: its frontmatter is the deck headmatter (global configuration). `
-      + `Edit its content with the update tool instead, or operate on the following slides.`,
-    )
+function protectHeadmatter(data: EditingDeck, source: SourceSlideInfo, action: string): void {
+  if (source === data.entry.slides[0]) throw new Error(`Cannot ${action} the entry's first slide. It holds the deck headmatter.`)
+}
+
+function yamlDocument(source: string): FrontmatterDocument | undefined {
+  if (!source.trim()) return
+  let contents: unknown
+  try { contents = Bun.YAML.parse(source) }
+  catch { throw new Error('Invalid YAML frontmatter') }
+  if (contents !== null && contents !== undefined && (typeof contents !== 'object' || Array.isArray(contents)))
+    throw new Error('Invalid YAML frontmatter. Expected a mapping.')
+  return { contents: contents ?? {}, toJSON: () => contents ?? {}, toString: () => source }
+}
+
+function renderSlide(source: SourceSlideInfo): SourceSlideInfo {
+  if (source.note?.includes('-->')) throw new Error('Speaker notes cannot contain a closing HTML comment')
+  const rendered = parser.prettifySlide(source)
+  if (rendered.raw.trim() && parser.parseSync(rendered.raw, source.filepath).slides.length !== 1) throw new Error('The supplied content must contain one slide')
+  return rendered
+}
+
+async function persist(data: EditingDeck, markdown: SlidevMarkdown, slides: SourceSlideInfo[]): Promise<string> {
+  const path = await realpath(markdown.filepath)
+  const original = data.sourceFiles.get(path)
+  if (!within(data.root, path) || path !== normalize(markdown.filepath) || original === undefined)
+    throw new Error('Slide source is unavailable for editing')
+  const document = markdownDocument(path, data.root, original, '')
+  const newline = original.includes('\r\n') ? '\r\n' : '\n'
+  const offset = (line: number) => line < document.lines.length ? document.rawIndex(document.lines[line]) : original.length
+  const sections = new Map(markdown.slides.map((slide, index) => {
+    const previous = markdown.slides[index - 1]
+    const start = offset(previous?.end ?? slide.start)
+    return [slide, {
+      start,
+      end: offset(markdown.slides[index + 1] ? slide.end : document.lines.length),
+      body: offset(slide.start),
+      hadSeparator: index > 0 || slide.raw.startsWith('---'),
+    }]
+  }))
+  let result = original.slice(0, offset(markdown.slides[0]?.start ?? 0))
+  for (const [index, slide] of slides.entries()) {
+    const section = sections.get(slide)
+    let fragment: string
+    if (section) {
+      const start = index === 0 ? section.body : section.start
+      fragment = original.slice(start, section.end)
+      if (index > 0 && !section.hadSeparator) fragment = `---${newline}${newline}${fragment}`
+    }
+    else fragment = parser.stringifySlide(slide, index).replace(/\n/g, newline)
+    if (index && !result.endsWith('\n')) result += newline
+    result += fragment
   }
+  if (result && original.endsWith('\n') && !result.endsWith('\n')) result += newline
+  if (Buffer.byteLength(result, 'utf8') > maxDeckSourceBytes) throw new Error('The edited Markdown file is too large')
+  const revision = snippetRevision(original)
+  const response = await writeDeckFile({ path, root: data.root, revision }, revision, maxDeckSourceBytes, 'slide source', () => result)
+  if (!response.ok) throw new Error(await response.text())
+  return result
 }
 
 export interface SlidePatchResult {
@@ -36,52 +106,32 @@ export interface SlidePatchResult {
   fileContent: string
 }
 
-/**
- * Apply a `SlidePatch` to the slide source and save the markdown file.
- *
- * Note this only mutates the *source* slide (`slide.source`), not the
- * rendered `SlideInfo`, so a running dev server will pick up the change from
- * disk like an external edit and push HMR updates to connected clients.
- */
-export async function applySlidePatch(
-  data: LoadedSlidevData,
-  no: number,
-  patch: SlidePatch,
-): Promise<SlidePatchResult> {
+export async function applySlidePatch(data: EditingDeck, no: number, patch: SlidePatch): Promise<SlidePatchResult> {
   const slide = resolveSlide(data, no)
-  const source = slide.source
-
-  if (patch.content != null)
-    source.content = patch.content
-  if (patch.frontmatterRaw != null) {
-    if (patch.frontmatterRaw.trim() === '') {
-      source.frontmatterDoc = source.frontmatterStyle = undefined
+  const source = { ...slide.source }
+  const markdown = getMarkdown(data, slide.source)
+  if (patch.content !== undefined) source.content = patch.content
+  if (patch.note !== undefined) source.note = patch.note
+  if (patch.frontmatterRaw !== undefined) source.frontmatterDoc = yamlDocument(patch.frontmatterRaw)
+  if (patch.frontmatter) {
+    const values = { ...source.frontmatterDoc?.toJSON() as Record<string, unknown> | undefined }
+    for (const [key, value] of Object.entries(patch.frontmatter)) {
+      if (value === null) delete values[key]
+      else Object.defineProperty(values, key, { value, enumerable: true, configurable: true, writable: true })
     }
-    else {
-      const parsed = YAML.parseDocument(patch.frontmatterRaw)
-      if (parsed.errors.length)
-        throw new Error(`Invalid YAML frontmatter: ${parsed.errors.map(e => e.message).join('; ')}`)
-      source.frontmatterDoc = parsed
-    }
+    source.frontmatterDoc = Object.keys(values).length ? yamlDocument(Bun.YAML.stringify(values)) : undefined
   }
-  if (patch.note != null)
-    source.note = patch.note
-  if (patch.frontmatter)
-    updateFrontmatterPatch(source, patch.frontmatter)
-
-  parser.prettifySlide(source)
-  const fileContent = await parser.save(getMarkdown(data, source))
-  return { slide, fileContent }
+  if (source.frontmatterDoc) source.frontmatterStyle ??= 'frontmatter'
+  const edited = renderSlide(source)
+  const slides = markdown.slides.map(original => original === slide.source ? edited : original)
+  const fileContent = await persist(data, markdown, slides)
+  return { slide: { ...slide, source: edited }, fileContent }
 }
 
 export interface InsertSlideOptions {
-  /**
-   * Rendered slide number (1-based) after which the new slide is inserted.
-   * The new slide is inserted into the same markdown file as this slide.
-   */
   after: number
   content: string
-  frontmatter?: Record<string, any>
+  frontmatter?: Record<string, unknown>
   note?: string
 }
 
@@ -91,41 +141,19 @@ export interface InsertSlideResult {
   fileContent: string
 }
 
-/**
- * Insert a new slide after an existing one, in the same markdown file.
- */
-export async function insertSlide(data: LoadedSlidevData, options: InsertSlideOptions): Promise<InsertSlideResult> {
+export async function insertSlide(data: EditingDeck, options: InsertSlideOptions): Promise<InsertSlideResult> {
   const anchor = resolveSlide(data, options.after)
-  const md = getMarkdown(data, anchor.source)
-
+  const markdown = getMarkdown(data, anchor.source)
   const frontmatter = options.frontmatter ?? {}
-  const hasFrontmatter = Object.keys(frontmatter).length > 0
-  const doc = hasFrontmatter
-    ? new YAML.Document(frontmatter)
-    : undefined
-
-  const source: SourceSlideInfo = {
-    filepath: anchor.source.filepath,
-    index: 0, // recomputed on next load
-    start: 0,
-    contentStart: 0,
-    end: 0,
-    raw: '',
-    revision: '',
-    content: options.content,
-    contentRaw: options.content,
-    frontmatter,
-    frontmatterDoc: doc,
-    frontmatterStyle: doc ? 'frontmatter' : undefined,
-    frontmatterRaw: doc?.toString(),
-    note: options.note?.trim() || undefined,
-  }
-  parser.prettifySlide(source)
-
-  const anchorIdx = md.slides.indexOf(anchor.source)
-  md.slides.splice(anchorIdx + 1, 0, source)
-  const fileContent = await parser.save(md)
-  return { source, filepath: md.filepath, fileContent }
+  const doc = Object.keys(frontmatter).length ? yamlDocument(Bun.YAML.stringify(frontmatter)) : undefined
+  const source = renderSlide({
+    filepath: markdown.filepath, index: 0, start: 0, contentStart: 0, end: 0, revision: '', raw: '',
+    contentRaw: options.content, content: options.content, frontmatter, frontmatterDoc: doc,
+    frontmatterStyle: doc ? 'frontmatter' : undefined, note: options.note,
+  })
+  const slides = [...markdown.slides]
+  slides.splice(slides.indexOf(anchor.source) + 1, 0, source)
+  return { source, filepath: markdown.filepath, fileContent: await persist(data, markdown, slides) }
 }
 
 export interface RemoveSlideResult {
@@ -134,29 +162,15 @@ export interface RemoveSlideResult {
   fileContent: string
 }
 
-/**
- * Remove a slide from its source markdown file.
- */
-export async function removeSlide(data: LoadedSlidevData, no: number): Promise<RemoveSlideResult> {
-  const slide = resolveSlide(data, no)
-  assertNotEntryHeadmatter(data, slide.source, 'remove')
-  const md = getMarkdown(data, slide.source)
-  const idx = md.slides.indexOf(slide.source)
-  if (idx < 0)
-    throw new Error(`Slide ${no} is out of sync with its source file. Try again.`)
-  md.slides.splice(idx, 1)
-  const fileContent = await parser.save(md)
-  return { removed: slide, filepath: md.filepath, fileContent }
+export async function removeSlide(data: EditingDeck, no: number): Promise<RemoveSlideResult> {
+  const removed = resolveSlide(data, no)
+  protectHeadmatter(data, removed.source, 'remove')
+  const markdown = getMarkdown(data, removed.source)
+  const slides = markdown.slides.filter(source => source !== removed.source)
+  return { removed, filepath: markdown.filepath, fileContent: await persist(data, markdown, slides) }
 }
 
-export interface MoveSlideOptions {
-  /** Rendered slide number (1-based) of the slide to move */
-  from: number
-  /** Move the slide right before this rendered slide number */
-  before?: number
-  /** Move the slide right after this rendered slide number */
-  after?: number
-}
+export interface MoveSlideOptions { from: number, before?: number, after?: number }
 
 export interface MoveSlideResult {
   moved: SlideInfo
@@ -165,49 +179,18 @@ export interface MoveSlideResult {
   fileContent: string
 }
 
-/**
- * Move a slide before or after another slide within the same markdown file.
- */
-export async function moveSlide(data: LoadedSlidevData, options: MoveSlideOptions): Promise<MoveSlideResult> {
+export async function moveSlide(data: EditingDeck, options: MoveSlideOptions): Promise<MoveSlideResult> {
   const { from, before, after } = options
-  if ((before == null) === (after == null))
-    throw new Error('Specify exactly one of `before` or `after`.')
-
+  if ((before === undefined) === (after === undefined)) throw new Error('Specify exactly one of before or after')
   const anchorNo = (before ?? after)!
-  if (anchorNo === from)
-    throw new Error('The `before`/`after` anchor must be a different slide than `from`.')
-
-  const slide = resolveSlide(data, from)
+  if (anchorNo === from) throw new Error('Choose a different slide to move before or after')
+  const moved = resolveSlide(data, from)
   const anchor = resolveSlide(data, anchorNo)
-
-  if (slide.source.filepath !== anchor.source.filepath) {
-    throw new Error(
-      `Cannot move a slide across markdown files: slide ${from} is in "${slide.source.filepath}" `
-      + `but slide ${anchorNo} is in "${anchor.source.filepath}" (imported with \`src:\`). `
-      + `Move it within its own file, or edit the \`src:\` imports in the entry file manually.`,
-    )
-  }
-
-  assertNotEntryHeadmatter(data, slide.source, 'move')
-  if (before != null)
-    assertNotEntryHeadmatter(data, anchor.source, 'insert a slide before')
-
-  const md = getMarkdown(data, slide.source)
-  const fromIdx = md.slides.indexOf(slide.source)
-  if (fromIdx < 0)
-    throw new Error(`Slide ${from} is out of sync with its source file. Try again.`)
-  md.slides.splice(fromIdx, 1)
-  const anchorIdx = md.slides.indexOf(anchor.source)
-  if (anchorIdx < 0)
-    throw new Error(`Slide ${anchorNo} is out of sync with its source file. Try again.`)
-  md.slides.splice(before != null
-    ? anchorIdx
-    : anchorIdx + 1, 0, slide.source)
-  const fileContent = await parser.save(md)
-  return {
-    moved: slide,
-    anchor,
-    filepath: md.filepath,
-    fileContent,
-  }
+  if (moved.source.filepath !== anchor.source.filepath) throw new Error('Cannot move a slide across markdown files')
+  protectHeadmatter(data, moved.source, 'move')
+  if (before !== undefined) protectHeadmatter(data, anchor.source, 'insert before')
+  const markdown = getMarkdown(data, moved.source)
+  const slides = markdown.slides.filter(source => source !== moved.source)
+  slides.splice(slides.indexOf(anchor.source) + Number(after !== undefined), 0, moved.source)
+  return { moved, anchor, filepath: markdown.filepath, fileContent: await persist(data, markdown, slides) }
 }

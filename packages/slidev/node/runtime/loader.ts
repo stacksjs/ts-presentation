@@ -42,7 +42,7 @@ export interface CompiledDeck extends ExtensionAssets {
   drawingStore?: DrawingStore
 }
 
-export interface CompileOptions extends Pick<RenderOptions, 'liveCompile' | 'mode'> {
+export interface CompileOptions extends Pick<RenderOptions, 'liveCompile' | 'mode' | 'mcpNavigation'> {
   theme?: string
 }
 
@@ -210,7 +210,7 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
     const deckCss = options.liveCompile ? await observe(join(directory, 'style.css')).catch(() => undefined) : undefined
     if (options.liveCompile && deckCss === undefined) files.set(join(directory, 'style.css'), undefined)
     const { html, routes, live } = await renderPresentation(deck, {
-      liveCompile: options.liveCompile, mode, extensions, setup, writableSnippets, savedDrawings, saveDrawings,
+      liveCompile: options.liveCompile, mcpNavigation: options.mcpNavigation, mode, extensions, setup, writableSnippets, savedDrawings, saveDrawings,
       deckCssRevision: deckCss && snippetRevision(deckCss), sourceBindings,
     })
     const author = typeof deck.headmatter?.author === 'string' ? deck.headmatter.author : undefined

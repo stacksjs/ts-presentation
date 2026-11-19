@@ -1,27 +1,20 @@
-import { StdioServerTransport } from '@modelcontextprotocol/server/stdio'
-import { version } from '../../package.json'
-import { parser } from '../parser'
-import { getRoots } from '../resolver'
-import { createSlidevMcpServer } from './server'
+import { createInterface } from 'node:readline'
+import { version } from '../../../../package.json'
+import { loadEditingDeck } from './operations.ts'
+import { createSlidevMcpServer, rpcError } from './server.ts'
 
-/**
- * Start a Slidev MCP server over stdio, operating on the markdown files
- * directly (no dev server required, so no live-navigation tool).
- *
- * Note: in stdio mode, stdout is reserved for the MCP protocol — nothing
- * else may be printed to it.
- */
-export async function startMcpStdioServer(entry: string) {
-  const { userRoot } = await getRoots(entry)
-  const server = createSlidevMcpServer({
-    version,
-    entry,
-    // Reload from disk on every tool call, as the files may be edited
-    // externally between calls
-    getData: () => parser.load({
-      userRoot,
-      roots: [userRoot],
-    }, entry),
-  })
-  await server.connect(new StdioServerTransport())
+export async function startMcpStdioServer(entry: string): Promise<void> {
+  const handle = createSlidevMcpServer({ entry, version, getData: () => loadEditingDeck(entry) })
+  const lines = createInterface({ input: process.stdin, crlfDelay: Infinity })
+  for await (const line of lines) {
+    if (!line.trim()) continue
+    let request: unknown
+    try { request = JSON.parse(line) }
+    catch {
+      process.stdout.write(JSON.stringify(rpcError(null, -32700, 'Parse error')) + '\n')
+      continue
+    }
+    const response = await handle(request)
+    if (response) process.stdout.write(JSON.stringify(response) + '\n')
+  }
 }

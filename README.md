@@ -125,6 +125,16 @@ can run the original TypeScript and offers an editable JavaScript version.
 See the [Stacks presentations skill](skills/stacks-presentations/SKILL.md)
 for authoring, extension APIs, exports, and the preserved upstream skill bundle.
 
+## Work with a deck through MCP
+
+Run `bun src/cli.ts mcp path/to/slides.md` for a stdio MCP server. It can list
+slides, inspect source and notes, update fields, and insert, reorder, or remove
+slides in the deck's Markdown files.
+
+Run `bun src/cli.ts dev path/to/slides.md --mcp` to enable the local
+`/__mcp` JSON endpoint and navigation for open audience and presenter
+windows. Set `mcp: false` in deck headmatter to disable the dev endpoint.
+
 ## Upstream compatibility
 
 The port branches from [Slidev v53.1.0](https://github.com/slidevjs/slidev/tree/b547b48fe86b60bd3a502d4217b33840273667dd).

@@ -1,258 +1,162 @@
-import type { Awaitable } from '@antfu/utils'
-import type { LoadedSlidevData } from '@slidev/parser/fs'
-import type { SlideInfo, SlidevConfig } from '@slidev/types'
-import { McpServer } from '@modelcontextprotocol/server'
-import { z } from 'zod'
-import { applySlidePatch, insertSlide, moveSlide, removeSlide, resolveSlide } from './operations'
-
-export type SlidevMcpData = LoadedSlidevData & { config?: SlidevConfig }
+import type { SlideInfo } from '../../../types/src/types.ts'
+import type { EditingDeck } from './operations.ts'
+import { applySlidePatch, insertSlide, moveSlide, removeSlide, resolveSlide } from './operations.ts'
 
 export interface SlidevMcpNav {
-  /** Current position of the live presentation */
   getState: () => { page: number, clicks: number }
-  /** Navigate all connected clients of the live presentation */
   go: (page: number, clicks: number) => void
 }
 
 export interface SlidevMcpContext {
-  /** Slidev version */
   version: string
-  /** Absolute path of the entry markdown file */
   entry: string
-  /** Get the up-to-date slides data */
-  getData: () => Awaitable<SlidevMcpData>
-  /** URL of the running dev server, if any */
+  getData: () => EditingDeck | Promise<EditingDeck>
   getServerUrl?: () => string | undefined
-  /** Live presentation navigation (only available with a running dev server) */
   nav?: SlidevMcpNav
 }
 
-function result(data: any) {
+type Args = Record<string, unknown>
+type Field = { type: 'integer', minimum: number } | { type: 'string' | 'object' }
+type Tool = {
+  name: string
+  description: string
+  inputSchema: { type: 'object', properties: Record<string, Field>, required: string[], additionalProperties: false }
+  annotations?: { readOnlyHint?: boolean, destructiveHint?: boolean, idempotentHint?: boolean }
+  call: (data: EditingDeck, args: Args) => unknown | Promise<unknown>
+}
+type RequestId = string | number | null
+export interface RpcReply {
+  jsonrpc: '2.0'
+  id: RequestId
+  result?: unknown
+  error?: { code: number, message: string }
+}
+export type McpHandler = (message: unknown) => Promise<RpcReply | undefined>
+
+const latest = '2025-11-25'
+const versions = new Set([latest, '2025-06-18', '2025-03-26', '2024-11-05'])
+const no: Field = { type: 'integer', minimum: 1 }
+const md: Field = { type: 'string' }
+const yaml: Field = { type: 'object' }
+
+function mapping(value: unknown): value is Args {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function tool(name: string, description: string, properties: Record<string, Field>, required: string[], call: Tool['call'], annotations?: Tool['annotations']): Tool {
+  return { name: `slidev-${name}`, description, inputSchema: { type: 'object', properties, required, additionalProperties: false }, annotations, call }
+}
+
+function summary(slide: SlideInfo): Args {
   return {
-    content: [
-      {
-        type: 'text' as const,
-        text: typeof data === 'string'
-          ? data
-          : JSON.stringify(data, null, 2),
-      },
-    ],
+    no: slide.index + 1, title: slide.title ?? null, layout: slide.frontmatter.layout,
+    file: slide.source.filepath, hasNote: Boolean(slide.source.note),
+    importedBySrcDirective: slide.importChain?.length ? true : undefined,
   }
 }
 
-function slideSummary(slide: SlideInfo) {
-  return {
-    no: slide.index + 1,
-    title: slide.title ?? null,
-    ...slide.frontmatter.layout
-      ? { layout: slide.frontmatter.layout }
-      : {},
-    file: slide.source.filepath,
-    hasNote: !!slide.source.note,
-    ...slide.importChain?.length
-      ? { importedBySrcDirective: true }
-      : {},
-  }
+function valid(tool: Tool, args: Args): boolean {
+  const { properties, required } = tool.inputSchema
+  return required.every(key => Object.hasOwn(args, key)) && Object.entries(args).every(([key, value]) => {
+    if (!Object.hasOwn(properties, key)) return false
+    const field = properties[key]
+    if (field.type === 'integer') return Number.isSafeInteger(value) && Number(value) >= field.minimum
+    return field.type === 'string' ? typeof value === 'string' : mapping(value)
+  })
 }
 
-const noSchema = z.number().int().min(1).describe('Slide number (1-based, as displayed in the presentation)')
-const frontmatterSchema = z
-  .record(z.string(), z.any())
-  .optional()
-  .describe('Slide frontmatter (YAML headmatter of the slide) as an object, e.g. { "layout": "two-cols" }')
+function content(value: unknown, isError = false): { content: { type: 'text', text: string }[], isError?: boolean } {
+  return { content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }], ...(isError && { isError }) }
+}
 
-/**
- * Create the Slidev MCP server exposing tools for agents to inspect, edit,
- * and (with a running dev server) navigate a slides deck.
- *
- * The same tool set is served over the dev server HTTP endpoint (`/__mcp`)
- * and the `slidev mcp` stdio command.
- */
-export function createSlidevMcpServer(ctx: SlidevMcpContext): McpServer {
-  const server = new McpServer(
-    {
-      name: 'slidev',
-      version: ctx.version,
-    },
-    {
-      instructions: [
-        'Tools for working with a Slidev (https://sli.dev) slides deck.',
-        'A deck is a Markdown file where slides are separated by `---`; each slide can have YAML frontmatter, Markdown/Vue content, and a speaker note (trailing HTML comment).',
-        'Slides are addressed by their rendered 1-based number, matching the slide numbers shown in the presentation.',
-        'After editing tools run, a running dev server hot-reloads the presentation automatically.',
-      ].join('\n'),
-    },
-  )
+export function rpcError(id: RequestId, code: number, message: string): RpcReply {
+  return { jsonrpc: '2.0', id, error: { code, message } }
+}
 
-  server.registerTool(
-    'slidev-get-info',
-    {
-      title: 'Get deck info',
-      description: 'Get an overview of the Slidev deck: entry file, title, slide count, markdown files, and (when a dev server is running) the server URL and current position of the live presentation.',
-      annotations: { readOnlyHint: true },
-    },
-    async () => {
-      const data = await ctx.getData()
-      const nav = ctx.nav?.getState()
-      return result({
+export function createSlidevMcpServer(ctx: SlidevMcpContext): McpHandler {
+  const readOnly = { readOnlyHint: true }
+  const tools: Tool[] = [
+    tool('get-info', 'Get the deck title, source files, slide count, and live position.', {}, [], data => {
+      const url = ctx.getServerUrl?.()
+      const position = ctx.nav?.getState()
+      return {
         slidevVersion: ctx.version,
         entry: ctx.entry,
         title: data.headmatter.title ?? data.slides[0]?.title ?? null,
-        theme: data.config?.theme ?? data.headmatter.theme ?? null,
+        theme: data.headmatter.theme ?? null,
         totalSlides: data.slides.length,
         markdownFiles: Object.keys(data.markdownFiles),
-        ...ctx.getServerUrl?.()
-          ? {
-              server: {
-                url: ctx.getServerUrl(),
-                // page 0 means no client has connected yet
-                currentPage: nav?.page || null,
-                currentClicks: nav?.page ? nav.clicks : null,
-              },
-            }
-          : {},
-      })
-    },
-  )
-
-  server.registerTool(
-    'slidev-list-slides',
-    {
-      title: 'List slides',
-      description: 'List all slides of the deck with their number, title, layout, and source file. Slides hidden with `hide`/`disabled` frontmatter are not included.',
-      annotations: { readOnlyHint: true },
-    },
-    async () => {
-      const data = await ctx.getData()
-      return result(data.slides.map(slideSummary))
-    },
-  )
-
-  server.registerTool(
-    'slidev-get-slide',
-    {
-      title: 'Get slide',
-      description: 'Get the full source of one slide: frontmatter, Markdown content, and speaker note.',
-      inputSchema: z.object({ no: noSchema }),
-      annotations: { readOnlyHint: true },
-    },
-    async ({ no }) => {
-      const data = await ctx.getData()
-      const slide = resolveSlide(data, no)
-      return result({
-        ...slideSummary(slide),
-        frontmatter: slide.source.frontmatter,
-        content: slide.source.content.trim(),
-        note: slide.source.note ?? null,
-        ...slide.importChain?.length
-          ? {
-              importedBy: slide.importChain.map(s => `${s.filepath}#${s.index + 1}`),
-            }
-          : {},
-      })
-    },
-  )
-
-  server.registerTool(
-    'slidev-update-slide',
-    {
-      title: 'Update slide',
-      description: 'Update the content, speaker note, and/or frontmatter of a slide. Only the provided fields are changed. Pass an empty string to clear the content or note. In `frontmatter`, only the given keys are patched; pass `null` as a value to delete that key.',
-      inputSchema: z.object({
-        no: noSchema,
-        content: z.string().optional().describe('New Markdown content of the slide (without frontmatter and note)'),
-        note: z.string().optional().describe('New speaker note (Markdown, stored as a trailing HTML comment)'),
-        frontmatter: frontmatterSchema,
-      }),
-    },
-    async ({ no, content, note, frontmatter }) => {
-      if (content == null && note == null && frontmatter == null)
-        throw new Error('Nothing to update: provide at least one of `content`, `note`, or `frontmatter`.')
-      const data = await ctx.getData()
+        ...(url && { server: { url, currentPage: position?.page || null, currentClicks: position?.page ? position.clicks : null } }),
+      }
+    }, readOnly),
+    tool('list-slides', 'List the visible slides in presentation order.', {}, [], data => data.slides.map(summary), readOnly),
+    tool('get-slide', 'Get the frontmatter, Markdown, and speaker notes of a visible slide.', { no }, ['no'], (data, args) => {
+      const slide = resolveSlide(data, Number(args.no))
+      return {
+        ...summary(slide), frontmatter: slide.source.frontmatter, content: slide.source.content.trim(),
+        note: slide.source.note ?? null, importedBy: slide.importChain?.map(source => `${source.filepath}#${source.index + 1}`),
+      }
+    }, readOnly),
+    tool('update-slide', 'Edit content, notes, or selected frontmatter keys. A null value deletes a frontmatter key.', { no, content: md, note: md, frontmatter: yaml }, ['no'], async (data, args) => {
+      const { no, content, note, frontmatter } = args as { no: number, content?: string, note?: string, frontmatter?: Args }
+      if (content === undefined && note === undefined && frontmatter === undefined) throw new Error('Provide content, a note, or frontmatter to update')
       const { slide } = await applySlidePatch(data, no, { content, note, frontmatter })
-      return result(`Updated slide ${no} in ${slide.source.filepath}.`)
-    },
-  )
-
-  server.registerTool(
-    'slidev-insert-slide',
-    {
-      title: 'Insert slide',
-      description: 'Insert a new slide after an existing slide (into the same markdown file). To add a slide at the very end, pass the last slide number.',
-      inputSchema: z.object({
-        after: z.number().int().min(1).describe('Slide number (1-based) after which the new slide is inserted'),
-        content: z.string().describe('Markdown content of the new slide'),
-        frontmatter: frontmatterSchema,
-        note: z.string().optional().describe('Speaker note of the new slide'),
-      }),
-    },
-    async ({ after, content, frontmatter, note }) => {
-      const data = await ctx.getData()
-      const { filepath } = await insertSlide(data, { after, content, frontmatter, note })
-      return result(`Inserted a new slide after slide ${after} in ${filepath}. Slide numbers after it have shifted; list the slides again if needed.`)
-    },
-  )
-
-  server.registerTool(
-    'slidev-remove-slide',
-    {
-      title: 'Remove slide',
-      description: 'Remove a slide from the deck (deletes it from its source markdown file).',
-      inputSchema: z.object({ no: noSchema }),
-      annotations: { destructiveHint: true },
-    },
-    async ({ no }) => {
-      const data = await ctx.getData()
-      const { removed, filepath } = await removeSlide(data, no)
-      return result(`Removed slide ${no}${removed.title
-        ? ` ("${removed.title}")`
-        : ''} from ${filepath}. Slide numbers after it have shifted; list the slides again if needed.`)
-    },
-  )
-
-  server.registerTool(
-    'slidev-move-slide',
-    {
-      title: 'Move slide',
-      description: 'Move a slide before or after another slide to reorder the deck. Both slides must be in the same markdown file. To swap two adjacent slides, move one after the other.',
-      inputSchema: z.object({
-        from: z.number().int().min(1).describe('Slide number (1-based) of the slide to move'),
-        before: z.number().int().min(1).optional().describe('Move the slide right before this slide number'),
-        after: z.number().int().min(1).optional().describe('Move the slide right after this slide number'),
-      }),
-    },
-    async ({ from, before, after }) => {
-      const data = await ctx.getData()
-      const { filepath } = await moveSlide(data, { from, before, after })
-      return result(`Moved slide ${from} ${before != null
-        ? `before slide ${before}`
-        : `after slide ${after}`} in ${filepath}. Slide numbers have shifted; list the slides again if needed.`)
-    },
-  )
-
-  if (ctx.nav) {
-    const nav = ctx.nav
-    server.registerTool(
-      'slidev-goto-slide',
-      {
-        title: 'Go to slide',
-        description: 'Navigate the live presentation (all connected browsers) to a given slide, e.g. to visually verify a slide after editing it.',
-        inputSchema: z.object({
-          no: noSchema,
-          clicks: z.number().int().min(0).optional().describe('Click animation step to reveal (defaults to 0)'),
-        }),
-        annotations: { idempotentHint: true },
-      },
-      async ({ no, clicks }) => {
-        const data = await ctx.getData()
-        resolveSlide(data, no) // range check
-        nav.go(no, clicks ?? 0)
-        return result(`Navigated the presentation to slide ${no}${clicks
-          ? ` (click ${clicks})`
-          : ''}.`)
-      },
-    )
+      return `Updated slide ${no} in ${slide.source.filepath}.`
+    }),
+    tool('insert-slide', 'Insert a slide after the chosen slide in the same Markdown file.', { after: no, content: md, note: md, frontmatter: yaml }, ['after', 'content'], async (data, args) => {
+      const { filepath } = await insertSlide(data, { after: Number(args.after), content: String(args.content), note: args.note as string | undefined, frontmatter: args.frontmatter as Args | undefined })
+      return `Inserted a slide after slide ${args.after} in ${filepath}.`
+    }),
+    tool('remove-slide', 'Remove a slide from its Markdown source.', { no }, ['no'], async (data, args) => {
+      const { filepath } = await removeSlide(data, Number(args.no))
+      return `Removed slide ${args.no} from ${filepath}.`
+    }, { destructiveHint: true }),
+    tool('move-slide', 'Move a slide immediately before or after another slide in the same Markdown file.', { from: no, before: no, after: no }, ['from'], async (data, args) => {
+      const { filepath } = await moveSlide(data, { from: Number(args.from), before: args.before as number | undefined, after: args.after as number | undefined })
+      return `Moved slide ${args.from} in ${filepath}.`
+    }),
+  ]
+  const nav = ctx.nav
+  if (nav) {
+    tools.push(tool('goto-slide', 'Navigate connected browsers to a slide and optional reveal step.', { no, clicks: { type: 'integer', minimum: 0 } }, ['no'], (data, args) => {
+      const page = Number(args.no)
+      resolveSlide(data, page)
+      nav.go(page, Number(args.clicks ?? 0))
+      return `Navigated to slide ${page}.`
+    }, { idempotentHint: true }))
   }
+  const definitions = tools.map(({ name, description, inputSchema, annotations }) => ({ name, description, inputSchema, annotations }))
+  const byName = new Map(tools.map(item => [item.name, item]))
 
-  return server
+  return async (message) => {
+    if (!mapping(message) || message.jsonrpc !== '2.0') return rpcError(null, -32600, 'Invalid request')
+    if (typeof message.method !== 'string') {
+      if ('result' in message || 'error' in message) return
+      return rpcError(null, -32600, 'Invalid request')
+    }
+    const { id, method } = message
+    if (id === undefined) return
+    if (typeof id !== 'string' && typeof id !== 'number') return rpcError(null, -32600, 'Invalid request ID')
+    const reply = (result: unknown): RpcReply => ({ jsonrpc: '2.0', id, result })
+    const params = mapping(message.params) ? message.params : {}
+    switch (method) {
+      case 'initialize':
+        return reply({
+          protocolVersion: typeof params.protocolVersion === 'string' && versions.has(params.protocolVersion) ? params.protocolVersion : latest,
+          serverInfo: { name: 'ts-presentation', version: ctx.version },
+          capabilities: { tools: {} },
+        })
+      case 'ping': return reply({})
+      case 'tools/list': return reply({ tools: definitions })
+      case 'tools/call': {
+        const item = typeof params.name === 'string' ? byName.get(params.name) : undefined
+        if (!item) return rpcError(id, -32602, 'Unknown tool')
+        const args = params.arguments ?? {}
+        if (!mapping(args) || !valid(item, args)) return rpcError(id, -32602, 'Invalid tool arguments')
+        try { return reply(content(await item.call(await ctx.getData(), args))) }
+        catch (error) { return reply(content(error instanceof Error ? error.message : String(error), true)) }
+      }
+      default: return rpcError(id, -32601, 'Method not found')
+    }
+  }
 }

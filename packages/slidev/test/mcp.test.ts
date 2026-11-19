@@ -1,11 +1,11 @@
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Client, InMemoryTransport } from '@modelcontextprotocol/client'
-import { describe, expect, it, vi } from 'vitest'
-import { load } from '../packages/parser/src/fs'
-import { applySlidePatch, insertSlide, moveSlide, removeSlide } from '../packages/slidev/node/mcp/operations'
-import { createSlidevMcpServer } from '../packages/slidev/node/mcp/server'
+import { fileURLToPath } from 'node:url'
+import { findChrome } from '../node/runtime/chrome.ts'
+import { afterEach, describe, expect, it, mock } from 'bun:test'
+import { applySlidePatch, insertSlide, loadEditingDeck, moveSlide, removeSlide } from '../node/mcp/operations.ts'
+import { createSlidevMcpServer } from '../node/mcp/server.ts'
 
 const ENTRY_MD = `---
 theme: default
@@ -46,15 +46,18 @@ const SUB_MD = `# Sub 1
 # Sub 2
 `
 
+const fixtures: string[] = []
+afterEach(async () => {
+  await Promise.all(fixtures.splice(0).map(dir => rm(dir, { recursive: true, force: true })))
+})
+
 async function createDeck() {
   const dir = await mkdtemp(join(tmpdir(), 'slidev-mcp-test-'))
+  fixtures.push(dir)
   const entry = join(dir, 'slides.md')
   await writeFile(entry, ENTRY_MD, 'utf-8')
   await writeFile(join(dir, 'sub.md'), SUB_MD, 'utf-8')
-  const loadData = () => load({
-    userRoot: dir,
-    roots: [dir],
-  }, entry)
+  const loadData = () => loadEditingDeck(entry)
   return { dir, entry, loadData }
 }
 
@@ -271,22 +274,23 @@ describe('mcp slide operations', () => {
 describe('mcp server', () => {
   async function createServerAndClient(nav?: { getState: () => { page: number, clicks: number }, go: (page: number, clicks: number) => void }) {
     const { entry, loadData } = await createDeck()
-    const server = createSlidevMcpServer({
-      version: '0.0.0-test',
-      entry,
-      getData: () => loadData(),
-      nav,
-    })
-    const client = new Client({ name: 'test-client', version: '0.0.0' })
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
-    await Promise.all([
-      server.connect(serverTransport),
-      client.connect(clientTransport),
-    ])
+    const handle = createSlidevMcpServer({ version: '0.0.0-test', entry, getData: loadData, nav })
+    let id = 0
+    async function request(method: string, params?: unknown) {
+      const reply = await handle({ jsonrpc: '2.0', id: ++id, method, params })
+      if (!reply || reply.error) throw new Error(reply?.error?.message ?? 'Missing RPC reply')
+      return reply.result
+    }
+    await request('initialize', { protocolVersion: '2025-11-25' })
+    await handle({ jsonrpc: '2.0', method: 'notifications/initialized' })
+    const client = {
+      listTools: async () => await request('tools/list') as { tools: { name: string }[] },
+      callTool: async (params: unknown) => await request('tools/call', params) as { content: { text: string }[], isError?: boolean },
+    }
     return { client }
   }
 
-  function textOf(result: any) {
+  function textOf(result: { content: { text: string }[] }) {
     return result.content[0].text as string
   }
 
@@ -362,7 +366,7 @@ describe('mcp server', () => {
   })
 
   it('navigates the live presentation', async () => {
-    const go = vi.fn()
+    const go = mock(() => {})
     const { client } = await createServerAndClient({
       getState: () => ({ page: 2, clicks: 1 }),
       go,
@@ -385,4 +389,87 @@ describe('mcp server', () => {
       .resolves
       .toMatchObject({ isError: true })
   })
+})
+
+const cli = fileURLToPath(new URL('../node/cli.ts', import.meta.url))
+
+it('speaks newline-delimited MCP through the CLI and edits the deck on disk', async () => {
+  const { entry, loadData } = await createDeck()
+  const messages = [
+    { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18' } },
+    { jsonrpc: '2.0', method: 'notifications/initialized' },
+    { jsonrpc: '2.0', id: 2, method: 'tools/list' },
+    { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'slidev-update-slide', arguments: { no: 3, content: '# From stdio' } } },
+    { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'slidev-get-slide', arguments: { no: 0 } } },
+  ]
+  const command = Bun.spawn([process.execPath, cli, 'mcp', entry], {
+    stdin: new Blob([messages.map(message => JSON.stringify(message) + '\n').join('')]),
+    stdout: 'pipe', stderr: 'pipe',
+  })
+  const [output, error, status] = await Promise.all([new Response(command.stdout).text(), new Response(command.stderr).text(), command.exited])
+  expect(status).toBe(0)
+  expect(error).toBe('')
+  const replies = output.trim().split('\n').map(line => JSON.parse(line))
+  expect(replies.map(reply => reply.id)).toEqual([1, 2, 3, 4])
+  expect(replies[0].result.protocolVersion).toBe('2025-06-18')
+  expect(replies[1].result.tools).toHaveLength(7)
+  expect(replies[2].result.content[0].text).toContain('Updated slide 3')
+  expect(replies[3].error.code).toBe(-32602)
+  expect((await loadData()).slides[2].source.content).toBe('# From stdio')
+})
+
+const chrome = await findChrome()
+it.skipIf(!chrome)('publishes MCP navigation to the audience and presenter through the local dev server', async () => {
+  const { entry } = await createDeck()
+  const command = Bun.spawn([process.execPath, cli, 'dev', entry, '--mcp', '--port', '0'], { stdout: 'pipe', stderr: 'pipe' })
+  const audience = new Bun.WebView({ width: 960, height: 540, backend: { type: 'chrome', path: chrome!, url: false } })
+  const presenter = new Bun.WebView({ width: 1200, height: 800, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    const start = await command.stdout.getReader().read()
+    const address = new TextDecoder().decode(start.value).match(/http:\/\/127\.0\.0\.1:\d+/)?.[0]
+    expect(address).toBeDefined()
+    await audience.navigate(address!)
+    await presenter.navigate(address + '/?presenter=1')
+    const url = address + '/__mcp'
+    const post = (message: unknown, headers: Record<string, string> = {}) => fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', ...headers },
+      body: JSON.stringify(message),
+    })
+    const navigation = { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'slidev-goto-slide', arguments: { no: 4 } } }
+    expect((await post(navigation, { Origin: 'https://example.com' })).status).toBe(403)
+    expect((await fetch(url)).status).toBe(405)
+    const response = await post(navigation)
+    expect(response.status).toBe(200)
+    expect((await response.json()).result.content[0].text).toContain('Navigated to slide 4')
+    async function expectSlide(browser: Bun.WebView): Promise<void> {
+      const until = Date.now() + 5000
+      do {
+        if (await browser.evaluate('window.presentationNavigation?.currentSlideNo') === 4) return
+        await Bun.sleep(100)
+      } while (Date.now() < until)
+      throw new Error('Browser did not receive the navigation command')
+    }
+    await Promise.all([expectSlide(audience), expectSlide(presenter)])
+  }
+  finally {
+    audience.close()
+    presenter.close()
+    command.kill()
+    await command.exited
+  }
+}, 25_000)
+
+it('preserves untouched CRLF sections and rejects writes from an older snapshot', async () => {
+  const { entry } = await createDeck()
+  const original = '\uFEFF---\r\ntitle: First\r\n---\r\n\r\n# First  \r\n\r\n---\r\n\r\n# Second\r\n\r\n---\n\n# Third  '
+  await Bun.write(entry, original)
+  const snapshot = await loadEditingDeck(entry)
+  await applySlidePatch(snapshot, 2, { content: '# Revised' })
+  const revised = await readFile(entry, 'utf8')
+  expect(revised.startsWith('\uFEFF---\r\ntitle: First\r\n---\r\n\r\n# First  \r\n\r\n')).toBe(true)
+  expect(revised.endsWith('---\n\n# Third  ')).toBe(true)
+  expect(revised).toContain('# Revised\r\n')
+  await expect(applySlidePatch(snapshot, 2, { content: '# Stale' })).rejects.toThrow('changed on disk')
+  expect(await readFile(entry, 'utf8')).toBe(revised)
 })
