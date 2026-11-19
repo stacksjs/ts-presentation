@@ -8,6 +8,7 @@ import { setupDrags } from './drag-player.ts'
 import { setupDrawings } from './drawing-player.ts'
 import type { DrawingClientConfig } from '../../types/src/drawings.ts'
 import { setupLiveCode } from './live-code.ts'
+import { createSlideMedia } from './media.ts'
 import type { ClickBounds, SlidePosition, SlideRoute } from './navigation.ts'
 import { clickBounds, createNavigationContext, nextPosition, previousPosition, readSlideHash, slideHash, slidePosition } from './navigation.ts'
 import { setupPresenter } from './presenter.ts'
@@ -96,6 +97,8 @@ const codeTabs = !isCapture && !isPreview ? setupCodeTabs(stage, (codeTab) => {
 const drags = !isCapture && !isPreview ? setupDrags(stage, (slide, presentationDrag) => {
   syncPeer({ dragSlide: articles.indexOf(slide) + 1, presentationDrag })
 }, isLive) : undefined
+const media = createSlideMedia(!isCapture && !isPreview)
+if (isCapture) window.presentationMediaReady = media.ready
 
 function show(number: number, step?: number, writeHistory = true, sync = true, refresh = false): void {
   const { slide: selected, click: nextStep } = slidePosition(number, step, bounds)
@@ -123,6 +126,7 @@ function show(number: number, step?: number, writeHistory = true, sync = true, r
   }
   notes[current - 1].hidden = false
   showReveals(reveals[current - 1], click, animate, Number(stage.style.getPropertyValue('--slide-scale')) || 1)
+  media.show(active)
   noteSteps[current - 1].forEach((note, index) => { note.hidden = index > click })
   if (slideChanged) notesPanel.scrollTop = 0
   else if (!notesPanel.hidden && click > 0) {

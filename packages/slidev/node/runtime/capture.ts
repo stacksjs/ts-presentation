@@ -29,7 +29,7 @@ async function withExportBrowser<T>(options: CaptureOptions, run: (browser: Bun.
     fetch(request) {
       try {
         const path = decodeURIComponent(new URL(request.url).pathname)
-        return asset(root, path === '/' ? '/index.html' : path)
+        return asset(root, path === '/' ? '/index.html' : path, request)
       }
       catch {
         return new Response('Invalid URL', { status: 400 })
@@ -95,6 +95,7 @@ export async function captureFrames(options: CaptureOptions, onFrame: (frame: Po
         window.dispatchEvent(new HashChangeEvent('hashchange'))
         const active = document.querySelector('#stage > article:not([hidden])')
         if (active?.id !== 'slide-${position.slide}') throw new Error('Slide did not become active')
+        await window.presentationMediaReady?.()
         await document.fonts.ready
         await Promise.all([...active.querySelectorAll('img')].map(image => image.decode()))
         const note = document.querySelector('#presenter-notes > section[data-has-notes]:not([hidden])')
@@ -162,6 +163,7 @@ export async function capturePdf(options: CaptureOptions): Promise<Uint8Array<Ar
         const active = stage.querySelector('article:not([hidden])')
         if (active?.id !== 'slide-' + slide) throw new Error('Slide did not become active')
         const page = active.cloneNode(true)
+        await window.presentationMediaReady?.(page)
         const anchor = document.createElement('span')
         anchor.id = destinations.get(slide + '/' + step)
         anchor.className = 'print-destination'

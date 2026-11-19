@@ -77,6 +77,7 @@ the deck and style slides with an optional `style.css`.
 | Per-slide options | `class`, `hide`, `disabled`, and `transition: fade`, `slide-left`, or `slide-up` |
 | Images and component markup | Trusted HTML, with optional `data-zoom` on an image |
 | Post embeds | `<Tweet id="…" />` or `<Tweet url="…" />` loads the X widget in a sandboxed iframe |
+| Video | `<SlidevVideo v-click controls>` accepts native video sources, playback and reset options, and a print poster or seek time. `<Youtube id="…" />` embeds playback in the deck and links to YouTube in exports |
 | Fonts | Set `fonts.sans`, `fonts.serif`, or `fonts.mono`. Choose `fonts.provider` as `google`, `coollabs`, or `none` |
 | First-party diagrams | YAML in a `charts` fence. `ts-charts` renders flowcharts, sequence and state diagrams, class and entity relationships, pie charts, Gantt schedules, Git histories, timelines, and user journeys |
 | Imported diagrams | Slidev diagram fences are translated to structured data and rendered by the same `ts-charts` functions |

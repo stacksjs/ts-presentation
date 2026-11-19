@@ -51,6 +51,69 @@ function serialized(attributes: Map<string, Attribute>): string {
   return [...attributes.values()].map(attribute => attribute.source).join('')
 }
 
+function mediaLiteral(attributes: Map<string, Attribute>, name: string): string | undefined {
+  const plain = attributes.get(name)
+  if (plain) return plain.value
+  const value = attributes.get(`:${name}`)?.value.trim()
+  if (value === undefined) return
+  const quoted = /^(?:"([^"]*)"|'([^']*)')$/.exec(value)
+  if (quoted) return quoted[1] ?? quoted[2]
+  if (/^(?:true|false|\d+(?:\.\d+)?)$/.test(value)) return value
+}
+
+function videoMarkup(source: string, selfClosing: boolean): string {
+  const attrs = attributeValues(selfClosing ? source.replace(/\/\s*$/, '') : source)
+  const autoplay = mediaLiteral(attrs, 'autoplay')
+  const autoreset = mediaLiteral(attrs, 'autoreset')
+  const timestamp = mediaLiteral(attrs, 'timestamp')
+  const printTimestamp = mediaLiteral(attrs, 'printtimestamp') ?? mediaLiteral(attrs, 'print-timestamp')
+  const printPoster = mediaLiteral(attrs, 'printposter') ?? mediaLiteral(attrs, 'print-poster')
+  const timePattern = /^\d+(?:\.\d+)?$/
+  for (const key of ['autoplay', 'autoreset', 'timestamp', 'printtimestamp', 'print-timestamp', 'printposter', 'print-poster']) {
+    attrs.delete(key)
+    attrs.delete(`:${key}`)
+  }
+  for (const key of ['src', 'poster', 'preload', 'width', 'height', 'crossorigin', 'controls', 'loop', 'muted', 'playsinline']) {
+    const value = mediaLiteral(attrs, key)
+    attrs.delete(`:${key}`)
+    if (value === undefined) continue
+    if (['controls', 'loop', 'muted', 'playsinline'].includes(key)) {
+      if (value === 'false') attrs.delete(key)
+      else setAttribute(attrs, key, '')
+    }
+    else if (!attrs.has(key)) setAttribute(attrs, key, value)
+  }
+  setAttribute(attrs, 'data-presentation-video', '')
+  if (!attrs.has('preload')) setAttribute(attrs, 'preload', 'none')
+  if (autoplay === '' || autoplay === 'true' || autoplay === 'once') setAttribute(attrs, 'data-video-autoplay', autoplay === 'once' ? 'once' : 'true')
+  if (autoreset === 'click' || autoreset === 'slide') setAttribute(attrs, 'data-video-reset', autoreset)
+  if (timestamp && timePattern.test(timestamp)) setAttribute(attrs, 'data-video-time', timestamp)
+  if (printTimestamp && (printTimestamp === 'last' || timePattern.test(printTimestamp))) setAttribute(attrs, 'data-video-print-time', printTimestamp)
+  if (printPoster !== undefined) setAttribute(attrs, 'data-video-print-poster', printPoster)
+  return `<video${serialized(attrs)}>${selfClosing ? '</video>' : ''}`
+}
+
+function youtubeMarkup(source: string): string {
+  const attrs = attributeValues(source.replace(/\/\s*$/, ''))
+  const match = /^([\w-]{11})(?:\?start=(\d{1,10}))?$/.exec(mediaLiteral(attrs, 'id') ?? '')
+  const dimensions = ['width', 'height'].map((key) => {
+    const value = mediaLiteral(attrs, key)
+    return value && /^\d{1,5}$/.test(value) ? ` ${key}="${value}"` : ''
+  }).join('')
+  const title = escapeHtml(mediaLiteral(attrs, 'title') || 'YouTube video')
+  for (const key of ['id', 'width', 'height', 'title']) {
+    attrs.delete(key)
+    attrs.delete(`:${key}`)
+  }
+  const classes = attrs.get('class')?.value
+  setAttribute(attrs, 'class', classes ? `slidev-youtube ${classes}` : 'slidev-youtube')
+  if (!match) return `<span${serialized(attrs)}>Video unavailable</span>`
+  const [id, start] = match.slice(1)
+  const embed = `https://www.youtube.com/embed/${id}${start ? `?start=${start}` : ''}`
+  const watch = `https://www.youtube.com/watch?v=${id}${start ? `&amp;t=${start}s` : ''}`
+  return `<span${serialized(attrs)}><iframe hidden data-presentation-youtube="${embed}" title="${title}"${dimensions} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe><a href="${watch}" target="_blank" rel="noopener noreferrer">Watch on YouTube</a></span>`
+}
+
 function destinationAttributes(target: SlideDestination): string {
   return ` href="#slide-${target.slide}" data-slide-link="${target.slide}"${target.click === undefined ? '' : ` data-slide-click="${target.click}"`}`
 }
@@ -124,7 +187,7 @@ function tweetMarkup(source: string, theme: 'light' | 'dark'): string {
 
 /** Adapted from Slidev's Markdown link and scoped style transforms (MIT). */
 export function prepareSlideHtml(input: string, destination: (value: string) => SlideDestination | undefined, slide: number, frontmatter: Record<string, unknown> = {}, theme: 'light' | 'dark' = 'dark'): { html: string, css: string } {
-  if (!/<(?:style|a(?=[\s/>])|Link(?=[\s/>])|Tweet(?=[\s/>])|v-?drag)|\sv-drag\b/i.test(input)) return { html: input, css: '' }
+  if (!/<(?:style|(?:a|Link|Tweet|SlidevVideo|Youtube)(?=[\s/>])|v-?drag)|\sv-drag\b/i.test(input)) return { html: input, css: '' }
   const blocks: StyleBlock[] = []
   const tags = new RegExp(htmlTags)
   let offset = 0
@@ -152,6 +215,12 @@ export function prepareSlideHtml(input: string, destination: (value: string) => 
     }
     else if (rawName === 'Tweet') {
       replacement = closing ? '' : tweetMarkup(source, theme)
+    }
+    else if (rawName === 'SlidevVideo') {
+      replacement = closing ? '</video>' : videoMarkup(source, /\/>$/.test(original))
+    }
+    else if (rawName === 'Youtube' || rawName === 'YouTube') {
+      replacement = closing ? '' : youtubeMarkup(source)
     }
     else if (rawName === 'Link') {
       if (closing && componentOpen) {

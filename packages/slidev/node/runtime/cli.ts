@@ -230,8 +230,8 @@ async function main(): Promise<void> {
           default: {
             const extension = /^\/extensions\/([a-z0-9-]+)(\/.*)$/i.exec(path)
             const mounted = extension ? (await compile()).mounts[extension[1]] : undefined
-            if (mounted && extension) return asset(mounted, extension[2])
-            const found = root ? await asset(root, path.endsWith('/') ? `${path}index.html` : path) : undefined
+            if (mounted && extension) return asset(mounted, extension[2], request)
+            const found = root ? await asset(root, path.endsWith('/') ? `${path}index.html` : path, request) : undefined
             if (found && found.status !== 404) return found
             if ((request.method === 'GET' || request.method === 'HEAD') && /^\/(?:[a-z0-9-]+\/?){1,2}$/i.test(path)) {
               const destination = legacySlideLocation(url, (await compile()).routeAliases)
@@ -261,8 +261,6 @@ async function main(): Promise<void> {
   try {
     await mkdir(dirname(output), { recursive: true })
     await writeSite(temp, deck)
-    const { pathToFileURL } = await import('node:url')
-    const localDeck = pathToFileURL(join(temp, 'index.html'))
     if (format !== 'pdf') {
       const { captureFrames } = await import('./capture.ts')
       const { title, author, canvas } = deck
@@ -292,27 +290,9 @@ async function main(): Promise<void> {
       return
     }
 
-    if (range || withClicks) {
-      const { capturePdf } = await import('./capture.ts')
-      const pdf = await capturePdf({ root: temp, executable, canvas: deck.canvas, scale, range, withClicks })
-      await Bun.write(output, pdf)
-      console.log(output)
-      return
-    }
-
-    const pdf = join(temp, 'presentation.pdf')
-    const chrome = Bun.spawn([
-      executable,
-      '--headless',
-      '--no-first-run',
-      '--no-pdf-header-footer',
-      `--user-data-dir=${join(temp, 'chrome')}`,
-      `--print-to-pdf=${pdf}`,
-      localDeck.href,
-    ], { stderr: 'pipe' })
-    const error = await new Response(chrome.stderr).text()
-    if (await chrome.exited || !(await Bun.file(pdf).exists())) throw new Error(`Chrome PDF export failed. ${error.trim()}`)
-    await Bun.write(output, Bun.file(pdf))
+    const { capturePdf } = await import('./capture.ts')
+    const pdf = await capturePdf({ root: temp, executable, canvas: deck.canvas, scale, range, withClicks })
+    await Bun.write(output, pdf)
     console.log(output)
   }
   finally {
