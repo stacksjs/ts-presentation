@@ -1,0 +1,135 @@
+// Supplemental control sequences derived from the Unicode mappings in KaTeX v0.16.22
+// (https://github.com/KaTeX/KaTeX/blob/v0.16.22/src/symbols.js, MIT).
+// See licenses/KaTeX-MIT.txt. The renderer uses Unicode and system fonts.
+
+export type MathSymbolKind = 'binary' | 'relation' | 'punctuation' | 'identifier' | 'ordinary' | 'inner'
+export type MathSymbol = readonly [glyph: string, kind: MathSymbolKind]
+
+const math: Readonly<Record<string, MathSymbol>> = {
+  And: ['&', 'binary'], Box: ['□', 'ordinary'], Bumpeq: ['≎', 'relation'],
+  Cap: ['⋒', 'binary'], Cup: ['⋓', 'binary'], Diamond: ['◊', 'ordinary'],
+  Doteq: ['≑', 'relation'], Finv: ['Ⅎ', 'ordinary'], Game: ['⅁', 'ordinary'],
+  Join: ['⋈', 'relation'], Lleftarrow: ['⇚', 'relation'], Lsh: ['↰', 'relation'],
+  P: ['¶', 'ordinary'], Rrightarrow: ['⇛', 'relation'], Rsh: ['↱', 'relation'],
+  S: ['§', 'ordinary'], Subset: ['⋐', 'relation'], Supset: ['⋑', 'relation'],
+  Vdash: ['⊩', 'relation'], Vvdash: ['⊪', 'relation'], amalg: ['⨿', 'binary'],
+  approxeq: ['≊', 'relation'], asymp: ['≍', 'relation'], backepsilon: ['∍', 'relation'],
+  backsim: ['∽', 'relation'], backsimeq: ['⋍', 'relation'], barwedge: ['⊼', 'binary'],
+  because: ['∵', 'relation'], beth: ['ℶ', 'ordinary'], between: ['≬', 'relation'],
+  bigcirc: ['◯', 'binary'], bigstar: ['★', 'ordinary'], bigtriangledown: ['▽', 'binary'],
+  bigtriangleup: ['△', 'binary'], blacklozenge: ['⧫', 'ordinary'], blacksquare: ['■', 'ordinary'],
+  blacktriangle: ['▲', 'ordinary'], blacktriangledown: ['▼', 'ordinary'], blacktriangleleft: ['◀', 'relation'],
+  blacktriangleright: ['▶', 'relation'], bot: ['⊥', 'ordinary'], bowtie: ['⋈', 'relation'],
+  boxdot: ['⊡', 'binary'], boxminus: ['⊟', 'binary'], boxplus: ['⊞', 'binary'],
+  boxtimes: ['⊠', 'binary'], bullet: ['∙', 'binary'], bumpeq: ['≏', 'relation'],
+  cdotp: ['⋅', 'punctuation'], centerdot: ['⋅', 'binary'], checkmark: ['✓', 'ordinary'],
+  circeq: ['≗', 'relation'], circlearrowleft: ['↺', 'relation'], circlearrowright: ['↻', 'relation'],
+  circledR: ['®', 'ordinary'], circledS: ['Ⓢ', 'ordinary'], circledast: ['⊛', 'binary'],
+  circledcirc: ['⊚', 'binary'], circleddash: ['⊝', 'binary'], clubsuit: ['♣', 'ordinary'],
+  complement: ['∁', 'ordinary'], curlyeqprec: ['⋞', 'relation'], curlyeqsucc: ['⋟', 'relation'],
+  curlyvee: ['⋎', 'binary'], curlywedge: ['⋏', 'binary'], curvearrowleft: ['↶', 'relation'],
+  curvearrowright: ['↷', 'relation'], dag: ['†', 'ordinary'], dagger: ['†', 'binary'],
+  daleth: ['ℸ', 'ordinary'], dashleftarrow: ['⇠', 'relation'], dashrightarrow: ['⇢', 'relation'],
+  dashv: ['⊣', 'relation'], ddag: ['‡', 'ordinary'], ddagger: ['‡', 'binary'],
+  degree: ['°', 'ordinary'], diagdown: ['╲', 'ordinary'], diagup: ['╱', 'ordinary'],
+  diamond: ['⋄', 'binary'], diamondsuit: ['♢', 'ordinary'], digamma: ['ϝ', 'ordinary'],
+  divideontimes: ['⋇', 'binary'], doteq: ['≐', 'relation'], doteqdot: ['≑', 'relation'],
+  dotplus: ['∔', 'binary'], doublebarwedge: ['⩞', 'binary'], doublecap: ['⋒', 'binary'],
+  doublecup: ['⋓', 'binary'], downdownarrows: ['⇊', 'relation'], downharpoonleft: ['⇃', 'relation'],
+  downharpoonright: ['⇂', 'relation'], eqcirc: ['≖', 'relation'], eqsim: ['≂', 'relation'],
+  eqslantgtr: ['⪖', 'relation'], eqslantless: ['⪕', 'relation'], eth: ['ð', 'ordinary'],
+  fallingdotseq: ['≒', 'relation'], flat: ['♭', 'ordinary'], frown: ['⌢', 'relation'],
+  geqq: ['≧', 'relation'], geqslant: ['⩾', 'relation'], ggg: ['⋙', 'relation'],
+  gggtr: ['⋙', 'relation'], gimel: ['ℷ', 'ordinary'], gnapprox: ['⪊', 'relation'],
+  gneq: ['⪈', 'relation'], gneqq: ['≩', 'relation'], gnsim: ['⋧', 'relation'],
+  gtrapprox: ['⪆', 'relation'], gtrdot: ['⋗', 'binary'], gtreqless: ['⋛', 'relation'],
+  gtreqqless: ['⪌', 'relation'], gtrless: ['≷', 'relation'], gtrsim: ['≳', 'relation'],
+  heartsuit: ['♡', 'ordinary'], hookleftarrow: ['↩', 'relation'], hookrightarrow: ['↪', 'relation'],
+  hslash: ['ℏ', 'ordinary'], imageof: ['⊷', 'relation'], intercal: ['⊺', 'binary'],
+  ldotp: ['.', 'punctuation'], leadsto: ['⇝', 'relation'], leftarrowtail: ['↢', 'relation'],
+  leftharpoondown: ['↽', 'relation'], leftharpoonup: ['↼', 'relation'], leftleftarrows: ['⇇', 'relation'],
+  leftrightarrows: ['⇆', 'relation'], leftrightharpoons: ['⇋', 'relation'], leftrightsquigarrow: ['↭', 'relation'],
+  leftthreetimes: ['⋋', 'binary'], leqq: ['≦', 'relation'], leqslant: ['⩽', 'relation'],
+  lessapprox: ['⪅', 'relation'], lessdot: ['⋖', 'binary'], lesseqgtr: ['⋚', 'relation'],
+  lesseqqgtr: ['⪋', 'relation'], lessgtr: ['≶', 'relation'], lesssim: ['≲', 'relation'],
+  lhd: ['⊲', 'binary'], lll: ['⋘', 'relation'], llless: ['⋘', 'relation'],
+  lnapprox: ['⪉', 'relation'], lneq: ['⪇', 'relation'], lneqq: ['≨', 'relation'],
+  lnot: ['¬', 'ordinary'], lnsim: ['⋦', 'relation'], looparrowleft: ['↫', 'relation'],
+  looparrowright: ['↬', 'relation'], lozenge: ['◊', 'ordinary'], ltimes: ['⋉', 'binary'],
+  maltese: ['✠', 'ordinary'], mathellipsis: ['…', 'inner'], mathsterling: ['£', 'ordinary'],
+  measuredangle: ['∡', 'ordinary'], mho: ['℧', 'ordinary'], models: ['⊨', 'relation'],
+  multimap: ['⊸', 'relation'], nLeftarrow: ['⇍', 'relation'], nLeftrightarrow: ['⇎', 'relation'],
+  nRightarrow: ['⇏', 'relation'], nVDash: ['⊯', 'relation'], nVdash: ['⊮', 'relation'],
+  natural: ['♮', 'ordinary'], ncong: ['≆', 'relation'], nearrow: ['↗', 'relation'],
+  nexists: ['∄', 'ordinary'], ngeqq: ['≧̸', 'relation'], ngeqslant: ['⩾̸', 'relation'],
+  ngtr: ['≯', 'relation'], nleftarrow: ['↚', 'relation'], nleftrightarrow: ['↮', 'relation'],
+  nleqq: ['≦̸', 'relation'], nleqslant: ['⩽̸', 'relation'], nless: ['≮', 'relation'],
+  nprec: ['⊀', 'relation'], npreceq: ['⋠', 'relation'], nrightarrow: ['↛', 'relation'],
+  nsim: ['≁', 'relation'], nsucc: ['⊁', 'relation'], nsucceq: ['⋡', 'relation'],
+  ntriangleleft: ['⋪', 'relation'], ntrianglelefteq: ['⋬', 'relation'], ntriangleright: ['⋫', 'relation'],
+  ntrianglerighteq: ['⋭', 'relation'], nvDash: ['⊭', 'relation'], nvdash: ['⊬', 'relation'],
+  nwarrow: ['↖', 'relation'], omicron: ['ο', 'identifier'], ominus: ['⊖', 'binary'],
+  origof: ['⊶', 'relation'], oslash: ['⊘', 'binary'], pitchfork: ['⋔', 'relation'],
+  pounds: ['£', 'ordinary'], prec: ['≺', 'relation'], precapprox: ['⪷', 'relation'],
+  preccurlyeq: ['≼', 'relation'], preceq: ['⪯', 'relation'], precnapprox: ['⪹', 'relation'],
+  precneqq: ['⪵', 'relation'], precnsim: ['⋨', 'relation'], precsim: ['≾', 'relation'],
+  restriction: ['↾', 'relation'], rhd: ['⊳', 'binary'], rightarrowtail: ['↣', 'relation'],
+  rightharpoondown: ['⇁', 'relation'], rightharpoonup: ['⇀', 'relation'], rightleftarrows: ['⇄', 'relation'],
+  rightleftharpoons: ['⇌', 'relation'], rightrightarrows: ['⇉', 'relation'], rightsquigarrow: ['⇝', 'relation'],
+  rightthreetimes: ['⋌', 'binary'], risingdotseq: ['≓', 'relation'], rtimes: ['⋊', 'binary'],
+  searrow: ['↘', 'relation'], sharp: ['♯', 'ordinary'], shortmid: ['∣', 'relation'],
+  shortparallel: ['∥', 'relation'], smallfrown: ['⌢', 'relation'], smallsmile: ['⌣', 'relation'],
+  smile: ['⌣', 'relation'], spadesuit: ['♠', 'ordinary'], sphericalangle: ['∢', 'ordinary'],
+  sqcap: ['⊓', 'binary'], sqcup: ['⊔', 'binary'], sqsubset: ['⊏', 'relation'],
+  sqsubseteq: ['⊑', 'relation'], sqsupset: ['⊐', 'relation'], sqsupseteq: ['⊒', 'relation'],
+  square: ['□', 'ordinary'], star: ['⋆', 'binary'], subseteqq: ['⫅', 'relation'],
+  subsetneq: ['⊊', 'relation'], subsetneqq: ['⫋', 'relation'], succ: ['≻', 'relation'],
+  succapprox: ['⪸', 'relation'], succcurlyeq: ['≽', 'relation'], succeq: ['⪰', 'relation'],
+  succnapprox: ['⪺', 'relation'], succneqq: ['⪶', 'relation'], succnsim: ['⋩', 'relation'],
+  succsim: ['≿', 'relation'], supseteqq: ['⫆', 'relation'], supsetneq: ['⊋', 'relation'],
+  supsetneqq: ['⫌', 'relation'], surd: ['√', 'ordinary'], swarrow: ['↙', 'relation'],
+  therefore: ['∴', 'relation'], thickapprox: ['≈', 'relation'], thicksim: ['∼', 'relation'],
+  top: ['⊤', 'ordinary'], triangle: ['△', 'ordinary'], triangledown: ['▽', 'ordinary'],
+  triangleleft: ['◃', 'binary'], trianglelefteq: ['⊴', 'relation'], triangleq: ['≜', 'relation'],
+  triangleright: ['▹', 'binary'], trianglerighteq: ['⊵', 'relation'], twoheadleftarrow: ['↞', 'relation'],
+  twoheadrightarrow: ['↠', 'relation'], unlhd: ['⊴', 'binary'], unrhd: ['⊵', 'binary'],
+  upharpoonleft: ['↿', 'relation'], upharpoonright: ['↾', 'relation'], uplus: ['⊎', 'binary'],
+  upuparrows: ['⇈', 'relation'], vDash: ['⊨', 'relation'], varkappa: ['ϰ', 'ordinary'],
+  varnothing: ['∅', 'ordinary'], varpi: ['ϖ', 'identifier'], varpropto: ['∝', 'relation'],
+  vartriangle: ['△', 'relation'], vartriangleleft: ['⊲', 'relation'], vartriangleright: ['⊳', 'relation'],
+  varvdots: ['⋮', 'ordinary'], vdash: ['⊢', 'relation'], veebar: ['⊻', 'binary'],
+  wp: ['℘', 'ordinary'], wr: ['≀', 'binary'], yen: ['¥', 'ordinary'],
+  // Standardized Unicode variants and overlays for relations that use private-use TeX glyphs.
+  gvertneqq: ['≩\uFE00', 'relation'], lvertneqq: ['≨\uFE00', 'relation'],
+  varsubsetneq: ['⊊\uFE00', 'relation'], varsubsetneqq: ['⫋\uFE00', 'relation'],
+  varsupsetneq: ['⊋\uFE00', 'relation'], varsupsetneqq: ['⫌\uFE00', 'relation'],
+  nsubseteqq: ['⫅\u0338', 'relation'], nsupseteqq: ['⫆\u0338', 'relation'],
+  nshortmid: ['∤', 'relation'], nshortparallel: ['∦', 'relation'],
+}
+
+const text: Readonly<Record<string, string>> = {
+  P: '¶', S: '§', checkmark: '✓', circledR: '®', dag: '†',
+  ddag: '‡', degree: '°', i: 'ı', j: 'ȷ', lbrack: '[',
+  ldots: '…', maltese: '✠', pounds: '£', rbrack: ']', textbardbl: '∥',
+  textbraceleft: '{', textbraceright: '}', textdagger: '†', textdaggerdbl: '‡', textdegree: '°',
+  textellipsis: '…', textemdash: '\u2014', textendash: '\u2013', textquotedblleft: '“', textquotedblright: '”',
+  textquoteleft: '‘', textquoteright: '’', textsterling: '£', varvdots: '⋮', yen: '¥',
+}
+
+const centeredGlyphs = new Set(Object.values(math)
+  .filter(([, kind]) => kind === 'binary' || kind === 'relation')
+  .map(([glyph]) => glyph))
+
+export function isCenteredGlyph(glyph: string): boolean {
+  return centeredGlyphs.has(glyph)
+}
+
+export function mathSymbol(name: string): MathSymbol | undefined {
+  return Object.hasOwn(math, name) ? math[name] : undefined
+}
+
+export function textSymbol(token: string): string | undefined {
+  if (token[0] !== '\\') return
+  const name = token.slice(1)
+  return Object.hasOwn(text, name) ? text[name] : undefined
+}

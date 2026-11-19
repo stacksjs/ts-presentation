@@ -3,6 +3,35 @@ import { findChrome } from '../packages/slidev/node/runtime/chrome.ts'
 import { collectSnapshot } from '../packages/slidev/node/runtime/editable/walker.ts'
 import { createMathRenderer, renderMath } from '../packages/slidev/node/runtime/math.ts'
 
+test('renders supplemental AMS relations, binary operators, and punctuation with distinct spacing', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const html = math(String.raw`
+    \def\containsMore{\supsetneqq}
+    a \containsMore b \boxplus c \nleqslant d \rightleftharpoons e \cdotp \And \beth \lvertneqq \nsupseteqq
+  `, true)
+  expect(html).toMatch(/<mo lspace="0\.277[^"]+" rspace="0\.277[^"]+">⫌<\/mo>/)
+  expect(html).toMatch(/<mo lspace="0\.222[^"]+" rspace="0\.222[^"]+">⊞<\/mo>/)
+  expect(html).toMatch(/<mo lspace="0\.277[^"]+" rspace="0\.277[^"]+">⩽̸<\/mo>/)
+  expect(html).toContain('>⇌</mo>')
+  expect(html).toContain('>≨\uFE00</mo>')
+  expect(html).toContain('>⫆\u0338</mo>')
+  expect(html).toMatch(/<mo lspace="0em" rspace="0\.166[^"]+" separator="true">⋅<\/mo>/)
+  expect(html).toContain('&amp;</mo>')
+  expect(html).toContain('<mtext>ℶ</mtext>')
+})
+
+test('uses supplemental symbols in contextual dots, negations, text, and operator names', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  expect(math(String.raw`a \dots \subsetneqq b + \not\gtrsim c`, false)).toContain('<mo>⋯</mo>')
+  const literal = 'a ' + String.raw`\dots` + ' ⫋ b'
+  expect(math(literal, false)).toContain('<mo>⋯</mo>')
+  const html = math(String.raw`\text{\S\textdagger\textbraceleft\textsterling\textbraceright}+\operatorname{\vdash\,closure}(x)`, false)
+  expect(html).toContain('<mtext>§†{£}</mtext>')
+  expect(html).toContain('<mo>⊢\u2009closure</mo>')
+  expect(math(String.raw`a \not\gtrsim b`, false)).toContain('≵</mo>')
+  expect(() => math(String.raw`\notARealMacro`, false)).toThrow('Unsupported math command')
+})
+
 test('expands a token after a delayed definition target and preserves noexpand through edef', () => {
   const math = createMathRenderer({ throwOnError: true })
   const delayed = math(String.raw`\def\target{X}\def\name{\target}\expandafter\def\name{A}\target`, false)

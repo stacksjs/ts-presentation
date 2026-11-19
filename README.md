@@ -145,6 +145,10 @@ The port branches from [Slidev v53.1.0](https://github.com/slidevjs/slidev/tree/
 Credit goes to Anthony Fu and the Slidev community. The original MIT
 license is included in [licenses/Slidev-MIT.txt](licenses/Slidev-MIT.txt).
 
+The supplemental TeX symbol mappings draw on KaTeX. Credit goes to Khan
+Academy and the KaTeX contributors. Their MIT notice is included in
+[licenses/KaTeX-MIT.txt](licenses/KaTeX-MIT.txt).
+
 The seven Slidev packages are carried in `packages/`. The Bun CLI and render
 pipeline are in `packages/slidev`, the STX presentation templates and player in
 `packages/client`, and Markdown parsing and shared contracts in `packages/parser`

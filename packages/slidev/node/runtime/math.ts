@@ -1,6 +1,8 @@
 import { escapeHtml } from './html.ts'
 import type { KatexOptions } from './authoring-setup.ts'
 import { chemicalFormula, physicalUnits } from './math-chemistry.ts'
+import { isCenteredGlyph, mathSymbol, textSymbol } from './math-symbols.ts'
+import type { MathSymbol, MathSymbolKind } from './math-symbols.ts'
 
 const greek: Record<string, string> = {
   alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε', varepsilon: 'ϵ', zeta: 'ζ', eta: 'η',
@@ -42,6 +44,9 @@ const largeOperatorGlyphs = new Set([...big].filter(name => !integralGlyphs.has(
 const classSpacing: Record<string, readonly [number, number]> = {
   mathord: [0, 0], mathopen: [0, 0], mathclose: [0, 0], mathpunct: [0, 3],
   mathbin: [4, 4], mathrel: [5, 5], mathinner: [3, 3], mathop: [3, 3],
+}
+const symbolClasses: Partial<Record<MathSymbolKind, string>> = {
+  binary: 'mathbin', relation: 'mathrel', punctuation: 'mathpunct', inner: 'mathinner',
 }
 const namedLimits: Record<string, string> = {
   liminf: 'lim inf', limsup: 'lim sup', injlim: 'inj lim', projlim: 'proj lim',
@@ -309,6 +314,12 @@ function classifiedAtom(name: string, content: Markup): Atom {
   // MathML token elements contain text. Space composite atoms outside their
   // script base so fractions, styles, and accents remain valid MathML.
   return { markup: xml`<mrow>${content}</mrow>`, limits, spacing: [left, right] }
+}
+
+function supplementalAtom([glyph, kind]: MathSymbol): Atom {
+  const category = symbolClasses[kind]
+  if (!category) return { markup: tag(kind === 'identifier' ? 'mi' : 'mtext', glyph) }
+  return classifiedAtom(category, tag('mo', glyph))
 }
 
 function negatedMarkup(markup: string): string {
@@ -643,7 +654,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const token = tokens[cursor++]
       if (!token || token === boundary || token === '}') throw new Error('Missing math text argument')
       depth--
-      return wrap(tag('mtext', textSymbols[token] ?? token.replace(/^\\([%$#&_{} ])$/, '$1')))
+      return wrap(tag('mtext', textSymbols[token] ?? textSymbol(token) ?? token.replace(/^\\([%$#&_{} ])$/, '$1')))
     }
     cursor++
     const sized: Markup[] = []
@@ -708,7 +719,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
           flush()
           parts.push(tag('mtext', '\u00A0'))
         }
-        else literal += textSymbols[token] ?? token.replace(/^\\([%$#&_{} ])$/, '$1')
+        else literal += textSymbols[token] ?? textSymbol(token) ?? token.replace(/^\\([%$#&_{} ])$/, '$1')
       }
     })
     if (sized.length || fontScale !== baseScale) {
@@ -761,8 +772,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const next = peek()
     const command = next.startsWith('\\') ? next.slice(1) : ''
     const integral = name === 'dotsi' || (name === 'dots' && integrals.has(command))
+    const category = command ? mathSymbol(command)?.[1] : undefined
     const centered = integral || name === 'dotsb' || name === 'dotsm'
-      || (name === 'dots' && (command.startsWith('not') || centersDots.test(operators[command] ?? next)))
+      || (name === 'dots' && (category === 'binary' || category === 'relation' || command.startsWith('not')
+        || centersDots.test(operators[command] ?? next) || (!command && isCenteredGlyph(next))))
     const nearClosing = /^(?:[)\]},.;]|\\(?:right|rparen|rbrack|rbrace|rangle|rceil|rfloor|rgroup|rmoustache|(?:big|Big|bigg|Bigg)r))$/.test(next)
     const trailing = name === 'dotsx' || (nearClosing && (name !== 'dotsc' || next !== ',')) ? muSpace(3) : ''
     const symbol = tag('mo', centered ? '⋯' : '…')
@@ -1293,7 +1306,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
         const command = token.startsWith('\\') ? token.slice(1) : ''
         if (Object.hasOwn(greek, command)) return greek[command]
         if (Object.hasOwn(operators, command)) return operators[command]
-        return token.replace(/^\\([_%#$&{}])$/, '$1')
+        return mathSymbol(command)?.[0] ?? textSymbol(token) ?? token.replace(/^\\([_%#$&{}])$/, '$1')
       }).join('').trim()
       return { markup: tag('mo', label), limits: name === 'operatornamewithlimits' || star }
     }
@@ -1368,6 +1381,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (Object.hasOwn(delimiters, token)) return { markup: fence(token, false) }
     if (Object.hasOwn(spacing, name)) return { markup: spaceMarkup(spacing[name]) }
     if (/^[%$#&_{}|]$/.test(name)) return { markup: tag('mo', name) }
+    const symbol = mathSymbol(name)
+    if (symbol) return supplementalAtom(symbol)
     if (state?.options.throwOnError) throw new Error(`Unsupported math command: ${token}`)
     const color = safeColor(state?.options.errorColor ?? '')
     return { markup: color ? `<mtext style="color:${color}">${escapeHtml(token)}</mtext>` : tag('mtext', token) }
