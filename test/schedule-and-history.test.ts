@@ -319,6 +319,57 @@ operations:
   expect(svg).toBe(renderChart(native, 'styled-git'))
 })
 
+test('applies every named Mermaid GitGraph preset and lets diagram colors override it', () => {
+  const graph = `gitGraph
+    commit id:"root"
+    branch review
+    commit id:"ready" tag:"v1"
+    checkout main
+    merge review id:"shared" type:HIGHLIGHT`
+  const presets = [
+    ['base', '#f4f4f4', '#ffcb5e'],
+    ['default', '#ffffff', '#0000ec'],
+    ['forest', '#ffffff', '#9bc834'],
+    ['neutral', '#ffffff', '#b4b4b4'],
+    ['dark', '#333333', '#797d7d'],
+    ['neo', '#ffffff', '#7373f8'],
+    ['neo-dark', '#333333', '#8b0000'],
+    ['redux', '#ffffff', '#7373f8'],
+    ['redux-color', '#ffffff', '#7373f8'],
+    ['redux-dark', '#333333', '#000000'],
+    ['redux-dark-color', '#333333', '#000000'],
+  ]
+  for (const [theme, background, branch] of presets) {
+    const svg = mermaid(graph, 'preset', { theme })!
+    expect(svg).toContain(`data-diagram-theme="${theme}"`)
+    expect(svg).toContain(`style="--diagram-background:${background}"`)
+    expect(svg).toMatch(new RegExp(`class="diagram-git-branch-label-box"[^>]*fill="${branch}"`))
+    expect(svg).toContain('data-commit-id="shared" data-parent-ids="root, ready"')
+  }
+
+  const styled = [
+    '---',
+    'title: Release history',
+    'config:',
+    '  theme: dark',
+    '  themeVariables:',
+    '    git0: "#112233"',
+    '    gitBranchLabel0: "#ddeeff"',
+    '    gitInv0: "#aabbcc"',
+    '    tagLabelBorder: "#ffcc66"',
+    '---',
+    graph,
+  ].join('\n')
+  const svg = mermaid(styled, 'palette-overrides', { theme: 'forest', themeVariables: { commitLabelFontSize: '14px' } })!
+  expect(svg).toContain('data-diagram-theme="dark"')
+  expect(svg).toMatch(/class="diagram-title"[^>]*style="fill:#f9fffe;"/)
+  expect(svg).toMatch(/class="diagram-git-branch-label-box"[^>]*fill="#112233"/)
+  expect(svg).toMatch(/class="diagram-git-branch-label"[^>]*style="fill:#ddeeff;"/)
+  expect(svg).toMatch(/class="diagram-git-dot"[^>]*fill="#aabbcc"/)
+  expect(svg).toMatch(/class="diagram-git-label"[^>]*style="fill:#b8b6b6;font-size:14px;"/)
+  expect(svg).toMatch(/class="diagram-git-tag-box"[^>]*fill="#1f2020" stroke="#ffcc66"/)
+})
+
 const actions = `gantt
 todayMarker off
 Draft :draft, 2026-11-01, 1d

@@ -1,6 +1,8 @@
 import type { GitCommitStyle, GitGraphDirection, GitGraphOperation, GitGraphOptions, GitHistory } from 'ts-charts/diagrams'
 import { buildGitHistory as buildHistory, gitGraphChart } from 'ts-charts/diagrams'
+import type { MermaidOptions } from '../authoring-setup.ts'
 import { diagramPixels, readChronology } from './chronology.ts'
+import { gitGraphPreset } from './gitgraph-themes.ts'
 import { syntaxMask } from './syntax.ts'
 
 function commands(source: string): string[] {
@@ -104,18 +106,33 @@ export function buildGitHistory(source: string, options?: unknown): GitHistory |
   if (chart) return buildHistory(chart)
 }
 
-export function gitGraph(source: string, idPrefix: string, options?: unknown, theme?: unknown, fallbackTitle = ''): string | undefined {
-  const chart = parseGitHistory(source, options)
+export function gitGraph(source: string, idPrefix: string, options: MermaidOptions = {}): string | undefined {
+  const chart = parseGitHistory(source, options.gitGraph)
   if (!chart) return
-  const variables = settings(theme)
+  const variables = settings(options.themeVariables)
+  const preset = gitGraphPreset(options.theme)
   const color = (key: string) => typeof variables[key] === 'string' ? variables[key] as string : undefined
-  const palette = (prefix: string) => Array.from({ length: 8 }, (_, index) => color(`${prefix}${index}`))
+  const palette = (prefix: string, defaults?: readonly string[], fallback?: string) =>
+    Array.from({ length: 8 }, (_, index) => color(`${prefix}${index}`) ?? fallback ?? defaults?.[index])
+  const colors = palette('git', preset?.branches)
   return gitGraphChart({
-    ...chart, idPrefix, title: chart.title || fallbackTitle,
-    colors: palette('git'),
-    branchLabelColors: palette('gitBranchLabel'),
-    highlightColors: palette('gitInv'),
-    commitLabel: { color: color('commitLabelColor'), background: color('commitLabelBackground'), fontSize: diagramPixels(variables.commitLabelFontSize) },
-    tagLabel: { color: color('tagLabelColor'), background: color('tagLabelBackground'), border: color('tagLabelBorder'), fontSize: diagramPixels(variables.tagLabelFontSize) },
+    ...chart, idPrefix, title: chart.title || (typeof options.title === 'string' ? options.title : ''),
+    colors,
+    branchLabelColors: palette('gitBranchLabel', preset?.branchText, color('branchLabelColor')),
+    branchLabelBackgrounds: preset ? colors : undefined,
+    highlightColors: palette('gitInv', preset?.highlights),
+    background: color('background') ?? preset?.background,
+    titleColor: color('titleColor') ?? color('textColor') ?? preset?.title,
+    commitLabel: {
+      color: color('commitLabelColor') ?? preset?.commit.color,
+      background: color('commitLabelBackground') ?? preset?.commit.background,
+      fontSize: diagramPixels(variables.commitLabelFontSize) ?? preset?.commit.fontSize,
+    },
+    tagLabel: {
+      color: color('tagLabelColor') ?? preset?.tag.color,
+      background: color('tagLabelBackground') ?? preset?.tag.background,
+      border: color('tagLabelBorder') ?? preset?.tag.border,
+      fontSize: diagramPixels(variables.tagLabelFontSize) ?? preset?.tag.fontSize,
+    },
   })
 }

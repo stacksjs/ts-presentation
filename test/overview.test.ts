@@ -47,8 +47,16 @@ test.skipIf(!chrome)('renders actual thumbnails, selects slides from the dialog,
     expect(await view.evaluate(`(async () => {
       const modal = document.querySelector('#overview')
       const frame = modal.querySelector('iframe')
-      for (let attempt = 0; attempt < 80 && !frame.contentDocument?.querySelector('[aria-current="page"]'); attempt++)
+      const isScaled = (thumbnail) => {
+        const width = thumbnail?.querySelector('article')?.getBoundingClientRect().width
+        return width > 0 && Math.abs(width - thumbnail.getBoundingClientRect().width) < 1
+      }
+      for (let attempt = 0; attempt < 80; attempt++) {
+        const child = frame.contentDocument
+        const thumbnail = child?.querySelector('.overview-thumbnail')
+        if (child?.querySelector('[aria-current="page"]') && isScaled(thumbnail)) break
         await new Promise(resolve => setTimeout(resolve, 25))
+      }
       const child = frame.contentDocument
       const thumbnail = child.querySelector('.overview-thumbnail')
       const slide = thumbnail.querySelector('article')
@@ -58,8 +66,7 @@ test.skipIf(!chrome)('renders actual thumbnails, selects slides from the dialog,
         !child.querySelector('#audience-copy'), !!document.querySelector('#audience-copy'),
         child.querySelector('[aria-current="page"]').dataset.overviewSlide,
         child.querySelector('.overview-notes') === null,
-        slide.inert && slide.getBoundingClientRect().width > 0
-          && Math.abs(slide.getBoundingClientRect().width - thumbnail.getBoundingClientRect().width) < 1,
+        slide.inert && isScaled(thumbnail),
       ]
     })()`)).toEqual([true, 1, 3, 'overview', true, true, true, '2', true, true])
 

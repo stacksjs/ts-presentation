@@ -154,6 +154,9 @@ The supplemental TeX symbol mappings and trust option draw on KaTeX. Credit goes
 Academy and the KaTeX contributors. Their MIT notice is included in
 [licenses/KaTeX-MIT.txt](licenses/KaTeX-MIT.txt).
 
+GitGraph theme colors come from Mermaid 12.3.0. The Mermaid MIT notice is
+included in [licenses/Mermaid-MIT.txt](licenses/Mermaid-MIT.txt).
+
 The seven Slidev packages are carried in `packages/`. The Bun CLI and render
 pipeline are in `packages/slidev`, the STX presentation templates and player in
 `packages/client`, and Markdown parsing and shared contracts in `packages/parser`
