@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
 import { renderChart } from '../packages/slidev/node/runtime/charts.ts'
+import { findChrome } from '../packages/slidev/node/runtime/chrome.ts'
 import { mermaid } from '../packages/slidev/node/runtime/diagram.ts'
 import { scheduleGantt } from '../packages/slidev/node/runtime/mermaid/gantt.ts'
 import { ganttDateParser } from 'ts-charts/diagrams'
@@ -182,3 +183,69 @@ test('imports GitGraph rotation and multiline accessible descriptions', () => {
   expect(horizontal).not.toContain('rotate(')
   expect(horizontal).toContain('>v1</tspan>')
 })
+
+const actions = `gantt
+todayMarker off
+Draft :draft, 2026-11-01, 1d
+Review :review, after draft, 1d
+Publish :ship, after review, 1d
+click draft,review call delivery.record()
+click ship href "#done/1" call delivery.record("red, blue", "<note> )", draft)
+`
+
+test('imports Gantt callback commands and applies security settings', () => {
+  const strict = mermaid(actions, 'strict')
+  expect(strict).toContain('data-task-id="ship"')
+  expect(strict).not.toContain('data-gantt-callback')
+  const loose = mermaid(actions, 'actions', { securityLevel: 'loose' })
+  expect(loose?.match(/data-gantt-callback="delivery.record"/g)).toHaveLength(3)
+  expect(loose).toContain('data-gantt-args="[&quot;draft&quot;]"')
+  expect(loose).toContain('data-gantt-args="[&quot;review&quot;]"')
+  expect(loose).toContain('data-gantt-args="[&quot;red, blue&quot;,&quot;&lt;note&gt; )&quot;,&quot;draft&quot;]"')
+  expect(loose).not.toContain('onclick=')
+})
+
+const chrome = await findChrome()
+test.skipIf(!chrome)('runs Gantt callbacks on keyboard and click and preserves slide navigation', async () => {
+  const html = await renderDeck(parseDeck([
+    '---', 'mermaid:', '  securityLevel: loose', '---', '', '# Delivery',
+    '', '```mermaid', actions, '```',
+    '', '---', 'routeAlias: done', '---', '', '# Release', '', '<p v-click>Release recorded</p>',
+  ].join('\n')))
+  const player = await Bun.build({
+    entrypoints: [new URL('../packages/client/runtime/player.ts', import.meta.url).pathname],
+    format: 'iife',
+    target: 'browser',
+  })
+  if (!player.success || !player.outputs[0]) throw new Error('Could not build the browser player')
+  const js = `window.delivery = { calls: [], record(...args) { this.calls.push(args) } };\n${await player.outputs[0].text()}`
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch(request) {
+      const { pathname } = new URL(request.url)
+      if (pathname === '/') return new Response(html, { headers: { 'Content-Type': 'text/html' } })
+      if (pathname === '/presentation.js') return new Response(js, { headers: { 'Content-Type': 'application/javascript' } })
+      return new Response(null, { status: 404 })
+    },
+  })
+  const view = new Bun.WebView({ width: 960, height: 620, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await view.navigate(server.url.href)
+    expect(await view.evaluate(`(() => {
+      const first = document.querySelector('[data-gantt-callback][role=button]')
+      first.focus()
+      return document.activeElement === first
+    })()`)).toBe(true)
+    await view.cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: ' ', code: 'Space', windowsVirtualKeyCode: 32 })
+    await view.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: ' ', code: 'Space', windowsVirtualKeyCode: 32 })
+    await view.evaluate(`document.querySelector('a[data-gantt-callback]').focus()`)
+    await view.cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
+    await view.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
+    expect(await view.evaluate('[window.delivery.calls, window.presentationNavigation.currentPage, window.presentationNavigation.clicks]'))
+      .toEqual([[['draft'], ['red, blue', '<note> )', 'draft']], 2, 1])
+  }
+  finally {
+    view.close()
+    await server.stop(true)
+  }
+}, 45000)

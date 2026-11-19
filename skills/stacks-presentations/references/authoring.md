@@ -181,6 +181,8 @@ speaker notes. Each hook can be asynchronous.
   previous task. Set `excludes: [weekends]` to skip weekends in durations.
   A task's `href` can point to a URL or slide. Use `weekday` to start weekly
   ticks on a chosen day and `todayMarkerStyle` to style the current-date line.
+  Use `callback: { name: delivery.review, args: [draft] }` to call a function
+  exposed by your deck or addon client, such as `window.delivery.review`.
 - Use `type: gitgraph` with `operations`. Each operation has an `op` of
   `commit`, `branch`, `checkout`, `merge`, or `cherry-pick`. Give
   branches and checkouts a `name`, merges a `branch`, and cherry-picks
@@ -192,7 +194,8 @@ speaker notes. Each hook can be asynchronous.
   the same `ts-charts` renderers as `charts` fences.
 - Imported Gantt schedules support date and axis formats, exclusions, task
   dependencies, milestones, today-marker styling, and chart spacing. Enable
-  imported `href` task links with `securityLevel: loose` in diagram settings.
+  imported `href` and `call` interactions with `securityLevel: loose` in diagram
+  settings. An empty callback argument list passes the task ID.
   Imported GitGraph diagrams support branch ordering, checkout, merges, tags,
   cherry-picking, horizontal or vertical lanes, and `rotateCommitLabel`.
 - Use `timeline` or `timeline TD` for chronological periods. A period can

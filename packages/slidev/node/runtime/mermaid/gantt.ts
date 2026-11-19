@@ -1,4 +1,4 @@
-import type { GanttChartOptions, GanttMarkerStyle, GanttSchedule, GanttTask, GanttTaskTag, GanttWeekday } from 'ts-charts/diagrams'
+import type { GanttChartOptions, GanttMarkerStyle, GanttSchedule, GanttTask, GanttTaskCallback, GanttTaskTag, GanttWeekday } from 'ts-charts/diagrams'
 import { ganttChart, ganttDurationEnd, scheduleGantt as scheduleTasks } from 'ts-charts/diagrams'
 import { readChronology } from './chronology.ts'
 
@@ -24,7 +24,48 @@ function markerStyle(text: string): GanttMarkerStyle {
   return style
 }
 
-function parseGantt(source: string, linksEnabled = false): GanttChartOptions | undefined {
+function splitCallbackArgs(raw: string): string[] | undefined {
+  if (!raw.trim()) return []
+  const token = /\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([^,'"]*?))\s*(,|$)/gy
+  const args: string[] = []
+  while (token.lastIndex < raw.length) {
+    const match = token.exec(raw)
+    if (!match) return
+    const [, double, single, bare, separator] = match
+    args.push((double ?? single ?? bare.trim()).replace(/\\(["'\\])/g, '$1'))
+    if (!separator) break
+    if (token.lastIndex === raw.length) args.push('')
+  }
+  return args
+}
+
+interface TaskInteraction { href?: string, callback?: GanttTaskCallback }
+
+function parseClick(line: string): { ids: string[], interaction: TaskInteraction } | undefined {
+  const [, ids, clauses] = /^click\s+([\w.-]+(?:,[\w.-]+)*)\s+(.+)$/.exec(line) ?? []
+  if (!ids) return
+  const interaction: TaskInteraction = {}
+  let remaining = clauses
+  while (remaining) {
+    const command = /^(?:href\s+"((?:[^"\\]|\\.)*)"|call\s+([a-z_$][\w$]*(?:\.[a-z_$][\w$]*)*)\s*\(((?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^"'()])*)\))(?=\s|$)/i.exec(remaining)
+    if (!command) return
+    const [clause, href, name, raw] = command
+    if (href !== undefined) {
+      if (interaction.href !== undefined) return
+      interaction.href = href.replace(/\\(["\\])/g, '$1')
+    }
+    else {
+      if (interaction.callback) return
+      const args = splitCallbackArgs(raw)
+      if (!args) return
+      interaction.callback = { name, args }
+    }
+    remaining = remaining.slice(clause.length).trimStart()
+  }
+  return { ids: ids.split(','), interaction }
+}
+
+function parseGantt(source: string, interactionsEnabled = false): GanttChartOptions | undefined {
   const chart = readChronology(source, '')
   if (!chart || chart.header !== 'gantt') return
 
@@ -40,7 +81,7 @@ function parseGantt(source: string, linksEnabled = false): GanttChartOptions | u
   const exclusions: string[] = []
   const inclusions: string[] = []
   const sections: { name?: string, tasks: GanttTask[] }[] = [{ tasks: [] }]
-  const links = new Map<string, string>()
+  const interactions = new Map<string, TaskInteraction>()
   for (const line of chart.rows) {
     const [directive, ...words] = line.split(/\s+/)
     const text = words.join(' ')
@@ -66,11 +107,11 @@ function parseGantt(source: string, linksEnabled = false): GanttChartOptions | u
       case 'topAxis': topAxis = true; continue
       case 'inclusiveEndDates': inclusiveEndDates = true; continue
       case 'click': {
-        const [, id, tail] = /^click\s+([\w.-]+)\s+(.+)$/.exec(line) ?? []
-        if (!id) return
-        const href = /^(?:call\s+[\w$.]+\([^)]*\)\s+)?href\s+"([^"]*)"(?:\s+call\s+[\w$.]+\([^)]*\))?$/.exec(tail)?.[1]
-        if (href === undefined && !/^call\s+[\w$.]+\([^)]*\)$/.test(tail)) return
-        if (linksEnabled && href) links.set(id, href)
+        const action = parseClick(line)
+        if (!action) return
+        if (interactionsEnabled) {
+          for (const id of action.ids) interactions.set(id, { ...interactions.get(id), ...action.interaction })
+        }
         continue
       }
     }
@@ -90,10 +131,10 @@ function parseGantt(source: string, linksEnabled = false): GanttChartOptions | u
     else task.end = end
     sections.at(-1)!.tasks.push(task)
   }
-  if (links.size) {
+  if (interactions.size) {
     for (const section of sections)
       for (const task of section.tasks)
-        if (task.id) task.href = links.get(task.id)
+        if (task.id) Object.assign(task, interactions.get(task.id))
   }
   return { sections, title: chart.title, accessibleTitle: chart.accessibleTitle, description: chart.description, dateFormat, axisFormat, tickInterval: ticks,
     weekday, weekend, topAxis, todayMarker, todayMarkerStyle, inclusiveEndDates, excludes: exclusions, includes: inclusions }
@@ -104,8 +145,8 @@ export function scheduleGantt(source: string, now: number = Date.now()): GanttSc
   if (options) return scheduleTasks({ ...options, now })
 }
 
-export function gantt(source: string, idPrefix: string, options?: unknown, fallbackTitle = '', linksEnabled = false): string | undefined {
-  const chart = parseGantt(source, linksEnabled)
+export function gantt(source: string, idPrefix: string, options?: unknown, fallbackTitle = '', interactionsEnabled = false): string | undefined {
+  const chart = parseGantt(source, interactionsEnabled)
   if (!chart) return
   const config = options && typeof options === 'object' ? options as Record<string, unknown> : {}
   const number = (key: string) => typeof config[key] === 'number' ? config[key] as number : undefined

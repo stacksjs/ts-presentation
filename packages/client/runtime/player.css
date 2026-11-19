@@ -575,8 +575,9 @@ v-switch { display: block; }
 .slide-diagram .diagram-gantt-crit .diagram-gantt-bar { fill: #d9828d; }
 .slide-diagram .diagram-gantt-milestone-shape { fill: #e7b76f; }
 .slide-diagram :is(.diagram-gantt-reference, .diagram-gantt-today) { stroke: #d9828d; stroke-width: 2; stroke-dasharray: 4 4; }
-.slide-diagram .diagram-gantt-link text { text-decoration: underline; }
-.slide-diagram .diagram-gantt-link:is(:hover, :focus-visible) :is(.diagram-gantt-bar, .diagram-gantt-milestone-shape) {
+.slide-diagram :is(.diagram-gantt-link, .diagram-gantt-action) { cursor: pointer; }
+.slide-diagram :is(.diagram-gantt-link, .diagram-gantt-action) text { text-decoration: underline; }
+.slide-diagram :is(.diagram-gantt-link, .diagram-gantt-action):is(:hover, :focus-visible) :is(.diagram-gantt-bar, .diagram-gantt-milestone-shape, .diagram-gantt-reference) {
   stroke: currentColor;
   stroke-width: 2;
 }

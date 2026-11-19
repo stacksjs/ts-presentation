@@ -1,5 +1,6 @@
 import { defaultCanvas } from '../../types/src/canvas.ts'
 import { setupCodeCopy, setupCodeTabs } from './code-controls.ts'
+import { setupDiagramActions } from './diagram-actions.ts'
 import type { LiveDeck } from '../../types/src/dev-protocol.ts'
 import type { LiveManifest } from './dev-updates.ts'
 import { watchLiveDeck } from './dev-updates.ts'
@@ -311,6 +312,7 @@ stage.addEventListener('toggle', (event) => {
 }, true)
 imageView.addEventListener('close', () => syncPeer({ slide: current, screenshot: -1 }))
 stage.addEventListener('click', event => zoom(event.target))
+if (!isCapture && !isPreview) setupDiagramActions(stage)
 stage.addEventListener('click', (event) => {
   if (isCapture || isPreview || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
   const link = event.target instanceof Element ? event.target.closest<HTMLAnchorElement | SVGAElement>('a[data-slide-link]') : null

@@ -188,6 +188,9 @@ const textAccents: Record<string, string> = {
   '\\u': '\u0306', '\\v': '\u030c', '\\H': '\u030b', '\\r': '\u030a',
   '\\c': '\u0327', '\\k': '\u0328', '\\b': '\u0331', '\\d': '\u0323',
 }
+const operatorSpaces: Readonly<Record<string, string>> = {
+  '\\,': '\u2009', '\\:': '\u205f', '\\;': '\u2004', '\\!': '', '\\ ': ' ',
+}
 
 interface Atom {
   markup: Markup
@@ -338,6 +341,10 @@ function sizedFence(glyph: string, size: string, side: string): string {
 const styleCommands: Record<string, MathStyle> = {
   '\\displaystyle': 0, '\\textstyle': 1, '\\scriptstyle': 2, '\\scriptscriptstyle': 3,
 }
+const sizeCommands: Readonly<Record<string, number>> = {
+  '\\tiny': 0.5, '\\sixptsize': 0.6, '\\scriptsize': 0.7, '\\footnotesize': 0.8, '\\small': 0.9,
+  '\\normalsize': 1, '\\large': 1.2, '\\Large': 1.44, '\\LARGE': 1.728, '\\huge': 2.074, '\\Huge': 2.488,
+}
 const infixFractions = new Set(['\\over', '\\atop', '\\choose', '\\brace', '\\brack', '\\above'])
 const fractionFences: Record<string, [string, string]> = {
   '\\choose': ['(', ')'],
@@ -355,6 +362,11 @@ function labelledOperator(symbol: string, above: string, below: string, size = '
 
 function mathSize(style: MathStyle, markup: string): string {
   return `<mstyle displaystyle="${style === 0}" scriptlevel="${Math.max(0, style - 1)}">${markup}</mstyle>`
+}
+
+function scaledMath(content: Markup, ratio: number): Markup {
+  if (ratio === 1 || !content) return content
+  return xml`<mstyle mathsize="${String(Number(ratio.toFixed(5)))}em">${content}</mstyle>`
 }
 
 function fractionMarkup(first: Markup, second: Markup, forced?: MathStyle, thickness?: string, align?: string): Markup {
@@ -388,6 +400,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   let environmentDepth = 0
   let delimiterDepth = 0
   let equationNumber = 0
+  let fontScale = 1
 
   const macros = new Map<string, Macro>()
   const scopes: Map<string, Macro | undefined>[] = []
@@ -599,7 +612,9 @@ export function renderMath(source: string, display = false, configured: MathMacr
       return wrap(tag('mtext', textSymbols[token] ?? token.replace(/^\\([%$#&_{} ])$/, '$1')))
     }
     cursor++
-    const parts: Markup[] = []
+    const sized: Markup[] = []
+    const baseScale = fontScale
+    let parts: Markup[] = []
     let literal = ''
     function flush(): void {
       if (!literal) return
@@ -607,13 +622,23 @@ export function renderMath(source: string, display = false, configured: MathMacr
       parts.push(tag('mtext', joined))
       literal = ''
     }
+    function flushSize(): void {
+      flush()
+      if (parts.length) sized.push(scaledMath(joinMarkup(parts), fontScale / baseScale))
+      parts = []
+    }
     inScope(() => {
       while (true) {
         expand(false)
         const token = tokens[cursor++]
         if (!token || token === boundary) throw new Error('Unclosed math text')
         if (token === '}') break
-        if (token === '$' || token === '\\(') {
+        if (Object.hasOwn(sizeCommands, token)) {
+          flushSize()
+          fontScale = sizeCommands[token]
+          space()
+        }
+        else if (token === '$' || token === '\\(') {
           flush()
           const close = token === '$' ? '$' : '\\)'
           const value = inScope(() => row([close, '}']))
@@ -647,6 +672,11 @@ export function renderMath(source: string, display = false, configured: MathMacr
         else literal += textSymbols[token] ?? token.replace(/^\\([%$#&_{} ])$/, '$1')
       }
     })
+    if (sized.length || fontScale !== baseScale) {
+      flushSize()
+      parts = sized
+    }
+    fontScale = baseScale
     flush()
     depth--
     const content = joinMarkup(parts)
@@ -733,6 +763,13 @@ export function renderMath(source: string, display = false, configured: MathMacr
       if (Object.hasOwn(styleCommands, token)) {
         const selected = styleCommands[token]
         parts.push(mathSize(selected, renderMarkup(row(stop, true), selected)))
+        continue
+      }
+      if (Object.hasOwn(sizeCommands, token)) {
+        const baseScale = fontScale
+        fontScale = sizeCommands[token]
+        parts.push(scaledMath(row(stop, true), fontScale / baseScale))
+        fontScale = baseScale
         continue
       }
       if (token === '\\color') {
@@ -1194,7 +1231,14 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (name === 'operatorname' || name === 'operatornamewithlimits') {
       const star = name === 'operatorname' && peek() === '*'
       if (star) take()
-      const label = expandDefinition(rawGroup()).join('').replace(/\\([_%#$&{}])/g, '$1')
+      const label = expandDefinition(rawGroup()).map((token) => {
+        if (Object.hasOwn(operatorSpaces, token)) return operatorSpaces[token]
+        if (Object.hasOwn(textSymbols, token)) return textSymbols[token]
+        const command = token.startsWith('\\') ? token.slice(1) : ''
+        if (Object.hasOwn(greek, command)) return greek[command]
+        if (Object.hasOwn(operators, command)) return operators[command]
+        return token.replace(/^\\([_%#$&{}])$/, '$1')
+      }).join('').trim()
       return { markup: tag('mo', label), limits: name === 'operatornamewithlimits' || star }
     }
     if (name === 'char') {
@@ -1204,7 +1248,6 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (name === 'mathstrut') {
       return { markup: '<mpadded width="0"><mphantom><mo stretchy="false">(</mo></mphantom></mpadded>' }
     }
-    if (name === 'mathop') return { markup: argument(), limits: false }
     if (name === 'mod' || name === 'bmod' || name === 'pmod' || name === 'pod') return { markup: modulus(name) }
     if (contextualDots.has(name)) return { markup: ellipsis(name) }
     if (name === 'not') {

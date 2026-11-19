@@ -3,6 +3,25 @@ import { findChrome } from '../packages/slidev/node/runtime/chrome.ts'
 import { collectSnapshot } from '../packages/slidev/node/runtime/editable/walker.ts'
 import { createMathRenderer, renderMath } from '../packages/slidev/node/runtime/math.ts'
 
+test('scopes TeX font sizing across groups, text, and nested math', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const markup = math(String.raw`A {\tiny b {\normalsize c} \large d} + \text{\Large Wide {\small note} end} + E `, true)
+  expect(markup).toContain('<mstyle mathsize="0.5em"><mi>b</mi><mrow><mstyle mathsize="2em"><mi>c</mi></mstyle></mrow>')
+  expect(markup).toContain('<mstyle mathsize="2.4em"><mi>d</mi></mstyle>')
+  expect(markup).toContain('<mstyle mathsize="1.44em"><mtext>Wide')
+  expect(markup).toContain('<mstyle mathsize="0.625em"><mtext>note</mtext></mstyle>')
+  expect(markup).toContain('<mo>+</mo><mi>E</mi></mrow>')
+})
+
+test('renders spacing and expanded symbols in named TeX operators', () => {
+  const markup = createMathRenderer({ throwOnError: true })(String.raw`
+    \def\greekLabel{\alpha}
+    \operatorname*{arg\,max}_{x} + \operatorname{D_\greekLabel}(x)
+  `, true)
+  expect(markup).toContain('<munder><mo>arg\u2009max</mo><mrow><mi>x</mi></mrow></munder>')
+  expect(markup).toContain('<mo>D_α</mo>')
+})
+
 test('sets spacing and fences for explicit TeX atom classes', () => {
   const math = createMathRenderer({ throwOnError: true })
   const markup = math(String.raw`a\mathbin{*}b\mathrel{:}c\mathpunct{!}\mathopen{[}d\mathclose{]}\mathord{+}\mathinner{\frac e f}`, false)
@@ -352,7 +371,7 @@ test('resolves modular spacing and named limit placement from the math style', (
   expect(formula(String.raw`\varliminf_n x_n`, true)).toContain('<munder><mo class="math-underline">lim</mo>')
 })
 
-test.skipIf(!chrome)('lays out four delimiter sizes, stretchy pairs, and signed kerns in Chromium', async () => {
+test.skipIf(!chrome)('lays out delimiter sizes, signed kerns, and scoped font sizes in Chromium', async () => {
   const examples = [
     ['plain', String.raw`(\frac{1}{\frac{2}{3}})`],
     ['fixed', String.raw`\bigl(A\bigr)\Bigl(A\Bigr)\biggl(A\biggr)\Biggl(A\Biggr)`],
@@ -360,6 +379,7 @@ test.skipIf(!chrome)('lays out four delimiter sizes, stretchy pairs, and signed 
     ['no-kern', 'xy'],
     ['negative-kern', String.raw`x\mkern-4mu y`],
     ['thin-negative', String.raw`x\!y`],
+    ['font-sizes', String.raw`A{\tiny b{\normalsize c}\large d}E + \text{\Large wide {\small note} end}`],
   ]
   const content = examples.map(([id, source]) => `<div id="${id}">${renderMath(source, true)}</div>`).join('')
   const server = Bun.serve({
@@ -371,12 +391,13 @@ test.skipIf(!chrome)('lays out four delimiter sizes, stretchy pairs, and signed 
   const view = new Bun.WebView({ width: 720, height: 500, backend: { type: 'chrome', path: chrome!, url: false } })
   try {
     await view.navigate(server.url.href)
-    const metrics = await view.evaluate<{ plain: number, sizes: number[], paired: number[], kerns: number[] }>(`(() => {
+    const metrics = await view.evaluate<{ plain: number, sizes: number[], paired: number[], kerns: number[], fontSizes: number[] }>(`(() => {
       const heights = (selector) => [...document.querySelectorAll(selector)].map(element => element.getBoundingClientRect().height)
       return {
         plain: heights('#plain mo')[0],
         sizes: heights('#fixed mo[form="prefix"]'),
         paired: heights('#paired mo[stretchy="true"]'),
+        fontSizes: [...document.querySelectorAll('#font-sizes :is(mi,mtext)')].map(node => Number.parseFloat(getComputedStyle(node).fontSize)),
         kerns: [...document.querySelectorAll('#no-kern, #negative-kern, #thin-negative')].map((example) => {
           const [first, second] = example.querySelectorAll('mi')
           return second.getBoundingClientRect().left - first.getBoundingClientRect().left
@@ -390,6 +411,8 @@ test.skipIf(!chrome)('lays out four delimiter sizes, stretchy pairs, and signed 
     for (const height of metrics.paired) expect(height).toBeGreaterThan(metrics.plain * 1.2)
     expect(metrics.kerns[0] - metrics.kerns[1]).toBeCloseTo(8, 0)
     expect(metrics.kerns[0] - metrics.kerns[2]).toBeCloseTo(36 * 0.17, 0)
+    for (const [index, ratio] of [1, 0.5, 1, 1.2, 1, 1.44, 0.9, 1.44].entries())
+      expect(metrics.fontSizes[index]).toBeCloseTo(36 * ratio, 1)
   }
   finally {
     view.close()
