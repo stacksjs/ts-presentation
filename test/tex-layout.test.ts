@@ -194,7 +194,7 @@ test('keeps style-dependent math in a lap and uses text mode for plain laps', ()
 })
 
 const chrome = await findChrome()
-test.skipIf(!chrome)('positions lap contents in Chromium without adding width to the formula', async () => {
+test.skipIf(!chrome)('positions lap contents and explicit operator limits in Chromium', async () => {
   const formulas = [
     { id: 'reference', tex: 'AB' },
     { id: 'left', tex: String.raw`A\mathllap{xyz}B` },
@@ -202,13 +202,14 @@ test.skipIf(!chrome)('positions lap contents in Chromium without adding width to
     { id: 'right', tex: String.raw`A\mathrlap{xyz}B` },
   ]
   const body = formulas.map(({ id, tex }) => `<div id="${id}">${renderMath(tex)}</div>`).join('')
+  const limits = `<section id="limits">${renderMath(String.raw`\sum\limits_{k=0} + \sum_{k=0}`)}</section>`
   const css = Bun.file(new URL('../src/player.css', import.meta.url))
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
     fetch(request) {
       if (new URL(request.url).pathname === '/presentation.css') return new Response(css)
-      return new Response(`<!doctype html><link rel="stylesheet" href="/presentation.css"><main style="margin: 60px; font-size: 36px">${body}<aside>${renderMath(String.raw`\mathllap{xyz}AB`)}</aside></main>`, {
+      return new Response(`<!doctype html><link rel="stylesheet" href="/presentation.css"><main style="margin: 60px; font-size: 36px">${body}${limits}<aside>${renderMath(String.raw`\mathllap{xyz}AB`)}</aside></main>`, {
         headers: { 'Content-Type': 'text/html; charset=utf-8' },
       })
     },
@@ -243,9 +244,93 @@ test.skipIf(!chrome)('positions lap contents in Chromium without adding width to
     }))()`)
     expect(bounds.inkLeft).toBeLessThan(bounds.actualLeft)
     expect(overflow?.pageRect?.x).toBeCloseTo(bounds.inkLeft)
+    const [stacked, inline] = await view.evaluate<number[]>(`[...document.querySelectorAll('#limits :is(munder, msub)')].map(node => {
+      const [base, lower] = [...node.children].map(part => part.getBoundingClientRect())
+      return lower.x + lower.width / 2 - base.x - base.width / 2
+    })`)
+    expect(Math.abs(stacked)).toBeLessThan(2)
+    expect(inline).toBeGreaterThan(5)
   }
   finally {
     view.close()
     server.stop(true)
   }
-}, 15000)
+}, 45000)
+
+function formula(source: string, display = false): string {
+  return createMathRenderer({ throwOnError: true })(source, display).split('<annotation')[0]
+}
+
+// Cases adapted from the KaTeX infix builder and matrix tests.
+test.each([
+  ['over', '', '<mfrac>'],
+  ['atop', '', '<mfrac linethickness="0">'],
+  ['choose', '()', '<mfrac linethickness="0">'],
+  ['brace', '{}', '<mfrac linethickness="0">'],
+  ['brack', '[]', '<mfrac linethickness="0">'],
+])('renders infix %s with a correctly grouped numerator and denominator', (command, delimiters, open) => {
+  const html = formula(`a+b \\${command} c+d`)
+  expect(html).toContain(`${open}<mrow><mi>a</mi><mo>+</mo><mi>b</mi></mrow><mrow><mi>c</mi><mo>+</mo><mi>d</mi></mrow></mfrac>`)
+  for (const delimiter of delimiters) expect(html).toContain(`<mo stretchy="true">${delimiter}</mo>`)
+  if (!delimiters) expect(html).not.toContain('<mo stretchy="true">')
+})
+
+test('honors custom generalized fraction bars, delimiters, and explicit styles', () => {
+  expect(formula(String.raw`\def\width{2pt} a\above{\width}b`)).toContain('<mfrac linethickness="2pt">')
+  expect(formula(String.raw`a\above.3em b`)).toContain('<mfrac linethickness=".3em">')
+  expect(formula(String.raw`a\above{} b`)).toContain('<mfrac linethickness="0">')
+  expect(formula(String.raw`a\above{-1pt} b`)).toContain('<mfrac linethickness="0">')
+  expect(formula(String.raw`\genfrac{}{}{}{}{a}{b}`)).toContain('<mfrac>')
+  expect(formula(String.raw`\genfrac{}{}{0pt}{}{a}{b}`)).toContain('<mfrac linethickness="0">')
+
+  const html = formula(String.raw`\def\L{(}\genfrac\L ] 2pt {1} a{a+1}`, true)
+  expect(html).toContain('<mo stretchy="true">(</mo><mstyle displaystyle="false" scriptlevel="0"><mfrac linethickness="2pt">')
+  expect(html).toContain('<mo stretchy="true">]</mo>')
+  expect(() => formula(String.raw`a\above{50} b`)).toThrow('Invalid math dimension')
+  expect(() => formula(String.raw`\genfrac{}{}{2pt}{9}ab`)).toThrow('Invalid fraction style')
+  expect(() => formula(String.raw`\genfrac{}{}{}{}{n}`)).toThrow('Missing math argument')
+})
+
+test('resolves math choice and limit placement once the fraction style is known', () => {
+  const source = String.raw`\def\pick{\mathchoice{D}{T}{S}{s}}\pick\over\pick`
+  for (const [display, choice] of [[true, 'T'], [false, 'S']] as const) {
+    const selected = `<mrow><mrow><mi>${choice}</mi></mrow></mrow>`
+    expect(formula(source, display)).toContain(`<mfrac>${selected}${selected}</mfrac>`)
+  }
+  expect(formula(String.raw`x^{\mathchoice{D}{T}{S}{s}\over 2}`, true)).toContain('<mrow><mi>s</mi></mrow>')
+  const limits = formula(String.raw`\displaystyle\sum_{k=0}^n k \over \color{blue}\sum_{k=0}^n k`, true)
+  expect(limits).toContain('<mstyle displaystyle="true" scriptlevel="0"><munderover><mo>∑</mo>')
+  expect(limits).toContain('<mrow style="color:blue"><msubsup><mo>∑</mo>')
+  expect(() => formula(String.raw`\mathchoice{a}{b}`)).toThrow('Missing math choice')
+})
+
+test('groups infix fractions within braces, matrices, and matching fences', () => {
+  const groups = formula(String.raw`{a\over b}\atop{c\over d}`)
+  expect(groups.match(/<mfrac\b/g)).toHaveLength(3)
+  expect(groups).toContain('<mfrac linethickness="0">')
+  const matrix = formula(String.raw`\begin{matrix}0&1\over2&3\\4&5&6\end{matrix}`)
+  expect(matrix.match(/<mtd\b/g)).toHaveLength(6)
+  expect(matrix).toContain('<mtd><mfrac><mrow><mn>1</mn></mrow><mrow><mn>2</mn></mrow></mfrac></mtd>')
+  expect(formula(String.raw`\left(a\over b\right)`)).toContain('<mo stretchy="true">(</mo><mfrac>')
+  expect(() => formula(String.raw`a\over b\atop c`)).toThrow('Only one infix fraction')
+  expect(renderMath(String.raw`a\over b\over c`)).toContain('math-unrendered')
+})
+
+test('accepts macro-generated infix syntax without leaking group-local definitions', () => {
+  const source = String.raw`\def\separator{\choose}{\def\x{A}\x \separator \x}`
+  const html = formula(source)
+  expect(html).toContain('<mfrac linethickness="0"><mrow><mi>A</mi></mrow><mrow><mi>A</mi></mrow>')
+  expect(() => formula(source + String.raw`\x`)).toThrow('Unsupported math command')
+  expect(formula(String.raw`\sqrt[\mathchoice{D}{T}{S}{s}]{27}`)).toContain('<mroot><mrow><mn>27</mn></mrow><mrow><mrow><mi>s</mi>')
+})
+
+test('applies the last operator limit control even after scripts', () => {
+  const explicit = formula(String.raw`\int_2\nolimits^3\limits f(x)`)
+  expect(explicit).toContain('<munderover><mo movablelimits="false">∫</mo><mn>2</mn><mn>3</mn></munderover>')
+  const side = formula(String.raw`\sum\limits_3^4\nolimits`, true)
+  expect(side).toContain('<msubsup><mo>∑</mo><mn>3</mn><mn>4</mn></msubsup>')
+  expect(formula(String.raw`\mathop{\mathrm{arg}}\limits_x`)).toContain('<munder><mrow>')
+  expect(formula(String.raw`\operatornamewithlimits{arg}_x`, true)).toContain('<munder><mo>arg</mo><mi>x</mi></munder>')
+  expect(formula(String.raw`\smallint_{a}^{b}`, true)).toContain('<munderover><mo largeop="false">∫</mo>')
+  expect(() => formula(String.raw`3\nolimits_2`)).toThrow('Limit control requires a math operator')
+})

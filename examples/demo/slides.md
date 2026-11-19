@@ -411,3 +411,19 @@ $$
 <!--
 The overlap keeps the summation compact. The frame marks a separate closed-form example.
 -->
+
+---
+
+# Read an infix fraction
+
+The separator groups the expressions on either side into a numerator and denominator.
+
+$$
+{\sum_{k=1}^{n} k \over n} = {n+1 \above{3pt} 2}
+\qquad\qquad
+{n \choose 2} = {n(n-1) \over 2}
+$$
+
+<!--
+Compare the ordinary fraction bar with the thicker bar in the average. The binomial coefficient stacks its terms inside parentheses.
+-->

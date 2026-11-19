@@ -19,14 +19,16 @@ const operators: Record<string, string> = {
   emptyset: '∅', ldots: '…', dots: '…', cdots: '⋯', vdots: '⋮', ddots: '⋱', angle: '∠',
   mid: '∣', parallel: '∥', perp: '⊥', circ: '∘', ast: '∗', setminus: '∖',
   coprod: '∐', bigcup: '⋃', bigcap: '⋂', bigvee: '⋁', bigwedge: '⋀',
-  iiint: '∭', oiint: '∯', imath: 'ı', jmath: 'ȷ', ell: 'ℓ', hbar: 'ℏ',
+  iiint: '∭', oiint: '∯', oiiint: '∰', intop: '∫', smallint: '∫', imath: 'ı', jmath: 'ȷ', ell: 'ℓ', hbar: 'ℏ',
   Re: 'ℜ', Im: 'ℑ', aleph: 'ℵ', empty: '∅', cong: '≅', ll: '≪', gg: '≫',
   uparrow: '↑', downarrow: '↓', longrightarrow: '⟶', longleftarrow: '⟵',
   otimes: '⊗', oplus: '⊕', odot: '⊙', wedge: '∧', vee: '∨', colon: ':',
 }
 const functions = new Set(['sin', 'cos', 'tan', 'cot', 'sec', 'csc', 'arcsin', 'arccos', 'arctan', 'sinh', 'cosh', 'tanh',
   'log', 'ln', 'exp', 'min', 'max', 'argmin', 'argmax', 'det', 'lim', 'sup', 'inf', 'gcd', 'mod', 'Pr'])
-const big = new Set(['sum', 'prod', 'coprod', 'bigcup', 'bigcap', 'bigvee', 'bigwedge', 'lim', 'min', 'max', 'argmin', 'argmax', 'sup', 'inf'])
+const big = new Set(['sum', 'prod', 'coprod', 'bigcup', 'bigcap', 'bigvee', 'bigwedge', 'intop', 'smallint',
+  'lim', 'min', 'max', 'argmin', 'argmax', 'sup', 'inf', 'det', 'gcd', 'Pr'])
+const integrals = new Set(['int', 'iint', 'iiint', 'oint', 'oiint', 'oiiint'])
 const variants: Record<string, string> = {
   mathbf: 'bold', mathbb: 'double-struck', mathrm: 'normal', mathit: 'italic',
   mathsf: 'sans-serif', mathtt: 'monospace', mathcal: 'script', mathfrak: 'fraktur', boldsymbol: 'bold-italic',
@@ -135,7 +137,7 @@ const textAccents: Record<string, string> = {
 }
 
 interface Atom {
-  markup: string
+  markup: Markup
   limits?: boolean
   brace?: 'lower' | 'upper'
 }
@@ -144,7 +146,54 @@ type Alignment = 'left' | 'center' | 'right'
 type ArrayRule = 'solid' | 'dashed' | 'double'
 const alignments: Record<string, Alignment> = { l: 'left', c: 'center', r: 'right' }
 interface ArrayColumn { align: Alignment, before?: ArrayRule }
-interface ArrayRow { cells: string[], label: string, before?: ArrayRule, gap?: string }
+interface ArrayRow { cells: Markup[], label: string, before?: ArrayRule, gap?: string }
+
+// Infix fractions decide the style of both operands after the row is parsed.
+// Static fragments stay strings. Only style-dependent parts defer rendering.
+type Markup = string | ((style: MathStyle) => string)
+
+function renderMarkup(markup: Markup, style: MathStyle): string {
+  return typeof markup === 'string' ? markup : markup(style)
+}
+
+function joinMarkup(parts: Markup[]): Markup {
+  return parts.some(part => typeof part !== 'string')
+    ? style => parts.map(part => renderMarkup(part, style)).join('')
+    : parts.join('')
+}
+
+function xml(parts: TemplateStringsArray, ...values: Markup[]): Markup {
+  let leading = parts[0]
+  for (let index = 0; index < values.length; index++) {
+    const value = values[index]
+    if (typeof value !== 'string') {
+      return (style) => {
+        let result = leading
+        for (let rest = index; rest < values.length; rest++) result += renderMarkup(values[rest], style) + parts[rest + 1]
+        return result
+      }
+    }
+    leading += value + parts[index + 1]
+  }
+  return leading
+}
+
+function fractionStyle(style: MathStyle): MathStyle {
+  return Math.min(3, style + 1) as MathStyle
+}
+
+function scriptStyle(style: MathStyle): MathStyle {
+  return style < 2 ? 2 : 3
+}
+
+function inScript(markup: Markup): Markup {
+  return typeof markup === 'string' ? markup : style => markup(scriptStyle(style))
+}
+
+function stackOperator(markup: Markup): Markup {
+  const fixed = (value: string) => value.replace(/^((?:<mrow>)*<mo)(?=[ >])/, '$1 movablelimits="false"')
+  return typeof markup === 'string' ? fixed(markup) : style => fixed(markup(style))
+}
 
 function arrayColumns(spec: string): { columns: ArrayColumn[], after?: ArrayRule } {
   const columns: ArrayColumn[] = []
@@ -176,6 +225,12 @@ function fence(token: string, stretchy = true): string {
 const styleCommands: Record<string, MathStyle> = {
   '\\displaystyle': 0, '\\textstyle': 1, '\\scriptstyle': 2, '\\scriptscriptstyle': 3,
 }
+const infixFractions = new Set(['\\over', '\\atop', '\\choose', '\\brace', '\\brack', '\\above'])
+const fractionFences: Record<string, [string, string]> = {
+  '\\choose': ['(', ')'],
+  '\\brace': ['{', '}'],
+  '\\brack': ['[', ']'],
+}
 const boundary = '\u0000math-expansion-boundary'
 
 function labelledOperator(symbol: string, above: string, below: string, size = ''): string {
@@ -187,6 +242,19 @@ function labelledOperator(symbol: string, above: string, below: string, size = '
 
 function mathSize(style: MathStyle, markup: string): string {
   return `<mstyle displaystyle="${style === 0}" scriptlevel="${Math.max(0, style - 1)}">${markup}</mstyle>`
+}
+
+function fractionMarkup(first: Markup, second: Markup, forced?: MathStyle, thickness?: string, align?: string): Markup {
+  const bar = thickness !== undefined ? ` linethickness="${thickness}"` : ''
+  const numerator = align ? ` numalign="${align}"` : ''
+  const start = `<mfrac${bar}${numerator}>`
+  if (forced === undefined && typeof first === 'string' && typeof second === 'string') return `${start}${first}${second}</mfrac>`
+  return (parent) => {
+    const target = forced ?? parent
+    const child = fractionStyle(target)
+    const content = `${start}${renderMarkup(first, child)}${renderMarkup(second, child)}</mfrac>`
+    return target === parent ? content : mathSize(target, content)
+  }
 }
 
 function dimension(value: string): string | undefined {
@@ -206,7 +274,6 @@ export function renderMath(source: string, display = false, configured: MathMacr
   let tagState = { label: '', suppressed: false }
   let environmentDepth = 0
   let equationNumber = 0
-  let style: MathStyle = display ? 0 : 1
 
   const macros = new Map<string, Macro>()
   const scopes: Map<string, Macro | undefined>[] = []
@@ -230,13 +297,6 @@ export function renderMath(source: string, display = false, configured: MathMacr
   for (const [name, definition] of state?.globals ?? []) macros.set(name, definition)
 
   const space = () => { while (/^\s+$/.test(tokens[cursor] ?? '')) cursor++ }
-
-  function withStyle<T>(value: MathStyle, render: () => T): T {
-    const before = style
-    style = value
-    try { return render() }
-    finally { style = before }
-  }
 
   function inScope<T>(render: () => T): T {
     const saved = new Map<string, Macro | undefined>()
@@ -342,13 +402,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return definition
   }
 
-  function scriptStyle(): MathStyle {
-    return Math.max(2, Math.min(3, style + 1)) as MathStyle
-  }
-
-  function argument(): string {
+  function argument(): Markup {
     if (depth++ > 100) throw new Error('Math arguments are nested too deeply')
-    const markup = atom(take()).markup
+    const token = take()
+    if (!token || token === '}' || token === boundary) throw new Error('Missing math argument')
+    if (infixFractions.has(token)) throw new Error('An infix fraction argument requires a group')
+    const markup = atom(token).markup
     depth--
     return markup
   }
@@ -357,10 +416,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return rawBracket()?.join('')
   }
 
-  function readDimension(): string {
-    space()
+  function readDimension(blank?: string): string {
+    expand()
     if (tokens[cursor] === '{') {
-      const length = dimension(literalGroup())
+      const value = expandDefinition(rawGroup()).join('')
+      if (!value.trim() && blank !== undefined) return blank
+      const length = dimension(value)
       if (length !== undefined) return length
     }
     else {
@@ -377,24 +438,24 @@ export function renderMath(source: string, display = false, configured: MathMacr
     throw new Error('Invalid math dimension')
   }
 
-  function textBox(name: string): string {
-    if (name === 'reflectbox') return `<mrow class="math-reflect">${textArgument('text')}</mrow>`
-    if (name === 'fbox') return `<mrow class="math-color-box math-frame">${textArgument('text')}</mrow>`
+  function textBox(name: string): Markup {
+    if (name === 'reflectbox') return xml`<mrow class="math-reflect">${textArgument('text')}</mrow>`
+    if (name === 'fbox') return xml`<mrow class="math-color-box math-frame">${textArgument('text')}</mrow>`
     const frame = name === 'fcolorbox' ? safeColor(literalGroup()) : ''
     const background = safeColor(literalGroup())
     if (!background || (name === 'fcolorbox' && !frame)) throw new Error('Invalid math box color')
     const content = textArgument('text')
-    return `<mrow class="math-color-box${frame ? ' math-frame' : ''}" style="background-color:${background}${frame ? `;border-color:${frame}` : ''}">${content}</mrow>`
+    return xml`<mrow class="math-color-box${frame ? ' math-frame' : ''}" style="background-color:${background}${frame ? `;border-color:${frame}` : ''}">${content}</mrow>`
   }
 
-  function overlap(direction: string, content: string): string {
-    return `<mpadded width="0"><mrow class="math-overlap-${direction}">${content}</mrow></mpadded>`
+  function overlap(direction: string, content: Markup): Markup {
+    return xml`<mpadded width="0"><mrow class="math-overlap-${direction}">${content}</mrow></mpadded>`
   }
 
-  function textArgument(name: string): string {
+  function textArgument(name: string): Markup {
     if (depth++ > 100) throw new Error('Math text is nested too deeply')
     const properties = textFonts[name]
-    const wrap = (markup: string) => properties ? `<mrow style="${properties}">${markup}</mrow>` : markup
+    const wrap = (markup: Markup) => properties ? xml`<mrow style="${properties}">${markup}</mrow>` : markup
     expand()
     if (tokens[cursor] !== '{') {
       const token = tokens[cursor++]
@@ -403,7 +464,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       return wrap(tag('mtext', textSymbols[token] ?? token.replace(/^\\([%$#&_{} ])$/, '$1')))
     }
     cursor++
-    const parts: string[] = []
+    const parts: Markup[] = []
     let literal = ''
     function flush(): void {
       if (!literal) return
@@ -420,9 +481,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
         if (token === '$' || token === '\\(') {
           flush()
           const close = token === '$' ? '$' : '\\)'
-          const value = withStyle(Math.max(1, style) as MathStyle, () => inScope(() => row([close, '}'])))
+          const value = inScope(() => row([close, '}']))
           if (take() !== close) throw new Error('Unclosed inline math in text')
-          parts.push(`<mrow style="font-style:normal;font-weight:normal">${style === 0 ? mathSize(1, value) : value}</mrow>`)
+          parts.push(style => {
+            const content = renderMarkup(value, style === 0 ? 1 : style)
+            return `<mrow style="font-style:normal;font-weight:normal">${style === 0 ? mathSize(1, content) : content}</mrow>`
+          })
         }
         else if (token === '{' || (token.startsWith('\\') && Object.hasOwn(textFonts, token.slice(1)))) {
           flush()
@@ -450,18 +514,18 @@ export function renderMath(source: string, display = false, configured: MathMacr
     })
     flush()
     depth--
-    if (properties || parts.length === 1) return wrap(parts.join(''))
-    return `<mrow>${parts.join('')}</mrow>`
+    const content = joinMarkup(parts)
+    return properties || parts.length === 1 ? wrap(content) : xml`<mrow>${content}</mrow>`
   }
 
-  function fraction(targetStyle: MathStyle, thickness?: string, align?: string): string {
-    const script = Math.min(3, targetStyle + 1) as MathStyle
-    const first = withStyle(script, argument)
-    const second = withStyle(script, argument)
-    const settings = thickness !== undefined ? ` linethickness="${thickness}"` : ''
-    const numerator = align ? ` numalign="${align}"` : ''
-    const markup = `<mfrac${settings}${numerator}>${first}${second}</mfrac>`
-    return style === targetStyle ? markup : mathSize(targetStyle, markup)
+  function fraction(target?: MathStyle, thickness?: string, align?: string): Markup {
+    return fractionMarkup(argument(), argument(), target, thickness, align)
+  }
+
+  function infixThickness(token: string): string | undefined {
+    if (token === '\\over') return
+    const thickness = token === '\\above' ? readDimension('0') : '0'
+    return Number.parseFloat(thickness) > 0 ? thickness : '0'
   }
 
   function nextTag(automatic: boolean): string {
@@ -469,21 +533,32 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return automatic && !tagState.suppressed ? `(${++equationNumber})` : ''
   }
 
-  function row(stop: string[] = []): string {
+  function row(stop: string[] = [], breakOnInfix = false): Markup {
     if (depth++ > 100) throw new Error('Math groups are nested too deeply')
-    const parts: string[] = []
-    while (peek() && !stop.includes(peek())) {
-      const token = take()
+    const before: Markup[] = []
+    let parts = before
+    let infix = ''
+    let thickness: string | undefined
+    for (let token = peek(); token && !stop.includes(token); token = peek()) {
+      if (breakOnInfix && infixFractions.has(token)) break
+      cursor++
+      if (infixFractions.has(token)) {
+        if (infix) throw new Error('Only one infix fraction is allowed per math group')
+        infix = token
+        thickness = infixThickness(token)
+        parts = []
+        continue
+      }
       if (Object.hasOwn(styleCommands, token)) {
         const selected = styleCommands[token]
-        parts.push(mathSize(selected, withStyle(selected, () => row(stop))))
-        break
+        parts.push(mathSize(selected, renderMarkup(row(stop, true), selected)))
+        continue
       }
       if (token === '\\color') {
         const color = safeColor(literalGroup())
-        const content = row(stop)
-        parts.push(color ? `<mrow style="color:${color}">${content}</mrow>` : content)
-        break
+        const content = row(stop, true)
+        parts.push(color ? xml`<mrow style="color:${color}">${content}</mrow>` : content)
+        continue
       }
       let part: Atom
       if (/^\d$/.test(token)) {
@@ -496,14 +571,18 @@ export function renderMath(source: string, display = false, configured: MathMacr
         part = { markup: tag('mn', number) }
       }
       else part = atom(token)
-      let lower = ''
-      let upper = ''
-      let forceLimits = part.limits && style === 0
-      if (peek() === '\\limits' || peek() === '\\nolimits') forceLimits = take() === '\\limits'
-      while (peek() === '_' || peek() === '^' || peek() === "'") {
-        const kind = take()
-        if (kind === '_') lower = withStyle(scriptStyle(), argument)
-        else if (kind === '^') upper = withStyle(scriptStyle(), argument)
+      let lower: Markup = ''
+      let upper: Markup = ''
+      let forceLimits: boolean | undefined
+      for (let kind = peek(); kind; kind = peek()) {
+        if (kind !== '_' && kind !== '^' && kind !== "'" && kind !== '\\limits' && kind !== '\\nolimits') break
+        cursor++
+        if (kind === '\\limits' || kind === '\\nolimits') {
+          if (part.limits === undefined) throw new Error('Limit control requires a math operator')
+          forceLimits = kind === '\\limits'
+        }
+        else if (kind === '_') lower = inScript(argument())
+        else if (kind === '^') upper = inScript(argument())
         else {
           let primes = '′'
           while (peek() === "'") { take(); primes += '′' }
@@ -511,27 +590,42 @@ export function renderMath(source: string, display = false, configured: MathMacr
         }
       }
       if (part.brace === 'upper' && upper) {
-        part.markup = `<mover>${part.markup}${upper}</mover>`
+        part.markup = xml`<mover>${part.markup}${upper}</mover>`
         upper = ''
       }
       if (part.brace === 'lower' && lower) {
-        part.markup = `<munder>${part.markup}${lower}</munder>`
+        part.markup = xml`<munder>${part.markup}${lower}</munder>`
         lower = ''
       }
-      const wrapper = lower && upper ? (forceLimits ? 'munderover' : 'msubsup')
-        : lower ? (forceLimits ? 'munder' : 'msub')
-          : upper ? (forceLimits ? 'mover' : 'msup') : ''
-      parts.push(wrapper ? `<${wrapper}>${part.markup}${lower}${upper}</${wrapper}>` : part.markup)
+      if (!lower && !upper) parts.push(part.markup)
+      else {
+        const normal = lower && upper ? 'msubsup' : lower ? 'msub' : 'msup'
+        const stacked = lower && upper ? 'munderover' : lower ? 'munder' : 'mover'
+        const wrap = (tag: string) => xml`<${tag}>${part.markup}${lower}${upper}</${tag}>`
+        if (forceLimits !== undefined || !part.limits) {
+          if (forceLimits) part.markup = stackOperator(part.markup)
+          parts.push(wrap(forceLimits ? stacked : normal))
+        }
+        else {
+          const display = wrap(stacked)
+          const inline = wrap(normal)
+          parts.push(style => renderMarkup(style === 0 ? display : inline, style))
+        }
+      }
     }
     depth--
-    return parts.join('')
+    const result = joinMarkup(parts)
+    if (!infix) return result
+    const quotient = fractionMarkup(xml`<mrow>${joinMarkup(before)}</mrow>`, xml`<mrow>${result}</mrow>`, undefined, thickness)
+    const fences = fractionFences[infix]
+    return fences ? xml`<mrow>${fence(fences[0])}${quotient}${fence(fences[1])}</mrow>` : quotient
   }
 
   function commutativeDiagram(): string {
     const stops = ['@', '&', '\\\\', '\\cr', '\\end']
     const rows: string[][] = []
     function arrowLabel(type: string): string {
-      const label = withStyle(2, () => inScope(() => row([...stops, type])))
+      const label = renderMarkup(inScope(() => row([...stops, type])), 2)
       if (take() !== type) throw new Error('Incomplete CD arrow')
       return label ? `<mrow>${label}</mrow>` : ''
     }
@@ -550,7 +644,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     let cells: string[] = []
     let closed = false
     while (peek()) {
-      cells.push(withStyle(0, () => inScope(() => row(stops))))
+      cells.push(renderMarkup(inScope(() => row(stops)), 0))
       const separator = take()
       if (separator === '@') { cells.push(commutativeArrow()); continue }
       if (separator === '&') continue
@@ -571,14 +665,14 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return `<mtable class="math-cd">${markup}</mtable>`
   }
 
-  function delimitedNotation(name: string): string {
+  function delimitedNotation(name: string): Markup {
     const [left, right] = notationDelimiters[name]
     const stretchy = /^[A-Z]/.test(name)
     const separator = name === 'Braket' || name === 'Set' || name === 'set'
-    if (!separator || peek() !== '{') return `<mrow>${fence(left, stretchy)}${argument()}${fence(right, stretchy)}</mrow>`
+    if (!separator || peek() !== '{') return xml`<mrow>${fence(left, stretchy)}${argument()}${fence(right, stretchy)}</mrow>`
     take()
     const content = inScope(() => {
-      const parts: string[] = []
+      const parts: Markup[] = []
       const stops = name === 'set' ? ['|', '}'] : ['|', '\\|', '}']
       parts.push(row(stops))
       while (peek() && peek() !== '}') {
@@ -589,12 +683,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
         parts.push(row(name === 'Braket' ? stops : ['}']))
       }
       if (take() !== '}') throw new Error('Unclosed math notation')
-      return parts.join('')
+      return joinMarkup(parts)
     })
-    return `<mrow>${fence(left, stretchy)}${content}${fence(right, stretchy)}</mrow>`
+    return xml`<mrow>${fence(left, stretchy)}${content}${fence(right, stretchy)}</mrow>`
   }
 
-  function matrix(environment: string): string {
+  function matrix(environment: string): Markup {
     const unclosed = () => new Error(`Unclosed math environment: ${environment}`)
     if (environment === 'CD') return commutativeDiagram()
     if (/^equation[*]?$/.test(environment)) {
@@ -603,7 +697,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       environmentDepth--
       if (take() !== '\\end' || literalGroup() !== environment) throw unclosed()
       tagState.label = nextTag(display && environment === 'equation')
-      return `<mrow>${content}</mrow>`
+      return xml`<mrow>${content}</mrow>`
     }
     if (!/^(?:[pbBvV]?matrix[*]?|smallmatrix|d?rcases|d?cases|align(?:ed|edat|at[*]?|[*])?|gather(?:ed|[*])?|split|d?array|subarray|substack|multline[*]?)$/.test(environment))
       return tag('mtext', `\\begin{${environment}}`)
@@ -619,7 +713,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const aligned = environment.startsWith('align') || environment === 'split'
     const gathered = environment.startsWith('gather') || environment.startsWith('multline')
     const cases = environment.endsWith('cases')
-    const cellStyle = compact ? Math.max(2, style) as MathStyle : environment.startsWith('d') || aligned || gathered ? 0 : 1
+    const ordinaryCellStyle = environment.startsWith('d') || aligned || gathered ? 0 : 1
     const stretch = columnArray && macros.has('\\arraystretch')
       ? Number(expandDefinition(['\\arraystretch']).join('')) : 1
     if (!(stretch > 0 && stretch <= 100)) throw new Error('Invalid array stretch')
@@ -628,7 +722,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     environmentDepth++
     tagState = { label: '', suppressed: false }
     const rows: ArrayRow[] = []
-    let cells: string[] = []
+    let cells: Markup[] = []
     const end = stack ? '}' : '\\end'
     let rule: ArrayRule | undefined
     let closed = false
@@ -640,7 +734,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
           rule = rule ? 'double' : line
         }
       }
-      cells.push(withStyle(cellStyle, () => inScope(() => row(stops))))
+      cells.push(inScope(() => row(stops)))
       const separator = take()
       if (separator === '&') {
         if (stack || environment === 'subarray' || gathered) throw new Error('Too many columns in math stack')
@@ -675,37 +769,39 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const columnCount = Math.max(layout.columns.length, ...rows.map(entry => entry.cells.length))
     if (columnArray && columnCount * rows.length > 6000) throw new Error('Math array has too many cells')
     const pad = compact ? '0.06' : (0.14 * stretch).toFixed(4).replace(/0+$/, '').replace(/\.$/, '')
-    const markup = rows.map((entry, rowIndex) => {
-      const cell = tags ? `<mtd class="math-equation-number">${tag('mtext', entry.label)}</mtd>` : ''
-      // MathML Core browsers use CSS for cell alignment and visible rules.
-      const content = Array.from({ length: columnArray ? columnCount : entry.cells.length }, (_, index) => {
-        const align = aligned ? (index % 2 ? 'left' : 'right') : alignment[index] ?? alignment.at(-1) ?? (cases ? 'left' : '')
-        const styling: string[] = []
-        if (align) styling.push(`text-align:${align}`)
-        if (cellStyle === 0) styling.push('math-style:normal')
-        const before = layout.columns[index]?.before
-        if (before) styling.push(tableBorder('left', before))
-        if (layout.after && index === columnCount - 1) styling.push(tableBorder('right', layout.after))
-        if (entry.before) styling.push(tableBorder('top', entry.before))
-        if (rule && rowIndex === rows.length - 1) styling.push(tableBorder('bottom', rule))
-        if (compact || stretch !== 1) styling.push(`padding-block:${pad}em`)
-        if (entry.gap) styling.push(`padding-bottom:max(0px,calc(${pad}em + ${entry.gap}))`)
-        const settings = styling.length ? ` style="${styling.join(';')}"` : ''
-        const value = entry.cells[index] ?? ''
-        return `<mtd${settings}>${style === cellStyle ? value : mathSize(cellStyle, value)}</mtd>`
+    const lines = compact ? ' class="math-compact-array"' : ' data-equation-lines'
+    return (style) => {
+      const cellStyle = compact ? Math.max(2, style) as MathStyle : ordinaryCellStyle
+      const markup = rows.map((entry, rowIndex) => {
+        const cell = tags ? `<mtd class="math-equation-number">${tag('mtext', entry.label)}</mtd>` : ''
+        // MathML Core browsers use CSS for cell alignment and visible rules.
+        const content = Array.from({ length: columnArray ? columnCount : entry.cells.length }, (_, index) => {
+          const align = aligned ? (index % 2 ? 'left' : 'right') : alignment[index] ?? alignment.at(-1) ?? (cases ? 'left' : '')
+          const styling: string[] = []
+          if (align) styling.push(`text-align:${align}`)
+          if (cellStyle === 0) styling.push('math-style:normal')
+          const before = layout.columns[index]?.before
+          if (before) styling.push(tableBorder('left', before))
+          if (layout.after && index === columnCount - 1) styling.push(tableBorder('right', layout.after))
+          if (entry.before) styling.push(tableBorder('top', entry.before))
+          if (rule && rowIndex === rows.length - 1) styling.push(tableBorder('bottom', rule))
+          if (compact || stretch !== 1) styling.push(`padding-block:${pad}em`)
+          if (entry.gap) styling.push(`padding-bottom:max(0px,calc(${pad}em + ${entry.gap}))`)
+          const settings = styling.length ? ` style="${styling.join(';')}"` : ''
+          const value = renderMarkup(entry.cells[index] ?? '', cellStyle)
+          return `<mtd${settings}>${style === cellStyle ? value : mathSize(cellStyle, value)}</mtd>`
       }).join('')
       return `<mtr>${state?.options.leqno ? cell : ''}${content}${state?.options.leqno ? '' : cell}</mtr>`
-    }).join('')
-    const lines = compact ? ' class="math-compact-array"' : ' data-equation-lines'
-    return `<mrow>${fence(left)}<mtable${lines}${align}>${markup}</mtable>${fence(right)}</mrow>`
+      }).join('')
+      return `<mrow>${fence(left)}<mtable${lines}${align}>${markup}</mtable>${fence(right)}</mrow>`
+    }
   }
 
   function atom(token: string): Atom {
-    if (!token) return { markup: '<mrow/>' }
     if (token === '{') {
       const content = inScope(() => row(['}']))
       if (take() !== '}') throw new Error('Unclosed math group')
-      return { markup: `<mrow>${content}</mrow>` }
+      return { markup: xml`<mrow>${content}</mrow>` }
     }
     if (!token.startsWith('\\')) {
       if (/^\d/.test(token)) return { markup: tag('mn', token) }
@@ -719,7 +815,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const close = name === 'begingroup' ? '\\endgroup' : '\\egroup'
       const content = inScope(() => row([close]))
       if (take() !== close) throw new Error('Unclosed math group')
-      return { markup: `<mrow>${content}</mrow>` }
+      return { markup: xml`<mrow>${content}</mrow>` }
     }
     if (name === 'ce' || name === 'pu') {
       return { markup: (name === 'ce' ? chemicalFormula : physicalUnits)(literalGroup()) }
@@ -764,9 +860,17 @@ export function renderMath(source: string, display = false, configured: MathMacr
       if (name !== 'providecommand' || !macros.has(command)) assign(command, plainMacro(body, arity, optional))
       return { markup: '' }
     }
-    if (name === 'mathchoice' || name === '@firstoftwo' || name === '@secondoftwo') {
-      const choices = Array.from({ length: name === 'mathchoice' ? 4 : 2 }, rawGroup)
-      const selected = choices[name === 'mathchoice' ? style : name === '@firstoftwo' ? 0 : 1]
+    if (name === 'mathchoice') {
+      const choices = Array.from({ length: 4 }, () => {
+        const next = peek()
+        if (!next || next === '}') throw new Error('Missing math choice')
+        return argument()
+      })
+      return { markup: style => renderMarkup(choices[style], style) }
+    }
+    if (name === '@firstoftwo' || name === '@secondoftwo') {
+      const choices = [rawGroup(), rawGroup()]
+      const selected = choices[name === '@firstoftwo' ? 0 : 1]
       tokens.splice(cursor, 0, '{', ...selected, '}')
       return { markup: argument() }
     }
@@ -778,18 +882,18 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (name === 'label') { literalGroup(); return { markup: '' } }
     if (name === 'notag' || name === 'nonumber') { tagState.suppressed = true; return { markup: '' } }
     if (name === 'boxed' || name === 'cancel' || name === 'bcancel' || name === 'xcancel') {
-      return { markup: `<mrow class="math-${name}">${argument()}</mrow>` }
+      return { markup: xml`<mrow class="math-${name}">${argument()}</mrow>` }
     }
     if (name === 'textcolor') {
       const color = safeColor(literalGroup())
       const content = argument()
       const safe = color ? ` style="color:${color}"` : ''
-      return { markup: `<mrow${safe}>${content}</mrow>` }
+      return { markup: xml`<mrow${safe}>${content}</mrow>` }
     }
     if (textBoxes.has(name)) return { markup: textBox(name) }
-    if (name === 'mathreflectbox') return { markup: `<mrow class="math-reflect">${argument()}</mrow>` }
+    if (name === 'mathreflectbox') return { markup: xml`<mrow class="math-reflect">${argument()}</mrow>` }
     if (name === 'vcenter') {
-      return { markup: `<mtable class="math-vcenter"><mtr><mtd>${argument()}</mtd></mtr></mtable>` }
+      return { markup: xml`<mtable class="math-vcenter"><mtr><mtd>${argument()}</mtd></mtr></mtable>` }
     }
     const lap = /^(math)?([lcr])lap$/.exec(name)
     if (lap) return { markup: overlap(lap[2], lap[1] ? argument() : textArgument('text')) }
@@ -797,7 +901,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const left = fence(take())
       const content = inScope(() => row(['\\right']))
       const right = peek() === '\\right' ? (take(), fence(take())) : ''
-      return { markup: `<mrow>${left}${content}${right}</mrow>` }
+      return { markup: xml`<mrow>${left}${content}${right}</mrow>` }
     }
     if (name === 'right' || name === 'middle' || /^(?:big|Big|bigg|Bigg)[lrm]?$/.test(name)) return { markup: fence(take()) }
     if (name === 'begin') return { markup: inScope(() => matrix(literalGroup())) }
@@ -808,18 +912,19 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (name === 'end') return { markup: tag('mtext', `\\end{${literalGroup()}}`) }
     if (['frac', 'dfrac', 'tfrac', 'binom', 'dbinom', 'tbinom'].includes(name)) {
       const binomial = name.endsWith('binom')
-      const targetStyle = name.startsWith('d') ? 0 : name.startsWith('t') ? 1 : style
+      const targetStyle = name.startsWith('d') ? 0 : name.startsWith('t') ? 1 : undefined
       const content = fraction(targetStyle, binomial ? '0' : undefined)
-      return { markup: binomial ? `<mrow>${fence('(')}${content}${fence(')')}</mrow>` : content }
+      return { markup: binomial ? xml`<mrow>${fence('(')}${content}${fence(')')}</mrow>` : content }
     }
     if (name === 'genfrac') {
-      const left = literalGroup()
-      const right = literalGroup()
-      const bar = literalGroup()
-      const mode = literalGroup()
+      const left = expandDefinition(rawGroup()).join('').trim()
+      const right = expandDefinition(rawGroup()).join('').trim()
+      const bar = readDimension('')
+      const mode = expandDefinition(rawGroup()).join('').trim()
       if (mode && !/^[0-3]$/.test(mode)) throw new Error('Invalid fraction style')
-      const content = fraction(mode ? Number(mode) as MathStyle : style, dimension(bar))
-      return { markup: `<mrow>${fence(left)}${content}${fence(right)}</mrow>` }
+      const thickness = bar ? (Number.parseFloat(bar) > 0 ? bar : '0') : undefined
+      const content = fraction(mode ? Number(mode) as MathStyle : undefined, thickness)
+      return { markup: xml`<mrow>${fence(left)}${content}${fence(right)}</mrow>` }
     }
     if (name === 'cfrac') {
       const align = bracket()
@@ -836,11 +941,11 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const offset = readDimension()
       const height = dimension(bracket() ?? '')
       const depth = dimension(bracket() ?? '')
-      return { markup: `<mpadded voffset="${offset}"${height ? ` height="${height}"` : ''}${depth ? ` depth="${depth}"` : ''}>${textArgument('text')}</mpadded>` }
+      return { markup: xml`<mpadded voffset="${offset}"${height ? ` height="${height}"` : ''}${depth ? ` depth="${depth}"` : ''}>${textArgument('text')}</mpadded>` }
     }
     if (name === 'smash') {
       const side = bracket()
-      return { markup: `<mpadded${side !== 'b' ? ' height="0"' : ''}${side !== 't' ? ' depth="0"' : ''}>${argument()}</mpadded>` }
+      return { markup: xml`<mpadded${side !== 'b' ? ' height="0"' : ''}${side !== 't' ? ' depth="0"' : ''}>${argument()}</mpadded>` }
     }
     if (['hspace', 'kern', 'mkern', 'mskip', 'hskip'].includes(name)) {
       if (name === 'hspace' && peek() === '*') take()
@@ -848,65 +953,74 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
     if (Object.hasOwn(notationDelimiters, name)) return { markup: delimitedNotation(name) }
     if (name === 'prescript') {
-      const upper = withStyle(2, argument)
-      const lower = withStyle(2, argument)
-      return { markup: `<mmultiscripts>${argument()}<mprescripts/>${lower}${upper}</mmultiscripts>` }
+      const upper = inScript(argument())
+      const lower = inScript(argument())
+      return { markup: xml`<mmultiscripts>${argument()}<mprescripts/>${lower}${upper}</mmultiscripts>` }
     }
     if (name === 'sqrt') {
       let degree = ''
       if (peek() === '[') {
         take()
-        degree = row([']'])
-        if (peek() === ']') take()
+        degree = renderMarkup(inScope(() => row([']'])), 3)
+        if (take() !== ']') throw new Error('Unclosed root index')
       }
       const base = argument()
-      return { markup: degree ? `<mroot>${base}<mrow>${degree}</mrow></mroot>` : `<msqrt>${base}</msqrt>` }
+      return { markup: degree ? xml`<mroot>${base}<mrow>${degree}</mrow></mroot>` : xml`<msqrt>${base}</msqrt>` }
     }
     if (Object.hasOwn(textFonts, name)) return { markup: textArgument(name) }
-    if (name === 'operatorname') {
-      const star = peek() === '*'
+    if (name === 'operatorname' || name === 'operatornamewithlimits') {
+      const star = name === 'operatorname' && peek() === '*'
       if (star) take()
-      return { markup: tag('mo', literalGroup().replace(/\\([_%#$&{}])/g, '$1')), limits: star }
+      const label = expandDefinition(rawGroup()).join('').replace(/\\([_%#$&{}])/g, '$1')
+      return { markup: tag('mo', label), limits: name === 'operatornamewithlimits' || star }
     }
+    if (name === 'mathop') return { markup: argument(), limits: false }
     if (name === 'overline' || name === 'underline') {
-      return { markup: `<mrow class="math-${name}">${argument()}</mrow>` }
+      return { markup: xml`<mrow class="math-${name}">${argument()}</mrow>` }
     }
     if (name === 'overset' || name === 'underset' || name === 'stackrel') {
-      const annotation = withStyle(scriptStyle(), argument)
+      const annotation = inScript(argument())
       const element = name === 'underset' ? 'munder' : 'mover'
-      return { markup: `<${element}>${argument()}${annotation}</${element}>` }
+      return { markup: xml`<${element}>${argument()}${annotation}</${element}>` }
     }
     if (Object.hasOwn(stretchedAccents, name)) {
       const under = name.startsWith('under') || name === 'utilde'
       const element = under ? 'munder' : 'mover'
       const brace = name === 'overbrace' ? 'upper' : name === 'underbrace' ? 'lower' : undefined
-      return { brace, markup: `<${element} ${under ? 'accentunder' : 'accent'}="true">${argument()}<mo stretchy="true">${stretchedAccents[name]}</mo></${element}>` }
+      return { brace, markup: xml`<${element} ${under ? 'accentunder' : 'accent'}="true">${argument()}<mo stretchy="true">${stretchedAccents[name]}</mo></${element}>` }
     }
     if (Object.hasOwn(extensibleArrows, name)) {
-      let below = ''
+      let below: Markup = ''
       if (peek() === '[') {
         take()
-        below = `<mrow>${withStyle(scriptStyle(), () => inScope(() => row([']'])))}</mrow>`
+        below = xml`<mrow>${inScript(inScope(() => row([']'])))}</mrow>`
         if (take() !== ']') throw new Error('Unclosed arrow subscript')
       }
-      return { markup: labelledOperator(extensibleArrows[name], withStyle(scriptStyle(), argument), below) }
+      const above = inScript(argument())
+      const symbol = extensibleArrows[name]
+      return { markup: typeof above === 'string' && typeof below === 'string'
+        ? labelledOperator(symbol, above, below)
+        : style => labelledOperator(symbol, renderMarkup(above, style), renderMarkup(below, style)) }
     }
     if (name === 'phantom' || name === 'hphantom' || name === 'vphantom') {
-      const invisible = `<mphantom>${argument()}</mphantom>`
+      const invisible = xml`<mphantom>${argument()}</mphantom>`
       const dimensions = name === 'hphantom' ? ' height="0" depth="0"' : name === 'vphantom' ? ' width="0"' : ''
-      return { markup: dimensions ? `<mpadded${dimensions}>${invisible}</mpadded>` : invisible }
+      return { markup: dimensions ? xml`<mpadded${dimensions}>${invisible}</mpadded>` : invisible }
     }
     if (name === 'relax' || name === 'allowbreak' || name === 'nobreak') return { markup: '' }
     if (Object.hasOwn(variants, name)) {
       const variant = variants[name]
       const content = argument()
       // MathML Core honors normal on identifiers and uses font styles for other variants.
-      const styled = applyVariant(content, variant)
-      return { markup: `<mrow class="math-${variant}" mathvariant="${variant}">${styled}</mrow>` }
+      const styled: Markup = typeof content === 'string' ? applyVariant(content, variant) : style => applyVariant(content(style), variant)
+      return { markup: xml`<mrow class="math-${variant}" mathvariant="${variant}">${styled}</mrow>` }
     }
-    if (Object.hasOwn(accents, name)) return { markup: `<mover accent="true">${argument()}${tag('mo', accents[name])}</mover>` }
+    if (Object.hasOwn(accents, name)) return { markup: xml`<mover accent="true">${argument()}${tag('mo', accents[name])}</mover>` }
     if (Object.hasOwn(greek, name)) return { markup: tag('mi', greek[name]) }
-    if (Object.hasOwn(operators, name)) return { markup: tag('mo', operators[name]), limits: big.has(name) }
+    if (name === 'smallint') return { markup: '<mo largeop="false">∫</mo>', limits: true }
+    if (Object.hasOwn(operators, name)) {
+      return { markup: tag('mo', operators[name]), limits: big.has(name) ? true : integrals.has(name) ? false : undefined }
+    }
     if (functions.has(name)) return { markup: tag('mo', name), limits: big.has(name) }
     if (Object.hasOwn(delimiters, token)) return { markup: fence(token) }
     if (Object.hasOwn(spacing, name)) return { markup: `<mspace width="${spacing[name]}"/>` }
@@ -917,7 +1031,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   }
 
   try {
-    const expression = `<mrow>${row()}</mrow>`
+    const expression = `<mrow>${renderMarkup(row(), display ? 0 : 1)}</mrow>`
     const equationTag = tagState.label ? `<mtd class="math-equation-number">${tag('mtext', tagState.label)}</mtd>` : ''
     const numbered = equationTag
       ? `<mtable><mtr>${state?.options.leqno ? equationTag : ''}<mtd>${expression}</mtd>${state?.options.leqno ? '' : equationTag}</mtr></mtable>`

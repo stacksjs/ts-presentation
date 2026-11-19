@@ -91,6 +91,10 @@ speaker notes. Each hook can be asynchronous.
   `\mathchoice` for style-dependent notation. TeX macro definitions support
   groups, delimited arguments, optional arguments, and eager expansion.
   `\raisebox`, `\rule`, and `\kern` control placement and spacing.
+- Use `{a \over b}` for an infix fraction, `{a \above{2pt} b}` for a
+  custom rule, or `{n \choose k}` for a binomial coefficient. Braces
+  delimit each fraction group. Use `\limits` or `\nolimits` with a
+  math operator to place scripts above and below or off to the side.
 - Use `\begin{align}`, `\begin{alignat}`, `\begin{gather}`, or
   `\begin{equation}` at the start of a line for standalone displays.
   The starred forms omit automatic numbering.
