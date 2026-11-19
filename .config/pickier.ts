@@ -14,6 +14,7 @@ const config: PickierConfig = {
     '**/benchmarks/**',
     '**/.claude/**',
     '**/.zed/**',
+    '**/skills/stacks-presentations/references/upstream/**',
   ],
 
   lint: {

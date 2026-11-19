@@ -21,8 +21,17 @@ supports screen capture, **Record** saves the chosen screen or window
 as a video.
 
 `bun run build` emits an offline browser deck. `bun run export` creates a
-PDF with Chrome or Chromium. Set `CHROME_BIN` if the executable is
-installed elsewhere. Use `--format png` on the CLI to export slide images.
+PDF with Chrome or Chromium. Set `CHROME_BIN` or pass `--executable-path`
+if the executable is installed elsewhere.
+
+```sh
+bun src/cli.ts export examples/demo/slides.md --format pptx --out output/demo.pptx
+bun src/cli.ts export examples/demo/slides.md --format png --range 1,3-5 --out output/frames
+```
+
+PowerPoint uses slide images with editable speaker notes and clickable web
+links. It includes each reveal by default. Pass `--without-clicks` for one
+frame per slide, or `--with-clicks` to include reveals in a PNG export.
 
 ## Write a deck
 
@@ -41,10 +50,19 @@ the deck and style slides with an optional `style.css`.
 | Per-slide options | `class`, `hide`, `disabled`, and `transition: fade`, `slide-left`, or `slide-up` |
 | Images and component markup | Trusted HTML, with optional `data-zoom` on an image |
 | Diagrams | Mermaid `flowchart` and `graph` fences for nodes, basic shapes, arrows and labels |
+| Math | `$...$` inline or `$$...$$` on separate lines, rendered as MathML |
+| Live code | A `js` or `ts` fence followed by `{live-run}` or `{monaco-run}`. Use `{live}` or `{monaco}` for an editor |
+| Themes and addons | Set `theme: paper` or `theme: serif`, or load trusted local modules through `theme` and `addons` |
+| Canvas size | Set `canvasWidth: 800` and `aspectRatio: 4/3` in deck frontmatter for an 800 × 600 canvas |
 
 The dev server shares an in-flight compilation and reuses rendered HTML
 until an included source changes. The browser renders local decks
 without a framework, and slide navigation updates only the active slide.
+
+TypeScript edits run when served by the Bun dev command. The offline build
+can run the original TypeScript and offers an editable JavaScript version.
+See the [Stacks presentations skill](skills/stacks-presentations/SKILL.md)
+for authoring, extension APIs, exports, and the preserved upstream skill bundle.
 
 ## Upstream compatibility
 
@@ -52,9 +70,9 @@ The port branches from [Slidev v53.1.0](https://github.com/slidevjs/slidev/tree/
 Credit goes to Anthony Fu and the Slidev community. The original MIT
 license is included in [licenses/Slidev-MIT.txt](licenses/Slidev-MIT.txt).
 
-The Bun player currently supports the authoring and presentation features
-above. Upstream Vue components, themes and addons require a port.
-Monaco, code runners, Shiki transformers, KaTeX, full Mermaid and PlantUML
-support, remote slide control, and PowerPoint export also remain upstream-only.
+Open compatibility work includes Vue components and extensions, Monaco tooling,
+Shiki transformers, the full TeX and Mermaid grammars, PlantUML, remote slide
+control, and export with editable PowerPoint slide content. See the
+[compatibility guide](skills/stacks-presentations/references/compatibility.md).
 
 Tooling conventions come from [ts-starter](https://github.com/stacksjs/ts-starter).

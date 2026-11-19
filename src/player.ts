@@ -1,3 +1,8 @@
+import { defaultCanvas } from './canvas.ts'
+import { setupLiveCode } from './live-code.ts'
+
+const canvasWidth = Number(document.documentElement.dataset.slideWidth) || defaultCanvas.width
+const canvasHeight = Number(document.documentElement.dataset.slideHeight) || defaultCanvas.height
 const stage = document.querySelector<HTMLElement>('#stage')!
 const articles = [...stage.querySelectorAll<HTMLElement>(':scope > article')]
 const notesPanel = document.querySelector<HTMLElement>('#presenter-notes')!
@@ -16,6 +21,7 @@ const timer = document.querySelector<HTMLElement>('#presenter-time')!
 const nextTitle = document.querySelector<HTMLElement>('#presenter-next')!
 const params = new URLSearchParams(location.search)
 const isCapture = params.has('capture')
+const captureSteps = params.has('steps')
 const isPresenter = params.has('presenter')
 const opener: Window | null = isPresenter ? window.opener : null
 const messageOrigin = location.protocol === 'file:' ? '*' : location.origin
@@ -48,6 +54,7 @@ const reveals = articles.map((article) => {
 })
 
 const clickTotals = reveals.map((steps, index) => Math.max(0, ...steps.map(item => item.step), noteSteps[index].length - 1))
+articles.forEach((article, index) => { article.dataset.clicks = String(clickTotals[index]) })
 let current = 1
 let click = 0
 let popup: Window | null = null
@@ -60,7 +67,7 @@ function resize(): void {
   const inset = isCapture ? 0 : 24
   const width = Math.max(1, stage.clientWidth - inset)
   const height = Math.max(1, stage.clientHeight - inset)
-  stage.style.setProperty('--slide-scale', String(Math.min(width / 960, height / 540)))
+  stage.style.setProperty('--slide-scale', String(Math.min(width / canvasWidth, height / canvasHeight)))
 }
 
 function syncPeer(data: Record<string, unknown>): void {
@@ -95,6 +102,7 @@ function show(number: number, step = 0, writeHistory = true, sync = true): void 
   previous.disabled = current === 1 && click === 0
   next.disabled = current === articles.length && click === clickTotals[current - 1]
   if (!canvas.hidden) mountDrawing()
+  window.dispatchEvent(new CustomEvent('presentation:slide', { detail: { slide: current, click, title: articles[current - 1].getAttribute('aria-label') } }))
   if (sync) syncPeer({ presentationSlide: current, presentationClick: click })
 }
 
@@ -113,7 +121,7 @@ function readLocation(): void {
   const [key, step] = hash.split('/')
   const numeric = /^(?:slide-)?(\d+)$/.exec(key)
   const number = numeric ? Number(numeric[1]) : (aliases.get(key) ?? 1)
-  show(number, isCapture ? Number.MAX_SAFE_INTEGER : (/^\d+$/.test(step ?? '') ? Number(step) : 0), false)
+  show(number, isCapture && !captureSteps ? Number.MAX_SAFE_INTEGER : (/^\d+$/.test(step ?? '') ? Number(step) : 0), false)
 }
 
 function updateTimer(): void {
@@ -180,8 +188,8 @@ async function toggleFullscreen(): Promise<void> {
 
 const canvas = document.createElement('canvas')
 canvas.className = 'slide-ink'
-canvas.width = 960
-canvas.height = 540
+canvas.width = canvasWidth
+canvas.height = canvasHeight
 canvas.hidden = true
 canvas.setAttribute('aria-hidden', 'true')
 const ink = canvas.getContext('2d')
@@ -342,6 +350,8 @@ if (isPresenter) {
   opener?.postMessage({ presenterReady: true }, messageOrigin)
 }
 resize()
+
+if (!isCapture) setupLiveCode()
 
 const recordButton = control.querySelector<HTMLButtonElement>('#record-button')!
 let recorder: MediaRecorder | undefined

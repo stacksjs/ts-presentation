@@ -1,5 +1,13 @@
+import type { LoadedExtensions, PresentationAddon } from './extensions.ts'
 import { resolveGrammar, tokenClass, Tokenizer } from 'ts-syntax-highlighter/browser'
+import { resolveCanvas } from './canvas.ts'
 import { flowchart } from './diagram.ts'
+import { escapeHtml, unescapeHtml } from './html.ts'
+import { liveBlock } from './live-markup.ts'
+import { prepareMarkdown, splitSlots } from './syntax.ts'
+
+export { defineAddon, defineTheme } from './extensions.ts'
+export type { LayoutContext, PresentationAddon, PresentationTheme } from './extensions.ts'
 
 export interface Slide {
   title: string
@@ -13,6 +21,7 @@ export interface Slide {
 export interface Deck {
   title: string
   slides: Slide[]
+  headmatter?: Record<string, unknown>
 }
 
 const codeFence = /^ {0,3}(`{3,}|~{3,})(.*)$/
@@ -25,6 +34,7 @@ export function parseDeck(markdown: string): Deck {
   const lines = markdown.replace(/^\uFEFF/, '').split(/\r?\n/)
   const slides: Slide[] = []
   let title = ''
+  let headmatter: Record<string, unknown> | undefined
   let attributes: Record<string, unknown> = {}
   let content: string[] = []
   let notes = ''
@@ -72,7 +82,10 @@ export function parseDeck(markdown: string): Deck {
           throw new Error(`Slide frontmatter must be a YAML mapping at line ${index + 1}`)
         }
         attributes = yaml as Record<string, unknown>
-        if (index === 0 && typeof attributes.title === 'string') title = attributes.title
+        if (index === 0) {
+          headmatter = attributes
+          if (typeof attributes.title === 'string') title = attributes.title
+        }
         index = end
       }
       continue
@@ -109,34 +122,56 @@ export function parseDeck(markdown: string): Deck {
   appendSlide()
 
   if (!slides.length) throw new Error('The deck contains no slides')
-  return { title: title || slides[0].title, slides }
-}
-
-const entities: Record<string, string> = {
-  '&': '&amp;',
-  '<': '&lt;',
-  '>': '&gt;',
-  '"': '&quot;',
-  "'": '&#39;',
-}
-
-function escapeHtml(text: string): string {
-  return text.replace(/[&<>"']/g, character => entities[character])
+  return { title: title || slides[0].title, slides, headmatter }
 }
 
 const escapedCode = /<pre><code class="language-([\w+#.-]+)">([\s\S]*?)<\/code><\/pre>/g
-const characters = Object.fromEntries(Object.entries(entities).map(([character, escaped]) => [escaped, character]))
 
-export async function renderDeck(deck: Deck): Promise<string> {
-  const activeSlides = deck.slides.filter(slide => slide.frontmatter?.hide !== true && slide.frontmatter?.disabled !== true)
+export interface RenderOptions {
+  liveCompile?: boolean
+  extensions?: LoadedExtensions
+}
+
+export async function renderDeck(deck: Deck, options: RenderOptions = {}): Promise<string> {
+  const { width, height } = resolveCanvas(deck.headmatter)
+  const { extensions } = options
+  const activeExtensions: PresentationAddon[] = extensions ? [extensions.theme, ...extensions.addons] : []
+  const defaults = extensions?.theme.defaults
+  const transforms = activeExtensions.flatMap(extension => extension.transformSlide ? [extension.transformSlide] : [])
+  const adapted = transforms.length ? await Promise.all(deck.slides.map(async (slide, index) => {
+    let result = slide
+    for (const transform of transforms) result = await transform(result, index)
+    return result
+  })) : deck.slides
+  const activeSlides = adapted.filter(slide => slide.frontmatter?.hide !== true && slide.frontmatter?.disabled !== true)
   if (!activeSlides.length) throw new Error('The deck contains no visible slides')
-  const html = activeSlides.map(slide => Bun.markdown.html(slide.content))
-  const languages = new Set(html.flatMap(slide => Array.from(slide.matchAll(escapedCode), match => match[1])))
-  const grammars = new Map(await Promise.all([...languages].map(async language => [language, await resolveGrammar(language)] as const)))
+  const layoutHooks = Object.assign(Object.create(null), ...activeExtensions.map(addon => addon.layouts ?? {})) as NonNullable<PresentationAddon['layouts']>
+  const codeHooks = activeExtensions.flatMap(addon => addon.renderCode ? [addon.renderCode] : [])
+  function effectiveLayout(slide: Slide): string {
+    return slide.layout === 'default' && typeof slide.frontmatter?.layout !== 'string' ? defaults?.layout ?? slide.layout : slide.layout
+  }
+  function markdown(content: string): string {
+    const prepared = prepareMarkdown(content)
+    return prepared.restore(Bun.markdown.html(prepared.source))
+  }
+  const html = activeSlides.map((slide) => {
+    if (!layoutHooks[effectiveLayout(slide)]) return { default: markdown(slide.content) }
+    return Object.fromEntries(Object.entries(splitSlots(slide.content)).map(([name, content]) => [name, markdown(content)]))
+  })
+  const languages = new Set(html.flatMap(slide => Object.values(slide).flatMap(slot => Array.from(slot.matchAll(escapedCode), match => match[1]))))
+  const highlightedLanguages = [...languages].filter(language => !language.endsWith('-tp-run') && !language.endsWith('-tp-edit') && language !== 'mermaid')
+  const grammars = new Map(await Promise.all(highlightedLanguages.map(async language => [language, await resolveGrammar(language)] as const)))
   const slides = activeSlides.map((slide, index) => {
     let diagram = 0
-    const body = html[index].replace(escapedCode, (block, language: string, code: string) => {
-      const decoded = code.replace(/&(?:amp|lt|gt|quot|#39);/g, entity => characters[entity])
+    const layout = effectiveLayout(slide)
+    const renderCode = (block: string, language: string, code: string) => {
+      const decoded = unescapeHtml(code)
+      for (const hook of codeHooks) {
+        const custom = hook(decoded, language, slide)
+        if (custom !== undefined) return custom
+      }
+      const live = /^(js|ts)-tp-(run|edit)$/.exec(language)
+      if (live) return liveBlock(decoded.trimEnd(), live[1] === 'ts' ? 'ts' : 'js', live[2] === 'run')
       if (language === 'mermaid') return flowchart(decoded, `arrow-${index}-${diagram++}`) || block
       const grammar = grammars.get(language)
       if (!grammar) return block
@@ -145,39 +180,48 @@ export async function renderDeck(deck: Deck): Promise<string> {
         .map(token => `<span class="tok-${tokenClass(token.type)}">${escapeHtml(token.content)}</span>`)
         .join('')).join('\n')
       return `<pre><code class="language-${language}">${highlighted}</code></pre>`
-    })
+    }
+    const slots = Object.fromEntries(Object.entries(html[index]).map(([name, markup]) => [name, markup.replace(escapedCode, renderCode)]))
+    const custom = layoutHooks[layout]
+    const body = custom ? custom({ slide, index, html: slots.default, slots }) : slots.default
+    const className = [defaults?.className, slide.className].filter(Boolean).join(' ')
     const alias = String(slide.frontmatter?.routeAlias ?? '')
     const transition = String(slide.frontmatter?.transition ?? '')
     const motion = ['fade', 'slide-left', 'slide-up'].includes(transition) ? ` data-transition="${transition}"` : ''
     const route = /^[a-z][a-z0-9-]*$/i.test(alias) ? ` data-route="${escapeHtml(alias)}"` : ''
     const image = slide.frontmatter?.image ?? slide.frontmatter?.background
     const safeImage = typeof image === 'string' && /^(?:https?:\/\/|[./]|[\w-]+\/)/.test(image) ? image : ''
-    const background = safeImage && slide.layout.startsWith('image-')
+    const background = safeImage && layout.startsWith('image-') && !custom
       ? `<img class="slide-layout-image" src="${escapeHtml(safeImage)}" alt="" loading="lazy">`
       : ''
-    return `<article id="slide-${index + 1}" class="slide slidev-layout layout-${escapeHtml(slide.layout)} ${escapeHtml(slide.className)}" aria-label="${escapeHtml(slide.title)}"${route}${motion}>${background ? `${background}<div class="slide-content">${body}</div>` : body}</article>`
+    return `<article id="slide-${index + 1}" class="slide slidev-layout layout-${escapeHtml(layout)} ${escapeHtml(className)}" aria-label="${escapeHtml(slide.title)}"${route}${motion}>${background ? `${background}<div class="slide-content">${body}</div>` : body}</article>`
   })
 
-  const options = activeSlides.map((slide, index) => `<option value="${index + 1}">${index + 1}. ${escapeHtml(slide.title)}</option>`)
+  const choices = activeSlides.map((slide, index) => `<option value="${index + 1}">${index + 1}. ${escapeHtml(slide.title)}</option>`)
   const notes = activeSlides.map((slide) => {
     const segments = (slide.notes || 'No speaker notes for this slide.').split(/^\[click\]\s*$/m)
-    return `<section hidden>${segments.map((text, index) => `<div data-note-step="${index}">${Bun.markdown.html(text)}</div>`).join('')}</section>`
+    return `<section hidden${slide.notes ? ' data-has-notes="true"' : ''}>${segments.map((text, index) => `<div data-note-step="${index}">${Bun.markdown.html(text)}</div>`).join('')}</section>`
   })
   const overview = activeSlides.map((slide, index) => `<li><button type="button" value="${index + 1}"><span>${index + 1}</span> ${escapeHtml(slide.title)}</button></li>`)
 
   return `<!doctype html>
-<html lang="en">
+<html lang="en" data-slide-width="${width}" data-slide-height="${height}" data-theme="${escapeHtml(extensions?.theme.name ?? 'default')}"${options.liveCompile ? ' data-live-compile="true"' : ''}>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="data:,">
   <title>${escapeHtml(deck.title)}</title>
   <link rel="stylesheet" href="./presentation.css">
+  ${extensions?.styles ? '<link rel="stylesheet" href="./extensions.css">' : ''}
   <link rel="stylesheet" href="./deck.css">
+  <style>:root { --slide-width: ${width}px; --slide-height: ${height}px; } @page { size: ${width}px ${height}px; margin: 0; }</style>
+  ${extensions?.client ? '<script defer src="./extensions.js"></script>' : ''}
   <script defer src="./presentation.js"></script>
 </head>
 <body>
+  ${activeExtensions.map(extension => extension.globalTop || '').join('')}
   <main id="stage">${slides.join('\n')}</main>
+  ${activeExtensions.map(extension => extension.globalBottom || '').join('')}
   <aside id="presenter-notes" hidden aria-label="Speaker notes">
     <header class="presenter-header">
       <h2>Speaker notes</h2>
@@ -191,7 +235,7 @@ export async function renderDeck(deck: Deck): Promise<string> {
   </aside>
   <nav id="controls" aria-label="Presentation controls">
     <button id="previous" type="button" aria-label="Previous slide">←</button>
-    <select id="goto" aria-label="Go to slide">${options.join('')}</select>
+    <select id="goto" aria-label="Go to slide">${choices.join('')}</select>
     <button id="next" type="button" aria-label="Next slide">→</button>
     <button id="presenter" type="button">Presenter view</button>
     <button id="overview-button" type="button">Overview</button>

@@ -1,5 +1,8 @@
 ---
 title: TypeScript presentations
+theme: ./themes/lecture.ts
+addons:
+  - ./addons/status.ts
 class: demo
 layout: center
 
@@ -76,4 +79,40 @@ flowchart LR
 
 <!--
 The slide renders the diagram locally with ts-charts.
+-->
+
+---
+
+# Live TypeScript
+
+Edit the function and run it in the slide.
+
+```ts {monaco-run}
+const distance = (x: number, y: number) => Math.hypot(x, y)
+console.log(distance(3, 4))
+```
+
+<!--
+Change 3 or 4 and run the example again.
+-->
+
+---
+layout: compare
+
+---
+
+# Vector length
+
+The length of a vector $v$ is $\lVert v\rVert$.
+
+::right::
+
+$$
+\sqrt{x^2+y^2} = \sqrt{3^2+4^2} = 5
+$$
+
+[Browser runtime documentation](https://bun.com/docs/runtime)
+
+<!--
+Connect the formula to the preceding live example.
 -->

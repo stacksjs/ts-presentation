@@ -1,11 +1,21 @@
 import { realpath } from 'node:fs/promises'
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
-import type { Deck, Slide } from './index.ts'
+import type { Deck, RenderOptions, Slide } from './index.ts'
+import type { ExtensionAssets } from './extensions.ts'
+import type { SlideCanvas } from './canvas.ts'
+import { resolveCanvas } from './canvas.ts'
+import { loadExtensions } from './extensions.ts'
 import { parseDeck, renderDeck } from './index.ts'
 
-interface CompiledDeck {
-  files: Map<string, string>
+export interface CompiledDeck extends ExtensionAssets {
   html: string
+  title: string
+  author?: string
+  canvas: SlideCanvas
+}
+
+export interface CompileOptions extends Pick<RenderOptions, 'liveCompile'> {
+  theme?: string
 }
 
 function rangeFor(reference: string | undefined, slides: Slide[]): Slide[] {
@@ -18,31 +28,37 @@ function rangeFor(reference: string | undefined, slides: Slide[]): Slide[] {
   return slides.slice(first - 1, last)
 }
 
-export function createDeckRenderer(entry: string): () => Promise<string> {
+export function createDeckCompiler(entry: string, options: CompileOptions = {}): () => Promise<CompiledDeck> {
   const root = dirname(resolve(entry))
-  let cached: CompiledDeck | undefined
-  let pending: Promise<string> | undefined
+  let cached: { files: Map<string, string>, deck: CompiledDeck } | undefined
+  let pending: Promise<CompiledDeck> | undefined
 
-  async function compile(): Promise<string> {
+  async function compile(): Promise<CompiledDeck> {
     if (cached) {
       const checks = await Promise.all([...cached.files].map(async ([path, previous]) => {
         const stat = await Bun.file(path).stat().catch(() => null)
         return stat && `${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}` === previous
       }))
-      if (checks.every(Boolean)) return cached.html
+      if (checks.every(Boolean)) return cached.deck
     }
 
     const files = new Map<string, string>()
     const directory = await realpath(root)
+    async function observe(path: string): Promise<string> {
+      const stat = await Bun.file(path).stat()
+      const revision = `${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}`
+      files.set(path, revision)
+      return revision
+    }
+
     async function read(path: string, stack: string[]): Promise<Deck> {
       const filePath = await realpath(path)
       const position = relative(directory, filePath)
       if (position === '..' || position.startsWith(`..${sep}`) || isAbsolute(position)) throw new Error('Slide source must stay inside the deck directory')
       if (stack.includes(filePath)) throw new Error(`Circular slide source: ${position}`)
       const source = Bun.file(filePath)
-      const stat = await source.stat()
+      await observe(filePath)
       const deck = parseDeck(await source.text())
-      files.set(filePath, `${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}`)
       const slides = await Promise.all(deck.slides.map(async (slide) => {
         const attributes = slide.frontmatter ?? {}
         const reference = attributes?.src
@@ -57,13 +73,22 @@ export function createDeckRenderer(entry: string): () => Promise<string> {
           frontmatter: { ...item.frontmatter, ...attributes, src: undefined },
         }))
       }))
-      return { title: deck.title, slides: slides.flat() }
+      return { ...deck, slides: slides.flat() }
     }
 
-    const html = await renderDeck(await read(resolve(entry), []))
-    cached = { files, html }
-    return html
+    const deck = await read(resolve(entry), [])
+    const extensions = await loadExtensions(deck, directory, observe, options.theme)
+    const html = await renderDeck(deck, { liveCompile: options.liveCompile, extensions })
+    const author = typeof deck.headmatter?.author === 'string' ? deck.headmatter.author : undefined
+    const compiled = { title: deck.title, author, canvas: resolveCanvas(deck.headmatter), html, styles: extensions.styles, client: extensions.client, mounts: extensions.mounts }
+    cached = { files, deck: compiled }
+    return compiled
   }
 
   return () => pending ??= compile().finally(() => { pending = undefined })
+}
+
+export function createDeckRenderer(entry: string, options?: CompileOptions): () => Promise<string> {
+  const compile = createDeckCompiler(entry, options)
+  return async () => (await compile()).html
 }

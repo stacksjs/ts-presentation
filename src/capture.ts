@@ -1,0 +1,117 @@
+import { realpath } from 'node:fs/promises'
+import type { FrameLink, PowerPointFrame } from './powerpoint.ts'
+import type { SlideCanvas } from './canvas.ts'
+import { asset } from './assets.ts'
+
+interface CaptureOptions {
+  root: string
+  executable: string
+  scale: number
+  withClicks: boolean
+  range?: string
+  canvas: SlideCanvas
+}
+
+interface FrameDetails {
+  title: string
+  notes: string
+  links: FrameLink[]
+}
+
+export function slideRange(count: number, range?: string): number[] {
+  if (!range) return Array.from({ length: count }, (_, index) => index + 1)
+  const order = new Set<number>()
+  for (const segment of range.split(',')) {
+    const match = /^(\d+)(?:-(\d+))?$/.exec(segment.trim())
+    if (!match) throw new Error(`Invalid slide selection: ${segment}`)
+    const first = Number(match[1])
+    const last = Number(match[2] ?? match[1])
+    if (first > last || first < 1 || last > count) throw new Error(`Slide selection is outside 1-${count}: ${segment}`)
+    for (let number = first; number <= last; number++) order.add(number)
+  }
+  return [...order]
+}
+
+export async function captureFrames(options: CaptureOptions, onFrame: (frame: PowerPointFrame, index: number, count: number) => void | Promise<void>): Promise<void> {
+  const { width, height } = options.canvas
+  const root = await realpath(options.root)
+  const preview = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    fetch(request) {
+      try {
+        const path = decodeURIComponent(new URL(request.url).pathname)
+        return asset(root, path === '/' ? '/index.html' : path)
+      }
+      catch {
+        return new Response('Invalid URL', { status: 400 })
+      }
+    },
+  })
+
+  let view: Bun.WebView | undefined
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  try {
+    const chrome = new Bun.WebView({
+      width,
+      height,
+      backend: { type: 'chrome', path: options.executable, url: false },
+    })
+    view = chrome
+    async function capture(): Promise<void> {
+      await chrome.navigate('data:text/html,<title>Presentation export</title>')
+      await chrome.cdp('Emulation.setDeviceMetricsOverride', {
+        width, height, deviceScaleFactor: options.scale, mobile: false,
+      })
+      await chrome.navigate(new URL(`?capture=1${options.withClicks ? '&steps=1' : ''}`, preview.url).href)
+      const steps = await chrome.evaluate<number[]>(
+        "[...document.querySelectorAll('#stage > article')].map(slide => Number(slide.dataset.clicks))",
+      )
+      if (!steps.length || steps.some(count => !Number.isSafeInteger(count) || count < 0)) {
+        throw new Error('The browser did not load the presentation player')
+      }
+      const positions = slideRange(steps.length, options.range).flatMap((slide) =>
+        Array.from({ length: options.withClicks ? steps[slide - 1] + 1 : 1 }, (_, step) => ({ slide, step })),
+      )
+      for (const [index, position] of positions.entries()) {
+        const metadata = await chrome.evaluate<FrameDetails>(`(async () => {
+          location.hash = ${JSON.stringify(`slide-${position.slide}/${position.step}`)}
+          window.dispatchEvent(new HashChangeEvent('hashchange'))
+          const active = document.querySelector('#stage > article:not([hidden])')
+          if (active?.id !== 'slide-${position.slide}') throw new Error('Slide did not become active')
+          await document.fonts.ready
+          await Promise.all([...active.querySelectorAll('img')].map(image => image.decode()))
+          const note = document.querySelector('#presenter-notes > section[data-has-notes]:not([hidden])')
+          const noteSteps = note?.querySelectorAll('[data-note-step]${options.withClicks ? ':not([hidden])' : ''}') ?? []
+          const notes = [...noteSteps].map(part => [...part.children].map(node => node.textContent.trim()).join('\\n')).filter(Boolean).join('\\n\\n')
+          const bounds = active.getBoundingClientRect()
+          const links = [...active.querySelectorAll('a[href]')].flatMap(link => {
+            if (!/^(https?:|mailto:)/i.test(link.getAttribute('href').trim()) || getComputedStyle(link).visibility !== 'visible') return []
+            return [...link.getClientRects()].flatMap(rect => {
+              const x = Math.max(bounds.left, rect.left)
+              const y = Math.max(bounds.top, rect.top)
+              const width = Math.min(bounds.right, rect.right) - x
+              const height = Math.min(bounds.bottom, rect.bottom) - y
+              return width > 0 && height > 0 ? [{ href: link.href, label: link.textContent.trim() || link.href, x: x - bounds.left, y: y - bounds.top, width, height }] : []
+            })
+          })
+          return { title: active.getAttribute('aria-label') || '', notes, links }
+        })()`)
+        const image = new Uint8Array(await (await chrome.screenshot()).arrayBuffer())
+        await onFrame({ ...metadata, image }, index, positions.length)
+      }
+    }
+
+    await Promise.race([
+      capture(),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error('Slide capture did not finish within 120 seconds')), 120_000)
+      }),
+    ])
+  }
+  finally {
+    if (timeout !== undefined) clearTimeout(timeout)
+    view?.close()
+    await preview.stop(true)
+  }
+}
