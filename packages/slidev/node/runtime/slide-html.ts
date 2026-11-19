@@ -1,3 +1,4 @@
+import { resolveTweetId } from '../../../client/logic/tweet.ts'
 import { escapeHtml, unescapeHtml } from './html.ts'
 import { arrowGeometry, defaultDragPosition, dragKey, dragStyle, parseDragPosition } from '../../../types/src/drag.ts'
 import type { DragKind } from '../../../types/src/drag.ts'
@@ -103,9 +104,27 @@ function dragMarkup(name: string, source: string, frontmatter: Record<string, un
   return `<svg${serialized(attrs)}><defs>${head}</defs>${line}${hit}</svg>`
 }
 
+function tweetMarkup(source: string, theme: 'light' | 'dark'): string {
+  const attrs = attributeValues(source)
+  const literal = (name: string) => attrs.get(name)?.value ?? attrs.get(`:${name}`)?.value.replace(/^(["'])(.*)\1$/, '$2')
+  const id = resolveTweetId(literal('id'), literal('url'))
+  if (!id) return '<span class="slidev-tweet">Post unavailable</span>'
+  const scale = Number(literal('scale') ?? 1)
+  const zoom = Number.isFinite(scale) && scale >= 0.1 && scale <= 3 ? scale : 1
+  const url = new URL('https://platform.twitter.com/embed/Tweet.html')
+  url.search = new URLSearchParams({
+    id,
+    theme,
+    dnt: 'true',
+    hideThread: String(literal('conversation') !== 'all'),
+    hideCard: String(literal('cards') === 'hidden'),
+  }).toString()
+  return `<span class="slidev-tweet" style="zoom:${zoom}"><iframe data-presentation-tweet="${id}" title="Post on X" width="550" height="80" sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox" data-src="${escapeHtml(url.href)}"></iframe><a href="https://x.com/i/web/status/${id}" target="_blank" rel="noopener noreferrer">View post on X</a></span>`
+}
+
 /** Adapted from Slidev's Markdown link and scoped style transforms (MIT). */
-export function prepareSlideHtml(input: string, destination: (value: string) => SlideDestination | undefined, slide: number, frontmatter: Record<string, unknown> = {}): { html: string, css: string } {
-  if (!/<(?:style|a(?=[\s/>])|Link(?=[\s/>])|v-?drag)|\sv-drag\b/i.test(input)) return { html: input, css: '' }
+export function prepareSlideHtml(input: string, destination: (value: string) => SlideDestination | undefined, slide: number, frontmatter: Record<string, unknown> = {}, theme: 'light' | 'dark' = 'dark'): { html: string, css: string } {
+  if (!/<(?:style|a(?=[\s/>])|Link(?=[\s/>])|Tweet(?=[\s/>])|v-?drag)|\sv-drag\b/i.test(input)) return { html: input, css: '' }
   const blocks: StyleBlock[] = []
   const tags = new RegExp(htmlTags)
   let offset = 0
@@ -130,6 +149,9 @@ export function prepareSlideHtml(input: string, destination: (value: string) => 
       }
       else replacement = input.slice(token.index, close.lastIndex)
       tags.lastIndex = close.lastIndex
+    }
+    else if (rawName === 'Tweet') {
+      replacement = closing ? '' : tweetMarkup(source, theme)
     }
     else if (rawName === 'Link') {
       if (closing && componentOpen) {

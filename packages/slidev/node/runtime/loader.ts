@@ -190,7 +190,7 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
       }
       return result
     }))
-    const setup = await loadAuthoringSetup(directory, observe, observeOptional)
+    const setup = await loadAuthoringSetup(directory, observe, observeOptional, roots)
     if (extensions.references && deck.headmatter) {
       deck.headmatter = {
         ...deck.headmatter,

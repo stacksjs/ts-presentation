@@ -48,6 +48,7 @@
     "skills",
     "packages/client/index.ts",
     "packages/client/runtime",
+    "packages/client/logic/tweet.ts",
     "packages/client/layouts/*.stx",
     "packages/create-app/index.mjs",
     "packages/create-app/scaffold.mjs",

@@ -4,6 +4,7 @@ import type { LoadedSlidevData } from '../../../parser/src/fs.ts'
 import * as parser from '../../../parser/src/fs.ts'
 import type { FrontmatterDocument, SlideInfo, SlidePatch, SlidevMarkdown, SourceSlideInfo } from '../../../types/src/types.ts'
 import { within } from '../runtime/assets.ts'
+import { patchFrontmatter } from '../runtime/frontmatter-patch.ts'
 import { markdownDocument, maxDeckSourceBytes } from '../runtime/markdown-source.ts'
 import { snippetRevision, writeDeckFile } from '../runtime/snippet-write.ts'
 
@@ -113,14 +114,8 @@ export async function applySlidePatch(data: EditingDeck, no: number, patch: Slid
   if (patch.content !== undefined) source.content = patch.content
   if (patch.note !== undefined) source.note = patch.note
   if (patch.frontmatterRaw !== undefined) source.frontmatterDoc = yamlDocument(patch.frontmatterRaw)
-  if (patch.frontmatter) {
-    const values = { ...source.frontmatterDoc?.toJSON() as Record<string, unknown> | undefined }
-    for (const [key, value] of Object.entries(patch.frontmatter)) {
-      if (value === null) delete values[key]
-      else Object.defineProperty(values, key, { value, enumerable: true, configurable: true, writable: true })
-    }
-    source.frontmatterDoc = Object.keys(values).length ? yamlDocument(Bun.YAML.stringify(values)) : undefined
-  }
+  if (patch.frontmatter)
+    source.frontmatterDoc = yamlDocument(patchFrontmatter(source.frontmatterDoc?.toString() ?? '', patch.frontmatter))
   if (source.frontmatterDoc) source.frontmatterStyle ??= 'frontmatter'
   const edited = renderSlide(source)
   const slides = markdown.slides.map(original => original === slide.source ? edited : original)

@@ -11,11 +11,8 @@ export function resolveTweetId(
   id: string | number | undefined,
   sourceUrl: string | undefined,
 ): string | undefined {
-  if (typeof id === 'number')
-    return id.toString()
-
-  if (id?.trim())
-    return id.trim()
+  const explicit = typeof id === 'number' && Number.isSafeInteger(id) ? String(id) : typeof id === 'string' ? id.trim() : ''
+  if (/^\d{1,25}$/.test(explicit)) return explicit
 
   if (!sourceUrl)
     return
@@ -28,7 +25,7 @@ export function resolveTweetId(
     const segments = url.pathname.split('/').filter(Boolean)
     const statusIndex = segments.lastIndexOf('status')
     const tweetId = segments[statusIndex + 1]
-    if (statusIndex < 1 || !tweetId || !/^\d+$/.test(tweetId))
+    if (statusIndex < 1 || !tweetId || !/^\d{1,25}$/.test(tweetId))
       return
 
     return tweetId

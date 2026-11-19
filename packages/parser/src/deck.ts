@@ -1,3 +1,4 @@
+import { plainMarkdown } from './plain-markdown.ts'
 // Adapted from Slidev's MIT-licensed Markdown parser. See licenses/Slidev-MIT.txt.
 export interface Slide {
   title: string
@@ -247,8 +248,9 @@ function finishDeck(drafts: SlideDraft[], keepSources = false): Deck {
   if (!drafts.length) throw new Error('The deck contains no slides')
   const slides = drafts.map(({ content, visible, notes, attributes, source }, index): Slide => {
     const heading = /^ {0,3}(#{1,6})[ \t]+(.+?)\s*$/m.exec(visible)
-    const htmlTitle = heading ? undefined : visible.match(/<h1\b[^>]*>([\s\S]+?)<\/h1>/i)?.[1].replace(/<[^>]+>/g, ' ')
-    const title = attributes.title ?? attributes.name ?? heading?.[2].replace(/[ \t]+#+$/, '').trim() ?? htmlTitle
+    const htmlTitle = heading ? undefined : visible.match(/<h1\b[^>]*>([\s\S]+?)<\/h1>/i)?.[1]
+    const titled = heading?.[2].replace(/[ \t]+#+$/, '').trim() ?? htmlTitle
+    const title = attributes.title ?? attributes.name ?? (titled ? plainMarkdown(titled) : undefined)
     const level = typeof attributes.level === 'number' ? attributes.level : heading?.[1].length
     const slide: Slide = {
       title: String(title ?? `Slide ${index + 1}`),

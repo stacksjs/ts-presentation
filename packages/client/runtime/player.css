@@ -2,7 +2,7 @@
   color-scheme: dark;
   color: #fbfaf8;
   background: #0a090a;
-  font: 16px/1.5 system-ui, sans-serif;
+  font: 16px/1.5 var(--presentation-font-sans, system-ui, sans-serif);
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -30,6 +30,7 @@ button, select { font: inherit; }
 }
 
 .slide h1 { margin-top: 0; line-height: 1.1; }
+.slide :is(code, pre) { font-family: var(--presentation-font-mono, ui-monospace, monospace); }
 .slide pre {
   padding: 0.9em;
   background: #111721;
@@ -638,7 +639,7 @@ math .math-xcancel {
   border: 0;
   color: #e9f0f8;
   background: #13202f;
-  font: 400 15px/1.5 ui-monospace, monospace;
+  font: 400 15px/1.5 var(--presentation-font-mono, ui-monospace, monospace);
   tab-size: 2;
 }
 .slide .live-output {
@@ -727,3 +728,12 @@ body:is(.capturing, .previewing) .live-code-static { display: block; margin: 0; 
 .markdown-alert-important { --alert-color: #a976ee; }
 .markdown-alert-warning { --alert-color: #ce982d; }
 .markdown-alert-caution { --alert-color: #e76d77; }
+
+.slidev-tweet { display: block; }
+.slidev-tweet iframe {
+  display: block;
+  max-width: 100%;
+  border: 0;
+  border-radius: 12px;
+}
+.slidev-tweet[data-embed-ready] > a { display: none; }

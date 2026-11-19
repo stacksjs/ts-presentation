@@ -1,3 +1,4 @@
+import { deckFontMarkup } from './fonts.ts'
 import { applyNotesAutoRuby } from './notes.ts'
 import { hasBuiltinLayout, renderBuiltinLayout, renderPresentationShell } from '../../../client/index.ts'
 import type { AuthoringSetup, MermaidOptions } from './authoring-setup.ts'
@@ -89,6 +90,10 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   const diagramFences = new Map<string, { type: 'mermaid' | 'plantuml', options: MermaidOptions }>()
   const codeFences = new Map<string, CodeBlockInfo>()
   const highlight = createCodeHighlighter()
+  const nested = deck.headmatter?.config as Record<string, unknown> | undefined
+  const fontMarkup = deckFontMarkup(options.extensions?.theme.defaults?.fonts, nested?.fonts, deck.headmatter?.fonts)
+  const color = deck.headmatter?.colorSchema ?? nested?.colorSchema
+  const socialTheme = color === 'light' || (color !== 'dark' && options.extensions?.theme.name === 'paper') ? 'light' : 'dark'
   const codeTheme = codeThemeStyles(deck.headmatter?.codeTheme ?? configuration?.codeHighlight?.theme)
   const { extensions } = options
   const activeExtensions: PresentationAddon[] = extensions ? [extensions.theme, ...extensions.addons] : []
@@ -204,7 +209,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     const body = custom
       ? await custom({ slide, index, html: slots.default, slots })
       : await renderBuiltinLayout(layout, slots, slide.frontmatter) ?? slots.default
-    const prepared = prepareSlideHtml(body, destination, index + 1, slide.frontmatter)
+    const prepared = prepareSlideHtml(body, destination, index + 1, slide.frontmatter, socialTheme)
     const className = [defaults?.className, slide.className].filter(Boolean).join(' ')
     const transition = String(slide.frontmatter?.transition ?? '')
     const motion = ['fade', 'slide-left', 'slide-up'].includes(transition) ? ` data-transition="${transition}"` : ''
@@ -248,7 +253,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   if (options.liveCompile) {
     const drawingOptions = [drawings.enabled, drawings.presenterOnly, drawings.syncAll, drawings.persist]
     const theme = extensions?.theme.name
-    const frame = snippetRevision(JSON.stringify([width, height, clicksPreset, drawingOptions, theme, codeTheme, mcpNavigation, extensions?.styles, extensions?.client, globalTop, globalBottom]))
+    const frame = snippetRevision(JSON.stringify([width, height, clicksPreset, drawingOptions, theme, codeTheme, fontMarkup, mcpNavigation, extensions?.styles, extensions?.client, globalTop, globalBottom]))
     const parts = slides.map((slide, index) => {
       const source = options.sourceBindings?.get(activeSlides[index])
       const part = { ...slide, notes: notes[index], route: routes[index], sourceToken: source?.token }
@@ -269,7 +274,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
       ? ' data-live-compile="true"' + (mcpNavigation ? ' data-mcp-navigation="true"' : '')
       : '',
     title: deck.title,
-    extensionStyles: extensions?.styles ? '<link rel="stylesheet" href="./extensions.css">' : '',
+    extensionStyles: fontMarkup + (extensions?.styles ? '<link rel="stylesheet" href="./extensions.css">' : ''),
     scopedStyles: [codeTheme, ...slides.map(slide => slide.css)].filter(Boolean).join('\n  '),
     extensionScript: extensions?.client ? '<script defer src="./extensions.js"></script>' : '',
     globalTop,

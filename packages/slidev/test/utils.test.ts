@@ -1,19 +1,30 @@
-import type { ResolvedFontOptions, SlideInfo } from '@slidev/types'
-import { createHash } from 'node:crypto'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { describe, expect, it } from 'bun:test'
+import { mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, relative, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { slash } from '@antfu/utils'
-import MarkdownExit from 'markdown-exit'
-import { describe, expect, it } from 'vitest'
-import YAML from 'yaml'
-import { parseAspectRatio, parseRangeString } from '../packages/parser/src'
-import { getRoots, toAtFS } from '../packages/slidev/node/resolver'
-import { createMakeAbsoluteImportGlob, generateCoollabsFontsUrl, generateGoogleFontsUrl, stringifyMarkdownTokens, updateFrontmatterPatch } from '../packages/slidev/node/utils'
+import { dirname, join } from 'node:path'
+import { parseAspectRatio, parseRangeString } from '../../parser/src/index.ts'
+import { plainMarkdown } from '../../parser/src/plain-markdown.ts'
+import type { ResolvedFontOptions } from '../../types/src/config.ts'
+import { generateCoollabsFontsUrl, generateGoogleFontsUrl } from '../node/runtime/fonts.ts'
+import { findWorkspaceRoot, resolveDeckEntry } from '../node/runtime/extension-resolver.ts'
+import { parseDeck, renderDeck } from '../node/runtime/index.ts'
+import { createDeckCompiler } from '../node/runtime/loader.ts'
+import { patchFrontmatter } from '../node/runtime/frontmatter-patch.ts'
+import { applySlidePatch, loadEditingDeck } from '../node/mcp/operations.ts'
 
-describe('utils', () => {
-  it('page-range', () => {
+const fontOptions: ResolvedFontOptions = {
+  webfonts: ['Fira Code', 'PT Serif'], weights: ['200', '400', '600'], provider: 'google',
+  italic: false, sans: [], mono: [], serif: [], local: [],
+}
+
+async function project(run: (root: string) => Promise<void>): Promise<void> {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'presentation-utilities-')))
+  try { await run(root) }
+  finally { await rm(root, { recursive: true, force: true }) }
+}
+
+describe('utilities', () => {
+  it('accepts page range syntax', () => {
     expect(parseRangeString(5)).toEqual([1, 2, 3, 4, 5])
     expect(parseRangeString(5, 'all')).toEqual([1, 2, 3, 4, 5])
     expect(parseRangeString(2, '*')).toEqual([1, 2])
@@ -23,169 +34,91 @@ describe('utils', () => {
     expect(parseRangeString(10, '6-')).toEqual([6, 7, 8, 9, 10])
   })
 
-  it('aspect-ratio', () => {
-    expect(parseAspectRatio(1)).toEqual(1)
-    expect(parseAspectRatio('16/9')).toEqual(16 / 9)
-    expect(parseAspectRatio('16 / 9 ')).toEqual(16 / 9)
-    expect(parseAspectRatio('3:4')).toEqual(3 / 4)
-    expect(parseAspectRatio('1x1')).toEqual(1)
-    expect(parseAspectRatio('1')).toEqual(1)
-
+  it('accepts supported aspect ratio separators', () => {
+    expect(parseAspectRatio(1)).toBe(1)
+    expect(parseAspectRatio('16/9')).toBe(16 / 9)
+    expect(parseAspectRatio('16 / 9 ')).toBe(16 / 9)
+    expect(parseAspectRatio('3:4')).toBe(3 / 4)
+    expect(parseAspectRatio('1x1')).toBe(1)
+    expect(parseAspectRatio('1')).toBe(1)
     expect(() => parseAspectRatio('hello')).toThrow()
     expect(() => parseAspectRatio('1/0')).toThrow()
   })
 
-  it('stringify-markdown-tokens', () => {
-    const md = MarkdownExit({ html: true })
-    const stringify = (src: string) => stringifyMarkdownTokens(md.parseInline(src, {}))
-
-    expect(stringify('<span style="color:red">Composable</span> Vue')).toBe('Composable Vue')
-    expect(stringify('<b>Whatever</b>')).toBe('Whatever')
-    expect(stringify('Talk about `<details/>`')).toBe('Talk about <details/>')
-    expect(stringify('What is Readonly\\<T\\> in TypeScript')).toBe('What is Readonly<T> in TypeScript')
-    expect(stringify('Welcome to<br />*Slidev*')).toBe('Welcome to Slidev')
+  it('converts Markdown headings to text without dropping escaped tags or literal code', async () => {
+    expect(plainMarkdown('<span style="color:red">Composable</span> Vue')).toBe('Composable Vue')
+    expect(plainMarkdown('<b>Whatever</b>')).toBe('Whatever')
+    expect(plainMarkdown('Talk about `<details/>`')).toBe('Talk about <details/>')
+    expect(plainMarkdown('What is Readonly\\<T\\> in TypeScript')).toBe('What is Readonly<T> in TypeScript')
+    expect(plainMarkdown('Welcome to<br />*Slidev*')).toBe('Welcome to Slidev')
+    const deck = parseDeck('# **Introduction** to `<T>`')
+    expect(deck.title).toBe('Introduction to <T>')
+    const html = await renderDeck(deck)
+    expect(html).toContain('<title>Introduction to &lt;T&gt;</title>')
+    expect(html).toContain('aria-label="Introduction to &lt;T&gt;"')
   })
 
-  it('google-fonts', () => {
-    expect(
-      generateGoogleFontsUrl({
-        webfonts: ['Fira Code', 'PT Serif'],
-        weights: ['200', '400', '600'],
-        provider: 'google',
-      } as ResolvedFontOptions),
-    ).toMatchSnapshot()
-
-    expect(
-      generateGoogleFontsUrl({
-        webfonts: ['Fira Code', 'PT Serif'],
-        weights: ['200', '400', '600'],
-        italic: true,
-        provider: 'google',
-      } as ResolvedFontOptions),
-    ).toMatchSnapshot()
+  it.each([
+    [generateGoogleFontsUrl, 'https://fonts.googleapis.com/css2'],
+    [generateCoollabsFontsUrl, 'https://api.fonts.coollabs.io/css2'],
+  ] as const)('builds CSS2 requests for normal and italic weights using %s', (url, origin) => {
+    expect(url(fontOptions)).toBe(`${origin}?family=Fira+Code:wght@200;400;600&family=PT+Serif:wght@200;400;600&display=swap`)
+    expect(url({ ...fontOptions, italic: true })).toBe(`${origin}?family=Fira+Code:ital,wght@0,200;0,400;0,600;1,200;1,400;1,600&family=PT+Serif:ital,wght@0,200;0,400;0,600;1,200;1,400;1,600&display=swap`)
+    expect(url({ ...fontOptions, webfonts: ['"Helvetica Neue"', "'PT Serif'"], weights: ['400'] }))
+      .toBe(`${origin}?family=Helvetica+Neue:wght@400&family=PT+Serif:wght@400&display=swap`)
   })
 
-  it('google-fonts with quoted family names', () => {
-    expect(
-      generateGoogleFontsUrl({
-        webfonts: ['"Helvetica Neue"', '\'PT Serif\''],
-        weights: ['400'],
-        provider: 'google',
-      } as ResolvedFontOptions),
-    ).toBe('https://fonts.googleapis.com/css2?family=Helvetica+Neue:wght@400&family=PT+Serif:wght@400&display=swap')
+  it('applies font settings to deck CSS and excludes local families from network font requests', async () => {
+    const deck = parseDeck('---\nfonts:\n  provider: coollabs\n  sans: "PT Serif"\n  mono: "Fira Code"\n  local: ["PT Serif"]\n  weights: [700, 400]\n---\n\n# Fonts')
+    const html = await renderDeck(deck)
+    expect(html).toContain('https://api.fonts.coollabs.io/css2?family=Fira+Code:wght@400;700&amp;display=swap')
+    expect(html).not.toContain('family=PT+Serif')
+    expect(html).toContain('--presentation-font-sans:"PT Serif"')
+    expect(html).toContain('--presentation-font-mono:"Fira Code"')
+    const offline = await renderDeck(parseDeck('---\nfonts:\n  provider: none\n  sans: Georgia\n---\n\n# Local fonts'))
+    expect(offline).toContain('--presentation-font-sans:"Georgia"')
+    expect(offline).not.toContain('fonts.googleapis.com')
+    expect(offline).not.toContain('fonts.coollabs.io')
   })
 
-  it('coollabs-fonts', () => {
-    expect(
-      generateCoollabsFontsUrl({
-        webfonts: ['Fira Code', 'PT Serif'],
-        weights: ['200', '400', '600'],
-        provider: 'google',
-      } as ResolvedFontOptions),
-    ).toMatchSnapshot()
+  it('resolves a deck entry, its project folder, and its declared workspace', () => project(async (root) => {
+    const entry = join(root, 'packages/deck/slides.md')
+    await Bun.write(join(root, 'package.json'), JSON.stringify({ workspaces: ['packages/*'] }))
+    await Bun.write(entry, '# Deck')
+    expect(await resolveDeckEntry(dirname(entry))).toBe(entry)
+    expect(await findWorkspaceRoot(dirname(entry))).toBe(root)
+    expect(await findWorkspaceRoot(join(root, 'standalone'))).toBe(join(root, 'standalone'))
+  }))
 
-    expect(
-      generateCoollabsFontsUrl({
-        webfonts: ['Fira Code', 'PT Serif'],
-        weights: ['200', '400', '600'],
-        italic: true,
-        provider: 'google',
-      } as ResolvedFontOptions),
-    ).toMatchSnapshot()
-  })
+  it('loads real setup modules across theme, addon, and deck roots in precedence order', () => project(async (root) => {
+    const entry = join(root, 'deck/slides.md')
+    const theme = join(root, 'theme')
+    const addon = join(root, 'addon')
+    await Bun.write(entry, '---\ntheme: ../theme\naddons: [../addon]\n---\n\n# Deck\n\n$\\T+\\A+\\P+\\common$')
+    await Bun.write(join(theme, 'index.ts'), "export default { name: 'base-theme' }")
+    await Bun.write(join(addon, 'index.ts'), "export default { name: 'math-addon' }")
+    await Bun.write(join(theme, 'setup/katex.ts'), String.raw`export default () => ({ macros: { '\\T': 't', '\\common': 'x' } })`)
+    await Bun.write(join(addon, 'setup/values.ts'), "export const token = 'a'")
+    await Bun.write(join(addon, 'setup/katex.ts'), String.raw`import { token } from './values.ts'
+export default () => ({ macros: { '\\A': token, '\\common': 'y' } })`)
+    await Bun.write(join(root, 'deck/setup/katex.ts'), String.raw`export default () => ({ macros: { '\\P': 'p', '\\common': 'z' } })`)
+    const compile = createDeckCompiler(entry)
+    expect((await compile()).html).toContain('<mi>t</mi><mo>+</mo><mi>a</mi><mo>+</mo><mi>p</mi><mo>+</mo><mi>z</mi>')
+    await Bun.write(join(addon, 'setup/values.ts'), "export const token = 'b'")
+    expect((await compile()).html).toContain('<mi>t</mi><mo>+</mo><mi>b</mi><mo>+</mo><mi>p</mi><mo>+</mo><mi>z</mi>')
+  }))
 
-  it('roots', async () => {
-    const { cliRoot, clientRoot, userRoot, userWorkspaceRoot } = await getRoots(resolve('slides.md'))
-    const expectRelative = (v: string) => expect(slash(relative(__dirname, v)))
-    expectRelative(cliRoot).toMatchInlineSnapshot(`"../packages/slidev"`)
-    expectRelative(clientRoot).toMatchInlineSnapshot(`"../packages/client"`)
-    expectRelative(userRoot).toMatchInlineSnapshot(`".."`)
-    expectRelative(userWorkspaceRoot).toMatchInlineSnapshot(`".."`)
-  })
-
-  it('proxies slidev import globs through a real filesystem module', () => {
-    const root = mkdtempSync(join(tmpdir(), 'slidev-import-glob-'))
-    const makeAbsoluteImportGlob = createMakeAbsoluteImportGlob(root)
-
-    try {
-      const proxyUrl = makeAbsoluteImportGlob([
-        join(root, 'setup/main.ts'),
-      ], { import: 'default' })
-      const secondProxyUrl = makeAbsoluteImportGlob([
-        join(root, 'theme/setup/main.ts'),
-      ], { import: 'default' })
-
-      expect(proxyUrl).toMatch(/^\/@fs\/.*\/node_modules\/\.slidev\/virtual\/import-glob\.[a-f0-9]{10}\.ts$/)
-      expect(secondProxyUrl).toMatch(/^\/@fs\/.*\/node_modules\/\.slidev\/virtual\/import-glob\.[a-f0-9]{10}\.ts$/)
-      expect(secondProxyUrl).not.toBe(proxyUrl)
-      const content = readFileSync(fileURLToPath(`file://${proxyUrl.slice('/@fs'.length)}`), 'utf-8')
-      const secondContent = readFileSync(fileURLToPath(`file://${secondProxyUrl.slice('/@fs'.length)}`), 'utf-8')
-      expect(proxyUrl).toBe(toAtFS(join(root, `node_modules/.slidev/virtual/import-glob.${createHash('sha256').update(content).digest('hex').slice(0, 10)}.ts`)))
-      expect(secondProxyUrl).toBe(toAtFS(join(root, `node_modules/.slidev/virtual/import-glob.${createHash('sha256').update(secondContent).digest('hex').slice(0, 10)}.ts`)))
-      expect(content)
-        .toBe('export default import.meta.glob(["../../../setup/main.ts"], {"eager":true,"exhaustive":true,"import":"default"})\n')
-      expect(secondContent)
-        .toBe('export default import.meta.glob(["../../../theme/setup/main.ts"], {"eager":true,"exhaustive":true,"import":"default"})\n')
-    }
-    finally {
-      rmSync(root, { recursive: true, force: true })
-    }
-  })
-
-  it('update frontmatter patch', async () => {
-    const dragPos = {
-      foo: '1,2,3,4',
-    }
-    function createFakeSource(yaml: string) {
-      const doc = YAML.parseDocument(yaml)
-      return {
-        frontmatter: {},
-        source: {
-          frontmatter: doc.toJSON() || {},
-          frontmatterRaw: yaml,
-          frontmatterDoc: doc,
-        },
-      } as SlideInfo
-    }
-    function expectFrontmatter(slide: SlideInfo) {
-      return expect(slide.source.frontmatterDoc?.toString())
-    }
-
-    const slide1 = createFakeSource(``)
-    updateFrontmatterPatch(slide1.source, { dragPos })
-    expectFrontmatter(slide1).toMatchInlineSnapshot(`
-      "dragPos:
-        foo: 1,2,3,4
-      "
-    `)
-
-    const slide2 = createFakeSource(`
-      # comment
-      title: Hello  # another comment
-      dragPos:
-        bar: 5,6,7,8
-    `)
-    updateFrontmatterPatch(slide2.source, { dragPos })
-    expectFrontmatter(slide2).toMatchInlineSnapshot(`
-      "# comment
-      title: Hello # another comment
-      dragPos:
-        foo: 1,2,3,4
-      "
-    `)
-
-    // remove a field
-    const slide3 = createFakeSource(`
-      # comment
-      title: Hello  # another comment
-      dragPos:
-        bar: 5,6,7,8
-    `)
-    updateFrontmatterPatch(slide3.source, { title: null })
-    expectFrontmatter(slide3).toMatchInlineSnapshot(`
-      "dragPos:
-        bar: 5,6,7,8
-      "
-    `)
-  })
+  it('updates YAML neighbouring comments, deletion, and multiline values through the MCP editor', () => project(async (root) => {
+    const dragPos = { foo: '1,2,3,4' }
+    const raw = '# comment\ntitle: Hello  # another comment\ndragPos:\n  bar: 5,6,7,8'
+    expect(Bun.YAML.parse(patchFrontmatter('', { dragPos }))).toEqual({ dragPos })
+    expect(patchFrontmatter(raw, { dragPos })).toStartWith('# comment\ntitle: Hello  # another comment\n')
+    expect(patchFrontmatter(raw, { title: null })).toBe('# comment\ndragPos:\n  bar: 5,6,7,8')
+    const entry = join(root, 'slides.md')
+    await Bun.write(entry, `---\n${raw}\n---\n\n# YAML`)
+    await applySlidePatch(await loadEditingDeck(entry), 1, { frontmatter: { dragPos, title: 'Updated' } })
+    const result = await Bun.file(entry).text()
+    expect(result).toContain('# comment\ntitle: Updated # another comment')
+    expect((await loadEditingDeck(entry)).headmatter.dragPos).toEqual(dragPos)
+  }))
 })

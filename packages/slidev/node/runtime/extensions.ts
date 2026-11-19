@@ -2,6 +2,7 @@ import { compileTemplate } from '../../../client/index.ts'
 import { realpath, stat } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import type { FontOptions } from '../../../types/src/frontmatter.ts'
 import type { DrawingOptions } from '../../../types/src/drawings.ts'
 import type { Deck, Slide } from './index.ts'
 import { importDeckModule } from './deck-modules.ts'
@@ -33,7 +34,7 @@ export interface PresentationAddon {
 }
 
 export interface PresentationTheme extends PresentationAddon {
-  defaults?: { layout?: string, className?: string, drawings?: DrawingOptions, addons?: string | string[] }
+  defaults?: { layout?: string, className?: string, drawings?: DrawingOptions, fonts?: FontOptions, addons?: string | string[] }
 }
 
 export interface ExtensionAssets {
@@ -92,7 +93,7 @@ const builtin: Record<string, PresentationTheme> = {
   serif: {
     name: 'serif',
     styles: `
-      [data-theme="serif"] .slide { background: #201924; color: #f3eadd; font-family: Georgia, serif }
+      [data-theme="serif"] .slide { background: #201924; color: #f3eadd; font-family: var(--presentation-font-serif, Georgia, serif) }
       [data-theme="serif"] .slide h1 { color: #f9cf9b; letter-spacing: -.035em }
       [data-theme="serif"] .slide a { color: #f9cf9b }
     `,

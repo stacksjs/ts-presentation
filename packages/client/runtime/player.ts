@@ -115,7 +115,11 @@ function show(number: number, step?: number, writeHistory = true, sync = true, r
   }
   current = selected
   click = nextStep
-  articles[current - 1].hidden = false
+  const active = articles[current - 1]
+  active.hidden = false
+  for (const frame of active.querySelectorAll<HTMLIFrameElement>('iframe[data-presentation-tweet]:not([src])')) {
+    if (frame.dataset.src) frame.src = frame.dataset.src
+  }
   notes[current - 1].hidden = false
   showReveals(reveals[current - 1], click, animate, Number(stage.style.getPropertyValue('--slide-scale')) || 1)
   noteSteps[current - 1].forEach((note, index) => { note.hidden = index > click })
@@ -342,6 +346,21 @@ control.querySelector('#overview-button')!.addEventListener('click', () => overv
 document.querySelector('#presenter-reset')!.addEventListener('click', () => {
   startedAt = Date.now()
   updateTimer()
+})
+window.addEventListener('message', (event) => {
+  if (event.origin !== 'https://platform.twitter.com') return
+  const message = event.data?.['twttr.embed']
+  if (message?.method !== 'twttr.private.resize') return
+  const size = message.params?.[0]
+  const height = size?.height
+  if (typeof height !== 'number' || !Number.isSafeInteger(height) || height < 1 || height > 1800) return
+  for (const frame of stage.querySelectorAll<HTMLIFrameElement>('iframe[data-presentation-tweet]')) {
+    if (event.source === frame.contentWindow && size.data?.tweet_id === frame.dataset.presentationTweet) {
+      frame.height = String(height)
+      frame.closest('.slidev-tweet')?.setAttribute('data-embed-ready', '')
+      break
+    }
+  }
 })
 window.addEventListener('hashchange', readLocation)
 window.addEventListener('popstate', readLocation)

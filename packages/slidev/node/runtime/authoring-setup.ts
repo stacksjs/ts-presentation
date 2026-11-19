@@ -36,21 +36,28 @@ export function defineKatexSetup(setup: KatexSetup): KatexSetup { return setup }
 export function defineMermaidSetup(setup: MermaidSetup): MermaidSetup { return setup }
 export function defineMermaidRendererSetup(setup: MermaidRendererSetup): MermaidRendererSetup { return setup }
 
-export async function loadAuthoringSetup(root: string, observe: ObserveDeckFile, optional: (path: string) => Promise<string | undefined>): Promise<AuthoringSetup> {
-  async function read<T>(name: string): Promise<T | undefined> {
+export async function loadAuthoringSetup(root: string, observe: ObserveDeckFile, optional: (path: string) => Promise<string | undefined>, roots: readonly string[] = []): Promise<AuthoringSetup> {
+  async function read<T>(root: string, name: string): Promise<T | undefined> {
     const path = join(root, 'setup', `${name}.ts`)
     if (await optional(path) === undefined) return
     const { default: setup } = await importDeckModule<() => T | void | Promise<T | void>>(path, root, observe)
     if (typeof setup !== 'function') throw new Error(`setup/${name}.ts must export a setup function`)
     return await setup() as T | undefined
   }
-  const [katex, mermaid, diagramRenderer, shiki, nativeHighlight] = await Promise.all([
-    read<KatexOptions>('katex'),
-    read<MermaidOptions>('mermaid'),
-    read<MermaidRenderer>('mermaid-renderer'),
-    read<CodeHighlightOptions>('shiki'),
-    read<CodeHighlightOptions>('code-highlighter'),
-  ])
-  if (diagramRenderer !== undefined && typeof diagramRenderer !== 'function') throw new Error('setup/mermaid-renderer.ts must return a renderer function')
-  return { katex, mermaid, diagramRenderer, codeHighlight: { ...shiki, ...nativeHighlight } }
+  const setup: AuthoringSetup = {}
+  for (const directory of [...new Set([...roots.filter(value => value !== root), root])]) {
+    const [katex, mermaid, diagramRenderer, shiki, nativeHighlight] = await Promise.all([
+      read<KatexOptions>(directory, 'katex'),
+      read<MermaidOptions>(directory, 'mermaid'),
+      read<MermaidRenderer>(directory, 'mermaid-renderer'),
+      read<CodeHighlightOptions>(directory, 'shiki'),
+      read<CodeHighlightOptions>(directory, 'code-highlighter'),
+    ])
+    if (diagramRenderer !== undefined && typeof diagramRenderer !== 'function') throw new Error('setup/mermaid-renderer.ts must return a renderer function')
+    if (katex) setup.katex = { ...setup.katex, ...katex, macros: { ...setup.katex?.macros, ...katex.macros } }
+    if (mermaid) setup.mermaid = { ...setup.mermaid, ...mermaid }
+    if (diagramRenderer) setup.diagramRenderer = diagramRenderer
+    if (shiki || nativeHighlight) setup.codeHighlight = { ...setup.codeHighlight, ...shiki, ...nativeHighlight }
+  }
+  return setup
 }

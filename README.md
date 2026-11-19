@@ -76,6 +76,8 @@ the deck and style slides with an optional `style.css`.
 | Navigation | `routeAlias: review`, then links such as `#review` or `#review/2`. Use `clicksStart` and `clicks` to set reveal bounds |
 | Per-slide options | `class`, `hide`, `disabled`, and `transition: fade`, `slide-left`, or `slide-up` |
 | Images and component markup | Trusted HTML, with optional `data-zoom` on an image |
+| Post embeds | `<Tweet id="…" />` or `<Tweet url="…" />` loads the X widget in a sandboxed iframe |
+| Fonts | Set `fonts.sans`, `fonts.serif`, or `fonts.mono`. Choose `fonts.provider` as `google`, `coollabs`, or `none` |
 | First-party diagrams | YAML in a `charts` fence. `ts-charts` renders flowcharts, sequence and state diagrams, class and entity relationships, pie charts, Gantt schedules, Git histories, timelines, and user journeys |
 | Imported diagrams | Slidev diagram fences are translated to structured data and rendered by the same `ts-charts` functions |
 | PlantUML sequence diagrams | `plantuml` fences render messages, participants, notes, and groups locally through `ts-charts` |
@@ -156,9 +158,9 @@ The VS Code build provides Markdown syntax, audience and presenter commands,
 and a command to stop previews. It launches the project’s local Bun CLI.
 
 The original test tree lives in `packages/slidev/test`. `bun test` runs
-the adapted parser fixtures and the copied package tests that target the
-ported APIs, alongside the Bun regression suite. The remaining copied Vue components, Vite integrations, VS Code
-language tooling, and their tests still need porting. See the
+the adapted copied suites alongside the native regression suite. Some copied
+Vue components, Vite integrations, and VS Code language tooling still need
+porting. See the
 [compatibility guide](skills/stacks-presentations/references/compatibility.md)
 for authoring support and known gaps.
 
