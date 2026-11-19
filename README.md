@@ -1,103 +1,37 @@
-<br>
-<p align="center">
-<a href="https://sli.dev" target="_blank">
-<img src="https://sli.dev/logo-title.png" alt="Slidev" height="250" width="250"/>
-</a>
-</p>
+# ts-presentation
 
-<p align="center">
-Presentation <b>slide</b>s for <b>dev</b>elopers 🧑‍💻👩‍💻👨‍💻
-</p>
+A Bun-first fork of [Slidev](https://sli.dev/) with a TypeScript player
+and CLI. The active engine uses Bun’s Markdown, YAML, bundler and HTTP
+server, plus Stacks’ syntax highlighter. The example deck is generic.
 
-<p align="center">
-<a href="https://www.npmjs.com/package/@slidev/cli" target="__blank"><img src="https://img.shields.io/npm/v/@slidev/cli?color=2B90B6&label=" alt="NPM version"></a>
-<a href="https://www.npmjs.com/package/@slidev/cli" target="__blank"><img alt="NPM Downloads" src="https://img.shields.io/npm/dm/@slidev/cli?color=349dbe&label="></a>
-<a href="https://sli.dev/" target="__blank"><img src="https://img.shields.io/static/v1?label=&message=docs%20%26%20demos&color=45b8cd" alt="Docs & Demos"></a>
-<a href="https://sli.dev/resources/theme-gallery" target="__blank"><img src="https://img.shields.io/static/v1?label=&message=themes&color=4ec5d4" alt="Themes"></a>
-<br>
-<a href="https://github.com/slidevjs/slidev/stargazers" target="__blank"><img alt="GitHub stars" src="https://img.shields.io/github/stars/slidevjs/slidev?style=social"></a>
-</p>
+## Run the example
 
-<p align="center">
-  <a href="https://x.com/antfu7/status/1389604687502995457">Video Preview</a> | <a href="https://sli.dev">Documentation</a>
-</p>
+Requires Bun 1.4 or newer.
 
-<div align="center">
-<table>
-<tbody>
-<td align="center">
-<img width="2000" height="0" alt="" aria-hidden><br>
-<sub>Made possible by my <a href="https://github.com/sponsors/antfu">Sponsor Program 💖</a></sub><br>
-<img width="2000" height="0" alt="" aria-hidden>
-</td>
-</tbody>
-</table>
-</div>
-
-## Features
-
-- 📝 [**Markdown-based**](https://sli.dev/guide/syntax) - focus on content and use your favorite editor
-- 🧑‍💻 [**Developer Friendly**](https://sli.dev/guide/syntax#code-blocks) - built-in code highlighting, live coding, etc.
-- 🎨 [**Themable**](https://sli.dev/resources/theme-gallery) - theme can be shared and used with npm packages
-- 🌈 [**Stylish**](https://sli.dev/guide/syntax#embedded-styles) - on-demand utilities via [UnoCSS](https://github.com/unocss/unocss).
-- 🤹 [**Interactive**](https://sli.dev/custom/directory-structure#components) - embedding Vue components seamlessly
-- 🎙 [**Presenter Mode**](https://sli.dev/guide/ui#presenter-mode) - use another window, or even your phone to control your slides
-- 🎨 [**Drawing**](https://sli.dev/features/drawing) - draw and annotate on your slides
-- 🧮 [**LaTeX**](https://sli.dev/features/latex) - built-in LaTeX math equations support
-- 📰 [**Diagrams**](https://sli.dev/guide/syntax#diagrams) - creates diagrams using textual descriptions with [Mermaid](https://mermaid.js.org/)
-- 🌟 [**Icons**](https://sli.dev/features/icons) - access to icons from any icon set directly
-- 💻 [**Editor**](https://sli.dev/guide/index#editor) - integrated editor, or the [VSCode extension](https://sli.dev/features/vscode-extension)
-- 🎥 [**Recording**](https://sli.dev/features/recording) - built-in recording and camera view
-- 📤 [**Portable**](https://sli.dev/guide/exporting) - export into PDF, PNGs, or PPTX
-- ⚡️ [**Fast**](https://vitejs.dev) - instant reloading powered by [Vite](https://vitejs.dev)
-- 🛠 [**Hackable**](https://sli.dev/custom/) - using Vite plugins, Vue components, or any npm packages
-
-## Getting Started
-
-### Try it Online ⚡️
-
-[sli.dev/new](https://sli.dev/new)
-
-[![](https://developer.stackblitz.com/img/open_in_stackblitz.svg)](https://sli.dev/new)
-
-### Init Project Locally
-
-Install [Node.js >= 22.12.0](https://nodejs.org/) and run the following command:
-
-```bash
-npm init slidev
+```sh
+bun install --frozen-lockfile
+bun run dev
 ```
 
-Documentation:
-**[English](https://sli.dev)** | [中文文档](https://cn.sli.dev) | [Français](https://fr.sli.dev) | [Español](https://es.sli.dev) | [Русский](https://ru.sli.dev) | [Português-BR](https://br.sli.dev)
+Press **P** for a synchronized presenter window or **F** for fullscreen.
+Use the arrow keys or slide picker to navigate. `bun run build` emits
+an offline browser deck. `bun run export` creates a PDF with Chrome or
+Chromium. Set `CHROME_BIN` if the executable is installed elsewhere.
 
-Discord: [chat.sli.dev](https://chat.sli.dev)
+## Start a deck
 
-For a full example, you can check the [demo](https://github.com/slidevjs/slidev/blob/main/demo) folder, which is also the source file for [my previous talk](https://antfu.me/posts/composable-vue-vueday-2021).
+Run `bun src/cli.ts dev path/to/slides.md`. Put a blank line after
+`---` for a slide break, or add YAML frontmatter ending with another
+`---`. Use a trailing HTML comment for speaker notes. Add optional
+`style.css` and `public/` next to the deck and refer to assets with
+relative URLs.
 
-## Tech Stack
+## Upstream
 
-- [Vite](https://vitejs.dev) - An extremely fast frontend tooling
-- [Vue 3](https://v3.vuejs.org/) powered [Markdown](https://daringfireball.net/projects/markdown/syntax) - Focus on the content while having the power of HTML and Vue components whenever needed
-- [UnoCSS](https://github.com/unocss/unocss) - On-demand utility-first CSS engine, style your slides at ease
-- [Shiki](https://github.com/shikijs/shiki), [Monaco Editor](https://github.com/Microsoft/monaco-editor) - First-class code snippets support with live coding capability
-- [RecordRTC](https://recordrtc.org) - Built-in recording and camera view
-- [VueUse](https://vueuse.org) family - [`@vueuse/core`](https://github.com/vueuse/vueuse), [`@vueuse/motion`](https://github.com/vueuse/motion), etc.
-- [Iconify](https://iconify.design/) - Icon sets collection.
-- [Drauu](https://github.com/antfu/drauu) - Drawing and annotations support
-- [KaTeX](https://katex.org/) - LaTeX math rendering.
-- [Mermaid](https://mermaid-js.github.io/mermaid) - Textual Diagrams.
+The port branches from [Slidev v53.1.0](https://github.com/slidevjs/slidev/tree/b547b48fe86b60bd3a502d4217b33840273667dd).
+Credit goes to Anthony Fu and the Slidev community. The original MIT
+license is included in [licenses/Slidev-MIT.txt](licenses/Slidev-MIT.txt).
+This port currently implements a subset of Slidev’s feature set. Existing
+decks that use upstream Vue components and themes need adaptation.
 
-## Sponsors
-
-This project is made possible by all the sponsors supporting my work:
-
-<p align="center">
-  <a href="https://github.com/sponsors/antfu">
-    <img src='https://cdn.jsdelivr.net/gh/antfu/static/sponsors.svg' alt="Logos from Sponsors" />
-  </a>
-</p>
-
-## License
-
-MIT License © 2021 [Anthony Fu](https://github.com/antfu)
+Tooling conventions come from [ts-starter](https://github.com/stacksjs/ts-starter).

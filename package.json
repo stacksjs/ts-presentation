@@ -1,94 +1,42 @@
 {
+  "name": "ts-presentation",
+  "version": "0.1.0",
   "type": "module",
-  "version": "53.1.0",
-  "private": true,
-  "packageManager": "pnpm@12.16.1",
+  "description": "A Bun and TypeScript presentation toolkit based on Slidev.",
+  "author": "Chris Breuer <chris@stacksjs.org>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stacksjs/ts-presentation.git"
+  },
   "engines": {
-    "node": ">=22.22.0"
+    "bun": ">=1.4.0"
+  },
+  "bin": {
+    "ts-presentation": "./src/cli.ts"
+  },
+  "exports": {
+    ".": "./src/index.ts"
   },
   "scripts": {
-    "build": "turbo run build --filter=\"./packages/*\"",
-    "ci:publish": "zx scripts/publish.mjs",
-    "cy": "cypress open",
-    "cy:fixture": "pnpm -C cypress/fixtures/basic run dev",
-    "demo:build": "zx ./scripts/demo.mjs",
-    "demo:composable-vue": "pnpm -C demo/composable-vue run dev",
-    "demo:vue-runner": "pnpm -C demo/vue-runner run dev",
-    "demo:dev": "pnpm -C demo/starter run dev",
-    "vscode:dev": "pnpm -C packages/vscode run dev",
-    "play": "pnpm demo:dev",
-    "dev": "turbo run dev --filter=\"./packages/*\"",
-    "lint": "eslint . --cache",
-    "lint:fix": "nr lint --fix",
-    "typecheck": "vue-tsc --noEmit",
-    "docs": "pnpm -C docs run dev",
-    "docs:build": "pnpm run --filter=\"./docs...\" build && pnpm demo:build",
-    "release": "bumpp package.json packages/*/package.json docs/package.json --all -x \"zx scripts/update-versions.mjs\"",
-    "test": "vitest test",
-    "verify": "pnpm build && pnpm typecheck && pnpm lint && pnpm test",
-    "prepare": "simple-git-hooks && skills experimental_sync -y -r"
+    "dev": "bun --watch src/cli.ts dev examples/demo/slides.md",
+    "build": "bun src/cli.ts build examples/demo/slides.md",
+    "export": "bun src/cli.ts export examples/demo/slides.md --out output/demo.pdf",
+    "format": "pickier run --mode format",
+    "lint": "pickier run --mode lint",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "ts-syntax-highlighter": "^0.2.20"
   },
   "devDependencies": {
-    "@antfu/eslint-config": "catalog:dev",
-    "@antfu/ni": "catalog:prod",
-    "@antfu/skills": "catalog:agentic",
-    "@antfu/utils": "catalog:frontend",
-    "@modelcontextprotocol/client": "catalog:prod",
-    "@shikijs/markdown-it": "catalog:frontend",
-    "@slidev/cli": "workspace:*",
-    "@slidev/parser": "workspace:*",
-    "@slidev/types": "workspace:*",
-    "@types/cli-progress": "catalog:types",
-    "@types/connect": "catalog:types",
-    "@types/file-saver": "catalog:types",
-    "@types/js-yaml": "catalog:types",
-    "@types/katex": "catalog:types",
-    "@types/node": "catalog:types",
-    "@types/prompts": "catalog:types",
-    "@types/recordrtc": "catalog:types",
-    "@types/resolve": "catalog:types",
-    "@types/yargs": "catalog:types",
-    "@vue/compiler-sfc": "catalog:demo",
-    "@vueuse/core": "catalog:frontend",
-    "bumpp": "catalog:dev",
-    "cypress": "catalog:dev",
-    "eslint": "catalog:dev",
-    "eslint-plugin-format": "catalog:dev",
-    "katex": "catalog:frontend",
-    "lint-staged": "catalog:dev",
-    "markdown-exit": "catalog:prod",
-    "mermaid": "catalog:frontend",
-    "playwright-chromium": "catalog:dev",
-    "prettier": "catalog:dev",
-    "prettier-plugin-slidev": "catalog:dev",
-    "rimraf": "catalog:dev",
-    "shiki": "catalog:frontend",
-    "simple-git-hooks": "catalog:dev",
-    "skills": "catalog:agentic",
-    "taze": "catalog:dev",
-    "tinyexec": "catalog:prod",
-    "tsdown": "catalog:dev",
-    "tsnapi": "catalog:dev",
-    "tsx": "catalog:dev",
-    "turbo": "catalog:dev",
-    "typescript": "catalog:dev",
-    "vite": "catalog:prod",
-    "vite-plugin-pwa": "catalog:prod",
-    "vitest": "catalog:dev",
-    "vue-tsc": "catalog:dev",
-    "zx": "catalog:dev"
+    "better-dx": "^0.2.15"
   },
-  "resolutions": {
-    "chokidar": "catalog:prod",
-    "typescript": "catalog:dev",
-    "vite": "catalog:prod"
-  },
-  "simple-git-hooks": {
-    "pre-commit": "npx lint-staged"
-  },
-  "lint-staged": {
-    "**/*.{js,ts,vue,json}": [
-      "eslint --fix --cache"
-    ]
-  }
+  "files": [
+    "licenses",
+    "README.md",
+    "LICENSE.md",
+    "src"
+  ]
 }
