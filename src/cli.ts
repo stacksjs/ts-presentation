@@ -8,6 +8,7 @@ import { compileLiveCode, maxCodeLength } from './compile-code.ts'
 import type { CompiledDeck } from './loader.ts'
 import type { PowerPointFrame } from './powerpoint.ts'
 import { createDeckCompiler } from './loader.ts'
+import { saveSnippet } from './snippet-write.ts'
 
 const options = {
   out: { type: 'string' },
@@ -32,6 +33,10 @@ const help = `ts-presentation <dev|build|export> [slides.md]
           PNG/PPTX support --range, --scale and --with-clicks or --without-clicks.
   --theme   Override the deck's theme for any command.
 `
+
+function localAuthorRequest(request: Request, url: URL): boolean {
+  return request.headers.get('Origin') === url.origin && ['127.0.0.1', 'localhost'].includes(url.hostname)
+}
 
 async function chromePath(explicit?: string): Promise<string> {
   const candidates = [
@@ -128,7 +133,7 @@ async function main(): Promise<void> {
             return new Response((await compile()).client, { headers: { 'Content-Type': 'text/javascript; charset=utf-8' } })
           case '/__presentation/compile':
             if (request.method !== 'POST') return new Response(null, { status: 405, headers: { Allow: 'POST' } })
-            if (request.headers.get('Origin') !== url.origin || !['127.0.0.1', 'localhost'].includes(url.hostname))
+            if (!localAuthorRequest(request, url))
               return new Response('Compile requests must come from the local presenter.', { status: 403 })
             try {
               return new Response(compileLiveCode(await request.text(), 'ts'))
@@ -136,6 +141,12 @@ async function main(): Promise<void> {
             catch (error) {
               return new Response(error instanceof Error ? error.message : 'Invalid code', { status: 422 })
             }
+          case '/__presentation/snippet': {
+            if (request.method !== 'POST') return new Response(null, { status: 405, headers: { Allow: 'POST' } })
+            if (!localAuthorRequest(request, url)) return new Response('Save requests must come from the local presenter.', { status: 403 })
+            const input = await request.json().catch(() => undefined)
+            return saveSnippet((await compile()).writableSnippets, input)
+          }
           case '/presentation.css':
             return new Response(baseStyle, { headers: { 'Content-Type': 'text/css' } })
           case '/deck.css':

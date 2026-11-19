@@ -107,13 +107,42 @@ export function setupLiveCode(): void {
     const reset = block.querySelector<HTMLButtonElement>('[data-live-reset]')!
     const run = block.querySelector<HTMLButtonElement>('[data-live-run]')
     const output = block.querySelector<HTMLElement>('.live-output')
-    const original = editor.value
+    let original = editor.value
     const compiled = block.querySelector<HTMLTemplateElement>('[data-live-program]')?.content.textContent ?? ''
     const error = block.querySelector<HTMLTemplateElement>('[data-live-error]')?.content.textContent
     const switchLanguage = block.querySelector<HTMLButtonElement>('[data-live-convert]')
     const label = block.querySelector<HTMLElement>('.live-code-toolbar > span')
+    const save = block.querySelector<HTMLButtonElement>('[data-live-save]')
+    const status = block.querySelector('[data-snippet-status]')
     let language = block.dataset.language === 'ts' ? 'ts' : 'js'
     let active: AbortController | undefined
+
+    if (save && status) save.addEventListener('click', async () => {
+      const source = editor.value
+      if (save.disabled || source === original) return
+      save.disabled = true
+      status.textContent = 'Saving…'
+      try {
+        const response = await fetch('./__presentation/snippet', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: block.dataset.snippetToken, revision: block.dataset.snippetRevision, source }),
+        })
+        const result = await response.text()
+        if (!response.ok) throw new Error(result)
+        block.dataset.snippetRevision = result
+        original = source
+        const print = block.querySelector('.live-code-static code')
+        if (print) print.textContent = source
+        status.textContent = 'Saved.'
+      }
+      catch (error) {
+        status.textContent = error instanceof Error ? error.message : 'Could not save the snippet.'
+      }
+      finally {
+        save.disabled = false
+      }
+    })
 
     if (switchLanguage && !canCompile && !error) {
       switchLanguage.hidden = false

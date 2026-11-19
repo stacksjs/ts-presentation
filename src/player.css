@@ -38,6 +38,34 @@ button, select { font: inherit; }
   white-space: pre-wrap;
 }
 
+.presentation-code { text-align: start; }
+.slide .code-frame { margin: 1em 0; min-width: 0; }
+.slide .code-frame figcaption { font-size: 0.67em; color: inherit; }
+.slide .code-frame figcaption + pre { margin-top: 0.35em; }
+.slide .code-frame pre { overflow: auto; white-space: pre; }
+.code-frame code { white-space: normal; }
+.code-line { display: block; min-height: 1em; white-space: pre; }
+.code-line-number {
+  display: inline-block;
+  width: 2.8em;
+  padding-right: 0.9em;
+  text-align: right;
+  color: #9aaac1;
+  user-select: none;
+}
+[data-code-motion] .code-line > span { display: inline-block; }
+.live-code [data-snippet-status] { display: block; }
+.live-code [data-snippet-status]:empty { display: none; }
+
+@media screen {
+  [data-code-dim] { opacity: 0.36; }
+  [data-code-hidden] { visibility: hidden; }
+}
+@media print {
+  [data-code-motion] > .code-frame { display: none !important; }
+  [data-code-motion] > .code-frame:last-child { display: block !important; }
+}
+
 .tok-comment { color: #929cab; }
 .tok-keyword, .tok-operator { color: #ff9eab; }
 .tok-string { color: #abd785; }

@@ -1,12 +1,14 @@
 import type { AuthoringSetup, MermaidOptions } from './authoring-setup.ts'
 import type { LoadedExtensions, PresentationAddon } from './extensions.ts'
-import { resolveGrammar, tokenClass, Tokenizer } from 'ts-syntax-highlighter/browser'
 import { resolveCanvas } from './canvas.ts'
+import type { CodeBlockInfo } from './code-blocks.ts'
+import { codeBlock, codeFrame, createCodeHighlighter, magicFrames, parseCodeInfo } from './code-blocks.ts'
 import { renderMermaid } from './diagram.ts'
 import { escapeHtml, unescapeHtml } from './html.ts'
 import { liveBlock } from './live-markup.ts'
 import { createMathRenderer, resolveMathMacros } from './math.ts'
 import { prepareMarkdown, splitSlots } from './syntax.ts'
+import type { WritableSnippet } from './snippet-write.ts'
 
 export { defineAddon, defineTheme } from './extensions.ts'
 export { defineKatexSetup, defineMermaidRendererSetup, defineMermaidSetup } from './authoring-setup.ts'
@@ -129,12 +131,13 @@ export function parseDeck(markdown: string): Deck {
   return { title: title || slides[0].title, slides, headmatter }
 }
 
-const escapedCode = /<pre><code class="language-([\w+#.-]+)">([\s\S]*?)<\/code><\/pre>/g
+const escapedCode = /<pre><code(?: class="language-([\w+#.-]+)")?>([\s\S]*?)<\/code><\/pre>/g
 
 export interface RenderOptions {
   liveCompile?: boolean
   extensions?: LoadedExtensions
   setup?: AuthoringSetup
+  writableSnippets?: ReadonlyMap<string, WritableSnippet>
 }
 
 export async function renderDeck(deck: Deck, options: RenderOptions = {}): Promise<string> {
@@ -150,6 +153,8 @@ export async function renderDeck(deck: Deck, options: RenderOptions = {}): Promi
     ...(mermaidConfig && typeof mermaidConfig === 'object' && !Array.isArray(mermaidConfig) ? mermaidConfig : {}),
   }
   const diagramFences = new Map<string, MermaidOptions>()
+  const codeFences = new Map<string, CodeBlockInfo>()
+  const highlight = createCodeHighlighter()
   const { extensions } = options
   const activeExtensions: PresentationAddon[] = extensions ? [extensions.theme, ...extensions.addons] : []
   const defaults = extensions?.theme.defaults
@@ -175,6 +180,11 @@ export async function renderDeck(deck: Deck, options: RenderOptions = {}): Promi
         diagramFences.set(marker, value)
         return marker
       },
+      registerCode(info) {
+        const marker = `tp-code-${codeFences.size}`
+        codeFences.set(marker, info)
+        return marker
+      },
     })
     return prepared.restore(Bun.markdown.html(prepared.source))
   }
@@ -182,15 +192,15 @@ export async function renderDeck(deck: Deck, options: RenderOptions = {}): Promi
     if (!layoutHooks[effectiveLayout(slide)]) return { default: markdown(slide.content) }
     return Object.fromEntries(Object.entries(splitSlots(slide.content)).map(([name, content]) => [name, markdown(content)]))
   })
-  const languages = new Set(html.flatMap(slide => Object.values(slide).flatMap(slot => Array.from(slot.matchAll(escapedCode), match => match[1]))))
-  const highlightedLanguages = [...languages].filter(language => !language.endsWith('-tp-run') && !language.endsWith('-tp-edit') && language !== 'mermaid' && !diagramFences.has(language))
-  const grammars = new Map(await Promise.all(highlightedLanguages.map(async language => [language, await resolveGrammar(language)] as const)))
   const slides = await Promise.all(activeSlides.map(async (slide, index) => {
     let diagram = 0
     const layout = effectiveLayout(slide)
-    const renderCode = async (block: string, language: string, code: string) => {
+    const lineNumbers = (slide.frontmatter?.lineNumbers ?? deck.headmatter?.lineNumbers) === true
+    const renderCode = async (block: string, language = 'text', code: string) => {
       const decoded = unescapeHtml(code)
       const diagramProps = diagramFences.get(language)
+      const info = codeFences.get(language)
+      if (info) language = info.language
       if (diagramProps) language = 'mermaid'
       for (const hook of codeHooks) {
         const custom = hook(decoded, language, slide)
@@ -198,17 +208,29 @@ export async function renderDeck(deck: Deck, options: RenderOptions = {}): Promi
       }
       const live = /^(js|ts)-tp-(run|edit)$/.exec(language)
       if (live) return liveBlock(decoded.trimEnd(), live[1] === 'ts' ? 'ts' : 'js', live[2] === 'run')
+      const writable = info?.writeToken && options.liveCompile && options.writableSnippets?.get(info.writeToken)
+      if (writable && /^(js|javascript|ts|typescript)$/.test(language)) {
+        return liveBlock(decoded.replace(/\n$/, ''), language.startsWith('t') ? 'ts' : 'js', false,
+          { token: info.writeToken!, revision: writable.revision })
+      }
       if (language === 'mermaid') {
         const svg = mermaidConfig === false ? undefined : await renderMermaid(decoded, `arrow-${index}-${diagram++}`, diagramOptions, diagramProps, configuration?.diagramRenderer)
         return svg || (diagramProps ? block.replace(/language-mermaid-fence-\d+/, 'language-mermaid') : block)
       }
-      const grammar = grammars.get(language)
-      if (!grammar) return block
-      const lines = new Tokenizer(grammar).tokenize(decoded)
-      const highlighted = lines.map(line => line.tokens
-        .map(token => `<span class="tok-${tokenClass(token.type)}">${escapeHtml(token.content)}</span>`)
-        .join('')).join('\n')
-      return `<pre><code class="language-${language}">${highlighted}</code></pre>`
+      if (info?.magic) {
+        const frames = magicFrames(decoded)
+        if (frames) return codeBlock(info, await Promise.all(frames.map(async frame => codeFrame({
+          ...frame,
+          info: { ...frame.info, title: frame.info.title ?? info.title, lines: frame.info.lines ?? info.lines, maxHeight: frame.info.maxHeight ?? info.maxHeight },
+        }, await highlight(frame.source, frame.info.language), lineNumbers))), true)
+        return block.replace(/language-tp-code-\d+/, 'language-md')
+      }
+      const lines = language === 'text' && !info && !lineNumbers ? undefined : await highlight(decoded, language)
+      if (info || lineNumbers) {
+        const settings = info ?? parseCodeInfo(language)
+        if (settings) return codeBlock(settings, [codeFrame({ source: decoded, info: settings }, lines, lineNumbers)])
+      }
+      return lines ? `<pre><code class="language-${language}">${lines.join('\n')}</code></pre>` : block
     }
     const slots = Object.fromEntries(await Promise.all(Object.entries(html[index]).map(async ([name, markup]) => {
       const blocks = [...markup.matchAll(escapedCode)]

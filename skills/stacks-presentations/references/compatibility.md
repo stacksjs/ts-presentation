@@ -9,7 +9,8 @@ in a new ts-presentation project.
 | --- | --- |
 | Markdown, frontmatter, slide includes, click steps | Native Bun parser and browser player |
 | Scoped layouts and themes | TypeScript theme and addon modules, named slots, deck CSS |
-| Monaco editor and runner | Local editor and timed browser-worker runner. TypeScript compilation for edits uses Bun in dev |
+| Monaco editor and runner | Local editor and timed browser-worker runner. Bun compiles TypeScript edits in dev and can save opted-in snippets |
+| Snippets, line highlights, Magic Move | Local file and region imports, numbered click highlights, native token animations |
 | KaTeX | Native MathML with chemistry, numbered alignment rows, scoped macros, custom fractions and box layout, and click highlighting |
 | PowerPoint export | Image slides or editable text and boxes with separate artwork |
 | Mermaid | Local flowchart, sequence, basic state, class, ER, pie, Gantt, and GitGraph rendering |

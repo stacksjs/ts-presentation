@@ -1,4 +1,6 @@
 import { defaultCanvas } from './canvas.ts'
+import type { CodeReveal } from './code-player.ts'
+import { codeReveal, showCode } from './code-player.ts'
 import type { EquationReveal } from './equation-steps.ts'
 import { equationReveal, showEquation } from './equation-steps.ts'
 import { setupLiveCode } from './live-code.ts'
@@ -38,14 +40,19 @@ interface Reveal {
   hide: boolean
 }
 
-const reveals: (Reveal | EquationReveal)[][] = articles.map((article) => {
+const reveals: (Reveal | EquationReveal | CodeReveal)[][] = articles.map((article) => {
   let cursor = 0
   const groups = article.querySelectorAll('v-clicks')
   for (const group of groups) {
     const childNodes = group.firstElementChild?.matches('ol, ul') ? group.firstElementChild.children : group.children
     for (const child of childNodes) child.setAttribute('v-click', '')
   }
-  return [...article.querySelectorAll<HTMLElement>('v-click, v-after, [v-click], [v-after], [data-click], [data-equation-steps]')].map((element) => {
+  return [...article.querySelectorAll<HTMLElement>('v-click, v-after, [v-click], [v-after], [data-click], [data-equation-steps], [data-code-block]')].map((element) => {
+    if (element.hasAttribute('data-code-block')) {
+      const reveal = codeReveal(element, cursor)
+      cursor = Math.max(cursor, reveal.step)
+      return reveal
+    }
     if (element.hasAttribute('data-equation-steps')) {
       const reveal = equationReveal(element, cursor)
       cursor = Math.max(cursor, reveal.step)
@@ -84,6 +91,7 @@ function syncPeer(data: Record<string, unknown>): void {
 function show(number: number, step = 0, writeHistory = true, sync = true): void {
   const selected = Math.max(1, Math.min(articles.length, number))
   const nextStep = Math.max(0, Math.min(clickTotals[selected - 1], step))
+  const animate = !isCapture && selected === current && nextStep !== click
   if (writeHistory && (selected !== current || nextStep !== click)) {
     const hash = articles[selected - 1].dataset.route || `slide-${selected}`
     const locationHash = `#${hash}${nextStep ? `/${nextStep}` : ''}`
@@ -101,7 +109,8 @@ function show(number: number, step = 0, writeHistory = true, sync = true): void 
   articles[current - 1].hidden = false
   notes[current - 1].hidden = false
   for (const reveal of reveals[current - 1]) {
-    if ('lines' in reveal) showEquation(reveal, click)
+    if ('frames' in reveal) showCode(reveal, click, animate, Number(stage.style.getPropertyValue('--slide-scale')) || 1)
+    else if ('lines' in reveal) showEquation(reveal, click)
     else reveal.element.toggleAttribute('data-reveal-hidden', reveal.hide ? click >= reveal.step : click < reveal.step)
   }
   noteSteps[current - 1].forEach((note, index) => { note.hidden = index > click })

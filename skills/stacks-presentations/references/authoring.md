@@ -24,6 +24,16 @@ deck. For example, `canvasWidth: 800` and `aspectRatio: 4/3` produce an
 
 ## Code, math, and diagrams
 
+- Add a title and click ranges to a fence, as in
+  `ts [build.ts] {1|2-3|all}{lines:true,maxHeight:'160px'}`. Set
+  `lineNumbers: true` in frontmatter for default line numbering.
+- Import an existing file with `<<< ./example.ts` or use `@/` for a path
+  relative to the deck root. Append `#example` to select a named region.
+  Opt in to writing a whole JavaScript or TypeScript file by appending
+  `{monaco-write}`. Saving is available on the local dev server.
+- Open a four-backtick `md magic-move` fence and add ordinary code fences
+  or snippet imports inside it. Advancing a click animates tokens between
+  frames. Reduced motion switches frames immediately.
 - A fence with `js {monaco}` or `ts {monaco}` opens an editor.
   Add `-run` to the option for a Run/Stop button and console output.
   Use small, self-contained examples. JavaScript runs in static builds.

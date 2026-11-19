@@ -57,6 +57,8 @@ the deck and style slides with an optional `style.css`.
 | Images and component markup | Trusted HTML, with optional `data-zoom` on an image |
 | Diagrams | Mermaid flowcharts, sequence, basic state, class, entity relationship, pie, Gantt, and GitGraph diagrams |
 | Math | Native MathML with scoped and optional-argument macros, styled fractions, numbered equations, click highlighting, and chemistry notation |
+| Code walkthroughs | `ts [build.ts] {1\|2-3\|all}{lines:true}` for titles and click highlights, or `md magic-move` around nested fences to animate between frames |
+| Source snippets | `<<< @/snippets/build.ts#example` for a named region. Use `{monaco-write}` with a whole JavaScript or TypeScript file to allow saving from the local dev editor |
 | Live code | A `js` or `ts` fence followed by `{live-run}` or `{monaco-run}`. Use `{live}` or `{monaco}` for an editor |
 | Themes and addons | Set `theme: paper` or `theme: serif`, or load trusted local modules through `theme` and `addons` |
 | Canvas size | Set `canvasWidth: 800` and `aspectRatio: 4/3` in deck frontmatter for an 800 × 600 canvas |
@@ -80,7 +82,7 @@ All seven Slidev packages and the complete test tree are preserved in the
 [source snapshot in Git history](https://github.com/stacksjs/ts-presentation/tree/fd663ef704a3dbd27ad07cf7151003490f3c21b1/upstream/slidev).
 The active checkout contains the Bun port. The editable exporter ports
 Slidev's DOM walker and layout normalization to Bun WebView and the native
-PowerPoint writer. Adapted tests for export, math, and diagrams run with
+PowerPoint writer. Adapted tests for export, code blocks, math, and diagrams run with
 `bun test`.
 
 Open compatibility work includes Vue components and extensions, Monaco tooling,

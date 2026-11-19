@@ -3,6 +3,8 @@ import type { EquationOptions } from './equation-steps.ts'
 import { parseEquationOptions } from './equation-steps.ts'
 import type { FenceScalar } from './fence-options.ts'
 import { readFenceOptions } from './fence-options.ts'
+import type { CodeBlockInfo } from './code-blocks.ts'
+import { decoratedCode } from './code-blocks.ts'
 
 const fenceStart = /^ {0,3}(`{3,}|~{3,})(.*)$/
 const inlineCode = /^`+/
@@ -45,10 +47,11 @@ interface MarkdownSyntax {
   renderMath?: (body: string, display: boolean) => string
   mathEnabled?: boolean
   registerMermaid?: (options: Record<string, FenceScalar>) => string
+  registerCode?: (info: CodeBlockInfo) => string
 }
 
 export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): PreparedMarkdown {
-  if (!source.includes('$') && !source.includes('\\(') && !source.includes('\\[') && !source.includes('{monaco') && !source.includes('{live') && !source.includes('mermaid')) {
+  if (!source.includes('$') && !source.includes('\\(') && !source.includes('\\[') && !source.includes('{monaco') && !source.includes('{live') && !source.includes('mermaid') && !source.includes('```') && !source.includes('~~~')) {
     return { source, restore: html => html }
   }
 
@@ -139,6 +142,11 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
         continue
       }
       const options = runnerOptions.exec(opening[2])
+      const decoration = !options && decoratedCode(opening[2])
+      if (decoration && syntax.registerCode) {
+        output.push(`${line.slice(0, line.indexOf(fence))}${fence}${syntax.registerCode(decoration)}`)
+        continue
+      }
       const module = options?.[2].toLowerCase().startsWith('j') ? 'js' : 'ts'
       const mode = options?.[4].toLowerCase().endsWith('run') ? 'run' : 'edit'
       output.push(options ? `${line.slice(0, line.indexOf(fence))}${fence}${module}-tp-${mode}` : line)

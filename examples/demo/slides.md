@@ -250,3 +250,38 @@ Between terms, use a rule or an explicit space. For example, \(\rule{0.65em}{0.8
 <!--
 The left expression uses continued fractions. The right expression changes delimiters and bar thickness.
 -->
+
+---
+
+# Walk through the code
+
+<<< ./snippets/summary.ts#summary ts [summary.ts] {1|2-3|all}{lines:true}
+
+<!--
+Start with the function signature.
+[click]
+Show how the completed items are counted.
+[click]
+Read the whole function together.
+-->
+
+---
+
+# Show a refactor
+
+````md magic-move
+```ts [summary.ts]
+const ready = items.filter(item => item.done)
+const count = ready.length
+```
+
+```ts [summary.ts]
+const count = items.filter(item => item.done).length
+```
+````
+
+<!--
+Start on the two-step implementation.
+[click]
+Show the same result computed inline.
+-->
