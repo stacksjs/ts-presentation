@@ -82,9 +82,9 @@ const builtin: Record<string, PresentationTheme> = {
   paper: {
     name: 'paper',
     styles: `
-      [data-theme="paper"] .slide { background: #f5f1e9; color: #202831; color-scheme: light }
-      [data-theme="paper"] .slide h1 { color: #164f57; letter-spacing: -.035em }
-      [data-theme="paper"] .slide a { color: #16637a }
+      [data-theme="paper"]:not(.dark) .slide { background: #f5f1e9; color: #202831; color-scheme: light }
+      [data-theme="paper"]:not(.dark) .slide h1 { color: #164f57; letter-spacing: -.035em }
+      [data-theme="paper"]:not(.dark) .slide a { color: #16637a }
       [data-theme="paper"] .slide .slide-diagram { background: #182533; border-radius: .35em }
       [data-theme="paper"] .slide .live-code { color: #edf5ff; color-scheme: dark }
       [data-theme="paper"] .slide pre { color: #edf5ff }

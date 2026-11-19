@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en"{!! clickAnimation !!} data-slide-width="{{ width }}" data-slide-height="{{ height }}" data-theme="{{ theme }}"{!! liveAttribute !!}>
+<html lang="en"{!! clickAnimation !!} data-slide-width="{{ width }}" data-slide-height="{{ height }}" data-theme="{{ theme }}" data-color-schema="{{ colorSchema }}"{!! liveAttribute !!}>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">

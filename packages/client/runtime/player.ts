@@ -1,5 +1,6 @@
 import { defaultCanvas } from '../../types/src/canvas.ts'
 import { setupCodeCopy, setupCodeTabs } from './code-controls.ts'
+import { createSlideConditions } from './conditions.ts'
 import { setupDiagramActions } from './diagram-actions.ts'
 import type { LiveDeck } from '../../types/src/dev-protocol.ts'
 import type { LiveManifest } from './dev-updates.ts'
@@ -9,7 +10,7 @@ import { setupDrawings } from './drawing-player.ts'
 import type { DrawingClientConfig } from '../../types/src/drawings.ts'
 import { setupLiveCode } from './live-code.ts'
 import { createSlideMedia } from './media.ts'
-import type { ClickBounds, SlidePosition, SlideRoute } from './navigation.ts'
+import type { ClickBounds, SlideMode, SlidePosition, SlideRoute } from './navigation.ts'
 import { clickBounds, createNavigationContext, nextPosition, previousPosition, readSlideHash, slideHash, slidePosition } from './navigation.ts'
 import { setupPresenter } from './presenter.ts'
 import { collectReveals, prepareSwitchPrint, showReveals } from './reveals.ts'
@@ -48,8 +49,12 @@ const defaultClickAnimation = document.documentElement.dataset.clickAnimation
 const reveals: ReturnType<typeof collectReveals>[] = []
 const bounds: ClickBounds[] = []
 const isLive = !isCapture && document.documentElement.dataset.liveCompile === 'true'
+const slideMode = (): SlideMode => isPreview ? 'preview' : isCapture ? 'export' : isPresenter || !notesPanel.hidden ? 'presenter' : 'slide'
+const conditions = createSlideConditions(slideMode, refreshConditions)
 
 function mountSlide(article: HTMLElement, index: number): void {
+  conditions.update(article)
+  reveals[index] = collectReveals(article, routes[index].frontmatter.clickAnimation || defaultClickAnimation, conditions.update)
   disclosures[index] = [...article.querySelectorAll('details')]
   screenshots[index] = [...article.querySelectorAll<HTMLImageElement>('img[data-zoom]')]
   for (const image of screenshots[index]) {
@@ -58,7 +63,6 @@ function mountSlide(article: HTMLElement, index: number): void {
     image.setAttribute('aria-label', `Enlarge ${image.alt || 'image'}`)
   }
   noteSteps[index] = [...notes[index].querySelectorAll<HTMLElement>('[data-note-step]')]
-  reveals[index] = collectReveals(article, routes[index].frontmatter.clickAnimation || defaultClickAnimation)
   bounds[index] = clickBounds(routes[index].frontmatter, Math.max(reveals[index].total, noteSteps[index].length - 1))
   article.dataset.clicks = String(bounds[index].end)
   article.dataset.clicksStart = String(bounds[index].start)
@@ -127,6 +131,7 @@ function show(number: number, step?: number, writeHistory = true, sync = true, r
   notes[current - 1].hidden = false
   showReveals(reveals[current - 1], click, animate, Number(stage.style.getPropertyValue('--slide-scale')) || 1)
   media.show(active)
+  conditions.observe(active)
   noteSteps[current - 1].forEach((note, index) => { note.hidden = index > click })
   if (slideChanged) notesPanel.scrollTop = 0
   else if (!notesPanel.hidden && click > 0) {
@@ -176,8 +181,7 @@ function readLocation(): void {
   show(target.slide, click, false)
 }
 
-window.presentationNavigation = createNavigationContext(routes,
-  () => isPreview ? 'preview' : isCapture ? 'export' : isPresenter || !notesPanel.hidden ? 'presenter' : 'slide',
+window.presentationNavigation = createNavigationContext(routes, slideMode,
   position, bounds, {
     go(slide, step) {
       const number = typeof slide === 'number' ? slide : aliases.get(slide) ?? Number(slide)
@@ -198,6 +202,7 @@ function togglePresenter(): void {
   notesPanel.hidden = !notesPanel.hidden
   document.body.classList.toggle('presenting', !notesPanel.hidden)
   presenter.setAttribute('aria-pressed', String(!notesPanel.hidden))
+  refreshConditions()
   if (!notesPanel.hidden) presenterControls ??= setupPresenter(routes, bounds, step => show(current, step))
   presenterControls?.setActive(!notesPanel.hidden)
   presenterControls?.update(position())
@@ -432,6 +437,25 @@ window.addEventListener('keydown', (event) => {
   event.preventDefault()
 })
 
+const mountCopy = !isCapture && !isPreview ? setupCodeCopy(stage) : undefined
+if (mountCopy) setupLiveCode()
+
+function refreshConditions(): void {
+  let changed = false
+  for (const [index, article] of articles.entries()) {
+    if (!conditions.update(article)) continue
+    mountSlide(article, index)
+    if (mountCopy) { mountCopy(article); setupLiveCode(article) }
+    changed = true
+  }
+  if (!changed) return
+  codeTabs?.refresh()
+  drags?.updateElements()
+  const previousClick = click
+  show(current, click, false, false, true)
+  if (click !== previousClick) history.replaceState(null, '', slideHash(routes[current - 1], click))
+}
+
 for (const article of articles) article.hidden = true
 readLocation()
 if (isPresenter) {
@@ -439,9 +463,6 @@ if (isPresenter) {
   opener?.postMessage({ presenterReady: true }, messageOrigin)
 }
 resize()
-
-const mountCopy = !isCapture && !isPreview ? setupCodeCopy(stage) : undefined
-if (mountCopy) setupLiveCode()
 
 function template(html: string): DocumentFragment {
   const template = document.createElement('template')

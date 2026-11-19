@@ -119,10 +119,15 @@ interface PendingSlot {
   explicitEnd?: number
 }
 
+const switchSlots = new WeakMap<HTMLElement, SwitchSlot[]>()
+const originalInert = new WeakMap<HTMLElement, boolean>()
+
 function prepareSwitch(element: HTMLElement, offset: number): SwitchReveal | undefined {
   const { raw, expression } = property(element, 'at')
   const at = parseClickPosition(raw, '+1', expression)
   if (!at) return
+  const mounted = switchSlots.get(element)
+  if (mounted) return { slots: mounted, span: clickSequence(at, offset, Math.max(...mounted.map(slot => slot.end)) - 1) }
   const pending: PendingSlot[] = []
   for (const child of element.children) {
     if (!(child instanceof HTMLTemplateElement)) continue
@@ -145,10 +150,11 @@ function prepareSwitch(element: HTMLElement, offset: number): SwitchReveal | und
     template.replaceWith(wrapper)
     return { element: wrapper, start, end }
   })
+  switchSlots.set(element, slots)
   return { slots, span: clickSequence(at, offset, Math.max(...slots.map(slot => slot.end)) - 1) }
 }
 
-export function collectReveals(article: HTMLElement, preset: unknown): SlideReveals {
+export function collectReveals(article: HTMLElement, preset: unknown, mountSlots?: (container: HTMLElement) => void): SlideReveals {
   const reveals: Reveal[] = []
   let offset = 0
   let total = 0
@@ -191,12 +197,16 @@ export function collectReveals(article: HTMLElement, preset: unknown): SlideReve
           element.classList.add('slidev-vclick-target', ...animations.map(name => `slidev-vclick-anim-${name}`))
           element.dataset.slidevClicksStart = String(span.start)
           if (Number.isFinite(span.end)) element.dataset.slidevClicksEnd = String(span.end)
-          register({ element, span, hide: info.hide, inert: element instanceof HTMLElement && element.inert }, span)
+          if (element instanceof HTMLElement && !originalInert.has(element)) originalInert.set(element, element.inert)
+          register({ element, span, hide: info.hide, inert: element instanceof HTMLElement && originalInert.get(element) === true }, span)
         }
         if (element instanceof HTMLElement && element.localName === 'v-clicks') registerGroup(element, groups)
         if (element instanceof HTMLElement && element.localName === 'v-switch') {
           const reveal = prepareSwitch(element, offset)
-          if (reveal) register(reveal, reveal.span)
+          if (reveal) {
+            register(reveal, reveal.span)
+            for (const slot of reveal.slots) mountSlots?.(slot.element)
+          }
         }
       }
     }

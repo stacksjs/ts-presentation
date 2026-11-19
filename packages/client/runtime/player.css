@@ -31,6 +31,10 @@ button, select { font: inherit; }
 }
 
 .slide h1 { margin-top: 0; line-height: 1.1; }
+.light .slide { background: #f8f8f4; color: #202831; color-scheme: light; }
+.light .slide a { color: #155786; }
+.light .slide pre { color: #edf5ff; color-scheme: dark; }
+[data-render-when]:not([data-render-when~="visible"]) { display: contents; }
 .slide :is(code, pre) { font-family: var(--presentation-font-mono, ui-monospace, monospace); }
 .slide pre {
   padding: 0.9em;

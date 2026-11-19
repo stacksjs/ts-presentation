@@ -97,6 +97,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   const fontMarkup = deckFontMarkup(options.extensions?.theme.defaults?.fonts, nested?.fonts, deck.headmatter?.fonts)
   const color = deck.headmatter?.colorSchema ?? nested?.colorSchema
   const socialTheme = color === 'light' || (color !== 'dark' && options.extensions?.theme.name === 'paper') ? 'light' : 'dark'
+  const colorSchema = color === 'auto' ? color : socialTheme
   const codeTheme = codeThemeStyles(deck.headmatter?.codeTheme ?? configuration?.codeHighlight?.theme)
   const { extensions } = options
   const activeExtensions: PresentationAddon[] = extensions ? [extensions.theme, ...extensions.addons] : []
@@ -276,7 +277,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   if (options.liveCompile) {
     const drawingOptions = [drawings.enabled, drawings.presenterOnly, drawings.syncAll, drawings.persist]
     const theme = extensions?.theme.name
-    const frame = snippetRevision(JSON.stringify([width, height, clicksPreset, drawingOptions, theme, codeTheme, fontMarkup, mcpNavigation, extensions?.styles, extensions?.client, globalTop, globalBottom]))
+    const frame = snippetRevision(JSON.stringify([width, height, clicksPreset, drawingOptions, theme, colorSchema, codeTheme, fontMarkup, mcpNavigation, extensions?.styles, extensions?.client, globalTop, globalBottom]))
     const parts = slides.map((slide, index) => {
       const source = options.sourceBindings?.get(activeSlides[index])
       const part = { ...slide, notes: notes[index], route: routes[index], sourceToken: source?.token }
@@ -293,6 +294,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     width,
     height,
     theme: extensions?.theme.name ?? 'default',
+    colorSchema,
     liveAttribute: options.liveCompile
       ? ' data-live-compile="true"' + (mcpNavigation ? ' data-mcp-navigation="true"' : '')
       : '',

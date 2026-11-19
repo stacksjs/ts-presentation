@@ -100,9 +100,13 @@ async function execute(program: string, append: (text: string) => void, signal: 
   })
 }
 
+const mountedEditors = new WeakSet<HTMLElement>()
+
 export function setupLiveCode(root: ParentNode = document): void {
   const canCompile = document.documentElement.dataset.liveCompile === 'true'
   for (const block of root.querySelectorAll<HTMLElement>('.live-code')) {
+    if (mountedEditors.has(block)) continue
+    mountedEditors.add(block)
     const editor = block.querySelector('textarea')!
     const reset = block.querySelector<HTMLButtonElement>('[data-live-reset]')!
     const run = block.querySelector<HTMLButtonElement>('[data-live-run]')

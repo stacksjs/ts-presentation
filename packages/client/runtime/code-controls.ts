@@ -116,6 +116,7 @@ async function writeClipboard(value: string): Promise<boolean> {
 export function setupCodeCopy(stage: HTMLElement): (article: HTMLElement) => void {
   const sources = new WeakMap<HTMLButtonElement, () => string>()
   const timers = new WeakMap<HTMLButtonElement, ReturnType<typeof setTimeout>>()
+  const installed = new WeakSet<HTMLElement>()
   function install(parent: HTMLElement, source: () => string): void {
     const button = document.createElement('button')
     button.type = 'button'
@@ -128,7 +129,7 @@ export function setupCodeCopy(stage: HTMLElement): (article: HTMLElement) => voi
   }
   function prepare(article: HTMLElement): void {
     for (const code of article.querySelectorAll<HTMLElement>('pre > code')) {
-      if (code.closest('.live-code')) continue
+      if (installed.has(code) || code.closest('.live-code')) continue
       const disabled = code.closest('[data-code-motion]')
         ? article.hasAttribute('data-magic-copy-disabled')
         : article.hasAttribute('data-code-copy-disabled')
@@ -138,12 +139,16 @@ export function setupCodeCopy(stage: HTMLElement): (article: HTMLElement) => voi
       overlay.className = 'code-copy-overlay'
       pre.prepend(overlay)
       install(overlay, () => codeText(code))
+      installed.add(code)
     }
     if (article.hasAttribute('data-code-copy-disabled')) return
     for (const live of article.querySelectorAll('.live-code')) {
       const toolbar = live.querySelector<HTMLElement>('.live-code-toolbar')
       const input = live.querySelector('textarea')
-      if (toolbar && input) install(toolbar, () => input.value)
+      if (toolbar && input && !installed.has(toolbar)) {
+        install(toolbar, () => input.value)
+        installed.add(toolbar)
+      }
     }
   }
   stage.querySelectorAll<HTMLElement>(':scope > article').forEach(prepare)

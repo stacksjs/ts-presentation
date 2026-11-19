@@ -112,6 +112,18 @@ function listProp(attributes: Map<string, Attribute>, name: string): string[] {
 
 const outlineComponents = new Set(['Toc', 'TitleRenderer', 'SlideCurrentNo', 'SlidesTotal'])
 
+function conditionalMarkup(name: string, source: string, selfClosing: boolean): string {
+  const attributes = attributeValues(selfClosing ? source.replace(/\/\s*$/, '') : source)
+  if (name === 'RenderWhen') {
+    const contexts = listProp(attributes, 'context')
+    attributes.delete('context')
+    attributes.delete(':context')
+    setAttribute(attributes, 'data-render-when', contexts.join(' '))
+  }
+  else setAttribute(attributes, 'data-light-or-dark', '')
+  return `<div${serialized(attributes)}>${selfClosing ? '</div>' : '<template data-condition-content>'}`
+}
+
 function outlineMarkup(name: string, source: string, slide: number, outline: SlideOutline): string {
   const attributes = attributeValues(source.replace(/\/\s*$/, ''))
   const integer = (key: string, fallback: number) => {
@@ -293,12 +305,13 @@ function tweetMarkup(source: string, theme: 'light' | 'dark'): string {
 
 /** Adapted from Slidev's Markdown link and scoped style transforms (MIT). */
 export function prepareSlideHtml(input: string, destination: (value: string) => SlideDestination | undefined, slide: number, frontmatter: Record<string, unknown> = {}, theme: 'light' | 'dark' = 'dark', outline?: SlideOutline): { html: string, css: string } {
-  if (!/<(?:style|(?:a|Link|Tweet|SlidevVideo|Youtube|Toc|TitleRenderer|SlideCurrentNo|SlidesTotal)(?=[\s/>])|v-?drag)|\sv-drag\b/i.test(input)) return { html: input, css: '' }
+  if (!/<(?:style|(?:a|Link|Tweet|SlidevVideo|Youtube|Toc|TitleRenderer|SlideCurrentNo|SlidesTotal|RenderWhen|LightOrDark)(?=[\s/>])|v-?drag)|\sv-drag\b/i.test(input)) return { html: input, css: '' }
   const blocks: StyleBlock[] = []
   const tags = new RegExp(htmlTags)
   let offset = 0
   let html = ''
   let componentOpen = false
+  let conditionalDepth = 0
   let arrowCount = 0
   for (let token = tags.exec(input); token; token = tags.exec(input)) {
     const [original, closing, rawName, source] = token
@@ -313,8 +326,15 @@ export function prepareSlideHtml(input: string, destination: (value: string) => 
         const attrs = attributeValues(source)
         attrs.delete('scoped')
         attrs.delete('data-slide-style')
-        blocks.push({ attributes: serialized(attrs), content: input.slice(tags.lastIndex, end.index) })
-        replacement = ''
+        const content = input.slice(tags.lastIndex, end.index)
+        if (conditionalDepth) {
+          const [scoped] = scopeSlideStyles([content], slide)
+          replacement = `<style${serialized(attrs)}>${scoped}</style>`
+        }
+        else {
+          blocks.push({ attributes: serialized(attrs), content })
+          replacement = ''
+        }
       }
       else replacement = input.slice(token.index, close.lastIndex)
       tags.lastIndex = close.lastIndex
@@ -330,6 +350,12 @@ export function prepareSlideHtml(input: string, destination: (value: string) => 
     }
     else if (outline && outlineComponents.has(rawName)) {
       replacement = closing ? '' : outlineMarkup(rawName, source, slide, outline)
+    }
+    else if (rawName === 'RenderWhen' || rawName === 'LightOrDark') {
+      const selfClosing = /\/>$/.test(original)
+      if (closing && conditionalDepth) conditionalDepth--
+      else if (!closing && !selfClosing) conditionalDepth++
+      replacement = closing ? '</template></div>' : conditionalMarkup(rawName, source, selfClosing)
     }
     else if (rawName === 'Link') {
       if (closing && componentOpen) {
