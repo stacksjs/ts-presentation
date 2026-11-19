@@ -13,22 +13,45 @@ const operators: Record<string, string> = {
   pm: '±', mp: '∓', cdot: '·', times: '×', div: '÷', le: '≤', leq: '≤', ge: '≥', geq: '≥', ne: '≠', neq: '≠',
   approx: '≈', sim: '∼', simeq: '≃', equiv: '≡', propto: '∝', in: '∈', notin: '∉', subset: '⊂',
   subseteq: '⊆', supset: '⊃', supseteq: '⊇', cap: '∩', cup: '∪', land: '∧', lor: '∨',
-  forall: '∀', exists: '∃', neg: '¬', to: '→', mapsto: '↦', rightarrow: '→', leftarrow: '←',
+  forall: '∀', exists: '∃', neg: '¬', to: '→', mapsto: '↦', rightarrow: '→', leftarrow: '←', gets: '←',
   leftrightarrow: '↔', Rightarrow: '⇒', Leftarrow: '⇐', Leftrightarrow: '⇔', iff: '⇔',
   sum: '∑', prod: '∏', int: '∫', iint: '∬', oint: '∮', partial: '∂', nabla: '∇', infty: '∞',
-  emptyset: '∅', ldots: '…', dots: '…', cdots: '⋯', vdots: '⋮', ddots: '⋱', angle: '∠',
+  emptyset: '∅', ldots: '…', cdots: '⋯', vdots: '⋮', ddots: '⋱', angle: '∠',
   mid: '∣', parallel: '∥', perp: '⊥', circ: '∘', ast: '∗', setminus: '∖',
   coprod: '∐', bigcup: '⋃', bigcap: '⋂', bigvee: '⋁', bigwedge: '⋀',
   iiint: '∭', oiint: '∯', oiiint: '∰', intop: '∫', smallint: '∫', imath: 'ı', jmath: 'ȷ', ell: 'ℓ', hbar: 'ℏ',
   Re: 'ℜ', Im: 'ℑ', aleph: 'ℵ', empty: '∅', cong: '≅', ll: '≪', gg: '≫',
-  uparrow: '↑', downarrow: '↓', longrightarrow: '⟶', longleftarrow: '⟵',
+  uparrow: '↑', downarrow: '↓', updownarrow: '↕', Uparrow: '⇑', Downarrow: '⇓', Updownarrow: '⇕',
+  longrightarrow: '⟶', longleftarrow: '⟵', longleftrightarrow: '⟷',
+  Longrightarrow: '⟹', Longleftarrow: '⟸', Longleftrightarrow: '⟺', longmapsto: '⟼',
+  lt: '<', gt: '>', ni: '∋', owns: '∋', notni: '∌', nmid: '∤', nparallel: '∦',
+  nleq: '≰', ngeq: '≱', nsubseteq: '⊈', nsupseteq: '⊉',
+  prime: '′', backprime: '‵', smallsetminus: '∖',
   otimes: '⊗', oplus: '⊕', odot: '⊙', wedge: '∧', vee: '∨', colon: ':',
 }
 const functions = new Set(['sin', 'cos', 'tan', 'cot', 'sec', 'csc', 'arcsin', 'arccos', 'arctan', 'sinh', 'cosh', 'tanh',
-  'log', 'ln', 'exp', 'min', 'max', 'argmin', 'argmax', 'det', 'lim', 'sup', 'inf', 'gcd', 'mod', 'Pr'])
+  'log', 'ln', 'exp', 'min', 'max', 'argmin', 'argmax', 'det', 'lim', 'sup', 'inf', 'gcd', 'Pr'])
 const big = new Set(['sum', 'prod', 'coprod', 'bigcup', 'bigcap', 'bigvee', 'bigwedge', 'intop', 'smallint',
   'lim', 'min', 'max', 'argmin', 'argmax', 'sup', 'inf', 'det', 'gcd', 'Pr'])
 const integrals = new Set(['int', 'iint', 'iiint', 'oint', 'oiint', 'oiiint'])
+const namedLimits: Record<string, string> = {
+  liminf: 'lim inf', limsup: 'lim sup', injlim: 'inj lim', projlim: 'proj lim',
+}
+const accentedLimits: Record<string, string> = {
+  varliminf: 'math-underline', varlimsup: 'math-overline',
+}
+const unicodeSuperscripts = new Map([...'⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ᴬᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴼᴾᴿᵀᵁⱽᵂᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻᵝᵞᵟᵠᵡᶿ'].map((symbol, index) =>
+  [symbol, '0123456789+-=()ABDEGHIJKLMNOPRTUVWabcdefghijklmnoprstuvwxyzβγδϕχθ'[index]]))
+const unicodeSubscripts = new Map([...'₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓᵦᵧᵨᵩᵪ'].map((symbol, index) =>
+  [symbol, '0123456789+-=()aehijklmnoprstuvxβγρϕχ'[index]]))
+const primes: Readonly<Record<string, number>> = { "'": 1, '′': 1, '″': 2, '‴': 3, '⁗': 4 }
+const negatedOperators: Record<string, string> = {
+  '=': '≠', '&lt;': '≮', '&gt;': '≯', '≤': '≰', '≥': '≱', '≈': '≉', '≡': '≢', '∼': '≁', '≃': '≄', '≅': '≇',
+  '∈': '∉', '∋': '∌', '⊂': '⊄', '⊃': '⊅', '⊆': '⊈', '⊇': '⊉', '∣': '∤', '∥': '∦',
+  '⊢': '⊬', '⊨': '⊭', '←': '↚', '→': '↛', '↔': '↮', '⇐': '⇍', '⇒': '⇏', '⇔': '⇎',
+}
+const contextualDots = new Set(['dots', 'dotsc', 'dotsb', 'dotsm', 'dotsi', 'dotso', 'dotsx'])
+const centersDots = /^[+\-−*=<>:±∓·×÷≤≥≠≈∼≃≡∝∈∉∋∌∣∤∥∦⊥⊂⊄⊆⊈⊃⊅⊇⊉∘∗∖∩∪∧∨⊕⊗⊙∑∏∐⋃⋂⋁⋀←→↔⇒⇐⇔↦⟵⟶⟷⟹⟸⟺⟼]$/u
 const variants: Record<string, string> = {
   mathbf: 'bold', mathbb: 'double-struck', mathrm: 'normal', mathit: 'italic',
   mathsf: 'sans-serif', mathtt: 'monospace', mathcal: 'script', mathfrak: 'fraktur', boldsymbol: 'bold-italic',
@@ -56,9 +79,20 @@ const notationDelimiters: Record<string, [string, string]> = {
 }
 const delimiters: Record<string, string> = {
   '\\{': '{', '\\}': '}', '\\lbrace': '{', '\\rbrace': '}', '\\langle': '⟨', '\\rangle': '⟩',
+  '\\lparen': '(', '\\rparen': ')', '\\lbrack': '[', '\\rbrack': ']', '\\lang': '⟨', '\\rang': '⟩',
   '\\lVert': '‖', '\\rVert': '‖', '\\lvert': '|', '\\rvert': '|',
   '\\lfloor': '⌊', '\\rfloor': '⌋', '\\lceil': '⌈', '\\rceil': '⌉', '\\vert': '|', '\\Vert': '‖', '\\|': '‖',
+  '\\lgroup': '⟮', '\\rgroup': '⟯', '\\lmoustache': '⎰', '\\rmoustache': '⎱', '\\backslash': '\\',
+  '\\ulcorner': '⌜', '\\urcorner': '⌝', '\\llcorner': '⌞', '\\lrcorner': '⌟',
+  '\\llbracket': '⟦', '\\rrbracket': '⟧', '\\lBrace': '⦃', '\\rBrace': '⦄',
 }
+const delimiterAliases: Record<string, string> = {
+  '\\lt': '⟨', '\\gt': '⟩', '<': '⟨', '>': '⟩',
+  '\\uparrow': '↑', '\\downarrow': '↓', '\\updownarrow': '↕',
+  '\\Uparrow': '⇑', '\\Downarrow': '⇓', '\\Updownarrow': '⇕',
+}
+const delimiterGlyphs = new Set(['.', '(', ')', '[', ']', '{', '}', '/', '∣', ...Object.values(delimiters), ...Object.values(delimiterAliases)])
+const sizedDelimiters: Record<string, string> = { big: '1.2em', Big: '1.8em', bigg: '2.4em', Bigg: '3em' }
 const matrixDelimiters: Record<string, [string, string]> = {
   pmatrix: ['(', ')'], bmatrix: ['[', ']'], Bmatrix: ['{', '}'], vmatrix: ['|', '|'], Vmatrix: ['‖', '‖'], cases: ['{', ''],
 }
@@ -217,9 +251,43 @@ function tag(name: string, value: string): string {
   return `<${name}>${escapeHtml(value)}</${name}>`
 }
 
+function spaceMarkup(width: string): string {
+  // MathML Core layout clamps space widths to zero. A negative margin retains
+  // the signed advance of a TeX kern.
+  return Number.parseFloat(width) < 0
+    ? `<mspace width="0" style="margin-inline-end:${width}"/>`
+    : `<mspace width="${width}"/>`
+}
+
+function muSpace(mu: number): string {
+  return spaceMarkup(`${mu / 18}em`)
+}
+
+function negatedMarkup(markup: string): string {
+  const symbol = /^((?:<mrow>)*)<(mo|mi|mn)([^>]*)>([^<]+)<\/\2>((?:<\/mrow>)*)$/.exec(markup)
+  if (!symbol || !/^(?:[^&]|&(?:lt|gt|amp|quot|#39);)$/u.test(symbol[4]))
+    return `<mrow class="math-cancel">${markup}</mrow>`
+  const [, prefix, element, attrs, value, suffix] = symbol
+  const negated = negatedOperators[value] ?? `${value}\u0338`
+  return `${prefix}<${element}${attrs}>${negated}</${element}>${suffix}`
+}
+
 function fence(token: string, stretchy = true): string {
   if (!token || token === '.') return ''
   return `<mo stretchy="${stretchy}">${escapeHtml(delimiters[token] ?? token)}</mo>`
+}
+
+function delimiter(token: string, command: string): string {
+  const glyph = delimiterAliases[token] ?? delimiters[token] ?? token
+  if (!delimiterGlyphs.has(glyph)) throw new Error(`Invalid delimiter after \\${command}`)
+  return glyph
+}
+
+function sizedFence(glyph: string, size: string, side: string): string {
+  if (glyph === '.') return ''
+  const form = side === 'l' ? 'prefix' : side === 'r' ? 'postfix' : 'infix'
+  const gap = side === 'm' ? '0.278em' : '0em'
+  return `<mo stretchy="true" fence="${side === 'l' || side === 'r'}" form="${form}" lspace="${gap}" rspace="${gap}" minsize="${size}" maxsize="${size}">${escapeHtml(glyph)}</mo>`
 }
 
 const styleCommands: Record<string, MathStyle> = {
@@ -273,6 +341,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   let expandedCount = 0
   let tagState = { label: '', suppressed: false }
   let environmentDepth = 0
+  let delimiterDepth = 0
   let equationNumber = 0
 
   const macros = new Map<string, Macro>()
@@ -405,7 +474,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   function argument(): Markup {
     if (depth++ > 100) throw new Error('Math arguments are nested too deeply')
     const token = take()
-    if (!token || token === '}' || token === boundary) throw new Error('Missing math argument')
+    if (!token || token === '}' || token === boundary || token === '^' || token === '_') throw new Error('Missing math argument')
     if (infixFractions.has(token)) throw new Error('An infix fraction argument requires a group')
     const markup = atom(token).markup
     depth--
@@ -414,6 +483,27 @@ export function renderMath(source: string, display = false, configured: MathMacr
 
   function bracket(): string | undefined {
     return rawBracket()?.join('')
+  }
+
+  function readDelimiter(command: string): string {
+    const token = take()
+    if (token !== '{') return delimiter(token, command)
+    const symbol = take()
+    if (take() !== '}') throw new Error(`Invalid delimiter after \\${command}`)
+    return delimiter(symbol, command)
+  }
+
+  function pairedDelimiters(): Markup {
+    const left = fence(readDelimiter('left'))
+    delimiterDepth++
+    let content: Markup
+    try {
+      content = inScope(() => row(['\\right', '}', '\\end', '&', '\\\\', '\\cr']))
+    }
+    finally { delimiterDepth-- }
+    if (take() !== '\\right') throw new Error('Missing \\right for \\left')
+    const right = fence(readDelimiter('right'))
+    return xml`<mrow>${left}${content}${right}</mrow>`
   }
 
   function readDimension(blank?: string): string {
@@ -533,6 +623,52 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return automatic && !tagState.suppressed ? `(${++equationNumber})` : ''
   }
 
+  function unicodeScript(symbols: ReadonlyMap<string, string>): Markup {
+    let buffer = ''
+    for (let value = symbols.get(peek()); value !== undefined; value = symbols.get(peek())) {
+      cursor++
+      buffer += value
+    }
+    const parts = (buffer.match(/\d+|./g) ?? []).map(token => /^\d+$/.test(token) ? tag('mn', token) : atom(token).markup)
+    return xml`<mrow>${joinMarkup(parts)}</mrow>`
+  }
+
+  function primeScript(): Markup {
+    let text = ''
+    for (let count = primes[peek()]; count; count = primes[peek()]) {
+      cursor++
+      text += '′'.repeat(count)
+    }
+    const following = peek() === '^' ? (cursor++, argument()) : ''
+    return xml`<mrow>${tag('mo', text)}${following}</mrow>`
+  }
+
+  function ellipsis(name: string): string {
+    const next = peek()
+    const command = next.startsWith('\\') ? next.slice(1) : ''
+    const integral = name === 'dotsi' || (name === 'dots' && integrals.has(command))
+    const centered = integral || name === 'dotsb' || name === 'dotsm'
+      || (name === 'dots' && (command.startsWith('not') || centersDots.test(operators[command] ?? next)))
+    const nearClosing = /^(?:[)\]},.;]|\\(?:right|rparen|rbrack|rbrace|rangle|rceil|rfloor|rgroup|rmoustache|(?:big|Big|bigg|Bigg)r))$/.test(next)
+    const trailing = name === 'dotsx' || (nearClosing && (name !== 'dotsc' || next !== ',')) ? muSpace(3) : ''
+    const symbol = tag('mo', centered ? '⋯' : '…')
+    return integral || trailing ? `<mrow>${integral ? muSpace(-3) : ''}${symbol}${trailing}</mrow>` : symbol
+  }
+
+  function modulus(name: string): Markup {
+    const label = '<mi mathvariant="normal">mod</mi>'
+    if (name === 'bmod') return `<mrow>${muSpace(5)}${label}${muSpace(5)}</mrow>`
+    const operand = argument()
+    const parenthesized = name !== 'mod'
+    return (style) => {
+      const space = muSpace(style === 0 ? 18 : parenthesized ? 8 : 12)
+      const value = renderMarkup(operand, style)
+      const content = name === 'pod' ? value : label + muSpace(6) + value
+      const body = parenthesized ? `<mrow>${fence('(', false)}${content}${fence(')', false)}</mrow>` : content
+      return `<mrow>${space}${body}</mrow>`
+    }
+  }
+
   function row(stop: string[] = [], breakOnInfix = false): Markup {
     if (depth++ > 100) throw new Error('Math groups are nested too deeply')
     const before: Markup[] = []
@@ -570,24 +706,29 @@ export function renderMath(source: string, display = false, configured: MathMacr
         }
         part = { markup: tag('mn', number) }
       }
+      else if (token === '_' || token === '^' || primes[token] || unicodeSubscripts.has(token) || unicodeSuperscripts.has(token)) {
+        part = { markup: '<mrow/>' }
+        cursor--
+      }
       else part = atom(token)
       let lower: Markup = ''
       let upper: Markup = ''
       let forceLimits: boolean | undefined
       for (let kind = peek(); kind; kind = peek()) {
-        if (kind !== '_' && kind !== '^' && kind !== "'" && kind !== '\\limits' && kind !== '\\nolimits') break
-        cursor++
         if (kind === '\\limits' || kind === '\\nolimits') {
+          cursor++
           if (part.limits === undefined) throw new Error('Limit control requires a math operator')
           forceLimits = kind === '\\limits'
+          continue
         }
-        else if (kind === '_') lower = inScript(argument())
-        else if (kind === '^') upper = inScript(argument())
-        else {
-          let primes = '′'
-          while (peek() === "'") { take(); primes += '′' }
-          upper = tag('mo', primes)
+        if (kind === '_' || unicodeSubscripts.has(kind)) {
+          if (lower) throw new Error('Double subscript')
+          lower = inScript(kind === '_' ? (cursor++, argument()) : unicodeScript(unicodeSubscripts))
+          continue
         }
+        if (kind !== '^' && !primes[kind] && !unicodeSuperscripts.has(kind)) break
+        if (upper) throw new Error('Double superscript')
+        upper = inScript(kind === '^' ? (cursor++, argument()) : primes[kind] ? primeScript() : unicodeScript(unicodeSuperscripts))
       }
       if (part.brace === 'upper' && upper) {
         part.markup = xml`<mover>${part.markup}${upper}</mover>`
@@ -805,6 +946,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
     if (!token.startsWith('\\')) {
       if (/^\d/.test(token)) return { markup: tag('mn', token) }
+      if (token !== '.' && delimiterGlyphs.has(token)) return { markup: fence(token, false) }
       return { markup: tag(/^\p{L}$/u.test(token) ? 'mi' : 'mo', token === '-' ? '−' : token) }
     }
 
@@ -897,13 +1039,15 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
     const lap = /^(math)?([lcr])lap$/.exec(name)
     if (lap) return { markup: overlap(lap[2], lap[1] ? argument() : textArgument('text')) }
-    if (name === 'left') {
-      const left = fence(take())
-      const content = inScope(() => row(['\\right']))
-      const right = peek() === '\\right' ? (take(), fence(take())) : ''
-      return { markup: xml`<mrow>${left}${content}${right}</mrow>` }
+    if (name === 'left') return { markup: pairedDelimiters() }
+    if (name === 'right') throw new Error('Unexpected \\right')
+    if (name === 'middle') {
+      if (!delimiterDepth) throw new Error('\\middle requires \\left and \\right')
+      const glyph = readDelimiter(name)
+      return { markup: glyph === '.' ? '' : `<mo stretchy="true" symmetric="true" form="infix">${escapeHtml(glyph)}</mo>` }
     }
-    if (name === 'right' || name === 'middle' || /^(?:big|Big|bigg|Bigg)[lrm]?$/.test(name)) return { markup: fence(take()) }
+    const sized = /^(bigg|Bigg|big|Big)([lrm]?)$/.exec(name)
+    if (sized) return { markup: sizedFence(readDelimiter(name), sizedDelimiters[sized[1]], sized[2]) }
     if (name === 'begin') return { markup: inScope(() => matrix(literalGroup())) }
     if (name === 'substack') {
       if (take() !== '{') throw new Error('Expected a grouped math stack')
@@ -917,14 +1061,14 @@ export function renderMath(source: string, display = false, configured: MathMacr
       return { markup: binomial ? xml`<mrow>${fence('(')}${content}${fence(')')}</mrow>` : content }
     }
     if (name === 'genfrac') {
-      const left = expandDefinition(rawGroup()).join('').trim()
-      const right = expandDefinition(rawGroup()).join('').trim()
+      const left = expandDefinition(rawGroup()).join('').trim() || '.'
+      const right = expandDefinition(rawGroup()).join('').trim() || '.'
       const bar = readDimension('')
       const mode = expandDefinition(rawGroup()).join('').trim()
       if (mode && !/^[0-3]$/.test(mode)) throw new Error('Invalid fraction style')
       const thickness = bar ? (Number.parseFloat(bar) > 0 ? bar : '0') : undefined
       const content = fraction(mode ? Number(mode) as MathStyle : undefined, thickness)
-      return { markup: xml`<mrow>${fence(left)}${content}${fence(right)}</mrow>` }
+      return { markup: xml`<mrow>${fence(delimiter(left, 'genfrac'))}${content}${fence(delimiter(right, 'genfrac'))}</mrow>` }
     }
     if (name === 'cfrac') {
       const align = bracket()
@@ -949,7 +1093,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
     if (['hspace', 'kern', 'mkern', 'mskip', 'hskip'].includes(name)) {
       if (name === 'hspace' && peek() === '*') take()
-      return { markup: `<mspace width="${readDimension()}"/>` }
+      return { markup: spaceMarkup(readDimension()) }
     }
     if (Object.hasOwn(notationDelimiters, name)) return { markup: delimitedNotation(name) }
     if (name === 'prescript') {
@@ -975,6 +1119,20 @@ export function renderMath(source: string, display = false, configured: MathMacr
       return { markup: tag('mo', label), limits: name === 'operatornamewithlimits' || star }
     }
     if (name === 'mathop') return { markup: argument(), limits: false }
+    if (name === 'mod' || name === 'bmod' || name === 'pmod' || name === 'pod') return { markup: modulus(name) }
+    if (contextualDots.has(name)) return { markup: ellipsis(name) }
+    if (name === 'not') {
+      const operand = argument()
+      return { markup: typeof operand === 'string' ? negatedMarkup(operand) : style => negatedMarkup(operand(style)) }
+    }
+    if (Object.hasOwn(namedLimits, name)) return { markup: tag('mo', namedLimits[name]), limits: true }
+    if (Object.hasOwn(accentedLimits, name)) {
+      return { markup: `<mo class="${accentedLimits[name]}">lim</mo>`, limits: true }
+    }
+    if (name === 'varinjlim' || name === 'varprojlim') {
+      const mark = name === 'varinjlim' ? '→' : '←'
+      return { markup: `<munder accentunder="true"><mo>lim</mo><mo stretchy="true">${mark}</mo></munder>`, limits: true }
+    }
     if (name === 'overline' || name === 'underline') {
       return { markup: xml`<mrow class="math-${name}">${argument()}</mrow>` }
     }
@@ -1022,8 +1180,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
       return { markup: tag('mo', operators[name]), limits: big.has(name) ? true : integrals.has(name) ? false : undefined }
     }
     if (functions.has(name)) return { markup: tag('mo', name), limits: big.has(name) }
-    if (Object.hasOwn(delimiters, token)) return { markup: fence(token) }
-    if (Object.hasOwn(spacing, name)) return { markup: `<mspace width="${spacing[name]}"/>` }
+    if (Object.hasOwn(delimiters, token)) return { markup: fence(token, false) }
+    if (Object.hasOwn(spacing, name)) return { markup: spaceMarkup(spacing[name]) }
     if (/^[%$#&_{}|]$/.test(name)) return { markup: tag('mo', name) }
     if (state?.options.throwOnError) throw new Error(`Unsupported math command: ${token}`)
     const color = safeColor(state?.options.errorColor ?? '')

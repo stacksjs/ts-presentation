@@ -502,3 +502,23 @@ Double-click a card or the arrow to move it.
 <!--
 Move a card, resize it with Shift, and then use the arrow handles to reconnect the two steps.
 -->
+
+---
+
+# Read delimiters at a glance
+
+The parentheses use four fixed sizes. The set braces and vertical bar grow with the fraction.
+
+$$
+\bigl(A\bigr)\quad \Bigl(A\Bigr)\quad \biggl(A\biggr)\quad \Biggl(A\Biggr)
+\qquad
+\left\{ x\in\mathbb{R}\middle| \frac{x}{x+1} \not= 0\right\}
+$$
+
+$$
+f''_2(x) \qquad a_1 + \dots + a_n \qquad x\equiv 1\pmod{6}
+$$
+
+<!--
+Point out the four parentheses sizes, then compare the taller set braces. Read the double prime, centered dots, and modular expression aloud.
+-->

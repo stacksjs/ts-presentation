@@ -127,6 +127,14 @@ speaker notes. Each hook can be asynchronous.
   arrow with `g` on the left. Put vertical arrows on their own rows.
 - Use `\Braket{\phi|H|\psi}` and `\Set{x|x>0}` for scalable bra-ket and
   set-builder notation. Labeled arrows accept `[below]{above}`.
+- Use `\bigl( … \bigr)` through `\Biggl( … \Biggr)` for fixed delimiter sizes.
+  Use `\left\{ … \middle| … \right\}` to fit delimiters to the expression and
+  `\left.` or `\right.` for an invisible end.
+- Use `f''_2` for primes with a subscript and `xᵢ²` for Unicode scripts.
+  `\dots` chooses centered or baseline dots from the next symbol. Use
+  `\not\subseteq` for a negated relation and `x\equiv1\pmod{6}` for
+  a congruence. Operators such as `\limsup` and `\varliminf` put limits
+  below the operator in display math.
 - Use deck-wide macros under `math.macros`. Quote TeX with YAML single
   quotes so backslashes are preserved.
 - Position a floating element with `v-drag="[left, top, width, height, angle]"`

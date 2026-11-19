@@ -150,7 +150,7 @@ test('renders fixed and scalable bra-ket and set-builder delimiters', () => {
   expect(html.match(/<mo stretchy="true">∣<\/mo>/g)).toHaveLength(2)
   expect(html).toContain('<mo stretchy="true">‖</mo>')
   expect(html).toContain('<mo stretchy="false">{</mo><mi>n</mi><mo>∣</mo>')
-  expect(html).toContain('<mo>|</mo><mi>x</mi><mo>|</mo>')
+  expect(html).toContain('<mo stretchy="false">|</mo><mi>x</mi><mo stretchy="false">|</mo>')
   expect(renderMath(String.raw`\Braket{\psi|`)).toContain('math-unrendered')
 })
 
@@ -260,6 +260,121 @@ test.skipIf(!chrome)('positions lap contents and explicit operator limits in Chr
 function formula(source: string, display = false): string {
   return createMathRenderer({ throwOnError: true })(source, display).split('<annotation')[0]
 }
+
+// Cases adapted from KaTeX's delimiter and prime parser tests.
+test('renders fixed TeX delimiter sizes with open, middle, and close spacing', () => {
+  const input = String.raw`\bigl( a \bigr) \Bigl\lbrack b \Bigr\rbrack
+    \biggl\langle c \biggm\Vert d \biggr\rangle \Bigg\updownarrow`
+  const html = formula(input)
+  expect(html).toContain('fence="true" form="prefix" lspace="0em" rspace="0em" minsize="1.2em" maxsize="1.2em">(')
+  expect(html).toContain('maxsize="1.8em">[</mo>')
+  expect(html).toContain('fence="false" form="infix" lspace="0.278em" rspace="0.278em" minsize="2.4em" maxsize="2.4em">‖')
+  expect(html).toContain('maxsize="3em">↕</mo>')
+  expect(formula(String.raw`\Bigl{(}x\Biggr.`)).not.toContain('maxsize="3em"')
+})
+
+test('pairs nested stretchy delimiters, expands aliases, and supports invisible ends', () => {
+  const html = formula(String.raw`\def\open{\lt}\left\open
+    \left. \frac{x}{2} \right\rvert \middle\Vert y \right\gt`)
+  expect(html).toContain('<mo stretchy="true">⟨</mo>')
+  expect(html).toContain('<mo stretchy="true" symmetric="true" form="infix">‖</mo>')
+  expect(html).toContain('<mo stretchy="true">⟩</mo>')
+  expect(html).toContain('<mo stretchy="true">|</mo>')
+  expect(html).not.toContain('>.</mo>')
+  expect(() => formula(String.raw`\left(x`)).toThrow('Missing \\right')
+  expect(() => formula(String.raw`\right)x`)).toThrow('Unexpected \\right')
+  expect(() => formula(String.raw`x\middle|y`)).toThrow('\\middle requires')
+  expect(() => formula(String.raw`\left q x\right)`)).toThrow('Invalid delimiter')
+  expect(() => formula(String.raw`\Bigl{aa}`)).toThrow('Invalid delimiter')
+  expect(() => formula(String.raw`\left(x{\right) y}`)).toThrow('Unexpected \\right')
+  expect(renderMath(String.raw`\left(x & y\right)`)).toContain('math-unrendered')
+})
+
+test('retains primes with explicit exponents and renders Unicode scripts on one base', () => {
+  expect(formula("x''''")).toContain('<msup><mi>x</mi><mrow><mo>′′′′</mo></mrow></msup>')
+  const expected = '<msubsup><mi>x</mi><mn>2</mn><mrow><mo>′′</mo></mrow></msubsup>'
+  expect(formula("x''_2")).toContain(expected)
+  expect(formula("x_2''")).toContain(expected)
+  expect(formula("f''^3")).toContain('<msup><mi>f</mi><mrow><mo>′′</mo><mn>3</mn></mrow></msup>')
+  expect(formula('y⁻¹²ᵢⱼ')).toContain('<msubsup><mi>y</mi><mrow><mi>i</mi><mi>j</mi></mrow><mrow><mo>−</mo><mn>12</mn></mrow></msubsup>')
+  expect(formula('zᵦᶿ')).toContain('<msubsup><mi>z</mi><mrow><mi>β</mi></mrow><mrow><mi>θ</mi></mrow></msubsup>')
+  expect(formula('x′')).toContain('<msup><mi>x</mi><mrow><mo>′</mo></mrow></msup>')
+  expect(formula('^2_1')).toContain('<msubsup><mrow/><mn>1</mn><mn>2</mn></msubsup>')
+  expect(() => formula('x_1_2')).toThrow('Double subscript')
+  expect(() => formula('x^1^2')).toThrow('Double superscript')
+  expect(() => formula("x^1'")).toThrow('Double superscript')
+  expect(() => formula('x²^3')).toThrow('Double superscript')
+  expect(() => formula(String.raw`\sqrt^23`)).toThrow('Missing math argument')
+})
+
+test('sets contextual dots and negated operators beside the surrounding math', () => {
+  expect(formula(String.raw`1,\dotsc,10`)).toContain('<mo>,</mo><mo>…</mo><mo>,</mo>')
+  expect(formula(String.raw`x + \dots + y`)).toContain('<mo>+</mo><mo>⋯</mo><mo>+</mo>')
+  expect(formula(String.raw`\def\rel{\leq} x \dots\rel y`)).toContain('<mo>⋯</mo><mo>≤</mo>')
+  expect(formula(String.raw`\int\dots\int`)).toContain('<mspace width="0" style="margin-inline-end:-0.16666666666666666em"/><mo>⋯</mo></mrow><mo>∫</mo>')
+  expect(formula(String.raw`x+\dotso+y`)).toContain('<mo>+</mo><mo>…</mo><mo>+</mo>')
+  expect(formula(String.raw`x\not<y\not\subseteq Z`)).toContain('<mi>x</mi><mo>≮</mo><mi>y</mi><mo>⊈</mo><mi>Z</mi>')
+  expect(formula(String.raw`x\not{\in}S`)).toContain('<mrow><mo>∉</mo></mrow>')
+  expect(formula(String.raw`x\not\mapsto y`)).toContain('<mo>↦̸</mo>')
+  expect(formula(String.raw`\not{\frac{a}{b}}`)).toContain('<mrow class="math-cancel"><mrow><mfrac>')
+})
+
+test('resolves modular spacing and named limit placement from the math style', () => {
+  expect(formula(String.raw`x\equiv1\pmod{6}`)).toContain('<mspace width="0.4444444444444444em"/><mrow><mo stretchy="false">(</mo><mi mathvariant="normal">mod</mi>')
+  expect(formula(String.raw`x\equiv1\pmod{6}`, true)).toContain('<mspace width="1em"/><mrow><mo stretchy="false">(</mo><mi mathvariant="normal">mod</mi>')
+  expect(formula(String.raw`x\mod{6}`)).toContain('<mspace width="0.6666666666666666em"/><mi mathvariant="normal">mod</mi><mspace width="0.3333333333333333em"/>')
+  expect(formula(String.raw`x\pod{6}`)).not.toContain('>mod<')
+  expect(formula(String.raw`x\bmod 6`)).toContain('<mi mathvariant="normal">mod</mi><mspace width="0.2777777777777778em"/></mrow><mn>6</mn>')
+  expect(formula(String.raw`\limsup_{n\to\infty}x_n`, true)).toContain('<munder><mo>lim sup</mo>')
+  expect(formula(String.raw`\liminf_{n\to\infty}x_n`)).toContain('<msub><mo>lim inf</mo>')
+  expect(formula(String.raw`\varinjlim_n x_n`, true)).toContain('<munder><munder accentunder="true"><mo>lim</mo>')
+  expect(formula(String.raw`\varliminf_n x_n`, true)).toContain('<munder><mo class="math-underline">lim</mo>')
+})
+
+test.skipIf(!chrome)('lays out four delimiter sizes, stretchy pairs, and signed kerns in Chromium', async () => {
+  const examples = [
+    ['plain', String.raw`(\frac{1}{\frac{2}{3}})`],
+    ['fixed', String.raw`\bigl(A\bigr)\Bigl(A\Bigr)\biggl(A\biggr)\Biggl(A\Biggr)`],
+    ['paired', String.raw`\left(\frac{1}{\frac{2}{3}}\middle|x\right)`],
+    ['no-kern', 'xy'],
+    ['negative-kern', String.raw`x\mkern-4mu y`],
+    ['thin-negative', String.raw`x\!y`],
+  ]
+  const content = examples.map(([id, source]) => `<div id="${id}">${renderMath(source, true)}</div>`).join('')
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response(`<!doctype html><meta charset="utf-8"><main style="font-size:36px">${content}</main>`, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    }),
+  })
+  const view = new Bun.WebView({ width: 720, height: 500, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await view.navigate(server.url.href)
+    const metrics = await view.evaluate<{ plain: number, sizes: number[], paired: number[], kerns: number[] }>(`(() => {
+      const heights = (selector) => [...document.querySelectorAll(selector)].map(element => element.getBoundingClientRect().height)
+      return {
+        plain: heights('#plain mo')[0],
+        sizes: heights('#fixed mo[form="prefix"]'),
+        paired: heights('#paired mo[stretchy="true"]'),
+        kerns: [...document.querySelectorAll('#no-kern, #negative-kern, #thin-negative')].map((example) => {
+          const [first, second] = example.querySelectorAll('mi')
+          return second.getBoundingClientRect().left - first.getBoundingClientRect().left
+        }),
+      }
+    })()`)
+    expect(metrics.sizes).toHaveLength(4)
+    expect(metrics.paired).toHaveLength(3)
+    for (const [index, height] of metrics.sizes.entries())
+      expect(height).toBeGreaterThan(index ? metrics.sizes[index - 1] : metrics.plain)
+    for (const height of metrics.paired) expect(height).toBeGreaterThan(metrics.plain * 1.2)
+    expect(metrics.kerns[0] - metrics.kerns[1]).toBeCloseTo(8, 0)
+    expect(metrics.kerns[0] - metrics.kerns[2]).toBeCloseTo(36 * 0.17, 0)
+  }
+  finally {
+    view.close()
+    server.stop(true)
+  }
+}, 45000)
 
 // Cases adapted from the KaTeX infix builder and matrix tests.
 test.each([
