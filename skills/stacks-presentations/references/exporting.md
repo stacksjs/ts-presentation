@@ -7,6 +7,7 @@ bun src/cli.ts build path/to/slides.md --out path/to/dist
 bun src/cli.ts export path/to/slides.md --format pdf --out deck.pdf
 bun src/cli.ts export path/to/slides.md --format png --range 2-4 --out frames
 bun src/cli.ts export path/to/slides.md --format pptx --out deck.pptx
+bun src/cli.ts export path/to/slides.md --format pptx-editable --out editable.pptx
 ```
 
 Exports use an installed Chrome or Chromium. Set `CHROME_BIN` or pass
@@ -18,6 +19,10 @@ as editable text, and adds standard web hyperlink regions. It produces one
 frame per reveal by default. Pass `--without-clicks` for one frame per slide.
 Use `--with-clicks` for progressive PNG frames. The browser build keeps live
 code and interactive components available.
+
+`pptx-editable` creates editable text and boxes and embeds artwork such as
+SVG, equations, and video frames as separate pictures. Review any slide
+fallback messages and confirm the recipient has the fonts used by the deck.
 
 Inspect exported slides at presentation size. Check math, fonts, notes,
 number of steps, and intended links. If an Office-compatible viewer is

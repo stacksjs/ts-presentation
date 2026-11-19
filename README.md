@@ -26,12 +26,18 @@ if the executable is installed elsewhere.
 
 ```sh
 bun src/cli.ts export examples/demo/slides.md --format pptx --out output/demo.pptx
+bun src/cli.ts export examples/demo/slides.md --format pptx-editable --out output/editable.pptx
 bun src/cli.ts export examples/demo/slides.md --format png --range 1,3-5 --out output/frames
 ```
 
 PowerPoint uses slide images with editable speaker notes and clickable web
 links. It includes each reveal by default. Pass `--without-clicks` for one
 frame per slide, or `--with-clicks` to include reveals in a PNG export.
+
+`pptx-editable` rebuilds text, backgrounds, and boxes as PowerPoint
+objects. Diagrams, formulas, and other browser artwork are embedded
+as separate pictures. The exporter reports slides that require a full-frame
+image. It references fonts by name, so recipients may see font substitutions.
 
 ## Write a deck
 
@@ -49,8 +55,8 @@ the deck and style slides with an optional `style.css`.
 | Navigation | `routeAlias: review`, then links such as `#review` |
 | Per-slide options | `class`, `hide`, `disabled`, and `transition: fade`, `slide-left`, or `slide-up` |
 | Images and component markup | Trusted HTML, with optional `data-zoom` on an image |
-| Diagrams | Mermaid `flowchart` and `graph` fences for nodes, basic shapes, arrows and labels |
-| Math | `$...$` inline or `$$...$$` on separate lines, rendered as MathML |
+| Diagrams | Mermaid flowcharts, sequence diagrams, and basic state diagrams |
+| Math | Inline and display TeX, deck macros, math alphabets, and aligned equations rendered as MathML |
 | Live code | A `js` or `ts` fence followed by `{live-run}` or `{monaco-run}`. Use `{live}` or `{monaco}` for an editor |
 | Themes and addons | Set `theme: paper` or `theme: serif`, or load trusted local modules through `theme` and `addons` |
 | Canvas size | Set `canvasWidth: 800` and `aspectRatio: 4/3` in deck frontmatter for an 800 × 600 canvas |
@@ -70,9 +76,14 @@ The port branches from [Slidev v53.1.0](https://github.com/slidevjs/slidev/tree/
 Credit goes to Anthony Fu and the Slidev community. The original MIT
 license is included in [licenses/Slidev-MIT.txt](licenses/Slidev-MIT.txt).
 
+All seven packages and the test tree are preserved in the pinned
+[upstream source snapshot](upstream/slidev/README.md). The editable
+exporter ports Slidev's DOM walker and layout normalization to Bun
+WebView and the native PowerPoint writer. Its adapted tests run with Bun.
+
 Open compatibility work includes Vue components and extensions, Monaco tooling,
-Shiki transformers, the full TeX and Mermaid grammars, PlantUML, remote slide
-control, and export with editable PowerPoint slide content. See the
+Shiki transformers, the full TeX and Mermaid grammars, PlantUML, and remote slide
+control. See the
 [compatibility guide](skills/stacks-presentations/references/compatibility.md).
 
 Tooling conventions come from [ts-starter](https://github.com/stacksjs/ts-starter).

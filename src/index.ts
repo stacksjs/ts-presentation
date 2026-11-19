@@ -1,9 +1,10 @@
 import type { LoadedExtensions, PresentationAddon } from './extensions.ts'
 import { resolveGrammar, tokenClass, Tokenizer } from 'ts-syntax-highlighter/browser'
 import { resolveCanvas } from './canvas.ts'
-import { flowchart } from './diagram.ts'
+import { mermaid } from './diagram.ts'
 import { escapeHtml, unescapeHtml } from './html.ts'
 import { liveBlock } from './live-markup.ts'
+import { resolveMathMacros } from './math.ts'
 import { prepareMarkdown, splitSlots } from './syntax.ts'
 
 export { defineAddon, defineTheme } from './extensions.ts'
@@ -134,6 +135,7 @@ export interface RenderOptions {
 
 export async function renderDeck(deck: Deck, options: RenderOptions = {}): Promise<string> {
   const { width, height } = resolveCanvas(deck.headmatter)
+  const macros = resolveMathMacros(deck.headmatter)
   const { extensions } = options
   const activeExtensions: PresentationAddon[] = extensions ? [extensions.theme, ...extensions.addons] : []
   const defaults = extensions?.theme.defaults
@@ -151,7 +153,7 @@ export async function renderDeck(deck: Deck, options: RenderOptions = {}): Promi
     return slide.layout === 'default' && typeof slide.frontmatter?.layout !== 'string' ? defaults?.layout ?? slide.layout : slide.layout
   }
   function markdown(content: string): string {
-    const prepared = prepareMarkdown(content)
+    const prepared = prepareMarkdown(content, macros)
     return prepared.restore(Bun.markdown.html(prepared.source))
   }
   const html = activeSlides.map((slide) => {
@@ -172,7 +174,7 @@ export async function renderDeck(deck: Deck, options: RenderOptions = {}): Promi
       }
       const live = /^(js|ts)-tp-(run|edit)$/.exec(language)
       if (live) return liveBlock(decoded.trimEnd(), live[1] === 'ts' ? 'ts' : 'js', live[2] === 'run')
-      if (language === 'mermaid') return flowchart(decoded, `arrow-${index}-${diagram++}`) || block
+      if (language === 'mermaid') return mermaid(decoded, `arrow-${index}-${diagram++}`) || block
       const grammar = grammars.get(language)
       if (!grammar) return block
       const lines = new Tokenizer(grammar).tokenize(decoded)
@@ -200,7 +202,7 @@ export async function renderDeck(deck: Deck, options: RenderOptions = {}): Promi
   const choices = activeSlides.map((slide, index) => `<option value="${index + 1}">${index + 1}. ${escapeHtml(slide.title)}</option>`)
   const notes = activeSlides.map((slide) => {
     const segments = (slide.notes || 'No speaker notes for this slide.').split(/^\[click\]\s*$/m)
-    return `<section hidden${slide.notes ? ' data-has-notes="true"' : ''}>${segments.map((text, index) => `<div data-note-step="${index}">${Bun.markdown.html(text)}</div>`).join('')}</section>`
+    return `<section hidden${slide.notes ? ' data-has-notes="true"' : ''}>${segments.map((text, index) => `<div data-note-step="${index}">${markdown(text)}</div>`).join('')}</section>`
   })
   const overview = activeSlides.map((slide, index) => `<li><button type="button" value="${index + 1}"><span>${index + 1}</span> ${escapeHtml(slide.title)}</button></li>`)
 

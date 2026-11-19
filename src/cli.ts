@@ -4,11 +4,9 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { asset, within } from './assets.ts'
-import { captureFrames } from './capture.ts'
 import { compileLiveCode, maxCodeLength } from './compile-code.ts'
 import type { CompiledDeck } from './loader.ts'
 import type { PowerPointFrame } from './powerpoint.ts'
-import { createPowerPoint } from './powerpoint.ts'
 import { createDeckCompiler } from './loader.ts'
 
 const options = {
@@ -29,7 +27,8 @@ const help = `ts-presentation <dev|build|export> [slides.md]
 
   dev     Serve a local presentation. Optional --port (default: 3030).
   build   Build a static site. Optional --out (default: dist beside the deck).
-  export  Write PDF, PNG or PPTX using Chrome. Optional --format, --out and --executable-path.
+  export  Write PDF, PNG, PPTX or editable PPTX using Chrome. Use --format pptx-editable for editable slides.
+          Optional --out and --executable-path.
           PNG/PPTX support --range, --scale and --with-clicks or --without-clicks.
   --theme   Override the deck's theme for any command.
 `
@@ -164,14 +163,16 @@ async function main(): Promise<void> {
 
   const executable = await chromePath(values['executable-path'])
   const format = values.format ?? 'pdf'
-  if (!['pdf', 'png', 'pptx'].includes(format)) throw new Error('Export format must be pdf, png or pptx')
+  if (!['pdf', 'png', 'pptx', 'pptx-editable'].includes(format)) throw new Error('Export format must be pdf, png, pptx or pptx-editable')
+  const powerPoint = format === 'pptx' || format === 'pptx-editable'
   if (values['with-clicks'] && values['without-clicks']) throw new Error('Choose either --with-clicks or --without-clicks')
   if (format === 'pdf' && (values.range || values.scale || values['with-clicks'] || values['without-clicks']))
     throw new Error('Slide range, scale and click options are available for PNG and PPTX')
-  const scale = Number(values.scale ?? (format === 'pptx' ? 2 : 1))
+  const scale = Number(values.scale ?? (powerPoint ? 2 : 1))
   if (!Number.isInteger(scale) || scale < 1 || scale > 3) throw new Error('Export scale must be 1, 2 or 3')
   const name = basename(source, '.md')
-  const output = resolve(destination ?? (format === 'png' ? `${name}-frames` : `${name}.${format}`))
+  const target = destination ?? (format === 'png' ? `${name}-frames` : `${name}.${powerPoint ? 'pptx' : 'pdf'}`)
+  const output = resolve(format === 'pptx-editable' && !target.toLowerCase().endsWith('.pptx') ? `${target}.pptx` : target)
   const temp = await mkdtemp(join(tmpdir(), 'ts-presentation-'))
   try {
     await mkdir(dirname(output), { recursive: true })
@@ -179,6 +180,7 @@ async function main(): Promise<void> {
     const { pathToFileURL } = await import('node:url')
     const localDeck = pathToFileURL(join(temp, 'index.html'))
     if (format !== 'pdf') {
+      const { captureFrames } = await import('./capture.ts')
       const { title, author, canvas } = deck
       const frames: PowerPointFrame[] = []
       if (format === 'png') await mkdir(output, { recursive: true })
@@ -186,17 +188,22 @@ async function main(): Promise<void> {
         root: temp,
         executable,
         canvas,
+        editable: format === 'pptx-editable',
         range: values.range,
         scale,
-        withClicks: values['with-clicks'] || (format === 'pptx' && !values['without-clicks']),
+        withClicks: values['with-clicks'] || (powerPoint && !values['without-clicks']),
       }, async (frame, index, total) => {
-        if (format === 'pptx') frames.push(frame)
+        if (powerPoint) frames.push(frame)
         else {
+          if (!frame.image) throw new Error('Missing PNG frame')
           const suffix = String(index + 1).padStart(String(total).length, '0')
           await Bun.write(join(output, `slide-${suffix}.png`), frame.image)
         }
       })
-      if (format === 'pptx') await Bun.write(output, createPowerPoint(frames, { title, author, ...canvas }))
+      if (powerPoint) {
+        const { createPowerPoint } = await import('./powerpoint.ts')
+        await Bun.write(output, createPowerPoint(frames, { title, author, ...canvas }))
+      }
       console.log(output)
       return
     }

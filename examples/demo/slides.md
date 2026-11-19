@@ -5,6 +5,9 @@ addons:
   - ./addons/status.ts
 class: demo
 layout: center
+math:
+  macros:
+    '\norm': '\left\lVert #1 \right\rVert'
 
 ---
 
@@ -72,9 +75,12 @@ Then ask for the decision.
 
 ```mermaid
 flowchart LR
-  A[Draft] --> B{Ready?}
-  B -->|Yes| C(Present)
-  B -->|No| D[Revise]
+  subgraph Preparation
+    A[Draft] --> B{Ready?}
+  end
+  B ==>|Yes| C([Present])
+  B -.->|No| D[Revise]
+  style C fill:#20504c,stroke:#80c7bc
 ```
 
 <!--
@@ -103,7 +109,7 @@ layout: compare
 
 # Vector length
 
-The length of a vector $v$ is $\lVert v\rVert$.
+The length of a vector \(v\) is \(\norm{v}\).
 
 ::right::
 
@@ -115,4 +121,21 @@ $$
 
 <!--
 Connect the formula to the preceding live example.
+-->
+
+---
+
+# Exchange messages
+
+```mermaid
+sequenceDiagram
+  actor A as Author
+  participant R as Reviewer
+  A->>+R: Share a draft
+  Note over R: Read and annotate
+  R-->>-A: Return feedback
+```
+
+<!--
+Show how the participants, messages and note come from the diagram fence.
 -->

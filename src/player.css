@@ -207,10 +207,24 @@ v-click, v-after, v-clicks { display: contents; }
 
 .slide-diagram { display: block; max-width: 100%; max-height: 380px; margin-inline: auto; }
 .slide-diagram text { fill: #f9f2ed; font: 14px system-ui, sans-serif; }
-.slide-diagram .diagram-node :is(rect, polygon) { fill: #2c3440; stroke: #9bb7d0; }
+.slide-diagram .diagram-node :is(rect, ellipse, polygon, path) {
+  fill: var(--diagram-fill, #2c3440);
+  stroke: var(--diagram-stroke, #9bb7d0);
+  stroke-width: var(--diagram-stroke-width, 1.2);
+  stroke-dasharray: var(--diagram-stroke-dasharray, none);
+}
+.slide-diagram .diagram-node-label { fill: var(--diagram-color, #f9f2ed); }
 .slide-diagram .diagram-edge { stroke: #9bb7d0; stroke-width: 1.7; fill: none; }
+.slide-diagram .diagram-edge-thick { stroke-width: 3.2; }
+.slide-diagram .diagram-edge-dotted, .slide-diagram .diagram-lifeline { stroke-dasharray: 5 4; }
 .slide-diagram .diagram-arrow { fill: #9bb7d0; }
+.slide-diagram .diagram-cross { fill: none; stroke: #9bb7d0; stroke-width: 1.4; }
 .slide-diagram .diagram-edge-label { font-size: 12px; paint-order: stroke; stroke: #1b2028; stroke-width: 3px; }
+.slide-diagram .diagram-cluster rect, .slide-diagram .diagram-sequence-section rect { fill: #273a49; fill-opacity: 0.55; stroke: #7694a9; stroke-dasharray: 4 3; }
+.slide-diagram .diagram-cluster-label { font-size: 12px; font-weight: 600; }
+.slide-diagram .diagram-lifeline { fill: none; stroke: #7893aa; stroke-width: 1.2; }
+.slide-diagram :is(.diagram-participant, .diagram-activation) { fill: #2c3440; stroke: #9bb7d0; }
+.slide-diagram .diagram-sequence-note rect { fill: #3b4358; stroke: #9bb7d0; }
 
 body.capturing { grid-template-rows: minmax(0, 1fr); }
 body.capturing #controls { display: none; }
@@ -231,6 +245,13 @@ body.capturing #controls { display: none; }
 .slide math .math-italic, .slide math .math-bold-italic { font-style: italic; }
 .slide math .math-sans-serif { font-family: sans-serif; }
 .slide math .math-monospace { font-family: monospace; }
+math .math-boxed { border: 1px solid currentColor; padding-inline: 0.14em; }
+math .math-cancel { background: linear-gradient(to top right, transparent 48%, currentColor 49% 51%, transparent 52%); }
+math .math-bcancel { background: linear-gradient(to bottom right, transparent 48%, currentColor 49% 51%, transparent 52%); }
+math .math-xcancel {
+  background: linear-gradient(to top right, transparent 48%, currentColor 49% 51%, transparent 52%),
+    linear-gradient(to bottom right, transparent 48%, currentColor 49% 51%, transparent 52%);
+}
 
 .live-code {
   border: 1px solid #61738a;

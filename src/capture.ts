@@ -10,6 +10,7 @@ interface CaptureOptions {
   withClicks: boolean
   range?: string
   canvas: SlideCanvas
+  editable?: boolean
 }
 
 interface FrameDetails {
@@ -33,6 +34,7 @@ export function slideRange(count: number, range?: string): number[] {
 }
 
 export async function captureFrames(options: CaptureOptions, onFrame: (frame: PowerPointFrame, index: number, count: number) => void | Promise<void>): Promise<void> {
+  const captureEditable = options.editable ? (await import('./editable/capture.ts')).captureEditable : undefined
   const { width, height } = options.canvas
   const root = await realpath(options.root)
   const preview = Bun.serve({
@@ -83,7 +85,11 @@ export async function captureFrames(options: CaptureOptions, onFrame: (frame: Po
           await Promise.all([...active.querySelectorAll('img')].map(image => image.decode()))
           const note = document.querySelector('#presenter-notes > section[data-has-notes]:not([hidden])')
           const noteSteps = note?.querySelectorAll('[data-note-step]${options.withClicks ? ':not([hidden])' : ''}') ?? []
-          const notes = [...noteSteps].map(part => [...part.children].map(node => node.textContent.trim()).join('\\n')).filter(Boolean).join('\\n\\n')
+          const notes = [...noteSteps].map(part => [...part.children].map(node => {
+            const copy = node.cloneNode(true)
+            copy.querySelectorAll('annotation').forEach(annotation => annotation.remove())
+            return copy.textContent.trim()
+          }).join('\\n')).filter(Boolean).join('\\n\\n')
           const bounds = active.getBoundingClientRect()
           const links = [...active.querySelectorAll('a[href]')].flatMap(link => {
             if (!/^(https?:|mailto:)/i.test(link.getAttribute('href').trim()) || getComputedStyle(link).visibility !== 'visible') return []
@@ -97,6 +103,22 @@ export async function captureFrames(options: CaptureOptions, onFrame: (frame: Po
           })
           return { title: active.getAttribute('aria-label') || '', notes, links }
         })()`)
+        if (captureEditable) {
+          let editable: PowerPointFrame['editable']
+          try {
+            const { content, warnings } = await captureEditable(chrome, options.canvas, position.slide, position.step, metadata.notes)
+            for (const warning of warnings) console.warn(`Slide ${position.slide}, step ${position.step}: ${warning}`)
+            editable = content
+          }
+          catch (error) {
+            console.warn(`Slide ${position.slide}, step ${position.step}: ${error instanceof Error ? error.message : 'could not measure editable content'}`)
+          }
+          if (editable) {
+            await onFrame({ ...metadata, editable }, index, positions.length)
+            continue
+          }
+          console.warn(`Slide ${position.slide}, step ${position.step}: using a slide image`)
+        }
         const image = new Uint8Array(await (await chrome.screenshot()).arrayBuffer())
         await onFrame({ ...metadata, image }, index, positions.length)
       }

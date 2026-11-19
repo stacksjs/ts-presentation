@@ -1,4 +1,5 @@
 import { renderMath } from './math.ts'
+import type { MathMacros } from './math.ts'
 
 const fenceStart = /^ {0,3}(`{3,}|~{3,})(.*)$/
 const inlineCode = /^`+/
@@ -37,14 +38,14 @@ interface PreparedMarkdown {
   restore: (rendered: string) => string
 }
 
-export function prepareMarkdown(source: string): PreparedMarkdown {
-  if (!source.includes('$') && !source.includes('{monaco') && !source.includes('{live')) {
+export function prepareMarkdown(source: string, macros?: MathMacros): PreparedMarkdown {
+  if (!source.includes('$') && !source.includes('\\(') && !source.includes('\\[') && !source.includes('{monaco') && !source.includes('{live')) {
     return { source, restore: html => html }
   }
 
   const math: string[] = []
   const marker = (body: string, display: boolean) => {
-    const index = math.push(renderMath(body.trim(), display)) - 1
+    const index = math.push(renderMath(body.trim(), display, macros)) - 1
     return `<tp-math data-equation="${index}"></tp-math>`
   }
 
@@ -53,6 +54,14 @@ export function prepareMarkdown(source: string): PreparedMarkdown {
     for (let at = 0; at < line.length;) {
       const char = line[at]
       if (char === '\\' && line[at + 1]) {
+        if (line[at + 1] === '(') {
+          const end = line.indexOf('\\)', at + 2)
+          if (end > at + 2) {
+            result += marker(line.slice(at + 2, end), false)
+            at = end + 2
+            continue
+          }
+        }
         result += line.slice(at, at + 2)
         at += 2
         continue
@@ -122,15 +131,17 @@ export function prepareMarkdown(source: string): PreparedMarkdown {
       output.push(line)
       continue
     }
-    const display = /^ {0,3}\$\$(.*)$/.exec(line)
+    const display = /^ {0,3}(\$\$|\\\[)(.*)$/.exec(line)
     if (display) {
-      if (display[1].trimEnd().endsWith('$$') && display[1].trim().length > 2) {
-        output.push('', marker(display[1].trimEnd().slice(0, -2), true), '')
+      const delimiter = display[1] === '$$' ? '$$' : '\\]'
+      if (display[2].trimEnd().endsWith(delimiter) && display[2].trim().length > 2) {
+        output.push('', marker(display[2].trimEnd().slice(0, -2), true), '')
         continue
       }
-      if (!display[1].trim()) {
-        const close = lines.findIndex((entry, at) => at > index && /^ {0,3}\$\$\s*$/.test(entry))
-        if (close > index + 1) {
+      if (!display[2].trim()) {
+        let close = index + 1
+        while (close < lines.length && lines[close].trim() !== delimiter && !fenceStart.test(lines[close])) close++
+        if (close > index + 1 && lines[close]?.trim() === delimiter) {
           output.push('', marker(lines.slice(index + 1, close).join('\n'), true), '')
           index = close
           continue

@@ -29,13 +29,22 @@ deck. For example, `canvasWidth: 800` and `aspectRatio: 4/3` produce an
   Use small, self-contained examples. JavaScript runs in static builds.
   The dev server compiles edits to TypeScript with Bun. Offline editors can
   run the original TypeScript or edit its compiled JavaScript.
-- Wrap inline equations in `$...$` and block equations in `$$...$$`.
-  MathML handles common TeX commands for fractions, roots, powers, sums,
-  accents, matrices, cases and aligned equations. Check the equations in the
-  target browser and the export. Unknown TeX commands render as source text.
-- A `mermaid` fence supports the flowchart subset, rendered locally using
-  `ts-charts`. Use an external SVG or author an addon when the requested
-  diagram depends on other Mermaid diagram types.
+- Wrap inline equations in `$...$` or `\(...\)`. Use `$$...$$` or
+  `\[...\]` for display equations. Native MathML handles fractions, roots,
+  sums, matrices, math alphabets, and alignments. Use `\tag{1}` for a
+  custom equation number and `\newcommand` for a formula-local macro.
+- Use deck-wide macros under `math.macros`. Quote TeX with YAML single
+  quotes so backslashes are preserved.
+- A `mermaid` fence supports flowcharts with styled nodes and subgraphs,
+  sequence diagrams with participants, messages, notes and sections,
+  and simple state transitions. Flowchart and state layout uses `ts-charts`.
+  Use an external SVG if a diagram requires unsupported syntax.
+
+```yaml
+math:
+  macros:
+    '\norm': '\left\lVert #1 \right\rVert'
+```
 
 ## Rehearsal
 

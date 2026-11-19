@@ -1,5 +1,6 @@
 import type { ZipPart } from './zip.ts'
-import { escapeHtml } from './html.ts'
+import type { SlideIr } from './editable/ir.ts'
+import { drawEditable, embeddedPicture, extents, xml } from './editable/drawing.ts'
 import { zipParts } from './zip.ts'
 
 export interface FrameLink {
@@ -11,12 +12,11 @@ export interface FrameLink {
   height: number
 }
 
-export interface PowerPointFrame {
+export type PowerPointFrame = {
   title: string
   notes: string
-  image: Uint8Array<ArrayBuffer>
   links?: FrameLink[]
-}
+} & ({ image: Uint8Array<ArrayBuffer>, editable?: never } | { editable: SlideIr, image?: never })
 
 export interface PowerPointOptions {
   title: string
@@ -39,20 +39,9 @@ const group = '<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p
 
 type XmlRelation = [id: string, kind: string, target: string, external?: boolean]
 
-function xml(text: string): string {
-  // XML 1.0 excludes most control characters, including those from pasted terminal output.
-  // eslint-disable-next-line no-control-regex
-  return escapeHtml(text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, ''))
-}
-
 function relationships(items: XmlRelation[]): string {
   return `<Relationships xmlns="${relationshipsNamespace}">${items.map(([id, kind, target, external]) =>
     `<Relationship Id="${id}" Type="${kind.startsWith('http') ? kind : `${r}/${kind}`}" Target="${xml(target)}"${external ? ' TargetMode="External"' : ''}/>`).join('')}</Relationships>`
-}
-
-function extents(width: number, height: number, x = 0, y = 0): string {
-  const emu = (px: number) => Math.round(px * 9525)
-  return `<a:xfrm><a:off x="${emu(x)}" y="${emu(y)}"/><a:ext cx="${emu(width)}" cy="${emu(height)}"/></a:xfrm>`
 }
 
 function lightTheme(): string {
@@ -124,25 +113,47 @@ export function createPowerPoint(frames: readonly PowerPointFrame[], options: Po
 
   for (const [index, frame] of frames.entries()) {
     const slide = index + 1
-    const links = [...(frame.links ?? [])].filter(validExternal)
-    const picture = `<p:pic><p:nvPicPr><p:cNvPr id="2" name="${xml(frame.title)}" descr="${xml(frame.title)}"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr>
-      <p:blipFill><a:blip r:embed="rId2"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>
-      <p:spPr>${extents(width, height)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>`
-    const hotspots = links.map((link, at) => `<p:sp><p:nvSpPr><p:cNvPr id="${at + 3}" name="${xml(link.label)}"><a:hlinkClick r:id="rId${at + 4}"/></p:cNvPr><p:cNvSpPr/><p:nvPr/></p:nvSpPr>
-      <p:spPr>${extents(link.width, link.height, link.x, link.y)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:solidFill><a:srgbClr val="FFFFFF"><a:alpha val="0"/></a:srgbClr></a:solidFill><a:ln><a:noFill/></a:ln></p:spPr></p:sp>`).join('')
-    add(`ppt/slides/slide${slide}.xml`, `<p:sld ${presentationNS}><p:cSld name="${xml(frame.title)}"><p:spTree>${group}${picture}${hotspots}</p:spTree></p:cSld>${mapped}</p:sld>`, 'presentationml.slide')
-    add(`ppt/slides/_rels/slide${slide}.xml.rels`, relationships([
+    const rels: XmlRelation[] = [
       ['rId1', 'slideLayout', '../slideLayouts/slideLayout1.xml'],
-      ['rId2', 'image', `../media/slide${slide}.png`],
-      ['rId3', 'notesSlide', `../notesSlides/notesSlide${slide}.xml`],
-      ...links.map((link, at): XmlRelation => [`rId${at + 4}`, 'hyperlink', link.href, true]),
-    ]))
+      ['rId2', 'notesSlide', `../notesSlides/notesSlide${slide}.xml`],
+    ]
+    const urls = new Map<string, string>()
+    const hyperlink = (href: string) => {
+      if (!/^(?:https?:\/\/|mailto:)/i.test(href)) return
+      const previous = urls.get(href)
+      if (previous) return previous
+      const id = `rId${rels.length + 1}`
+      rels.push([id, 'hyperlink', href, true])
+      urls.set(href, id)
+      return id
+    }
+    const image = (bytes: Uint8Array<ArrayBuffer>) => {
+      const id = `rId${rels.length + 1}`
+      const name = `slide${slide}-${id}.png`
+      files.push({ name: `ppt/media/${name}`, data: bytes })
+      rels.push([id, 'image', `../media/${name}`])
+      return id
+    }
+    let background = ''
+    let shapes: string
+    if (frame.editable) {
+      const drawing = drawEditable(frame.editable, png => image(Buffer.from(png, 'base64')), hyperlink)
+      background = drawing.background
+      shapes = drawing.shapes
+    }
+    else {
+      shapes = embeddedPicture(2, image(frame.image), { x: 0, y: 0, w: width, h: height }, frame.title)
+      shapes += (frame.links ?? []).filter(validExternal).map((link, at) =>
+        `<p:sp><p:nvSpPr><p:cNvPr id="${at + 3}" name="${xml(link.label)}"><a:hlinkClick r:id="${hyperlink(link.href)}"/></p:cNvPr><p:cNvSpPr/><p:nvPr/></p:nvSpPr>
+        <p:spPr>${extents(link.width, link.height, link.x, link.y)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:solidFill><a:srgbClr val="FFFFFF"><a:alpha val="0"/></a:srgbClr></a:solidFill><a:ln><a:noFill/></a:ln></p:spPr></p:sp>`).join('')
+    }
+    add(`ppt/slides/slide${slide}.xml`, `<p:sld ${presentationNS}><p:cSld name="${xml(frame.title)}">${background}<p:spTree>${group}${shapes}</p:spTree></p:cSld>${mapped}</p:sld>`, 'presentationml.slide')
+    add(`ppt/slides/_rels/slide${slide}.xml.rels`, relationships(rels))
     add(`ppt/notesSlides/notesSlide${slide}.xml`, `<p:notes ${presentationNS}><p:cSld><p:spTree>${group}${notesShape(frame.notes)}</p:spTree></p:cSld>${mapped}</p:notes>`, 'presentationml.notesSlide')
     add(`ppt/notesSlides/_rels/notesSlide${slide}.xml.rels`, relationships([
       ['rId1', 'notesMaster', '../notesMasters/notesMaster1.xml'],
       ['rId2', 'slide', `../slides/slide${slide}.xml`],
     ]))
-    files.push({ name: `ppt/media/slide${slide}.png`, data: frame.image })
   }
 
   add('[Content_Types].xml', `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
