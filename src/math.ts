@@ -61,7 +61,8 @@ export function resolveMathMacros(headmatter?: Record<string, unknown>): MathMac
 }
 
 function tokenize(source: string): string[] {
-  return source.match(/\\[A-Z@]+|\\[^A-Z@\r\n]|#[1-9]|\s+|./giu) ?? []
+  return source.match(/\\[A-Z@]+|\\[^A-Z@\r\n]|%[^\r\n]*(?:\r?\n[ \t]*|$)|#[1-9]|\s+|./giu)
+    ?.filter(token => !token.startsWith('%')) ?? []
 }
 
 type MathStyle = 0 | 1 | 2 | 3
@@ -93,9 +94,52 @@ function applyVariant(content: string, variant: string): string {
   })
 }
 
+const textFonts: Record<string, string> = {
+  text: '', textnormal: 'font-family:serif;font-weight:normal;font-style:normal', textrm: 'font-family:serif',
+  textsf: 'font-family:sans-serif', texttt: 'font-family:monospace',
+  textbf: 'font-weight:bold', textmd: 'font-weight:normal', textup: 'font-style:normal',
+  textit: 'font-style:italic', emph: 'font-style:italic',
+}
+const textSymbols: Record<string, string> = {
+  '\\textdollar': '$', '\\textunderscore': '_', '\\textbackslash': '\\',
+  '\\textasciitilde': '~', '\\textasciicircum': '^', '\\textbar': '|',
+  '\\textless': '<', '\\textgreater': '>', '\\ss': 'ß', '\\ae': 'æ', '\\AE': 'Æ',
+  '\\aa': 'å', '\\AA': 'Å', '\\o': 'ø', '\\O': 'Ø', '\\oe': 'œ', '\\OE': 'Œ',
+}
+const textAccents: Record<string, string> = {
+  "\\'": '\u0301', '\\`': '\u0300', '\\"': '\u0308',
+  '\\^': '\u0302', '\\~': '\u0303', '\\=': '\u0304', '\\.': '\u0307',
+  '\\u': '\u0306', '\\v': '\u030c', '\\H': '\u030b', '\\r': '\u030a',
+  '\\c': '\u0327', '\\k': '\u0328', '\\b': '\u0331', '\\d': '\u0323',
+}
+
 interface Atom {
   markup: string
   limits?: boolean
+}
+
+type Alignment = 'left' | 'center' | 'right'
+type ArrayRule = 'solid' | 'dashed' | 'double'
+const alignments: Record<string, Alignment> = { l: 'left', c: 'center', r: 'right' }
+interface ArrayColumn { align: Alignment, before?: ArrayRule }
+interface ArrayRow { cells: string[], label: string, before?: ArrayRule, gap?: string }
+
+function arrayColumns(spec: string): { columns: ArrayColumn[], after?: ArrayRule } {
+  const columns: ArrayColumn[] = []
+  let after: ArrayRule | undefined
+  for (const char of spec.replace(/\s/g, '')) {
+    if (char === '|' || char === ':') after = after ? 'double' : char === '|' ? 'solid' : 'dashed'
+    else if (Object.hasOwn(alignments, char)) {
+      columns.push({ align: alignments[char], before: after })
+      after = undefined
+    }
+    else throw new Error('Invalid array column')
+  }
+  return { columns, after }
+}
+
+function tableBorder(side: string, line: ArrayRule): string {
+  return `border-${side}:${line === 'double' ? '3px' : '1px'} ${line} currentColor`
 }
 
 function tag(name: string, value: string): string {
@@ -300,6 +344,61 @@ export function renderMath(source: string, display = false, configured: MathMacr
     throw new Error('Invalid math dimension')
   }
 
+  function textArgument(name: string): string {
+    if (depth++ > 100) throw new Error('Math text is nested too deeply')
+    const properties = textFonts[name]
+    const wrap = (markup: string) => properties ? `<mrow style="${properties}">${markup}</mrow>` : markup
+    expand()
+    if (tokens[cursor] !== '{') {
+      const token = tokens[cursor++]
+      if (!token || token === boundary || token === '}') throw new Error('Missing math text argument')
+      depth--
+      return wrap(tag('mtext', textSymbols[token] ?? token.replace(/^\\([%$#&_{} ])$/, '$1')))
+    }
+    cursor++
+    const parts: string[] = []
+    let literal = ''
+    function flush(): void {
+      if (!literal) return
+      const joined = literal.replace(/\s+/g, ' ').replace(/^ | $/g, '\u00A0')
+      parts.push(tag('mtext', joined))
+      literal = ''
+    }
+    inScope(() => {
+      while (true) {
+        expand(false)
+        const token = tokens[cursor++]
+        if (!token || token === boundary) throw new Error('Unclosed math text')
+        if (token === '}') break
+        if (token === '$' || token === '\\(') {
+          flush()
+          const close = token === '$' ? '$' : '\\)'
+          const value = withStyle(Math.max(1, style) as MathStyle, () => inScope(() => row([close, '}'])))
+          if (take() !== close) throw new Error('Unclosed inline math in text')
+          parts.push(`<mrow style="font-style:normal;font-weight:normal">${value}</mrow>`)
+        }
+        else if (token === '{' || (token.startsWith('\\') && Object.hasOwn(textFonts, token.slice(1)))) {
+          flush()
+          if (token === '{') cursor--
+          parts.push(textArgument(token === '{' ? 'text' : token.slice(1)))
+        }
+        else if (Object.hasOwn(textAccents, token)) {
+          const character = literalGroup().trim()
+          literal += (character + textAccents[token]).normalize('NFC')
+        }
+        else if (token === '~') {
+          flush()
+          parts.push(tag('mtext', '\u00A0'))
+        }
+        else literal += textSymbols[token] ?? token.replace(/^\\([%$#&_{} ])$/, '$1')
+      }
+    })
+    flush()
+    depth--
+    if (properties || parts.length === 1) return wrap(parts.join(''))
+    return `<mrow>${parts.join('')}</mrow>`
+  }
+
   function fraction(targetStyle: MathStyle, thickness?: string, align?: string): string {
     const script = Math.min(3, targetStyle + 1) as MathStyle
     const first = withStyle(script, argument)
@@ -367,55 +466,108 @@ export function renderMath(source: string, display = false, configured: MathMacr
   }
 
   function matrix(environment: string): string {
+    const unclosed = () => new Error(`Unclosed math environment: ${environment}`)
     if (/^equation[*]?$/.test(environment)) {
+      environmentDepth++
       const content = row(['\\end'])
-      if (take() !== '\\end' || literalGroup() !== environment) throw new Error(`Unclosed math environment: ${environment}`)
+      environmentDepth--
+      if (take() !== '\\end' || literalGroup() !== environment) throw unclosed()
       tagState.label = nextTag(display && environment === 'equation')
       return `<mrow>${content}</mrow>`
     }
-    if (!/^(?:[pbBvV]?matrix[*]?|smallmatrix|[d]?[r]?cases|align(?:ed|edat|at[*]?|[*])?|gather(?:ed|[*])?|split|[d]?array|multline[*]?)$/.test(environment))
+    if (!/^(?:[pbBvV]?matrix[*]?|smallmatrix|d?rcases|d?cases|align(?:ed|edat|at[*]?|[*])?|gather(?:ed|[*])?|split|d?array|subarray|substack|multline[*]?)$/.test(environment))
       return tag('mtext', `\\begin{${environment}}`)
-    const columns = environment.endsWith('array') || /^align(?:ed)?at[*]?$/.test(environment)
-      ? literalGroup()
-      : environment.endsWith('matrix*') ? bracket() ?? '' : ''
+    const stack = environment === 'substack'
+    const columnArray = /^(?:d?array|subarray)$/.test(environment)
+    const columns = columnArray ? literalGroup() : environment.endsWith('matrix*') ? bracket() ?? '' : ''
+    const paired = /^align(?:ed)?at[*]?$/.test(environment)
+    const pairs = paired ? Number(literalGroup()) : 0
+    if (paired && (!Number.isSafeInteger(pairs) || pairs < 1)) throw new Error('Invalid alignment column count')
+    const layout = arrayColumns(columns)
+    if (environment === 'subarray' && !/^\s*[lc]\s*$/.test(columns)) throw new Error('Invalid subarray alignment')
+    const compact = stack || environment === 'subarray' || environment === 'smallmatrix'
+    const aligned = environment.startsWith('align') || environment === 'split'
+    const gathered = environment.startsWith('gather') || environment.startsWith('multline')
+    const cases = environment.endsWith('cases')
+    const cellStyle = compact ? Math.max(2, style) as MathStyle : environment.startsWith('d') || aligned || gathered ? 0 : 1
+    const stretch = columnArray && macros.has('\\arraystretch')
+      ? Number(expandDefinition(['\\arraystretch']).join('')) : 1
+    if (!(stretch > 0 && stretch <= 100)) throw new Error('Invalid array stretch')
     const outerTag = tagState
     const automatic = display && environmentDepth === 0 && /^(?:align|alignat|gather)$/.test(environment)
     environmentDepth++
     tagState = { label: '', suppressed: false }
-    const rows: { cells: string[], label: string }[] = []
+    const rows: ArrayRow[] = []
     let cells: string[] = []
+    const end = stack ? '}' : '\\end'
+    let rule: ArrayRule | undefined
+    let closed = false
+    const stops = ['&', '\\\\', '\\cr', end]
     while (peek()) {
-      cells.push(row(['&', '\\\\', '\\cr', '\\end']))
+      if (columnArray && !cells.length) {
+        while (peek() === '\\hline' || peek() === '\\hdashline') {
+          const line = take() === '\\hline' ? 'solid' : 'dashed'
+          rule = rule ? 'double' : line
+        }
+      }
+      cells.push(withStyle(cellStyle, () => inScope(() => row(stops))))
       const separator = take()
-      if (separator === '&') continue
-      if (cells.length > 1 || cells[0] || rows.length === 0) rows.push({ cells, label: nextTag(automatic) })
+      if (separator === '&') {
+        if (stack || environment === 'subarray' || gathered) throw new Error('Too many columns in math stack')
+        continue
+      }
+      if (pairs && cells.length > pairs * 2) throw new Error('Too many alignment columns')
+      const lineBreak = separator === '\\\\' || separator === '\\cr'
+      const extra = lineBreak ? bracket() : undefined
+      const gap = extra === undefined ? undefined : dimension(extra)
+      if (extra !== undefined && gap === undefined) throw new Error('Invalid array row spacing')
+      if (cells.length > 1 || cells[0] || tagState.label || rows.length === 0 || lineBreak) {
+        rows.push({ cells, label: nextTag(automatic), before: rule, gap })
+        rule = undefined
+      }
       cells = []
       tagState = { label: '', suppressed: false }
-      if (separator === '\\end' && literalGroup() === environment) break
-      if (separator !== '\\\\' && separator !== '\\cr') throw new Error(`Unclosed math environment: ${environment}`)
-      bracket()
+      if (separator === end && (stack || literalGroup() === environment)) {
+        closed = true
+        break
+      }
+      if (!lineBreak) break
     }
+    if (!closed) throw unclosed()
     environmentDepth--
     tagState = outerTag
-    const style = environment.replace(/[*]$/, '').replace(/^d(?=(?:array|[r]?cases)$)/, '')
-    const [left, right] = style === 'rcases' ? ['', '}'] : matrixDelimiters[style] ?? ['', '']
-    const aligned = environment.startsWith('align') || environment === 'split'
-    const columnAlign = columns && (style === 'array' || style.endsWith('matrix'))
-      ? [...columns].filter(column => /[lcr]/.test(column)).map(column => ({ l: 'left', c: 'center', r: 'right' })[column]).join(' ')
-      : aligned ? 'right left' : style.endsWith('cases') ? 'left left' : ''
+    const kind = environment.replace(/[*]$/, '').replace(/^d(?=(?:array|r?cases)$)/, '')
+    const [left, right] = kind === 'rcases' ? ['', '}'] : matrixDelimiters[kind] ?? ['', '']
+    const alignment = layout.columns.map(column => column.align)
+    const columnAlign = alignment.join(' ') || (aligned ? 'right left' : cases ? 'left left' : '')
     const align = columnAlign ? ` columnalign="${columnAlign}"` : ''
     const tags = rows.some(entry => entry.label)
-    const alignment = columnAlign ? columnAlign.split(' ') : []
-    const markup = rows.map((entry) => {
+    const columnCount = Math.max(layout.columns.length, ...rows.map(entry => entry.cells.length))
+    if (columnArray && columnCount * rows.length > 6000) throw new Error('Math array has too many cells')
+    const pad = compact ? '0.06' : (0.14 * stretch).toFixed(4).replace(/0+$/, '').replace(/\.$/, '')
+    const markup = rows.map((entry, rowIndex) => {
       const cell = tags ? `<mtd class="math-equation-number">${tag('mtext', entry.label)}</mtd>` : ''
-      // MathML Core browsers use CSS alignment on cells.
-      const content = entry.cells.map((value, index) => {
-        const align = aligned ? alignment[index % alignment.length] : alignment[index] ?? alignment.at(-1)
-        return `<mtd${align ? ` style="text-align:${align}"` : ''}>${value}</mtd>`
+      // MathML Core browsers use CSS for cell alignment and visible rules.
+      const content = Array.from({ length: columnArray ? columnCount : entry.cells.length }, (_, index) => {
+        const align = aligned ? (index % 2 ? 'left' : 'right') : alignment[index] ?? alignment.at(-1) ?? (cases ? 'left' : '')
+        const styling: string[] = []
+        if (align) styling.push(`text-align:${align}`)
+        if (cellStyle === 0) styling.push('math-style:normal')
+        const before = layout.columns[index]?.before
+        if (before) styling.push(tableBorder('left', before))
+        if (layout.after && index === columnCount - 1) styling.push(tableBorder('right', layout.after))
+        if (entry.before) styling.push(tableBorder('top', entry.before))
+        if (rule && rowIndex === rows.length - 1) styling.push(tableBorder('bottom', rule))
+        if (compact || stretch !== 1) styling.push(`padding-block:${pad}em`)
+        if (entry.gap) styling.push(`padding-bottom:max(0px,calc(${pad}em + ${entry.gap}))`)
+        const settings = styling.length ? ` style="${styling.join(';')}"` : ''
+        const value = entry.cells[index] ?? ''
+        return `<mtd${settings}>${style === cellStyle ? value : mathSize(cellStyle, value)}</mtd>`
       }).join('')
       return `<mtr>${state?.options.leqno ? cell : ''}${content}${state?.options.leqno ? '' : cell}</mtr>`
     }).join('')
-    return `<mrow>${fence(left)}<mtable data-equation-lines${align}>${markup}</mtable>${fence(right)}</mrow>`
+    const lines = compact ? ' class="math-compact-array"' : ' data-equation-lines'
+    return `<mrow>${fence(left)}<mtable${lines}${align}>${markup}</mtable>${fence(right)}</mrow>`
   }
 
   function atom(token: string): Atom {
@@ -512,6 +664,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
     if (name === 'right' || name === 'middle' || /^(?:big|Big|bigg|Bigg)[lrm]?$/.test(name)) return { markup: fence(take()) }
     if (name === 'begin') return { markup: inScope(() => matrix(literalGroup())) }
+    if (name === 'substack') {
+      if (take() !== '{') throw new Error('Expected a grouped math stack')
+      return { markup: inScope(() => matrix('substack')) }
+    }
     if (name === 'end') return { markup: tag('mtext', `\\end{${literalGroup()}}`) }
     if (['frac', 'dfrac', 'tfrac', 'binom', 'dbinom', 'tbinom'].includes(name)) {
       const binomial = name.endsWith('binom')
@@ -568,10 +724,11 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const base = argument()
       return { markup: degree ? `<mroot>${base}<mrow>${degree}</mrow></mroot>` : `<msqrt>${base}</msqrt>` }
     }
-    if (name === 'text' || name === 'operatorname') {
-      const star = name === 'operatorname' && peek() === '*'
+    if (Object.hasOwn(textFonts, name)) return { markup: textArgument(name) }
+    if (name === 'operatorname') {
+      const star = peek() === '*'
       if (star) take()
-      return { markup: tag(name === 'text' ? 'mtext' : 'mo', literalGroup().replace(/\\([_%#$&{}])/g, '$1')), limits: star }
+      return { markup: tag('mo', literalGroup().replace(/\\([_%#$&{}])/g, '$1')), limits: star }
     }
     if (name === 'overbrace' || name === 'underbrace' || name === 'underline') {
       const above = name === 'overbrace'

@@ -285,3 +285,21 @@ Start on the two-step implementation.
 [click]
 Show the same result computed inline.
 -->
+
+---
+
+# Add conditions and labels
+
+\begin{align*}
+S &= \sum_{\substack{i>0\\j<n}} x_{ij}
+  & \text{for $n$ samples}\\[0.4ex]
+A &= \begin{array}{r|c}
+       2 & 0 \\ \hdashline
+       3 & 1
+     \end{array}
+  & \text{\textbf{Example} matrix}
+\end{align*}
+
+<!--
+Read the two conditions under the sum. In the second row, point out the rules that divide the matrix cells.
+-->

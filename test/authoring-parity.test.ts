@@ -81,3 +81,24 @@ test('renders sequence diagrams and basic state transitions', () => {
   expect(state).toContain('Approve')
   expect(mermaid('sequenceDiagram\nunexpected directive', 'unused')).toBeUndefined()
 })
+
+test('recognizes whole AMS display environments and nested inline math delimiters in Markdown', async () => {
+  const source = [
+    '# Math in a deck', '',
+    String.raw`Inline $\text{for $x^2$} = y$ and \(\text{for \(z\)} = w\).`, '',
+    String.raw`\begin{align} x&=y\\ y&=z \end{align}`, '',
+    String.raw`\begin{equation}`,
+    String.raw`\begin{split} a&=b\\ b&=c \end{split}`,
+    String.raw`\end{equation}`, '',
+    '~~~', String.raw`\begin{align} b&=c \end{align}`, '~~~', '',
+    '<!--', String.raw`\begin{align} hidden&=1 \end{align}`, '-->', 'Visible text.',
+  ].join('\n')
+  const html = await renderDeck(parseDeck(source))
+  expect(html.match(/<math /g)).toHaveLength(4)
+  expect(html.match(/<math [^>]* display="block"/g)).toHaveLength(2)
+  expect(html.match(/<mtd class="math-equation-number"/g)).toHaveLength(3)
+  expect(html).toContain('<msup><mi>x</mi><mn>2</mn></msup>')
+  expect(html).toContain(String.raw`<pre><code>\begin{align} b&amp;=c \end{align}`)
+  const disabled = await renderDeck(parseDeck('---\nmath: false\n---\n\n' + source))
+  expect(disabled).not.toContain('<math ')
+})

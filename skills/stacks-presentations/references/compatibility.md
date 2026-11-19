@@ -11,7 +11,7 @@ in a new ts-presentation project.
 | Scoped layouts and themes | TypeScript theme and addon modules, named slots, deck CSS |
 | Monaco editor and runner | Local editor and timed browser-worker runner. Bun compiles TypeScript edits in dev and can save opted-in snippets |
 | Snippets, line highlights, Magic Move | Local file and region imports, numbered click highlights, native token animations |
-| KaTeX | Native MathML with chemistry, numbered alignment rows, scoped macros, custom fractions and box layout, and click highlighting |
+| KaTeX | Native MathML with chemistry, ruled and compact arrays, mixed text and math, numbered alignment rows, scoped macros, custom fractions, and click highlighting |
 | PowerPoint export | Image slides or editable text and boxes with separate artwork |
 | Mermaid | Local flowchart, sequence, basic state, class, ER, pie, Gantt, and GitGraph rendering |
 | Presenter mode | Two synced browser windows, notes and timer |

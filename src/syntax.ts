@@ -11,6 +11,19 @@ const inlineCode = /^`+/
 const protectedHtml = /^<(pre|code|script|style)(?:\s[^>]*)?>[\s\S]*?<\/\1\s*>/i
 const runnerOptions = /^(\s*)(js|javascript|ts|typescript)(\s+)\{(monaco-run|monaco|live-run|live)\}(\s*)$/i
 const slotMarker = /^::([a-z][a-z0-9-]*)::\s*$/i
+const bareDisplay = /^ {0,3}\\begin\{((?:equation|align|alignat|gather)\*?)\}/
+
+function inlineMathEnd(line: string, start: number, delimiter: string): number {
+  let braces = 0
+  for (let at = start; at < line.length; at++) {
+    const token = line[at]
+    if (!braces && line.startsWith(delimiter, at)) return at
+    if (token === '\\') at++
+    else if (token === '{') braces++
+    else if (token === '}' && braces) braces--
+  }
+  return -1
+}
 
 export function splitSlots(source: string): Record<string, string> {
   const slots: Record<string, string> = Object.create(null)
@@ -51,7 +64,7 @@ interface MarkdownSyntax {
 }
 
 export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): PreparedMarkdown {
-  if (!source.includes('$') && !source.includes('\\(') && !source.includes('\\[') && !source.includes('{monaco') && !source.includes('{live') && !source.includes('mermaid') && !source.includes('```') && !source.includes('~~~')) {
+  if (!source.includes('$') && !source.includes('\\(') && !source.includes('\\[') && !source.includes('\\begin{') && !source.includes('{monaco') && !source.includes('{live') && !source.includes('mermaid') && !source.includes('```') && !source.includes('~~~')) {
     return { source, restore: html => html }
   }
 
@@ -71,7 +84,7 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
       const char = line[at]
       if (char === '\\' && line[at + 1]) {
         if (syntax.mathEnabled !== false && line[at + 1] === '(') {
-          const end = line.indexOf('\\)', at + 2)
+          const end = inlineMathEnd(line, at + 2, '\\)')
           if (end > at + 2) {
             result += marker(line.slice(at + 2, end), false)
             at = end + 2
@@ -99,12 +112,8 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
         if (chunk) { result += chunk; at += chunk.length; continue }
       }
       if (syntax.mathEnabled !== false && char === '$' && line[at + 1] && !/\s|\$/.test(line[at + 1]) && line[at - 1] !== '$') {
-        let end = at + 1
-        for (; end < line.length; end++) {
-          if (line[end] === '\\') { end++; continue }
-          if (line[end] === '$') break
-        }
-        if (end < line.length && !/\s/.test(line[end - 1]) && !/[\d$]/.test(line[end + 1] ?? '')) {
+        const end = inlineMathEnd(line, at + 1, '$')
+        if (end > at + 1 && !/\s/.test(line[end - 1]) && !/[\d$]/.test(line[end + 1] ?? '')) {
           result += marker(line.slice(at + 1, end), false)
           at = end + 1
           continue
@@ -120,9 +129,15 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
   const output: string[] = []
   let fence = ''
   let htmlCode = ''
+  let comment = false
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index]
     const opening = fenceStart.exec(line)
+    if (!fence && !htmlCode && (comment || /^ {0,3}<!--/.test(line))) {
+      comment = !line.includes('-->')
+      output.push(line)
+      continue
+    }
     if (fence) {
       if (opening && opening[1][0] === fence[0] && opening[1].length >= fence.length && !opening[2].trim()) fence = ''
       output.push(line)
@@ -157,6 +172,23 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
       htmlCode = rawCode[1]
       output.push(line)
       continue
+    }
+    const environment = syntax.mathEnabled !== false && bareDisplay.exec(line)
+    if (environment) {
+      const closing = `\\end{${environment[1]}}`
+      let end = index
+      while (!lines[end].trimEnd().endsWith(closing)) {
+        const next = lines[++end]
+        if (next === undefined || fenceStart.test(next) || bareDisplay.test(next) || /^ {0,3}<!--/.test(next)) {
+          end = -1
+          break
+        }
+      }
+      if (end >= index) {
+        output.push('', marker(lines.slice(index, end + 1).join('\n'), true), '')
+        index = end
+        continue
+      }
     }
     const display = syntax.mathEnabled !== false && /^ {0,3}(\$\$|\\\[)(.*)$/.exec(line)
     if (display) {

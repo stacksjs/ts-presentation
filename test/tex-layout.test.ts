@@ -45,3 +45,55 @@ test('captures eager macro expansion and tracks global definitions per deck', ()
   expect(math(String.raw`\persist`, false)).toContain('<mtext>\\nope</mtext>')
   expect(createMathRenderer()(String.raw`\u`, false)).toContain('<mtext>\\u</mtext>')
 })
+
+test('lays out AMS arrays with solid and dashed rules, row gaps, and scoped cell styles', () => {
+  const source = String.raw`\def\arraystretch{1.5}\begin{darray}{|r:c||}
+    \hline \def\value{a}\value & \mathchoice{D}{T}{S}{s} \\[1ex]
+    \hdashline z & \value \cr \hline
+  \end{darray}`
+  const html = renderMath(source)
+  expect(html).toContain('columnalign="right center"')
+  expect(html).toContain('math-style:normal')
+  expect(html).toContain('border-left:1px solid currentColor')
+  expect(html).toContain('border-left:1px dashed currentColor')
+  expect(html).toContain('border-right:3px double currentColor')
+  expect(html).toContain('border-top:1px solid currentColor')
+  expect(html).toContain('border-top:1px dashed currentColor')
+  expect(html).toContain('border-bottom:1px solid currentColor')
+  expect(html).toContain('padding-bottom:max(0px,calc(0.21em + 1ex))')
+  expect(html).toContain('<mrow><mi>D</mi></mrow>')
+  expect(html).toContain('<mtext>\\value</mtext>')
+  expect(html.match(/<mtr>/g)).toHaveLength(2)
+  expect(renderMath(String.raw`\begin{array}{c}a`)).toContain('math-unrendered')
+  expect(renderMath(String.raw`\begin{array}{c}a\\[bogus]b\end{array}`)).toContain('math-unrendered')
+})
+
+test('renders compact substack and subarray limits with no nested equation click rows', () => {
+  const html = renderMath(String.raw`\sum_{\substack{i>0\\j<n}} x_{ij} +
+    \lim_{\begin{subarray}{l}i\to0\cr j\to0\end{subarray}} y`, true)
+  expect(html.match(/class="math-compact-array"/g)).toHaveLength(2)
+  expect(html.match(/<munder>/g)).toHaveLength(2)
+  expect(html.match(/<mtr>/g)).toHaveLength(4)
+  expect(html).toContain('columnalign="left"')
+  expect(html).not.toContain('data-equation-lines')
+  expect(renderMath(String.raw`\substack{a & b}`)).toContain('math-unrendered')
+  expect(renderMath(String.raw`\begin{subarray}{r}a\end{subarray}`)).toContain('math-unrendered')
+})
+
+test('renders nested math, escaped text, accents, and stacked fonts inside TeX labels', () => {
+  const html = renderMath(String.raw`\text{\textsf{\textbf{Caf\'{e}}}: $x^2$ and \(y\) costs \$5~\&~tax}`)
+  expect(html).toContain('<mrow style="font-family:sans-serif"><mrow style="font-weight:bold"><mtext>Café</mtext>')
+  expect(html).toContain('<msup><mi>x</mi><mn>2</mn></msup>')
+  expect(html).toContain('<mi>y</mi>')
+  expect(html).toContain('$5</mtext>')
+  expect(html).toContain('<mtext>&amp;</mtext>')
+  expect(renderMath(String.raw`\text{price $x}`)).toContain('math-unrendered')
+})
+
+test('ignores TeX comments while preserving escaped percent signs inside text', () => {
+  const html = renderMath(String.raw`\text{90\%} + %\badcommand
+    x`)
+  expect(html).toContain('<mtext>90%</mtext><mo>+</mo><mi>x</mi>')
+  expect(html).not.toContain('<mtext>\\badcommand</mtext>')
+  expect(html).toContain('%\\badcommand')
+})

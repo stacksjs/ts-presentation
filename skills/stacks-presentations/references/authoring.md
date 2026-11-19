@@ -53,6 +53,15 @@ deck. For example, `canvasWidth: 800` and `aspectRatio: 4/3` produce an
   `\mathchoice` for style-dependent notation. TeX macro definitions support
   groups, delimited arguments, optional arguments, and eager expansion.
   `\raisebox`, `\rule`, and `\kern` control placement and spacing.
+- Use `\begin{align}`, `\begin{alignat}`, `\begin{gather}`, or
+  `\begin{equation}` at the start of a line for standalone displays.
+  The starred forms omit automatic numbering.
+- Use `\substack{i>0\\j<n}` or `subarray` for multiline limits and
+  `smallmatrix` for compact inline matrices. For ruled arrays, use
+  `|` or `:` between column specifiers, `\hline` or `\hdashline`
+  between rows, and `\\[1ex]` for extra row space.
+- Use `\text{for $n$ samples}` to mix upright labels with nested math.
+  Font commands such as `\textbf` can appear inside the label.
 - Use deck-wide macros under `math.macros`. Quote TeX with YAML single
   quotes so backslashes are preserved.
 - A `mermaid` fence supports flowcharts with styled nodes and subgraphs,

@@ -56,7 +56,7 @@ the deck and style slides with an optional `style.css`.
 | Per-slide options | `class`, `hide`, `disabled`, and `transition: fade`, `slide-left`, or `slide-up` |
 | Images and component markup | Trusted HTML, with optional `data-zoom` on an image |
 | Diagrams | Mermaid flowcharts, sequence, basic state, class, entity relationship, pie, Gantt, and GitGraph diagrams |
-| Math | Native MathML with scoped and optional-argument macros, styled fractions, numbered equations, click highlighting, and chemistry notation |
+| Math | Native MathML with scoped macros, styled fractions, numbered equations, ruled arrays, stacked subscripts, mixed text and math, click highlighting, and chemistry notation |
 | Code walkthroughs | `ts [build.ts] {1\|2-3\|all}{lines:true}` for titles and click highlights, or `md magic-move` around nested fences to animate between frames |
 | Source snippets | `<<< @/snippets/build.ts#example` for a named region. Use `{monaco-write}` with a whole JavaScript or TypeScript file to allow saving from the local dev editor |
 | Live code | A `js` or `ts` fence followed by `{live-run}` or `{monaco-run}`. Use `{live}` or `{monaco}` for an editor |
