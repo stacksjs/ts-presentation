@@ -331,7 +331,16 @@ export function collectSnapshot(options: {
       el.setAttribute(options.idAttribute, String(id))
       resolveStack(computed.fontFamily)
 
-      const box = el.getBoundingClientRect()
+      let box = el.getBoundingClientRect()
+      if (el.localName === 'math') {
+        // A TeX lap can paint outside the formula without taking up layout space.
+        for (const overlap of el.querySelectorAll('.math-overlap-l, .math-overlap-c, .math-overlap-r')) {
+          const ink = overlap.getBoundingClientRect()
+          const left = Math.min(box.left, ink.left)
+          const top = Math.min(box.top, ink.top)
+          box = new DOMRect(left, top, Math.max(box.right, ink.right) - left, Math.max(box.bottom, ink.bottom) - top)
+        }
+      }
       const record: RawNode = {
         id,
         parent,

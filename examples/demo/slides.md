@@ -396,3 +396,18 @@ Explain what the reviewer checks.
 [click]
 Show the approval.
 -->
+
+---
+
+# Keep long limits centered
+
+A wide condition can sit directly under the summation symbol.
+
+$$
+\qquad \sum_{\mathclap{1\le i\le j\le n}}\ x_{ij}
+\qquad\qquad \fcolorbox{3b82f6}{e0ecff}{$S_n=\displaystyle\sum_{i=1}^{n}i=\frac{n(n+1)}{2}$}
+$$
+
+<!--
+The overlap keeps the summation compact. The frame marks a separate closed-form example.
+-->

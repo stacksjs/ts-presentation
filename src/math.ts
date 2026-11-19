@@ -93,6 +93,8 @@ export function createMathRenderer(options: KatexOptions = {}): (source: string,
 }
 
 function safeColor(value: string): string {
+  value = value.trim()
+  if (/^[\da-f]{6}$/i.test(value)) return `#${value}`
   return /^(?:#[\da-f]{3}|#[\da-f]{6}|[a-z]{1,24})$/i.test(value) ? value : ''
 }
 
@@ -113,11 +115,12 @@ function applyVariant(content: string, variant: string): string {
 }
 
 const textFonts: Record<string, string> = {
-  text: '', textnormal: 'font-family:serif;font-weight:normal;font-style:normal', textrm: 'font-family:serif',
+  text: '', hbox: '', mbox: '', textnormal: 'font-family:serif;font-weight:normal;font-style:normal', textrm: 'font-family:serif',
   textsf: 'font-family:sans-serif', texttt: 'font-family:monospace',
   textbf: 'font-weight:bold', textmd: 'font-weight:normal', textup: 'font-style:normal',
   textit: 'font-style:italic', emph: 'font-style:italic',
 }
+const textBoxes = new Set(['colorbox', 'fcolorbox', 'fbox', 'reflectbox'])
 const textSymbols: Record<string, string> = {
   '\\textdollar': '$', '\\textunderscore': '_', '\\textbackslash': '\\',
   '\\textasciitilde': '~', '\\textasciicircum': '^', '\\textbar': '|',
@@ -374,6 +377,20 @@ export function renderMath(source: string, display = false, configured: MathMacr
     throw new Error('Invalid math dimension')
   }
 
+  function textBox(name: string): string {
+    if (name === 'reflectbox') return `<mrow class="math-reflect">${textArgument('text')}</mrow>`
+    if (name === 'fbox') return `<mrow class="math-color-box math-frame">${textArgument('text')}</mrow>`
+    const frame = name === 'fcolorbox' ? safeColor(literalGroup()) : ''
+    const background = safeColor(literalGroup())
+    if (!background || (name === 'fcolorbox' && !frame)) throw new Error('Invalid math box color')
+    const content = textArgument('text')
+    return `<mrow class="math-color-box${frame ? ' math-frame' : ''}" style="background-color:${background}${frame ? `;border-color:${frame}` : ''}">${content}</mrow>`
+  }
+
+  function overlap(direction: string, content: string): string {
+    return `<mpadded width="0"><mrow class="math-overlap-${direction}">${content}</mrow></mpadded>`
+  }
+
   function textArgument(name: string): string {
     if (depth++ > 100) throw new Error('Math text is nested too deeply')
     const properties = textFonts[name]
@@ -405,12 +422,20 @@ export function renderMath(source: string, display = false, configured: MathMacr
           const close = token === '$' ? '$' : '\\)'
           const value = withStyle(Math.max(1, style) as MathStyle, () => inScope(() => row([close, '}'])))
           if (take() !== close) throw new Error('Unclosed inline math in text')
-          parts.push(`<mrow style="font-style:normal;font-weight:normal">${value}</mrow>`)
+          parts.push(`<mrow style="font-style:normal;font-weight:normal">${style === 0 ? mathSize(1, value) : value}</mrow>`)
         }
         else if (token === '{' || (token.startsWith('\\') && Object.hasOwn(textFonts, token.slice(1)))) {
           flush()
           if (token === '{') cursor--
           parts.push(textArgument(token === '{' ? 'text' : token.slice(1)))
+        }
+        else if (token.startsWith('\\') && textBoxes.has(token.slice(1))) {
+          flush()
+          parts.push(textBox(token.slice(1)))
+        }
+        else if (token === '\\llap' || token === '\\clap' || token === '\\rlap') {
+          flush()
+          parts.push(overlap(token[1], textArgument('text')))
         }
         else if (Object.hasOwn(textAccents, token)) {
           const character = literalGroup().trim()
@@ -756,11 +781,18 @@ export function renderMath(source: string, display = false, configured: MathMacr
       return { markup: `<mrow class="math-${name}">${argument()}</mrow>` }
     }
     if (name === 'textcolor') {
-      const color = literalGroup()
+      const color = safeColor(literalGroup())
       const content = argument()
-      const safe = safeColor(color) ? ` style="color:${color}"` : ''
+      const safe = color ? ` style="color:${color}"` : ''
       return { markup: `<mrow${safe}>${content}</mrow>` }
     }
+    if (textBoxes.has(name)) return { markup: textBox(name) }
+    if (name === 'mathreflectbox') return { markup: `<mrow class="math-reflect">${argument()}</mrow>` }
+    if (name === 'vcenter') {
+      return { markup: `<mtable class="math-vcenter"><mtr><mtd>${argument()}</mtd></mtr></mtable>` }
+    }
+    const lap = /^(math)?([lcr])lap$/.exec(name)
+    if (lap) return { markup: overlap(lap[2], lap[1] ? argument() : textArgument('text')) }
     if (name === 'left') {
       const left = fence(take())
       const content = inScope(() => row(['\\right']))
@@ -804,7 +836,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const offset = readDimension()
       const height = dimension(bracket() ?? '')
       const depth = dimension(bracket() ?? '')
-      return { markup: `<mpadded voffset="${offset}"${height ? ` height="${height}"` : ''}${depth ? ` depth="${depth}"` : ''}>${argument()}</mpadded>` }
+      return { markup: `<mpadded voffset="${offset}"${height ? ` height="${height}"` : ''}${depth ? ` depth="${depth}"` : ''}>${textArgument('text')}</mpadded>` }
     }
     if (name === 'smash') {
       const side = bracket()

@@ -73,6 +73,11 @@ deck. For example, `canvasWidth: 800` and `aspectRatio: 4/3` produce an
   between rows, and `\\[1ex]` for extra row space.
 - Use `\text{for $n$ samples}` to mix upright labels with nested math.
   Font commands such as `\textbf` can appear inside the label.
+- Use `\fcolorbox{navy}{white}{$F=ma$}` for a framed formula and
+  `\colorbox{yellow}{draft}` for a label. Use `\raisebox` to shift a box
+  from the baseline, `\vcenter` to center a box on the math axis, and
+  `\mathllap`, `\mathclap`, or `\mathrlap` to align an overlap without
+  increasing the width of the formula.
 - Use an AMS `\begin{CD} … \end{CD}` block for a commutative diagram.
   Use `@>f>>` for a horizontal arrow marked `f` and `@VgVV` for a downward
   arrow with `g` on the left. Put vertical arrows on their own rows.

@@ -1,4 +1,6 @@
 import { expect, test } from 'bun:test'
+import { findChrome } from '../src/chrome.ts'
+import { collectSnapshot } from '../src/editable/walker.ts'
 import { createMathRenderer, renderMath } from '../src/math.ts'
 
 test('handles general fractions, TeX math styles, and continued fractions', () => {
@@ -163,3 +165,87 @@ test('places arrow, accent, and stretchy brace labels with the expected math sty
   expect(html).toContain('<mo stretchy="true">ˇ</mo>')
   expect(html).toContain('<mo stretchy="true">↽</mo>')
 })
+
+test('sets text and mixed math in framed, raised, and centered boxes', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const formula = String.raw`\vcenter{\hbox{\fcolorbox{d66c21}{#fc9}{$\frac{a}{b}$ result}}}
+    + \raisebox{.3em}{$y^2$} + \text{\fbox{check}}
+    + \colorbox{yellow}{draft} + \textcolor{228B22}{x}
+    + \reflectbox{R} + \mathreflectbox{x^2}`
+  const html = math(formula, true)
+  expect(html).toContain('<mtable class="math-vcenter">')
+  expect(html).toContain('style="background-color:#fc9;border-color:#d66c21"')
+  expect(html).toContain('<mfrac><mrow><mi>a</mi></mrow><mrow><mi>b</mi></mrow></mfrac>')
+  expect(html).toContain('<mtext> result</mtext>')
+  expect(html).toContain('<mpadded voffset=".3em"><mrow style="font-style:normal;font-weight:normal"><mstyle displaystyle="false" scriptlevel="0"><msup><mi>y</mi><mn>2</mn></msup>')
+  expect(html).toContain('class="math-color-box math-frame"><mtext>check</mtext>')
+  expect(html).toContain('style="background-color:yellow"><mtext>draft</mtext>')
+  expect(html).toContain('style="color:#228B22"')
+  expect(html.match(/class="math-reflect"/g)).toHaveLength(2)
+  expect(() => math(String.raw`\colorbox{red;display:none}{x}`, true)).toThrow('Invalid math box color')
+  expect(renderMath(String.raw`\fcolorbox{red"}{white}{<img>}`)).toContain('math-unrendered')
+})
+
+test('keeps style-dependent math in a lap and uses text mode for plain laps', () => {
+  const html = renderMath(String.raw`\sum_{\mathclap{\mathchoice{D}{T}{S}{s}}}+\text{\rlap{test}}`, true)
+  expect(html).toContain('<munder>')
+  expect(html).toContain('<mpadded width="0"><mrow class="math-overlap-c"><mrow><mrow><mi>S</mi></mrow>')
+  expect(html).toContain('<mpadded width="0"><mrow class="math-overlap-r"><mtext>test</mtext>')
+})
+
+const chrome = await findChrome()
+test.skipIf(!chrome)('positions lap contents in Chromium without adding width to the formula', async () => {
+  const formulas = [
+    { id: 'reference', tex: 'AB' },
+    { id: 'left', tex: String.raw`A\mathllap{xyz}B` },
+    { id: 'center', tex: String.raw`A\mathclap{xyz}B` },
+    { id: 'right', tex: String.raw`A\mathrlap{xyz}B` },
+  ]
+  const body = formulas.map(({ id, tex }) => `<div id="${id}">${renderMath(tex)}</div>`).join('')
+  const css = Bun.file(new URL('../src/player.css', import.meta.url))
+  const server = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    fetch(request) {
+      if (new URL(request.url).pathname === '/presentation.css') return new Response(css)
+      return new Response(`<!doctype html><link rel="stylesheet" href="/presentation.css"><main style="margin: 60px; font-size: 36px">${body}<aside>${renderMath(String.raw`\mathllap{xyz}AB`)}</aside></main>`, {
+        headers: { 'Content-Type': 'text/html; charset=utf-8' },
+      })
+    },
+  })
+  const view = new Bun.WebView({ width: 720, height: 400, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await view.navigate(server.url.href)
+    const layout = await view.evaluate<Array<{ end: number, anchor?: number, start?: number, width?: number }>>(`[...document.querySelectorAll('main > div')].map((formula) => {
+      const row = formula.querySelector('semantics > mrow')
+      const lap = row.querySelector('mpadded')
+      const content = lap?.firstElementChild.getBoundingClientRect()
+      return {
+        end: row.lastElementChild.getBoundingClientRect().left,
+        anchor: lap?.getBoundingClientRect().left,
+        start: content?.left,
+        width: content?.width,
+      }
+    })`)
+    const [reference, ...laps] = layout
+    for (const [{ end, anchor, start, width }, alignment] of laps.map((lap, index) => [lap, [1, 0.5, 0][index]] as const)) {
+      expect(end).toBeCloseTo(reference.end)
+      expect(width).toBeGreaterThan(0)
+      expect(start).toBeCloseTo(anchor! - width! * alignment)
+    }
+    const { slides: [{ nodes }] } = await view.evaluate<ReturnType<typeof collectSnapshot>>(`(${collectSnapshot.toString()})({
+      containerSelector: 'main', idAttribute: 'data-export-id', slide: 1, click: 0,
+    })`)
+    const overflow = nodes.filter(node => node.isMath).at(-1)
+    const bounds = await view.evaluate<{ actualLeft: number, inkLeft: number }>(`(() => ({
+      actualLeft: document.querySelector('aside math').getBoundingClientRect().left,
+      inkLeft: document.querySelector('aside .math-overlap-l').getBoundingClientRect().left,
+    }))()`)
+    expect(bounds.inkLeft).toBeLessThan(bounds.actualLeft)
+    expect(overflow?.pageRect?.x).toBeCloseTo(bounds.inkLeft)
+  }
+  finally {
+    view.close()
+    server.stop(true)
+  }
+}, 15000)
