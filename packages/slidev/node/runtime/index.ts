@@ -263,7 +263,6 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     const segments = (slide.notes || 'No speaker notes for this slide.').split(/^\[click\]\s*$/m)
     return `<section hidden${slide.notes ? ' data-has-notes="true"' : ''}>${segments.map((text, index) => `<div data-note-step="${index}">${markdown(annotations ? applyNotesAutoRuby(text, annotations) : text)}</div>`).join('')}</section>`
   })
-  const overview = routes.map(({ no, title }) => `<li><button type="button" value="${no}"><span>${no}</span> ${escapeHtml(title)}</button></li>`)
 
   const preset = deck.headmatter?.clickAnimation
   const clicksPreset = typeof preset === 'string' ? escapeHtml(preset) : ''
@@ -315,7 +314,6 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     editorButton: options.liveCompile ? '<button id="edit-slide" type="button" aria-controls="side-editor" aria-expanded="false" hidden>Edit slide</button>' : '',
     drawHidden: !drawings.enabled || drawings.presenterOnly ? ' hidden' : '',
     liveStatus: options.liveCompile ? '<span id="live-update-status" role="status" hidden></span>' : '',
-    slideOverview: overview.join(''),
   })
   return { html: document, routes, live }
 }

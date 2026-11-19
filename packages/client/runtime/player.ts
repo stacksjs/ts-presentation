@@ -12,6 +12,7 @@ import { setupLiveCode } from './live-code.ts'
 import { createSlideMedia } from './media.ts'
 import type { ClickBounds, SlideMode, SlidePosition, SlideRoute } from './navigation.ts'
 import { clickBounds, createNavigationContext, nextPosition, previousPosition, readSlideHash, slideHash, slidePosition } from './navigation.ts'
+import { setupOverviewGrid } from './overview.ts'
 import { setupPresenter } from './presenter.ts'
 import { collectReveals, prepareSwitchPrint, showReveals } from './reveals.ts'
 import { setupSideEditor } from './side-editor.ts'
@@ -29,6 +30,8 @@ const next = control.querySelector<HTMLButtonElement>('#next')!
 const presenter = control.querySelector<HTMLButtonElement>('#presenter')!
 const fullscreen = control.querySelector<HTMLButtonElement>('#fullscreen')!
 const overview = document.querySelector<HTMLDialogElement>('#overview')!
+const overviewFrame = overview.querySelector('iframe')!
+const overviewLink = overview.querySelector<HTMLAnchorElement>('#overview-page-link')!
 const imageView = document.querySelector<HTMLDialogElement>('#image-view')!
 const detail = imageView.querySelector('img')!
 const timer = document.querySelector<HTMLElement>('#presenter-time')!
@@ -36,7 +39,8 @@ const routes: SlideRoute[] = JSON.parse(document.querySelector('#presentation-na
 const params = new URLSearchParams(location.search)
 const isCapture = params.has('capture')
 const captureSteps = params.has('steps')
-const isPreview = params.has('preview')
+const isOverview = !isCapture && params.has('overview')
+const isPreview = params.has('preview') || isOverview
 const isPresenter = !isPreview && !isCapture && params.has('presenter')
 const opener: Window | null = isPresenter ? window.opener : null
 const messageOrigin = location.protocol === 'file:' ? '*' : location.origin
@@ -49,7 +53,7 @@ const defaultClickAnimation = document.documentElement.dataset.clickAnimation
 const reveals: ReturnType<typeof collectReveals>[] = []
 const bounds: ClickBounds[] = []
 const isLive = !isCapture && document.documentElement.dataset.liveCompile === 'true'
-const slideMode = (): SlideMode => isPreview ? 'preview' : isCapture ? 'export' : isPresenter || !notesPanel.hidden ? 'presenter' : 'slide'
+const slideMode = (): SlideMode => isOverview ? 'overview' : isPreview ? 'preview' : isCapture ? 'export' : isPresenter || !notesPanel.hidden ? 'presenter' : 'slide'
 const conditions = createSlideConditions(slideMode, refreshConditions)
 
 function mountSlide(article: HTMLElement, index: number): void {
@@ -77,6 +81,7 @@ let timerTick: ReturnType<typeof setInterval> | undefined
 document.body.classList.add('playing')
 if (isPreview) document.body.classList.add('previewing')
 if (isCapture) document.body.classList.add('capturing')
+if (isOverview) document.body.classList.add('overview-page')
 
 let presenterControls: ReturnType<typeof setupPresenter> | undefined
 let sideEditor: ReturnType<typeof setupSideEditor> | undefined
@@ -103,16 +108,29 @@ const drags = !isCapture && !isPreview ? setupDrags(stage, (slide, presentationD
 }, isLive) : undefined
 const media = createSlideMedia(!isCapture && !isPreview)
 if (isCapture) window.presentationMediaReady = media.ready
+const overviewGrid = isOverview ? setupOverviewGrid(stage, {
+  routes, articles, notes, bounds, width: canvasWidth, height: canvasHeight, origin: messageOrigin,
+  render(index, step, nearViewport) {
+    showReveals(reveals[index], step, false, 1)
+    if (nearViewport) media.show(articles[index])
+  },
+}) : undefined
 
 function show(number: number, step?: number, writeHistory = true, sync = true, refresh = false): void {
   const { slide: selected, click: nextStep } = slidePosition(number, step, bounds)
-  if (!refresh && selected === current && nextStep === click && !articles[current - 1].hidden) return
+  if (!overviewGrid && !refresh && selected === current && nextStep === click && !articles[current - 1].hidden) return
   const slideChanged = selected !== current
   const animate = !isCapture && !isPreview && selected === current && nextStep !== click
   if (writeHistory && (selected !== current || nextStep !== click)) {
     const hash = slideHash(routes[selected - 1], nextStep)
     if (selected === current) history.replaceState(null, '', hash)
     else history.pushState(null, '', hash)
+  }
+  if (overviewGrid) {
+    current = selected
+    click = nextStep
+    overviewGrid.select(current)
+    return
   }
 
   drags?.clear()
@@ -225,12 +243,39 @@ function openPresenter(): void {
   if (!popup) togglePresenter()
 }
 
+function sendOverviewPosition(): void {
+  if (overview.open) overviewFrame.contentWindow?.postMessage({ presentationPreview: position() }, messageOrigin)
+}
+
+function openOverview(): void {
+  const url = new URL(location.href)
+  for (const name of ['editor', 'presenter', 'resume']) url.searchParams.delete(name)
+  url.searchParams.set('overview', '1')
+  url.hash = slideHash(routes[current - 1])
+  overviewLink.href = url.href
+  if (!overviewFrame.hasAttribute('src')) overviewFrame.src = url.href
+  overview.showModal()
+  sendOverviewPosition()
+}
+
 window.addEventListener('message', (event: MessageEvent) => {
   if (event.origin !== (location.protocol === 'file:' ? 'null' : location.origin) || !event.source) return
   if (isPreview) {
     if (event.source !== window.parent || window.parent === window) return
     const position = event.data?.presentationPreview as Partial<SlidePosition> | undefined
-    if (Number.isInteger(position?.slide) && Number.isInteger(position?.click)) show(position!.slide!, position!.click!, false, false)
+    if (Number.isInteger(position?.slide) && Number.isInteger(position?.click)) {
+      show(position!.slide!, position!.click!, false, false)
+      overviewGrid?.select(current, true)
+    }
+    return
+  }
+  if (overview.open && event.source === overviewFrame.contentWindow) {
+    const target = event.data?.presentationOverviewSelect
+    if (event.data?.presentationOverviewClose === true) overview.close()
+    else if (Number.isInteger(target) && target > 0 && target <= routes.length) {
+      overview.close()
+      if (target !== current) show(target)
+    }
     return
   }
   if (event.source !== (opener ?? popup)) return
@@ -287,7 +332,7 @@ async function toggleFullscreen(): Promise<void> {
 }
 
 const drawingConfig: DrawingClientConfig = JSON.parse(document.querySelector('#presentation-drawings')?.textContent ?? '{}')
-const drawing = !isCapture && drawingConfig.enabled ? setupDrawings(drawingConfig, {
+const drawing = !isCapture && !isOverview && drawingConfig.enabled ? setupDrawings(drawingConfig, {
   stage,
   articles,
   canvas: { width: canvasWidth, height: canvasHeight },
@@ -341,20 +386,15 @@ stage.addEventListener('keydown', (event) => {
   }
 })
 imageView.addEventListener('click', (event) => { if (event.target === imageView) imageView.close() })
-overview.addEventListener('click', (event) => {
-  const button = event.target instanceof HTMLElement ? event.target.closest('li button') : null
-  if (button instanceof HTMLButtonElement) {
-    show(Number(button.value))
-    overview.close()
-  }
-})
+overviewFrame.addEventListener('load', sendOverviewPosition)
+overview.addEventListener('close', () => { if (!overview.open) overviewFrame.removeAttribute('src') })
 
 previous.addEventListener('click', previousStep)
 next.addEventListener('click', nextStep)
 goto.addEventListener('change', () => show(Number(goto.value)))
 presenter.addEventListener('click', openPresenter)
 fullscreen.addEventListener('click', () => { void toggleFullscreen() })
-control.querySelector('#overview-button')!.addEventListener('click', () => overview.showModal())
+control.querySelector('#overview-button')!.addEventListener('click', openOverview)
 document.querySelector('#presenter-reset')!.addEventListener('click', () => {
   startedAt = Date.now()
   updateTimer()
@@ -376,9 +416,14 @@ window.addEventListener('message', (event) => {
 })
 window.addEventListener('hashchange', readLocation)
 window.addEventListener('popstate', readLocation)
-new ResizeObserver(resize).observe(stage)
+if (!overviewGrid) new ResizeObserver(resize).observe(stage)
 
 window.addEventListener('keydown', (event) => {
+  if (isOverview && window.parent !== window && event.key === 'Escape') {
+    window.parent.postMessage({ presentationOverviewClose: true }, messageOrigin)
+    event.preventDefault()
+    return
+  }
   if (isCapture || isPreview || event.altKey || event.metaKey || event.ctrlKey || event.defaultPrevented || overview.open || imageView.open) return
   const field = event.target instanceof HTMLElement && event.target.closest('input, select, textarea, [contenteditable]')
   const activated = (event.key === ' ' || event.key === 'Enter') && event.target instanceof Element && event.target.closest('button, a, summary, [role=button]')
@@ -416,7 +461,7 @@ window.addEventListener('keydown', (event) => {
       break
     case 'o':
     case 'O':
-      overview.showModal()
+      openOverview()
       break
     case 'e':
     case 'E':
@@ -449,6 +494,11 @@ function refreshConditions(): void {
     changed = true
   }
   if (!changed) return
+  if (overviewGrid) {
+    overviewGrid.refreshReveals()
+    conditions.observe(stage)
+    return
+  }
   codeTabs?.refresh()
   drags?.updateElements()
   const previousClick = click
@@ -456,7 +506,11 @@ function refreshConditions(): void {
   if (click !== previousClick) history.replaceState(null, '', slideHash(routes[current - 1], click))
 }
 
-for (const article of articles) article.hidden = true
+if (overviewGrid) {
+  overviewGrid.updateSlides()
+  conditions.observe(stage)
+}
+else for (const article of articles) article.hidden = true
 readLocation()
 if (isPresenter) {
   togglePresenter()
@@ -472,24 +526,13 @@ function template(html: string): DocumentFragment {
 
 function updateSlideTitles(): void {
   const choices = document.createDocumentFragment()
-  const items = document.createDocumentFragment()
   for (const { no, title } of routes) {
     const option = document.createElement('option')
     option.value = String(no)
     option.textContent = `${no}. ${title}`
     choices.append(option)
-    const item = document.createElement('li')
-    const button = document.createElement('button')
-    button.type = 'button'
-    button.value = String(no)
-    const digit = document.createElement('span')
-    digit.textContent = String(no)
-    button.append(digit, ` ${title}`)
-    item.append(button)
-    items.append(item)
   }
   goto.replaceChildren(choices)
-  overview.querySelector('ol')!.replaceChildren(items)
 }
 
 function applyLiveDeck(deck: LiveDeck, before: LiveManifest): boolean {
@@ -543,6 +586,10 @@ function applyLiveDeck(deck: LiveDeck, before: LiveManifest): boolean {
     codeTabs?.refresh()
     drags?.updateElements()
     if (mountCopy) for (const article of replaced) { mountCopy(article); setupLiveCode(article) }
+  }
+  if (overviewGrid && (replaced.length || titlesChanged)) {
+    overviewGrid.updateSlides()
+    conditions.observe(stage)
   }
   current = Math.min(current, length)
   const selected = previous.alias ? aliases.get(previous.alias) ?? current : current

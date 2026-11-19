@@ -470,24 +470,69 @@ v-switch { display: block; }
 #image-view::backdrop { background: #0a090af2; }
 
 #overview {
-  width: min(760px, 92vw);
-  max-height: 88dvh;
-  padding: 20px 24px 28px;
-}
-
-#overview form,
-#image-view form { text-align: right; }
-#overview h2 { margin: 0 0 15px; }
-#overview ol {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  list-style: none;
-  gap: 8px;
-  margin: 0;
+  width: min(1120px, 94vw);
   padding: 0;
 }
-#overview li button { width: 100%; min-height: 54px; text-align: left; }
-#overview li span { color: #a4d6ff; margin-right: 6px; }
+
+#image-view form { text-align: right; }
+#overview header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 18px;
+  border-block-end: 1px solid #49434a;
+}
+#overview h2 { margin: 0; font-size: 18px; }
+#overview-page-link { margin-inline-start: auto; font-size: 14px; }
+#overview iframe { display: block; width: 100%; height: min(70dvh, 680px); border: 0; }
+
+.playing.overview-page #stage {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 235px), 1fr));
+  align-content: start;
+  align-items: start;
+  gap: 16px;
+  overflow: auto;
+  padding: 16px;
+}
+.overview-card {
+  min-width: 0;
+  border: 1px solid #49434a;
+  border-radius: 8px;
+  background: #17151a;
+}
+.overview-card:has(a[aria-current="page"]) { border-color: #8cc9f5; }
+.overview-thumbnail {
+  position: relative;
+  aspect-ratio: var(--overview-ratio);
+  overflow: hidden;
+  border-radius: 7px 7px 0 0;
+  background: #1b2028;
+  cursor: pointer;
+  content-visibility: auto;
+}
+.playing.overview-page .slide {
+  inset: 0 auto auto 0;
+  transform: scale(var(--overview-scale, 0));
+  transform-origin: top left;
+}
+.overview-card-link {
+  display: block;
+  padding: 8px 10px;
+  color: inherit;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.overview-card-link:focus-visible { outline: 2px solid #8cc9f5; outline-offset: -2px; }
+.overview-reveal, .overview-notes { padding: 6px 10px 10px; font-size: 13px; }
+.overview-reveal { display: flex; align-items: center; gap: 8px; }
+.overview-reveal input { min-width: 0; flex: 1; }
+.overview-notes {
+  border-block-start: 1px solid #49434a;
+  overflow-wrap: anywhere;
+}
+.overview-notes summary { cursor: pointer; }
 
 #image-view { max-width: 94vw; max-height: 94dvh; padding: 12px; }
 #image-view img { display: block; max-width: 88vw; max-height: 81dvh; margin-top: 8px; object-fit: contain; }

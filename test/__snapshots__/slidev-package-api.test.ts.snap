@@ -20,7 +20,7 @@ export interface SlidePosition {
     slide: number;
     click: number;
 }
-export type SlideMode = 'slide' | 'presenter' | 'export' | 'preview';
+export type SlideMode = 'slide' | 'presenter' | 'export' | 'preview' | 'overview';
 export declare function slideAlias(value: unknown): string | undefined;
 export declare function clickBounds(frontmatter: Record<string, unknown>, calculated: number): ClickBounds;
 export declare function slidePosition(rawSlide: number, step: number | undefined, bounds: ClickBounds[]): SlidePosition;
@@ -1097,7 +1097,7 @@ export interface SlidePosition {
     slide: number;
     click: number;
 }
-export type SlideMode = 'slide' | 'presenter' | 'export' | 'preview';
+export type SlideMode = 'slide' | 'presenter' | 'export' | 'preview' | 'overview';
 export declare function slideAlias(value: unknown): string | undefined;
 export declare function clickBounds(frontmatter: Record<string, unknown>, calculated: number): ClickBounds;
 export declare function slidePosition(rawSlide: number, step: number | undefined, bounds: ClickBounds[]): SlidePosition;

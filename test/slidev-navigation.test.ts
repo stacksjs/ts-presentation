@@ -15,6 +15,7 @@ describe('Slidev slide paths', () => {
     expect(getSlideRoutePath({ no: 2 })).toBe('/2')
     expect(getSlideRoutePath({ no: 2 }, 'presenter')).toBe('/presenter/2')
     expect(getSlideRoutePath({ no: 2 }, 'export')).toBe('/export/2')
+    expect(getSlideRoutePath({ no: 2 }, 'overview')).toBe('/overview')
   })
 
   test('uses slide aliases for paths and portable hashes', () => {
@@ -30,6 +31,8 @@ describe('Slidev slide paths', () => {
     expect(legacySlideLocation(new URL('http://localhost/export/2?clicks=0'), aliases)?.href).toBe('http://localhost/?capture=1&steps=1#2/0')
     expect(legacySlideLocation(new URL('http://localhost/2'), aliases)?.href).toBe('http://localhost/#2')
     expect(legacySlideLocation(new URL('http://localhost/missing'), aliases)).toBeUndefined()
+    expect(legacySlideLocation(new URL('http://localhost/overview'), aliases)?.href).toBe('http://localhost/?overview=1')
+    expect(legacySlideLocation(new URL('http://localhost/overview'), new Set(['overview']))?.href).toBe('http://localhost/#overview')
   })
 })
 

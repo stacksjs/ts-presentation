@@ -13,7 +13,7 @@ export interface SlideRoute {
 
 export interface ClickBounds { start: number, end: number }
 export interface SlidePosition { slide: number, click: number }
-export type SlideMode = 'slide' | 'presenter' | 'export' | 'preview'
+export type SlideMode = 'slide' | 'presenter' | 'export' | 'preview' | 'overview'
 
 const routeKey = /^(?:[a-z][a-z0-9-]*|[1-9]\d*)$/i
 const numericSlide = /^(?:slide-)?(\d+)$/
@@ -56,6 +56,7 @@ export function slideHash(route: Pick<SlideRoute, 'no' | 'alias'>, click = 0): s
 
 /** Adapted from Slidev's slidePath helpers. These paths are relative to the server base. */
 export function getSlideRoutePath(route: Pick<SlideRoute, 'no' | 'alias'>, mode: SlideMode = 'slide'): string {
+  if (mode === 'overview') return '/overview'
   const key = route.alias ?? String(route.no)
   return `${mode === 'presenter' || mode === 'export' ? `/${mode}` : ''}/${key}`
 }
@@ -70,6 +71,12 @@ export function readSlideHash(hash: string, aliases: ReadonlyMap<string, number>
 }
 
 export function legacySlideLocation(url: URL, aliases: ReadonlySet<string>): URL | undefined {
+  if (/^\/overview\/?$/.test(url.pathname) && !aliases.has('overview')) {
+    const location = new URL(url)
+    location.pathname = '/'
+    location.searchParams.set('overview', '1')
+    return location
+  }
   const path = url.pathname.split('/').filter(Boolean)
   const mode = path[0] === 'presenter' || path[0] === 'export' ? path.shift() : undefined
   if (path.length > 1 || (!mode && !path.length)) return

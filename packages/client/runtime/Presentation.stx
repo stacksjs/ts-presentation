@@ -61,9 +61,12 @@
     {!! liveStatus !!}
   </nav>
   <dialog id="overview" aria-label="Slide overview">
-    <form method="dialog"><button aria-label="Close overview">Close</button></form>
-    <h2>Slide overview</h2>
-    <ol>{!! slideOverview !!}</ol>
+    <header>
+      <h2>Slide overview</h2>
+      <a id="overview-page-link" target="_blank" rel="noopener">Full overview</a>
+      <form method="dialog"><button aria-label="Close overview">Close</button></form>
+    </header>
+    <iframe title="Slide thumbnails"></iframe>
   </dialog>
   <dialog id="image-view" aria-label="Screenshot detail">
     <form method="dialog"><button aria-label="Close screenshot">Close</button></form>

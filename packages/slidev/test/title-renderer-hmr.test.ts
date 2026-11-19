@@ -38,27 +38,33 @@ test.skipIf(!chrome)('edits native Markdown and applies body and title changes w
     const origin = new TextDecoder().decode(start.value).match(/https?:\/\/[\w.:]+/)?.[0]
     expect(origin).toBeDefined()
     await view.navigate(origin + '#second/1')
+    await view.evaluate(`document.querySelector('#overview-button').click()`)
+    const overviewLink = `document.querySelector('#overview iframe').contentDocument?.querySelector('[data-overview-slide="2"]')`
+    await waitFor(`!!(${overviewLink})`)
     await view.evaluate(`(() => {
       window.loadedOnce = true
       window.originalTitle = document.querySelector('#goto option[value="2"]')
-      window.originalOverviewTitle = document.querySelector('#overview button[value="2"]')
+      window.originalOverviewTitle = ${overviewLink}
       window.originalSlide = document.querySelector('#slide-2')
     })()`)
 
     await writeFile(entry, first.replace('Body text', 'Body text changed'))
     await waitFor(`document.querySelector('#slide-1').textContent.includes('Body text changed')`)
+    await waitFor(`document.querySelector('#overview iframe').contentDocument?.querySelector('#slide-1')?.textContent.includes('Body text changed')`)
     expect(await view.evaluate(`window.loadedOnce &&
       window.originalTitle === document.querySelector('#goto option[value="2"]') &&
-      window.originalOverviewTitle === document.querySelector('#overview button[value="2"]') &&
+      window.originalOverviewTitle === ${overviewLink} &&
       window.originalSlide === document.querySelector('#slide-2')`)).toBe(true)
     expect(await view.evaluate(`location.hash`)).toBe('#second/1')
 
     await writeFile(chapter, second.replace('# Second', '# Second Renamed'))
     await waitFor(`document.querySelector('#goto option[value="2"]').textContent.includes('Second Renamed')`)
+    await waitFor(`(${overviewLink})?.textContent.includes('Second Renamed')`)
     expect(await view.evaluate(`window.loadedOnce && window.originalTitle !== document.querySelector('#goto option[value="2"]')`)).toBe(true)
     expect(await view.evaluate(`window.presentationNavigation.clicks`)).toBe(1)
-    expect(await view.evaluate(`document.querySelector('#overview button[value="2"]').textContent`)).toContain('Second Renamed')
+    expect(await view.evaluate(`(${overviewLink}).textContent`)).toContain('Second Renamed')
 
+    await view.evaluate(`document.querySelector('#overview').close()`)
     await view.evaluate(`document.querySelector('#edit-slide').click()`)
     await waitFor(`document.querySelector('#side-editor textarea').value.includes('# Second Renamed')`)
     expect(await view.evaluate(`document.querySelector('#side-editor-path').textContent`)).toContain('chapter.md')
