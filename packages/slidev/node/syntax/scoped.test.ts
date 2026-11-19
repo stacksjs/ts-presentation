@@ -1,44 +1,14 @@
-import MarkdownExit from 'markdown-exit'
-import { expect, it } from 'vitest'
-import MarkdownItStyleScoped from './scoped'
+import { expect, it } from 'bun:test'
+import { parseDeck, renderDeck } from '../runtime/index.ts'
 
-it('add scoped to style', async () => {
-  const md = MarkdownExit({ html: true })
-  md.use(MarkdownItStyleScoped)
-
-  const result = await md.renderAsync('<style>\n.red { color: red; }\n</style>')
-
-  expect(result).toMatchInlineSnapshot(`
-    "<style scoped>
-    .red { color: red; }
-    </style>"
-  `)
+it.each(['', ' scoped'])('scopes slide styles with attributes %j', async (attribute) => {
+  const html = await renderDeck(parseDeck(`<style${attribute}>\n.red { color: red; }\n</style>\n\n# Example`))
+  expect(html).toContain('<style data-slide-style="1">')
+  expect(html).toContain('.red:where(#slide-1, #slide-1 *) { color: red; }')
 })
 
-it('preserve existing scoped', async () => {
-  const md = MarkdownExit({ html: true })
-  md.use(MarkdownItStyleScoped)
-
-  const result = await md.renderAsync('<style scoped>\n.red { color: red; }\n</style>')
-
-  expect(result).toMatchInlineSnapshot(`
-    "<style scoped>
-    .red { color: red; }
-    </style>"
-  `)
-})
-
-it('not transform in code block', async () => {
-  const md = MarkdownExit({ html: true })
-  md.use(MarkdownItStyleScoped)
-
-  const result = await md.renderAsync('```html\n<style>\n.red { color: red; }\n</style>\n```')
-
-  expect(result).toMatchInlineSnapshot(`
-    "<pre><code class="language-html">&lt;style&gt;
-    .red { color: red; }
-    &lt;/style&gt;
-    </code></pre>
-    "
-  `)
+it('preserves style tags inside fenced code', async () => {
+  const html = await renderDeck(parseDeck('```\n<style>\n.red { color: red; }\n</style>\n```'))
+  expect(html).toContain('&lt;style&gt;\n.red { color: red; }\n&lt;/style&gt;')
+  expect(html).not.toContain('data-slide-style')
 })

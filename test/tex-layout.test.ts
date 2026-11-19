@@ -449,3 +449,13 @@ test('applies the last operator limit control even after scripts', () => {
   expect(formula(String.raw`\smallint_{a}^{b}`, true)).toContain('<munderover><mo largeop="false">∫</mo>')
   expect(() => formula(String.raw`3\nolimits_2`)).toThrow('Limit control requires a math operator')
 })
+
+test('renders TeX character codes, zero-width struts, and common font aliases', () => {
+  const html = renderMath(String.raw`\char"263A+\char'101+\char66+\sqrt{\mathstrut x}+\mathscr{F}+\bm{v}`)
+  expect(html).toContain('<mtext>☺</mtext><mo>+</mo><mi>A</mi><mo>+</mo><mi>B</mi>')
+  expect(html).toContain('<mpadded width="0"><mphantom><mo stretchy="false">(</mo></mphantom></mpadded>')
+  expect(html).toContain('mathvariant="script"')
+  expect(html).toContain('mathvariant="bold-italic"')
+  expect(renderMath('\\char`\\&')).toContain('<mtext>&amp;</mtext>')
+  expect(renderMath(String.raw`\char"110000`)).toContain('math-unrendered')
+})

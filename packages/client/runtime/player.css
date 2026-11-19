@@ -123,8 +123,8 @@ button, select { font: inherit; }
   .drag-controls { display: none !important; }
   :is(.code-copy-overlay, .code-copy-action) { display: none !important; }
   .code-group-tab[aria-selected="false"] { display: none; }
-  [data-code-motion] > .code-frame { display: none !important; }
-  [data-code-motion] > .code-frame:last-child { display: block !important; }
+  body:not(.printing-frames) [data-code-motion] > .code-frame { display: none !important; }
+  body:not(.printing-frames) [data-code-motion] > .code-frame:last-child { display: block !important; }
 }
 .capturing .code-group-tab[aria-selected="false"] { display: none; }
 
@@ -483,7 +483,13 @@ v-switch { display: block; }
 .slide-ink[data-drawing-active] { pointer-events: auto; touch-action: none; cursor: crosshair; }
 
 @media print {
-  [data-switch-print-hidden] { display: none !important; }
+  body:not(.printing-frames) [data-switch-print-hidden],
+  .printing-frames [data-switch-hidden] { display: none !important; }
+  .printing-frames :is([data-reveal-hidden], [data-code-hidden], [data-equation-hidden]) { visibility: hidden; }
+  .printing-frames [data-reveal-hidden] { opacity: 0; }
+  .printing-frames [data-code-dim] { opacity: 0.36; }
+  .printing-frames [data-equation-dim] { opacity: 0.24; }
+  .print-destination { position: absolute; inset: 0 auto auto 0; }
   #overview, #image-view { display: none !important; }
   #stage .slide:is(.layout-cover, .layout-intro, .layout-section, .layout-image-left, .layout-image-right) {
     display: grid !important;

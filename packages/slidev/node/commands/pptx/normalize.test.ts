@@ -1,7 +1,8 @@
-import type { IrBox, IrText, RawNode, RawSlide, RawSnapshot, RawStyle } from './ir'
-import { describe, expect, it } from 'vitest'
-import { parseColor } from './color'
-import { normalize, parseLength, parseShadow, rasterReasonFor } from './normalize'
+// Adapted from Slidev v53.1.0. See licenses/Slidev-MIT.txt.
+import type { IrBox, IrText, RawNode, RawSlide, RawSnapshot, RawStyle } from '../../runtime/editable/ir.ts'
+import { describe, expect, it } from 'bun:test'
+import { parseColor } from '../../runtime/editable/color.ts'
+import { normalize, parseLength, parseShadow, rasterReasonFor } from '../../runtime/editable/normalize.ts'
 
 /**
  * One named case per rule.
@@ -852,7 +853,13 @@ describe('a slide that cannot be rebuilt falls back to an image', () => {
     expect(slides[0].fallbackReason).toMatch(/no text could be recovered/)
   })
 
-  it('falls back when most of the slide is a picture with nothing over it', () => {
+  it('falls back when artwork covers most of a slide without editable text', () => {
+    const nodes = [el(0, -1, 'SVG', 0, { rect: { x: 0, y: 0, w: 900, h: 500 } })]
+    const { slides } = run(nodes, [BASE_STYLE])
+    expect(slides[0].fallbackReason).toMatch(/rasterized/)
+  })
+
+  it('preserves an editable caption beside large artwork', () => {
     const big = { x: 0, y: 0, w: 900, h: 500 }
     const away = { x: 905, y: 505, w: 60, h: 20 }
     const nodes = [
@@ -864,9 +871,8 @@ describe('a slide that cannot be rebuilt falls back to an image', () => {
       }),
     ]
     const { slides } = run(nodes, [BASE_STYLE])
-    // The caption sits beside the picture rather than on it, so vectorizing
-    // really did recover almost nothing.
-    expect(slides[0].fallbackReason).toMatch(/rasterized/)
+    expect(slides[0].fallbackReason).toBeUndefined()
+    expect(texts(slides[0].nodes)[0].runs[0].text).toBe('a caption in the corner')
   })
 
   it('keeps a slide whose text sits ON TOP of a full-bleed picture', () => {
@@ -1255,6 +1261,20 @@ describe('a rendered formula is a picture', () => {
     ]
     const { slides } = run(nodes, [BASE_STYLE])
     expect(slides[0].nodes.map(node => node.kind)).toEqual(['text'])
+  })
+
+  it('keeps separate text boxes around inline MathML artwork', () => {
+    const after = { x: 125, y: 0, w: 45, h: 20 }
+    const nodes = [
+      el(0, -1, 'P', 0),
+      text(1, 0, 'before '),
+      el(2, 0, 'MATH', 1, { isMath: true, rect: { x: 100, y: 0, w: 25, h: 20 } }),
+      text(3, 0, ' after', { rect: after, glyphRects: [after] }),
+    ]
+    const { slides } = run(nodes, [BASE_STYLE, style({ display: 'math' })])
+    const runs = texts(slides[0].nodes)
+    expect(runs.map(node => node.rect.x)).toEqual([0, 125])
+    expect(runs.every(node => node.besideArtwork)).toBe(true)
   })
 })
 

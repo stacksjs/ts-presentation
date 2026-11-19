@@ -1,10 +1,11 @@
 #!/usr/bin/env bun
 import { cp, mkdir, mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, dirname, join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { asset, within } from './assets.ts'
 import { findChrome } from './chrome.ts'
+import { resolveExportSettings } from './export-options.ts'
 import { compileLiveCode, maxCodeLength } from './compile-code.ts'
 import { saveDrag } from './drag-source.ts'
 import { saveDrawing } from './drawing-store.ts'
@@ -35,7 +36,8 @@ const help = `ts-presentation <dev|build|export> [slides.md]
   build   Build a static site. Optional --out (default: dist beside the deck).
   export  Write PDF, PNG, PPTX or editable PPTX using Chrome. Use --format pptx-editable for editable slides.
           Optional --out and --executable-path.
-          PNG/PPTX support --range, --scale and --with-clicks or --without-clicks.
+          Use --range and --with-clicks to select PDF, PNG, or PPTX frames.
+          PNG/PPTX also support --scale.
   --theme   Override the deck's theme for any command.
 `
 
@@ -71,9 +73,9 @@ async function main(): Promise<void> {
   const emptyStyle = '/* This deck has no custom styles. */\n'
   const compile = createDeckCompiler(source, { liveCompile: command === 'dev', mode: command, theme: values.theme })
 
-  async function writeSite(output: string): Promise<CompiledDeck> {
+  async function writeSite(output: string, compiled?: CompiledDeck): Promise<CompiledDeck> {
     if (within(publicDir, output)) throw new Error('Build output must be outside the deck’s public directory')
-    const deck = await compile()
+    const deck = compiled ?? await compile()
     const css = Bun.file(customStyle)
     await mkdir(output, { recursive: true })
     if (await realpath(publicDir).catch(() => undefined)) {
@@ -214,23 +216,15 @@ async function main(): Promise<void> {
     return
   }
 
-  const executable = await findChrome(values['executable-path'])
+  const deck = await compile()
+  const { format, output, scale, range, executablePath, withClicks } = resolveExportSettings(source, deck.headmatter, values)
+  const executable = await findChrome(executablePath)
   if (!executable) throw new Error('Chrome or Chromium is required for export. Pass --executable-path or set CHROME_BIN.')
-  const format = values.format ?? 'pdf'
-  if (!['pdf', 'png', 'pptx', 'pptx-editable'].includes(format)) throw new Error('Export format must be pdf, png, pptx or pptx-editable')
   const powerPoint = format === 'pptx' || format === 'pptx-editable'
-  if (values['with-clicks'] && values['without-clicks']) throw new Error('Choose either --with-clicks or --without-clicks')
-  if (format === 'pdf' && (values.range || values.scale || values['with-clicks'] || values['without-clicks']))
-    throw new Error('Slide range, scale and click options are available for PNG and PPTX')
-  const scale = Number(values.scale ?? (powerPoint ? 2 : 1))
-  if (!Number.isInteger(scale) || scale < 1 || scale > 3) throw new Error('Export scale must be 1, 2 or 3')
-  const name = basename(source, '.md')
-  const target = destination ?? (format === 'png' ? `${name}-frames` : `${name}.${powerPoint ? 'pptx' : 'pdf'}`)
-  const output = resolve(format === 'pptx-editable' && !target.toLowerCase().endsWith('.pptx') ? `${target}.pptx` : target)
   const temp = await mkdtemp(join(tmpdir(), 'ts-presentation-'))
   try {
     await mkdir(dirname(output), { recursive: true })
-    const deck = await writeSite(temp)
+    await writeSite(temp, deck)
     const { pathToFileURL } = await import('node:url')
     const localDeck = pathToFileURL(join(temp, 'index.html'))
     if (format !== 'pdf') {
@@ -243,9 +237,9 @@ async function main(): Promise<void> {
         executable,
         canvas,
         editable: format === 'pptx-editable',
-        range: values.range,
+        range,
         scale,
-        withClicks: values['with-clicks'] || (powerPoint && !values['without-clicks']),
+        withClicks,
       }, async (frame, index, total) => {
         if (powerPoint) frames.push(frame)
         else {
@@ -258,6 +252,14 @@ async function main(): Promise<void> {
         const { createPowerPoint } = await import('./powerpoint.ts')
         await Bun.write(output, createPowerPoint(frames, { title, author, ...canvas }))
       }
+      console.log(output)
+      return
+    }
+
+    if (range || withClicks) {
+      const { capturePdf } = await import('./capture.ts')
+      const pdf = await capturePdf({ root: temp, executable, canvas: deck.canvas, scale, range, withClicks })
+      await Bun.write(output, pdf)
       console.log(output)
       return
     }

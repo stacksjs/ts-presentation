@@ -1,8 +1,8 @@
-import type { SlideIr } from './ir'
-import JSZip from 'jszip'
-import PptxGenJS from 'pptxgenjs'
-import { describe, expect, it } from 'vitest'
-import { buildPptx } from './build'
+// Adapted from Slidev v53.1.0. See licenses/Slidev-MIT.txt.
+import type { IrRun, IrText, SlideIr } from '../../runtime/editable/ir.ts'
+import { describe, expect, it } from 'bun:test'
+import { createPowerPoint } from '../../runtime/powerpoint.ts'
+import type { PowerPointFrame } from '../../runtime/powerpoint.ts'
 
 /**
  * These assert on the generated OOXML, not on the JavaScript that produced it.
@@ -25,13 +25,38 @@ function slide(nodes: SlideIr['nodes']): SlideIr {
   }
 }
 
-async function slideXml(ir: SlideIr[]): Promise<string> {
-  const buffer = await buildPptx(PptxGenJS, ir, { width: 980, height: 552 })
-  const zip = await JSZip.loadAsync(buffer)
-  return await zip.file('ppt/slides/slide1.xml')!.async('string')
+const dimensions = { width: 980, height: 552, title: 'Compatibility fixture' }
+
+function build(ir: SlideIr[]): Blob {
+  return createPowerPoint(ir.map(slide => ({
+    title: dimensions.title,
+    notes: slide.note ?? '',
+    ...(slide.fallbackPng
+      ? { image: Buffer.from(slide.fallbackPng.split(',')[1], 'base64') }
+      : { editable: slide }),
+  })), dimensions)
 }
 
-function textNode(runs: SlideIr['nodes'][number] extends never ? never : any): any {
+async function part(document: Blob, path: string): Promise<string> {
+  const archive = Buffer.from(await document.arrayBuffer())
+  let offset = 0
+  while (offset + 30 <= archive.length && archive.readUInt32LE(offset) === 0x04034B50) {
+    const size = archive.readUInt32LE(offset + 18)
+    const nameLength = archive.readUInt16LE(offset + 26)
+    const extraLength = archive.readUInt16LE(offset + 28)
+    const name = archive.toString('utf8', offset + 30, offset + 30 + nameLength)
+    const bytes = offset + 30 + nameLength + extraLength
+    if (name === path) return archive.toString('utf8', bytes, bytes + size)
+    offset = bytes + size
+  }
+  throw new Error(`Missing ZIP part: ${path}`)
+}
+
+function slideXml(ir: SlideIr[]): Promise<string> {
+  return part(build(ir), 'ppt/slides/slide1.xml')
+}
+
+function textNode(runs: IrRun[]): IrText {
   return {
     kind: 'text',
     sourceId: 1,
@@ -43,6 +68,34 @@ function textNode(runs: SlideIr['nodes'][number] extends never ? never : any): a
     runs,
   }
 }
+
+describe('presentation links', () => {
+  for (const mode of ['image', 'editable'] as const) {
+    it(`targets an exported reveal from a ${mode} slide`, async () => {
+      const image = new Uint8Array([0])
+      const label = ['Jump', 'Missing', 'External']
+      const destination = ['#slide-9/2', '#slide-8', 'https://example.com/']
+      const position = { slide: 4, click: 0 }
+      const from: PowerPointFrame = mode === 'editable'
+        ? { title: 'Links', notes: '', position, editable: slide([textNode(label.map((text, index) =>
+            ({ text, fontSize: 32, fontFamily: 'Arial', link: destination[index] })))]) }
+        : { title: 'Links', notes: '', position, image, links: label.map((label, index) =>
+            ({ href: destination[index], label, x: 10, y: 50 + index * 20, width: 40, height: 15 })) }
+      const file = createPowerPoint([
+        from,
+        { title: 'First reveal', notes: '', image, position: { slide: 9, click: 1 } },
+        { title: 'Second reveal', notes: '', image, position: { slide: 9, click: 2 } },
+      ], dimensions)
+      const markup = await part(file, 'ppt/slides/slide1.xml')
+      const relationships = await part(file, 'ppt/slides/_rels/slide1.xml.rels')
+      expect(markup.match(/<a:hlinkClick\b/g)).toHaveLength(2)
+      expect(markup).toContain('action="ppaction://hlinksldjump"')
+      expect(relationships).toMatch(/\/slide" Target="slide3\.xml"\/>/)
+      expect(relationships).not.toContain('slide2.xml')
+      expect(relationships).toContain('Target="https://example.com/" TargetMode="External"')
+    })
+  }
+})
 
 describe('unit conversions', () => {
   it('writes font size in points, not pixels', async () => {
@@ -73,7 +126,8 @@ describe('unit conversions', () => {
     ])
     // 2px -> 1.5pt -> spc is hundredths of a point.
     expect(xml).toContain('spc="150"')
-    expect(xml).toContain('kern="0"')
+    // A 12pt run requires a threshold above 12pt to keep manual tracking.
+    expect(xml).toContain('kern="1201"')
   })
 
   it('places geometry at exactly 9525 EMU per pixel', async () => {
@@ -211,7 +265,7 @@ describe('text', () => {
       ...textNode([
         { text: 'x', fontSize: 16, fontFamily: 'Arial' },
       ]),
-      align: 'center',
+      align: 'center' as const,
     }
     const xml = await slideXml([
       slide([centered]),
@@ -248,18 +302,7 @@ describe('text', () => {
 
 describe('slide assembly', () => {
   it('writes notes into the notes slide', async () => {
-    const buffer = await buildPptx(
-      PptxGenJS,
-      [
-        {
-          ...slide([]),
-          note: 'Say this part out loud.',
-        },
-      ],
-      { width: 980, height: 552 },
-    )
-    const zip = await JSZip.loadAsync(buffer)
-    const notes = await zip.file('ppt/notesSlides/notesSlide1.xml')!.async('string')
+    const notes = await part(build([{ ...slide([]), note: 'Say this part out loud.' }]), 'ppt/notesSlides/notesSlide1.xml')
     expect(notes).toContain('Say this part out loud.')
   })
 
@@ -282,6 +325,7 @@ describe('slide assembly', () => {
     // The safety valve has to be exclusive. Drawing the shapes as well would
     // put half-measured content on top of a correct picture of the same thing.
     expect(xml).not.toContain('<p:sp>')
+    expect(xml).toContain('<p:pic>')
   })
 
   it('produces a non-empty shape tree, which the image exporter never does', async () => {
@@ -292,7 +336,7 @@ describe('slide assembly', () => {
         ]),
       ]),
     ])
-    expect(xml).toContain('<a:t>Selectable</a:t>')
+    expect(xml).toContain('<a:t xml:space="preserve">Selectable</a:t>')
   })
 })
 

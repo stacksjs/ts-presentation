@@ -38,6 +38,7 @@ if the executable is installed elsewhere.
 bun src/cli.ts export examples/demo/slides.md --format pptx --out output/demo.pptx
 bun src/cli.ts export examples/demo/slides.md --format pptx-editable --out output/editable.pptx
 bun src/cli.ts export examples/demo/slides.md --format png --range 1,3-5 --out output/frames
+bun src/cli.ts export examples/demo/slides.md --range 2-4 --with-clicks --out output/rehearsal.pdf
 ```
 
 PowerPoint uses slide images with editable speaker notes and clickable web
@@ -48,6 +49,11 @@ frame per slide, or `--with-clicks` to include reveals in a PNG export.
 objects. Diagrams, formulas, and other browser artwork are embedded
 as separate pictures. The exporter reports slides that require a full-frame
 image. It references fonts by name, so recipients may see font substitutions.
+
+Set `exportFilename` and `export` in the deck headmatter for repeatable exports.
+The `export` mapping accepts `format`, `range`, and `withClicks`.
+PNG and PowerPoint can also set `scale`. CLI options override the deck defaults. With PDF
+`--with-clicks`, each selected reveal becomes a page with selectable text.
 
 ## Write a deck
 

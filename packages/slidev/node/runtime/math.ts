@@ -54,7 +54,9 @@ const contextualDots = new Set(['dots', 'dotsc', 'dotsb', 'dotsm', 'dotsi', 'dot
 const centersDots = /^[+\-−*=<>:±∓·×÷≤≥≠≈∼≃≡∝∈∉∋∌∣∤∥∦⊥⊂⊄⊆⊈⊃⊅⊇⊉∘∗∖∩∪∧∨⊕⊗⊙∑∏∐⋃⋂⋁⋀←→↔⇒⇐⇔↦⟵⟶⟷⟹⟸⟺⟼]$/u
 const variants: Record<string, string> = {
   mathbf: 'bold', mathbb: 'double-struck', mathrm: 'normal', mathit: 'italic',
-  mathsf: 'sans-serif', mathtt: 'monospace', mathcal: 'script', mathfrak: 'fraktur', boldsymbol: 'bold-italic',
+  mathsf: 'sans-serif', mathtt: 'monospace', mathcal: 'script', mathscr: 'script',
+  mathfrak: 'fraktur', mathnormal: 'italic', boldsymbol: 'bold-italic', bm: 'bold-italic',
+  Bbb: 'double-struck', frak: 'fraktur', bold: 'bold',
 }
 const accents: Record<string, string> = {
   hat: 'ˆ', bar: '¯', vec: '→', dot: '˙', ddot: '¨', dddot: '⃛', ddddot: '⃜', tilde: '˜',
@@ -938,6 +940,28 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
   }
 
+  function explicitCharacter(): string {
+    const prefix = peek()
+    let code: number
+    if (prefix === '`') {
+      take()
+      const char = take().replace(/^\\(?=.$)/u, '')
+      code = [...char].length === 1 ? char.codePointAt(0)! : NaN
+    }
+    else {
+      const radix = prefix === '"' ? 16 : prefix === "'" ? 8 : 10
+      if (radix !== 10) take()
+      const digits = radix === 16 ? /^[0-9a-f]$/i : radix === 8 ? /^[0-7]$/ : /^\d$/
+      space()
+      const start = cursor
+      while (cursor - start < 16 && digits.test(tokens[cursor] ?? '')) cursor++
+      code = Number.parseInt(tokens.slice(start, cursor).join(''), radix)
+    }
+    if (!Number.isInteger(code) || code < 0x20 || code > 0x10FFFF || (code >= 0xD800 && code <= 0xDFFF))
+      throw new Error('Invalid math character code')
+    return String.fromCodePoint(code)
+  }
+
   function atom(token: string): Atom {
     if (token === '{') {
       const content = inScope(() => row(['}']))
@@ -1117,6 +1141,13 @@ export function renderMath(source: string, display = false, configured: MathMacr
       if (star) take()
       const label = expandDefinition(rawGroup()).join('').replace(/\\([_%#$&{}])/g, '$1')
       return { markup: tag('mo', label), limits: name === 'operatornamewithlimits' || star }
+    }
+    if (name === 'char') {
+      const glyph = explicitCharacter()
+      return { markup: tag(/^\p{L}$/u.test(glyph) ? 'mi' : 'mtext', glyph) }
+    }
+    if (name === 'mathstrut') {
+      return { markup: '<mpadded width="0"><mphantom><mo stretchy="false">(</mo></mphantom></mpadded>' }
     }
     if (name === 'mathop') return { markup: argument(), limits: false }
     if (name === 'mod' || name === 'bmod' || name === 'pmod' || name === 'pod') return { markup: modulus(name) }

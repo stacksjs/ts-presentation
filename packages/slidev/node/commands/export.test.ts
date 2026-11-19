@@ -1,65 +1,93 @@
-import fs from 'node:fs/promises'
+import { describe, expect, it } from 'bun:test'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
-import { exportSlides } from './export'
+import { join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { findChrome } from '../runtime/chrome.ts'
+import { resolveExportSettings } from '../runtime/export-options.ts'
 
-/**
- * `exportSlides` writes to `--output` through several writers, and they used
- * to disagree about whose job it was to create the parent directory:
- * `page.pdf({ path })` creates it, `genPagePng` creates it, and everything
- * calling `fs.writeFile` directly did not. `dist/slides.pptx` then failed
- * with ENOENT while one-piece PDF wrote the same path happily.
- *
- * A real export needs a browser and a dev server, neither of which belongs in
- * a unit test, and it never gets that far here: `importPlaywright` asks
- * `getRoots` for the user root, which throws without an entry, so every call
- * below rejects before anything renders. That is enough, because the
- * directory is created first. The matcher pins each rejection to that known
- * failure, so an error from the `mkdir` itself fails the test instead of
- * satisfying it.
- */
+const cli = fileURLToPath(new URL('../cli.ts', import.meta.url))
+const chrome = await findChrome()
 
-const NO_ENTRY = /Cannot find roots/
+describe('export defaults', () => {
+  it('takes format, range, scale, reveal behavior, and filename from headmatter', () => {
+    const settings = resolveExportSettings('/deck/slides.md', {
+      exportFilename: 'reports/talk',
+      config: { export: { range: '2-4', scale: 3 } },
+      export: { format: 'pptx-editable', withClicks: false },
+    })
+    expect(settings).toMatchObject({ format: 'pptx-editable', output: resolve('reports/talk.pptx'), range: '2-4', scale: 3, withClicks: false })
+  })
 
-const tempRoots: string[] = []
-
-afterEach(async () => {
-  await Promise.all(tempRoots.splice(0).map(root => fs.rm(root, { recursive: true, force: true })))
+  it('uses explicit flags ahead of deck defaults in either direction', () => {
+    const settings = resolveExportSettings('/deck/slides.md', {
+      export: { format: 'png', range: '2', withClicks: true },
+    }, { format: 'pptx', range: '1', out: 'override.pptx', 'without-clicks': true })
+    expect(settings).toMatchObject({ format: 'pptx', range: '1', output: resolve('override.pptx'), withClicks: false })
+    expect(resolveExportSettings('/deck/slides.md', { export: { withClicks: false } }, { 'with-clicks': true }).withClicks).toBe(true)
+  })
 })
 
-async function tempRoot() {
-  const root = await fs.mkdtemp(join(tmpdir(), 'slidev-export-'))
-  tempRoots.push(root)
-  return root
+const deck = [
+  '---', 'title: Export compatibility', 'exportFilename: nested/final/report', '---',
+  '', '# First chapter omitted', '', '---', 'routeAlias: selected', '---', '', '# Second chapter selected', '',
+  '[Jump to the last reveal](#selected/2)', '',
+  '<p v-click>First distinct reveal</p>', '<p v-click>Second distinct reveal</p>',
+  '', '---', '', '# Third chapter omitted',
+].join('\n')
+
+async function exportDeck(root: string, ...args: string[]): Promise<void> {
+  const command = Bun.spawn([process.execPath, cli, 'export', 'slides.md', '--executable-path', chrome!, ...args], {
+    cwd: root, stdout: 'pipe', stderr: 'pipe',
+  })
+  const [status, output] = await Promise.all([command.exited, new Response(command.stderr).text()])
+  if (status !== 0) throw new Error(output)
 }
 
-function exportInto(output: string, format: 'pdf' | 'pptx' | 'pptx-editable') {
-  return exportSlides({ output, format, slides: [], total: 0, waitUntil: undefined })
-}
+describe('export creates output directories', () => {
+  it.skipIf(!chrome).each([
+    ['pptx', 'slides.pptx', 'PK'],
+    ['pptx-editable', 'slides.pptx', 'PK'],
+    ['pdf', 'slides.pdf', '%PDF'],
+  ])('creates a missing directory for %s', async (format, filename, magic) => {
+    const root = await mkdtemp(join(tmpdir(), 'presentation-export-'))
+    try {
+      await Bun.write(join(root, 'slides.md'), deck)
+      await exportDeck(root, '--format', format, '--output', join('dist', filename), ...(format === 'pdf' ? [] : ['--without-clicks']))
+      expect((await Bun.file(join(root, 'dist', filename)).text()).startsWith(magic)).toBe(true)
+    }
+    finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  }, 20_000)
 
-describe('exportSlides creates the output directory', () => {
-  it.each([
-    ['pptx', 'slides.pptx'],
-    ['pptx-editable', 'slides.pptx'],
-    ['pdf', 'slides.pdf'],
-  ] as const)('creates a missing directory for %s', async (format, filename) => {
-    const output = join(await tempRoot(), 'dist', filename)
+  it.skipIf(!chrome)('writes one vector page per selected reveal to the configured nested filename', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'presentation-export-range-'))
+    try {
+      await Bun.write(join(root, 'slides.md'), deck)
+      await exportDeck(root, '--range', '2', '--with-clicks')
+      const pdf = await Bun.file(join(root, 'nested', 'final', 'report.pdf')).text()
+      expect(pdf.match(/\/Type\s*\/Page\b/g)).toHaveLength(3)
+      const pages = [...pdf.matchAll(/\/MediaBox \[0 0 ([\d.]+) ([\d.]+)\]/g)]
+      expect(pages).toHaveLength(3)
+      expect(pages.every(([, width, height]) => Math.abs(Number(width) - 720) < 0.5 && Math.abs(Number(height) - 405) < 0.5)).toBe(true)
+      expect(pdf).toContain('/Type /Font')
+      expect(pdf.match(/\/Dest \/presentation-print-2-2\b/g)).toHaveLength(3)
+    }
+    finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  }, 20_000)
 
-    await expect(exportInto(output, format)).rejects.toThrow(NO_ENTRY)
-    await expect(fs.stat(dirname(output))).resolves.toBeTruthy()
-  })
-
-  it('creates nested directories', async () => {
-    const output = join(await tempRoot(), 'a', 'b', 'c', 'slides.pptx')
-
-    await expect(exportInto(output, 'pptx')).rejects.toThrow(NO_ENTRY)
-    await expect(fs.stat(dirname(output))).resolves.toBeTruthy()
-  })
-
-  it('accepts an output with no directory part', async () => {
-    // Resolves to the working directory, which exists, so the rejection has
-    // to come from the missing entry rather than from the `mkdir`.
-    await expect(exportInto('slides.pptx', 'pptx')).rejects.toThrow(NO_ENTRY)
-  })
+  it.skipIf(!chrome)('accepts an output with no directory part', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'presentation-export-'))
+    try {
+      await Bun.write(join(root, 'slides.md'), '# Example')
+      await exportDeck(root, '--format', 'pptx', '--output', 'slides.pptx')
+      expect(await Bun.file(join(root, 'slides.pptx')).exists()).toBe(true)
+    }
+    finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  }, 20_000)
 })

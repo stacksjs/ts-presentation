@@ -31,6 +31,7 @@ export interface CompiledDeck extends ExtensionAssets {
   html: string
   title: string
   author?: string
+  headmatter?: Record<string, unknown>
   canvas: SlideCanvas
   routeAliases: ReadonlySet<string>
   writableSnippets: ReadonlyMap<string, WritableSnippet>
@@ -194,7 +195,7 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
     const author = typeof deck.headmatter?.author === 'string' ? deck.headmatter.author : undefined
     const routeAliases = new Set(routes.flatMap(route => route.alias ? [route.alias] : []))
     const drawingStore = saveDrawings ? { ...store, slideCount: routes.length } : undefined
-    const compiled = { title: deck.title, author, canvas, html, styles: extensions.styles, client: extensions.client, mounts: extensions.mounts, writableSnippets, writableDrags, writableSlides, routeAliases, drawingStore, live }
+    const compiled = { title: deck.title, author, headmatter: deck.headmatter, canvas, html, styles: extensions.styles, client: extensions.client, mounts: extensions.mounts, writableSnippets, writableDrags, writableSlides, routeAliases, drawingStore, live }
     cached = { files, deck: compiled }
     return compiled
   }

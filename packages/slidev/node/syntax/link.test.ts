@@ -1,18 +1,8 @@
-import MarkdownExit from 'markdown-exit'
-import { expect, it } from 'vitest'
-import MarkdownItLink from './link'
+import { expect, it } from 'bun:test'
+import { parseDeck, renderDeck } from '../runtime/index.ts'
 
-it('links', async () => {
-  const md = MarkdownExit()
-  md.use(MarkdownItLink)
-
-  expect(await md.renderAsync('[slide 1](#1)')).toMatchInlineSnapshot(`
-    "<p><Link to="#1">slide 1</Link></p>
-    "
-  `)
-
-  expect(await md.renderAsync('[external](https://example.com)')).toMatchInlineSnapshot(`
-    "<p><a href="https://example.com" target="_blank">external</a></p>
-    "
-  `)
+it('links to slides and opens external destinations in a separate tab', async () => {
+  const html = await renderDeck(parseDeck('[slide 1](#1)\n\n[external](https://example.com)'))
+  expect(html).toContain('<a href="#slide-1" data-slide-link="1">slide 1</a>')
+  expect(html).toContain('href="https://example.com" target="_blank"')
 })

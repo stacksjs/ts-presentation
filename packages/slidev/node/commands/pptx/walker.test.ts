@@ -1,12 +1,12 @@
-import fs from 'node:fs'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+// Adapted from Slidev v53.1.0. See licenses/Slidev-MIT.txt.
 import vm from 'node:vm'
-import { describe, expect, it } from 'vitest'
-import { collectSnapshot } from './walker'
+import { fileURLToPath } from 'node:url'
+import { beforeAll, describe, expect, it } from 'bun:test'
+import type { RawSnapshot } from '../../runtime/editable/ir.ts'
+import { collectSnapshot } from '../../runtime/editable/walker.ts'
 
 /**
- * The walker is serialized by Playwright and evaluated in a page where this
+ * The walker is serialized by Bun WebView and evaluated in a page where this
  * module's scope does not exist, so a free variable becomes a `ReferenceError`
  * inside someone else's browser. The guard has to run the reconstructed
  * function, not compile it: an undeclared identifier resolves at call time, so
@@ -142,7 +142,7 @@ interface SandboxOptions {
   fontFamily?: string
 }
 
-function runInSandbox(source: string, containers: unknown[] = [], options: SandboxOptions = {}): unknown {
+function runInSandbox(source: string, containers: unknown[] = [], options: SandboxOptions = {}): RawSnapshot {
   const base: Record<string, unknown> = {
     document: domStub(containers, options.measureText),
     getComputedStyle: () => ({
@@ -193,7 +193,7 @@ function runInSandbox(source: string, containers: unknown[] = [], options: Sandb
 
   const context = vm.createContext(sandbox)
   const fn = vm.runInContext(`(${source})`, context)
-  return fn({ containerSelector: '.print-slide-container', idAttribute: 'data-slidev-export-id' })
+  return fn({ containerSelector: '.print-slide-container', idAttribute: 'data-presentation-export-id', slide: 3, click: 1 }) as RawSnapshot
 }
 
 describe('walker self-containedness', () => {
@@ -218,7 +218,7 @@ describe('walker self-containedness', () => {
       // container. Matched on its first field because the compiled source has
       // two other `const record` declarations, in the style interners, which a
       // page with no pseudo-elements never runs.
-      .replace(/const record\s*(?:(: any)\s*)?=\s*\{\s*id,/, 'const record = { leaked: LEAKED_FROM_WALK, id,')
+      .replace(/\brecord\s*=\s*\{\s*id,/, 'record = { leaked: LEAKED_FROM_WALK, id,')
     expect(() => runInSandbox(leaked, [
       containerStub(),
     ])).toThrow(/LEAKED_FROM_WALK/)
@@ -229,7 +229,7 @@ describe('walker self-containedness', () => {
     // cannot silently stop working.
     const leaked = collectSnapshot
       .toString()
-      .replace('const styles', 'const styles = [LEAKED_FROM_MODULE_SCOPE]; const _unused')
+      .replace(/\bstyles\s*=\s*\[\]/, 'styles = [LEAKED_FROM_MODULE_SCOPE]')
     expect(() => runInSandbox(leaked)).toThrow(/LEAKED_FROM_MODULE_SCOPE/)
   })
 
@@ -296,42 +296,19 @@ describe('walker self-containedness', () => {
   })
 })
 
-/**
- * The walker as it is actually shipped.
- *
- * Everything above runs against Vitest's transform of the source, which is not
- * what reaches a browser: `exportPptxEditable` hands Playwright the function
- * from the bundle in `dist`, and a bundler is free to rewrite a body with
- * helpers of its own. Testing only the transform leaves the invariant
- * unenforced on the one artifact that matters.
- *
- * Needs a prior `pnpm build`, which is how this repository runs its tests
- * anyway: workspace packages resolve through their built `dist`.
- */
-function bundledWalker(): string {
-  const dist = join(dirname(fileURLToPath(import.meta.url)), '../../../dist')
-  const file = fs.readdirSync(dist).find(name => /^pptx-.+\.mjs$/.test(name))
-  if (!file)
-    throw new Error(`no built pptx bundle in ${dist}; run \`pnpm build\` first`)
-
-  const source = fs.readFileSync(join(dist, file), 'utf8')
-  const start = source.indexOf('function collectSnapshot')
-  if (start < 0)
-    throw new Error('collectSnapshot is not in the built bundle under its own name')
-
-  // Brace matching rather than a regex: the body is thousands of characters of
-  // nested functions and object literals.
-  let depth = 0
-  let index = source.indexOf('{', start)
-  const open = index
-  for (; index < source.length; index++) {
-    if (source[index] === '{')
-      depth++
-    else if (source[index] === '}' && --depth === 0)
-      break
-  }
-  return `function collectSnapshot${source.slice(source.indexOf('(', start), open)}${source.slice(open, index + 1)}`
-}
+// Build the packaged walker with Bun and inspect the function actually
+// delivered to WebView. Bundler-generated closures would break it as well.
+let bundledWalker: string
+beforeAll(async () => {
+  const built = await Bun.build({
+    entrypoints: [fileURLToPath(new URL('../../runtime/editable/walker.ts', import.meta.url))],
+    target: 'bun',
+    format: 'esm',
+  })
+  if (!built.success || !built.outputs[0]) throw new Error('Could not bundle the browser walker')
+  const module = await import(`data:text/javascript;base64,${Buffer.from(await built.outputs[0].arrayBuffer()).toString('base64')}`)
+  bundledWalker = module.collectSnapshot.toString()
+})
 
 /** Block comments only: enough for the bundler's annotations, and it cannot eat a regex literal. */
 function withoutComments(source: string): string {
@@ -340,7 +317,7 @@ function withoutComments(source: string): string {
 
 describe('the built bundle keeps the walker self-contained', () => {
   it('runs to completion using only browser globals', () => {
-    expect(() => runInSandbox(bundledWalker(), [
+    expect(() => runInSandbox(bundledWalker, [
       containerStub(),
     ])).not.toThrow()
   })
@@ -351,11 +328,11 @@ describe('the built bundle keeps the walker self-contained', () => {
     //
     // Block comments are stripped first: the bundler annotates calls with
     // `/* @__PURE__ */`, which never executes and is not a leak.
-    expect(withoutComments(bundledWalker()).match(/\b__\w+/g)).toBeNull()
+    expect(withoutComments(bundledWalker).match(/\b__\w+/g)).toBeNull()
   })
 
   it('does not reference the module registry', () => {
-    const source = withoutComments(bundledWalker())
+    const source = withoutComments(bundledWalker)
     for (const forbidden of [
       'require(',
       'import(',
@@ -368,7 +345,7 @@ describe('the built bundle keeps the walker self-contained', () => {
   it('fails when the bundle leaks a helper into the walker', () => {
     // The guard pinned against the mutation it exists to catch, so it cannot
     // quietly stop working the next time the bundler changes.
-    const leaked = bundledWalker().replace(/const nodes = \[\]/, 'const nodes = __name([])')
+    const leaked = bundledWalker.replace(/const nodes = \[\]/, 'const nodes = __name([])')
     expect(() => runInSandbox(leaked, [
       containerStub(),
     ])).toThrow(/__name/)

@@ -1,172 +1,105 @@
-/**
- * Regression for https://github.com/slidevjs/slidev/issues/2784
- *
- * On Vite 8, invalidating `/@slidev/title-renderer.md` when it is present in the
- * client module graph but not `isSelfAccepting` dead-ends HMR and forces a full
- * page reload. Title-renderer only embeds slide titles, so body-only edits must
- * not invalidate it.
- */
-import type { HotPayload } from 'vite'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+// Adapted from Slidev's title-renderer HMR regression (MIT).
+import { expect, test } from 'bun:test'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
-import { createServer, parser, resolveOptions } from '../packages/slidev/node'
+import { findChrome } from '../node/runtime/chrome.ts'
 
-const TITLE_RENDERER_MD = '/@slidev/title-renderer.md'
+const chrome = await findChrome()
 
-const ENTRY_MD = `---
-theme: none
-title: HMR Repro
----
-
-# Hello
-
-Body text
-
----
-
-# Second
-
-More
-`
-
-interface HmrCapture {
-  fullReloads: Array<Extract<HotPayload, { type: 'full-reload' }>>
-  slideUpdates: number
-  moduleSnapshots: Array<Array<{ id: string | null, isSelfAccepting: boolean | undefined }>>
-}
-
-function titleRendererInvalidated(capture: HmrCapture) {
-  return capture.moduleSnapshots.some(snapshot =>
-    snapshot.some(m => m.id === TITLE_RENDERER_MD),
-  )
-}
-
-async function createReproServer(entry: string) {
-  const options = await resolveOptions({ entry, theme: 'none' }, 'dev')
-  const capture: HmrCapture = {
-    fullReloads: [],
-    slideUpdates: 0,
-    moduleSnapshots: [],
-  }
-
-  const server = await createServer(
-    options,
-    {
-      plugins: [{
-        name: 'slidev-title-renderer-hmr-capture',
-        hotUpdate: {
-          order: 'post',
-          handler(ctx) {
-            if (!ctx.modules.length)
-              return
-            capture.moduleSnapshots.push(
-              ctx.modules.map(m => ({
-                id: m.id,
-                isSelfAccepting: m.isSelfAccepting,
-              })),
-            )
-          },
-        },
-        configureServer(s) {
-          const hot = s.environments.client.hot
-          const send = hot.send.bind(hot)
-          hot.send = ((...args: Parameters<typeof hot.send>) => {
-            const payload = args[0]
-            if (payload && typeof payload === 'object' && payload.type === 'full-reload')
-              capture.fullReloads.push(payload)
-            if (typeof payload === 'string' && payload === 'slidev:update-slide')
-              capture.slideUpdates += 1
-            return send(...args)
-          }) as typeof hot.send
-        },
-      }],
-      server: { middlewareMode: true },
-      clearScreen: false,
-      logLevel: 'error',
-    },
-    {
-      async loadData(loadedSource) {
-        const loaded = await parser.load(options, options.entry, loadedSource, 'dev')
-        return {
-          ...loaded,
-          themeMeta: options.data.themeMeta,
-          config: parser.resolveConfig(loaded.headmatter, options.data.themeMeta, options.entry),
-        }
-      },
-    },
-  )
-
-  return { server, options, capture }
-}
-
-describe('title-renderer HMR (#2784)', () => {
-  const cleanups: Array<() => Promise<void>> = []
-
-  afterEach(async () => {
-    while (cleanups.length)
-      await cleanups.pop()!()
+test.skipIf(!chrome)('edits native Markdown and applies body and title changes without a browser reload', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tp-live-editor-'))
+  const entry = join(root, 'slides.md')
+  const first = [
+    '---', 'title: HMR Repro', '---', '', '# Hello', '', 'Body text', '',
+    '---', 'src: ./chapter.md', '---', '',
+  ].join('\n')
+  const chapter = join(root, 'chapter.md')
+  const second = [
+    '---', 'routeAlias: second', '---', '', '# Second', '',
+    '<p v-click>More</p>', '', '<!--', 'Presenter notes', '-->',
+  ].join('\n')
+  await writeFile(entry, first)
+  await writeFile(chapter, second)
+  const server = Bun.spawn([process.execPath, new URL('../node/runtime/cli.ts', import.meta.url).pathname, 'dev', entry, '--port', '0'], {
+    cwd: root, stdout: 'pipe', stderr: 'pipe',
   })
-
-  it('does not full-reload on a body-only slides.md edit when title-renderer is in the module graph', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'slidev-title-renderer-hmr-'))
-    const entry = join(dir, 'slides.md')
-    await writeFile(entry, ENTRY_MD)
-
-    const { server, capture } = await createReproServer(entry)
-    cleanups.push(async () => {
-      await server.close()
-      await rm(dir, { recursive: true, force: true })
-    })
-
-    // Mirror the Vite 8 client graph state from #2784: the virtual module exists
-    // (e.g. after overview/goto loaded it) but is not yet self-accepting.
-    const titleMod = await server.environments.client.moduleGraph.ensureEntryFromUrl(TITLE_RENDERER_MD)
-    expect(titleMod.isSelfAccepting).toBe(false)
-
-    await writeFile(entry, ENTRY_MD.replace('Body text', 'Body text changed'))
-    await waitFor(() => capture.slideUpdates > 0 || capture.fullReloads.length > 0)
-
-    expect(capture.slideUpdates, 'Slidev should still emit slidev:update-slide').toBeGreaterThan(0)
-    expect(titleRendererInvalidated(capture), 'body-only edits must not invalidate title-renderer.md').toBe(false)
-    expect(
-      capture.fullReloads,
-      [
-        'body-only edits must not trigger Vite full-reload via title-renderer.md.',
-        `HMR modules seen: ${JSON.stringify(capture.moduleSnapshots)}`,
-      ].join(' '),
-    ).toEqual([])
-  }, 20_000)
-
-  it('still invalidates title-renderer.md when a slide title changes', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'slidev-title-renderer-hmr-title-'))
-    const entry = join(dir, 'slides.md')
-    await writeFile(entry, ENTRY_MD)
-
-    const { server, capture } = await createReproServer(entry)
-    cleanups.push(async () => {
-      await server.close()
-      await rm(dir, { recursive: true, force: true })
-    })
-
-    await server.environments.client.moduleGraph.ensureEntryFromUrl(TITLE_RENDERER_MD)
-
-    // Second slide title comes from its heading (no per-slide frontmatter title).
-    await writeFile(entry, ENTRY_MD.replace('# Second', '# Second Renamed'))
-    await waitFor(() => capture.slideUpdates > 0 || titleRendererInvalidated(capture))
-
-    expect(capture.slideUpdates).toBeGreaterThan(0)
-    expect(titleRendererInvalidated(capture)).toBe(true)
-  }, 20_000)
-})
-
-async function waitFor(predicate: () => boolean, timeout = 5_000, interval = 50) {
-  const start = Date.now()
-  while (Date.now() - start < timeout) {
-    if (predicate())
-      return
-    await new Promise(r => setTimeout(r, interval))
+  const view = new Bun.WebView({ width: 1340, height: 820, backend: { type: 'chrome', path: chrome!, url: false } })
+  async function waitFor(expression: string): Promise<void> {
+    const deadline = Date.now() + 5000
+    do {
+      if (await view.evaluate(expression)) return
+      await Bun.sleep(50)
+    } while (Date.now() < deadline)
+    throw new Error(`Browser never reported ${expression}`)
   }
-  throw new Error(`Timed out after ${timeout}ms waiting for HMR activity`)
-}
+  try {
+    const start = await server.stdout.getReader().read()
+    const origin = new TextDecoder().decode(start.value).match(/https?:\/\/[\w.:]+/)?.[0]
+    expect(origin).toBeDefined()
+    await view.navigate(origin + '#second/1')
+    await view.evaluate(`(() => {
+      window.loadedOnce = true
+      window.originalTitle = document.querySelector('#goto option[value="2"]')
+      window.originalOverviewTitle = document.querySelector('#overview button[value="2"]')
+      window.originalSlide = document.querySelector('#slide-2')
+    })()`)
+
+    await writeFile(entry, first.replace('Body text', 'Body text changed'))
+    await waitFor(`document.querySelector('#slide-1').textContent.includes('Body text changed')`)
+    expect(await view.evaluate(`window.loadedOnce &&
+      window.originalTitle === document.querySelector('#goto option[value="2"]') &&
+      window.originalOverviewTitle === document.querySelector('#overview button[value="2"]') &&
+      window.originalSlide === document.querySelector('#slide-2')`)).toBe(true)
+    expect(await view.evaluate(`location.hash`)).toBe('#second/1')
+
+    await writeFile(chapter, second.replace('# Second', '# Second Renamed'))
+    await waitFor(`document.querySelector('#goto option[value="2"]').textContent.includes('Second Renamed')`)
+    expect(await view.evaluate(`window.loadedOnce && window.originalTitle !== document.querySelector('#goto option[value="2"]')`)).toBe(true)
+    expect(await view.evaluate(`window.presentationNavigation.clicks`)).toBe(1)
+    expect(await view.evaluate(`document.querySelector('#overview button[value="2"]').textContent`)).toContain('Second Renamed')
+
+    await view.evaluate(`document.querySelector('#edit-slide').click()`)
+    await waitFor(`document.querySelector('#side-editor textarea').value.includes('# Second Renamed')`)
+    expect(await view.evaluate(`document.querySelector('#side-editor-path').textContent`)).toContain('chapter.md')
+    await view.evaluate(`(() => {
+      const input = document.querySelector('#side-editor textarea')
+      input.value = input.value.replace('Second Renamed', 'Saved from the editor').replace('Presenter notes', 'Edited notes')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })()`)
+    await waitFor(`document.querySelector('#slide-2 h1').textContent === 'Saved from the editor'`)
+    expect(await view.evaluate(`document.querySelector('#presenter-notes section:last-child').textContent`)).toContain('Edited notes')
+    expect(await view.evaluate(`window.loadedOnce && !document.querySelector('#side-editor').hidden`)).toBe(true)
+    expect(await readFile(chapter, 'utf8')).toContain('# Saved from the editor')
+    expect(await readFile(entry, 'utf8')).toBe(first.replace('Body text', 'Body text changed'))
+
+    await writeFile(join(root, 'style.css'), ':root { --live-test-value: updated; }\n')
+    await waitFor(`getComputedStyle(document.documentElement).getPropertyValue('--live-test-value').trim() === 'updated'`)
+    const entryWithThirdSlide = (await readFile(entry, 'utf8')) + [
+      '', '---', '', '# Third', '', '<v-drag>New draggable content</v-drag>', '', '~~~ts', 'const value = 1', '~~~', '',
+    ].join('\n')
+    await writeFile(entry, entryWithThirdSlide)
+    await waitFor(`window.presentationNavigation.total === 3`)
+    expect(await view.evaluate(`window.loadedOnce && location.hash === '#second/1'`)).toBe(true)
+    expect(await view.evaluate(`document.querySelector('#slide-3 [data-presentation-drag]').tabIndex`)).toBe(0)
+    expect(await view.evaluate(`document.querySelector('#slide-3 button.code-copy-action').textContent`)).toBe('Copy')
+
+    const external = (await readFile(chapter, 'utf8')).replace('Edited notes', 'On disk')
+    await view.evaluate(`document.querySelector('#side-editor textarea').value += '\\nMy unfinished draft'`)
+    await writeFile(chapter, external)
+    await view.evaluate(`document.querySelector('#side-editor textarea').dispatchEvent(
+      new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true }))`)
+    await waitFor(`!document.querySelector('#side-editor-reload').hidden`)
+    expect(await view.evaluate(`document.querySelector('#side-editor textarea').value`)).toContain('My unfinished draft')
+    expect(await readFile(chapter, 'utf8')).toBe(external)
+
+    const rejected = await fetch(origin + '/__presentation/source', { method: 'POST', body: '{"slide":2}' })
+    expect(rejected.status).toBe(403)
+  }
+  finally {
+    view.close()
+    server.kill()
+    await server.exited
+    await rm(root, { recursive: true, force: true })
+  }
+}, 45000)
