@@ -7,7 +7,8 @@ in a new ts-presentation project.
 
 | Upstream feature | Stacks equivalent |
 | --- | --- |
-| Markdown, frontmatter, slide includes, click steps | Native Bun parser and browser player |
+| Markdown, frontmatter, slide includes, click steps | Native Bun parser and browser player with labeled separators, fenced YAML, and source ranges |
+| Preparser extensions | Async raw-line, slide, and speaker-note hooks from `setup/preparser.ts` |
 | Scoped layouts and themes | TypeScript theme and addon modules, named slots, deck CSS |
 | Monaco editor and runner | Local editor and timed browser-worker runner. Bun compiles TypeScript edits in dev and can save opted-in snippets |
 | Snippets, line highlights, Magic Move | Local file and region imports, numbered click highlights, native token animations |

@@ -56,7 +56,8 @@ the deck and style slides with an optional `style.css`.
 | Speaker notes | Trailing HTML comment, with `[click]` on its own line for notes revealed on the next click |
 | Progressive reveals | `v-click`, explicit and relative clicks, enter/leave ranges, animated modifiers, grouped `<v-clicks>` lists, and replacement content with `<v-switch>` |
 | Layouts | `layout: default`, `center`, `cover`, `intro`, `section`, `image-left`, or `image-right`. Set `image` for an image layout |
-| Local slides and ranges | `src: ./chapter.md` or `src: ./chapter.md#2-4`, relative to the including file |
+| Local slides and ranges | `src: ./chapter.md#2-4` selects authored slides before nested imports expand. A leading slash resolves from the deck directory |
+| Markdown preparser | `setup/preparser.ts` can transform raw lines, per-slide Markdown, frontmatter, and speaker notes before rendering |
 | Navigation | `routeAlias: review`, then links such as `#review` or `#review/2`. Set `clicksStart` or `clicks` to override a slide's reveal range |
 | Per-slide options | `class`, `hide`, `disabled`, and `transition: fade`, `slide-left`, or `slide-up` |
 | Images and component markup | Trusted HTML, with optional `data-zoom` on an image |
@@ -80,7 +81,7 @@ edges:
 ```
 
 The dev server shares an in-flight compilation and reuses rendered HTML
-until an included source changes. The browser renders local decks
+until an included source or the preparser entry changes. The browser renders local decks
 without a framework, and slide navigation updates only the active slide.
 
 TypeScript edits run when served by the Bun dev command. The offline build

@@ -10,6 +10,7 @@ import { liveBlock } from './live-markup.ts'
 import { createMathRenderer, resolveMathMacros } from './math.ts'
 import type { SlideRoute } from './navigation.ts'
 import { slideAlias } from './navigation.ts'
+import type { Deck, Slide } from './parser.ts'
 import { prepareMarkdown, splitSlots } from './syntax.ts'
 import type { WritableSnippet } from './snippet-write.ts'
 
@@ -19,121 +20,8 @@ export type { KatexOptions, MermaidOptions, MermaidRenderer } from './authoring-
 export type { PresentationNavigation, SlideRoute } from './navigation.ts'
 export type { LayoutContext, PresentationAddon, PresentationTheme } from './extensions.ts'
 
-export interface Slide {
-  title: string
-  content: string
-  notes: string
-  className: string
-  layout: string
-  frontmatter?: Record<string, unknown>
-}
-
-export interface Deck {
-  title: string
-  slides: Slide[]
-  headmatter?: Record<string, unknown>
-}
-
-const codeFence = /^ {0,3}(`{3,}|~{3,})(.*)$/
-
-/**
- * Slide and speaker-note parsing adapted from Slidev's MIT-licensed parser.
- * See licenses/Slidev-MIT.txt for Anthony Fu's notice.
- */
-export function parseDeck(markdown: string): Deck {
-  const lines = markdown.replace(/^\uFEFF/, '').split(/\r?\n/)
-  const slides: Slide[] = []
-  let title = ''
-  let headmatter: Record<string, unknown> | undefined
-  let attributes: Record<string, unknown> = {}
-  let content: string[] = []
-  let notes = ''
-  let fence = ''
-  let comment = false
-
-  function appendSlide(): void {
-    const body = content.join('\n').trim()
-    if (body || notes || typeof attributes.src === 'string') {
-      const heading = body.match(/^#{1,6}\s+(.+)$/m)?.[1]
-        ?? body.match(/<h1\b[^>]*>([\s\S]+?)<\/h1>/i)?.[1].replace(/<[^>]+>/g, ' ')
-      slides.push({
-        title: String(attributes.title ?? heading ?? `Slide ${slides.length + 1}`),
-        content: body,
-        notes,
-        className: typeof attributes.class === 'string' ? attributes.class : '',
-        layout: typeof attributes.layout === 'string' ? attributes.layout : 'default',
-        frontmatter: attributes,
-      })
-    }
-    attributes = {}
-    content = []
-    notes = ''
-  }
-
-  for (let index = 0; index < lines.length; index++) {
-    const line = lines[index]
-    const match = line.match(codeFence)
-    if (fence) {
-      if (match && match[1][0] === fence[0] && match[1].length >= fence.length && !match[2].trim()) {
-        fence = ''
-      }
-    }
-    else if (!comment && match) {
-      fence = match[1]
-    }
-    else if (!comment && line.trimEnd() === '---') {
-      appendSlide()
-      const next = lines[index + 1]
-      if (next && /^\w[\w-]*\s*:/.test(next)) {
-        const end = lines.findIndex((value, offset) => offset > index && value.trimEnd() === '---')
-        if (end === -1) throw new Error(`Unclosed slide frontmatter at line ${index + 1}`)
-        const yaml: unknown = Bun.YAML.parse(lines.slice(index + 1, end).join('\n'))
-        if (!yaml || typeof yaml !== 'object' || Array.isArray(yaml)) {
-          throw new Error(`Slide frontmatter must be a YAML mapping at line ${index + 1}`)
-        }
-        attributes = yaml as Record<string, unknown>
-        if (index === 0) {
-          headmatter = attributes
-          if (typeof attributes.title === 'string') title = attributes.title
-        }
-        index = end
-      }
-      continue
-    }
-    else if (!comment && line.trimStart().startsWith('<!--')) {
-      // A final HTML comment belongs to the speaker, in the Slidev format.
-      const commentLines = [line.trimStart().slice(4)]
-      let endLine = index
-      while (!commentLines[commentLines.length - 1].includes('-->') && endLine + 1 < lines.length) {
-        commentLines.push(lines[++endLine])
-      }
-      const finalLine = commentLines[commentLines.length - 1]
-      const end = finalLine.indexOf('-->')
-      if (end !== -1 && !finalLine.slice(end + 3).trim()) {
-        let nextLine = endLine + 1
-        while (nextLine < lines.length && !lines[nextLine].trim()) nextLine++
-        if (nextLine === lines.length || lines[nextLine].trimEnd() === '---') {
-          commentLines[commentLines.length - 1] = finalLine.slice(0, end)
-          notes = commentLines.join('\n').trim()
-          index = endLine
-          continue
-        }
-      }
-    }
-
-    if (!fence && !match) {
-      for (const delimiter of line.matchAll(/<!--|-->/g)) {
-        if (!comment && delimiter[0] === '<!--') comment = true
-        else if (comment && delimiter[0] === '-->') comment = false
-      }
-    }
-    content.push(line)
-  }
-  appendSlide()
-
-  if (!slides.length) throw new Error('The deck contains no slides')
-  return { title: title || slides[0].title, slides, headmatter }
-}
+export { definePreparserSetup, extractImagesUsage, parseDeck, parseDeckAsync } from './parser.ts'
+export type { Deck, PreparserContext, PreparserExtension, PreparserSetup, Slide } from './parser.ts'
 
 const escapedCode = /<pre><code(?: class="language-([\w+#.-]+)")?>([\s\S]*?)<\/code><\/pre>/g
 
@@ -268,7 +156,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     const transition = String(slide.frontmatter?.transition ?? '')
     const motion = ['fade', 'slide-left', 'slide-up'].includes(transition) ? ` data-transition="${transition}"` : ''
     const route = alias ? ` data-route="${escapeHtml(alias)}"` : ''
-    const image = slide.frontmatter?.image ?? slide.frontmatter?.background
+    const image = slide.frontmatter?.image ?? slide.frontmatter?.backgroundImage ?? slide.frontmatter?.background
     const safeImage = typeof image === 'string' && /^(?:https?:\/\/|[./]|[\w-]+\/)/.test(image) ? image : ''
     const background = safeImage && layout.startsWith('image-') && !custom
       ? `<img class="slide-layout-image" src="${escapeHtml(safeImage)}" alt="" loading="lazy">`

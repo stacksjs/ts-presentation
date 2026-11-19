@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { mkdtemp } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createDeckRenderer } from '../src/loader.ts'
@@ -26,4 +26,53 @@ test('fails on a circular include', async () => {
   const entry = join(directory, 'slides.md')
   await Bun.write(entry, '---\nsrc: ./slides.md\n---')
   await expect(createDeckRenderer(entry)()).rejects.toThrow('Circular slide source')
+})
+
+test('selects authored slides before expanding nested includes', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'deck-nested-range-'))
+  try {
+    const entry = join(directory, 'slides.md')
+    await Bun.write(entry, '# Cover\n\n---\nsrc: /nested.md#2,1\n---')
+    await Bun.write(join(directory, 'nested.md'), '---\nsrc: ./chapter.md\n---\n\n---\n\n# Selected\n\n---\nsrc: ./missing.md\n---')
+    await Bun.write(join(directory, 'chapter.md'), '# Nested first\n\n---\n\n# Nested second')
+    const html = await createDeckRenderer(entry)()
+    const titles = [...html.matchAll(/<article[^>]*aria-label="([^"]+)"/g)].map(match => match[1])
+    expect(titles).toEqual(['Cover', 'Selected', 'Nested first', 'Nested second'])
+  }
+  finally { await rm(directory, { recursive: true, force: true }) }
+})
+
+test('loads, updates, and removes the entry preparser for a running compiler', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'deck-preparser-'))
+  try {
+    const entry = join(directory, 'slides.md')
+    const setup = join(directory, 'setup/preparser.ts')
+    await Bun.write(entry, '\uFEFF---\nauthor: Example\n---\n\n# @heading\n\n---\nsrc: ./chapter.md\n---')
+    await Bun.write(join(directory, 'chapter.md'), '# @heading included\n\n<!-- draft -->')
+    const render = createDeckRenderer(entry, { mode: 'export' })
+    expect(await render()).toContain('aria-label="@heading"')
+
+    async function configure(label: string): Promise<void> {
+      await Bun.write(setup, `export default async ({ filepath, headmatter, mode }) => {
+        if (!filepath.endsWith('/slides.md') || headmatter.author !== 'Example') throw Error('Incorrect setup input')
+        return [{
+          async transformRawLines(lines) {
+            for (const [index, line] of lines.entries()) lines[index] = line.replace('@heading', ${JSON.stringify(label)})
+          },
+          transformNote(note) { if (note) return mode + ': ' + note },
+        }]
+      }`)
+    }
+    await configure('Prepared')
+    const first = await render()
+    expect(first).toContain('aria-label="Prepared"')
+    expect(first).toContain('aria-label="Prepared included"')
+    expect(first).toContain('export: draft')
+
+    await configure('Revised preparser')
+    expect(await render()).toContain('aria-label="Revised preparser included"')
+    await rm(setup)
+    expect(await render()).toContain('aria-label="@heading"')
+  }
+  finally { await rm(directory, { recursive: true, force: true }) }
 })

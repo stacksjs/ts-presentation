@@ -48,7 +48,7 @@ async function main(): Promise<void> {
     console.log(help)
     return
   }
-  if (!['dev', 'build', 'export'].includes(command) || positionals.length > 2) {
+  if ((command !== 'dev' && command !== 'build' && command !== 'export') || positionals.length > 2) {
     throw new Error(help)
   }
 
@@ -66,7 +66,7 @@ async function main(): Promise<void> {
   if (!player.success || !player.outputs[0]) throw new Error('Could not build the browser player')
   const javascript = await player.outputs[0].text()
   const emptyStyle = '/* This deck has no custom styles. */\n'
-  const compile = createDeckCompiler(source, { liveCompile: command === 'dev', theme: values.theme })
+  const compile = createDeckCompiler(source, { liveCompile: command === 'dev', mode: command, theme: values.theme })
 
   async function writeSite(output: string): Promise<CompiledDeck> {
     if (within(publicDir, output)) throw new Error('Build output must be outside the deck’s public directory')

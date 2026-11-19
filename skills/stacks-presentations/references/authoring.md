@@ -12,9 +12,12 @@ deck. For example, `canvasWidth: 800` and `aspectRatio: 4/3` produce an
 800 × 600 canvas in the browser and exported files.
 
 - Set deck title, author, theme and addons in the opening YAML block.
+- Add a label on a separator, as in `---chapter`. A leading `yaml`
+  fence can supply frontmatter when the slide has no dashed YAML block.
 - Use per-slide `layout`, `class`, `routeAlias`, `hide`, or `transition`.
 - Include another Markdown file with `src: ./chapter.md`. A suffix such as
-  `#2-4` selects the authored slide range from that file.
+  `#2-4` selects the authored slide range before nested includes expand.
+  Use `src: /chapters/intro.md` for a path relative to the entry deck.
 - Use `v-click`, a numbered click such as `v-click="2"`, `v-after`,
   or a `<v-clicks>` list for progressive reveals. Add `[click]` on
   its own line in speaker notes to reveal the next notes segment.
@@ -32,6 +35,14 @@ deck. For example, `canvasWidth: 800` and `aspectRatio: 4/3` produce an
 - Use `data-zoom` on a screenshot so the presenter can enlarge it.
 - Serve local images and fonts from the deck's `public/` directory and
   reference them with relative paths.
+
+Export a function with `definePreparserSetup` from `setup/preparser.ts`
+to configure Markdown transforms for the entry and included files. The
+setup receives `filepath`, `headmatter`, and `mode`. Return an ordered
+list of hooks using `transformRawLines(lines)` to mutate the source lines
+before splitting, `transformSlide(content, frontmatter)` to change slide
+Markdown or frontmatter, and `transformNote(note, frontmatter)` to change
+speaker notes. Each hook can be asynchronous.
 
 ## Code, math, and diagrams
 
