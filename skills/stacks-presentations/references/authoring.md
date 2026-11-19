@@ -129,6 +129,17 @@ speaker notes. Each hook can be asynchronous.
   set-builder notation. Labeled arrows accept `[below]{above}`.
 - Use deck-wide macros under `math.macros`. Quote TeX with YAML single
   quotes so backslashes are preserved.
+- Position a floating element with `v-drag="[left, top, width, height, angle]"`
+  or `<v-drag pos="left, top, width, height, angle">`. Use `NaN` in the
+  directive or `_` in the component to retain automatic height. Set
+  `pos="card"` or `v-drag="'card'"` to read the position from
+  `dragPos.card` in the slide's frontmatter. A draggable arrow uses
+  `<v-drag-arrow pos="x, y, dx, dy" />` with signed endpoint offsets.
+- Double-click a draggable element or press **F2** while it has focus to edit
+  it. Use arrow keys to nudge it and hold **Shift** while resizing to preserve
+  proportions. The dev server saves inline positions and named positions in
+  YAML block mappings. Complex YAML mappings and slides rewritten by preparsers
+  allow temporary edits. Built decks also keep adjustments in the browser only.
 - Use a `charts` YAML fence. For `type: flowchart` or `type: state`, supply
   `nodes` with stable IDs and `edges` linking those IDs with `from` and
   `to`. Label decisions with `shape: diamond`. Use `style: dotted` for

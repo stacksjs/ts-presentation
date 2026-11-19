@@ -1,0 +1,169 @@
+// Adapted from Slidev v53.1.0's VDrag Markdown cases (MIT).
+import { expect, test } from 'bun:test'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { findChrome } from '../src/chrome.ts'
+import { saveDrag } from '../src/drag-source.ts'
+import { parseDeck, renderDeck } from '../src/index.ts'
+import { createDeckCompiler } from '../src/loader.ts'
+
+test.each([
+  ['component', '<v-drag>Content</v-drag>'],
+  ['directive', '<div v-drag>Content</div>'],
+])('renders a draggable %s without authored coordinates', async (_, source) => {
+  const html = await renderDeck(parseDeck(source))
+  expect(html).toContain('data-presentation-drag="box"')
+  expect(html).toContain('>Content</')
+  expect(html).toContain('position:absolute;')
+  expect(html).not.toContain('data-drag-token')
+})
+
+test('renders slide-local named positions, rotation, and signed two-way arrows', async () => {
+  const source = [
+    '---', 'dragPos:', '  card: 65, 110, 190, _, -12', '---', '', '# Position data', '',
+    '<v-drag pos="card" style="background:beige">Note</v-drag>',
+    '<v-drag-arrow pos="420, 230, -100, -64" color="#357" width="5" two-way aria-label="Review direction" />',
+    '<Link to="2" title="Continue" v-drag="[720, 160, 95, 30]" />',
+    '', '---', 'dragPos:', '  card: [5, 110, 190, 60]', '---', '', '# Another slide',
+    '', `<span v-drag="'card'">Second note</span>`,
+  ].join('\n')
+  const html = await renderDeck(parseDeck(source))
+  expect(html).toContain('data-drag-position="[65,110,190,null,-12]"')
+  expect(html).toContain('background:beige;position:absolute;left:65px;top:110px;width:190px;height:auto;rotate:-12deg')
+  expect(html).toContain('data-drag-position="[5,110,190,60,0]"')
+  expect(html).toContain('left:300px;top:146px;width:140px;height:104px')
+  expect(html).toContain('data-drag-line x1="120" y1="84" x2="20" y2="20"')
+  expect(html).toContain('marker-start="url(#drag-arrow-1-1)"')
+  expect(html).toContain('aria-label="Review direction"')
+  expect(html).toMatch(/<a [^>]*data-slide-link="2"[^>]*data-drag-position="\[720,160,95,30,0\]"[^>]*>Continue<\/a>/)
+})
+
+test('saves the last multiline directive at EOF, preserving a BOM, CRLF, notes, and included Markdown', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tp-drag-source-'))
+  try {
+    const entry = join(root, 'slides.md')
+    const leaf = join(root, 'layout.md')
+    const included = '# Test\n\n---\nsrc: ./layout.md\n---\n'
+    const source = [
+      '\uFEFF---', 'dragPos:', '  start: "40, 70, 180, _" # anchor', '---', '',
+      '# Included', '', '<v-drag pos="start">Active card</v-drag>', '',
+      '<!-- Keep the speaker note. -->', '', '---', '', '# Last', '',
+      '<div', '  v-drag="[284, 248, 166, NaN]"', '>', '  V-drag element', '</div>',
+    ].join('\r\n')
+    await writeFile(entry, included)
+    await writeFile(leaf, source)
+    const compile = createDeckCompiler(entry, { liveCompile: true })
+    const first = await compile()
+    expect(first.writableDrags.size).toBe(2)
+    const [[name, named], [tag, inline]] = [...first.writableDrags.entries()]
+    const saved = await saveDrag(first.writableDrags, { token: tag, revision: inline.revision, position: [301, 220, 184, null, 15] })
+    expect(saved.ok).toBe(true)
+    const revised = source.replace('[284, 248, 166, NaN]', '[301, 220, 184, NaN, 15]')
+    expect(await readFile(leaf, 'utf8')).toBe(revised)
+    expect(await readFile(entry, 'utf8')).toBe(included)
+    const second = await compile()
+    expect(second.html).toContain('data-drag-position="[301,220,184,null,15]"')
+    expect(second.writableDrags.get(name)?.revision).toBe(await saved.text())
+    expect((await saveDrag(second.writableDrags, { token: name, revision: named.revision, position: [2, 92, 75, 30, 0] })).status).toBe(409)
+    expect((await saveDrag(second.writableDrags, { token: name, revision: second.writableDrags.get(name)?.revision, position: [2, 92, 75, 30, 0] })).ok).toBe(true)
+    expect(await readFile(leaf, 'utf8')).toBe(revised.replace('"40, 70, 180, _" # anchor', "'2, 92, 75, 30' # anchor"))
+  }
+  finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('writes empty named and direct component positions without binding identical code or comments', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tp-drag-markdown-'))
+  try {
+    const entry = join(root, 'slides.md')
+    const literal = '<v-drag pos="square">Example</v-drag>'
+    const source = [
+      '# Initial', '', '~~~html', literal, '~~~', '', `One example: \`${literal}\`.`, '',
+      `<!-- ${literal} -->`, '', literal, '', '<v-drag>New position</v-drag>',
+    ].join('\n')
+    await writeFile(entry, source)
+    const compile = createDeckCompiler(entry, { liveCompile: true })
+    const draft = await compile()
+    expect(draft.writableDrags.size).toBe(2)
+    expect(draft.html.match(/data-drag-token="/g)).toHaveLength(2)
+    const [named, inline] = [...draft.writableDrags.keys()]
+    async function save(token: string, position: unknown): Promise<Response> {
+      const doc = await compile()
+      return saveDrag(doc.writableDrags, { token, revision: doc.writableDrags.get(token)?.revision, position })
+    }
+    expect((await save(named, [42, 90, -2, 30, 0])).status).toBe(400)
+    expect((await save(named, [42, 90, 160, null, 0])).ok).toBe(true)
+    expect((await save(inline, [52, 110, 169, null, 0])).ok).toBe(true)
+    expect(await readFile(entry, 'utf8')).toBe(
+      "---\ndragPos:\n  'square': '42, 90, 160, _'\n---\n" + source.replace('<v-drag>New', '<v-drag pos="52, 110, 169, _">New'),
+    )
+    expect((await createDeckCompiler(entry)()).html).not.toContain('data-drag-token')
+  }
+  finally { await rm(root, { recursive: true, force: true }) }
+})
+
+const chrome = await findChrome()
+test.skipIf(!chrome)('moves, resizes, rotates, and saves from the player with scale and keeps capture controls hidden', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tp-drag-player-'))
+  const entry = join(root, 'slides.md')
+  await writeFile(entry, [
+    '---', 'canvasWidth: 900', 'aspectRatio: 2', '---', '', '# Drag controls', '',
+    '<div id="card" v-drag="[120, 125, 184, 72]" style="background: #315571">Card</div>', '',
+    '<v-drag-arrow id="arrow" pos="420, 140, 220, 100"/>',
+    '', '---', '', '# Second slide',
+  ].join('\n'))
+  const server = Bun.spawn([process.execPath, new URL('../src/cli.ts', import.meta.url).pathname, 'dev', entry, '--port', '0'], {
+    cwd: root, stdout: 'pipe', stderr: 'pipe',
+  })
+  const view = new Bun.WebView({ width: 1150, height: 690, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    const start = await server.stdout.getReader().read()
+    const origin = new TextDecoder().decode(start.value).match(/https?:\/\/[\w.:]+/)?.[0]
+    expect(origin).toBeDefined()
+    await view.navigate(origin!)
+    await view.evaluate(`document.querySelector('#card').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`)
+    expect(await view.evaluate(`document.querySelector('#card').hasAttribute('data-drag-selected')`)).toBe(true)
+    const gesture = async (selector: string, dx: number, dy: number, modifiers = 0) => {
+      const { x, y, scale } = await view.evaluate(`(() => {
+        const box = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect()
+        const slide = document.querySelector('#slide-1')
+        return { x: box.x + box.width / 2, y: box.y + box.height / 2, scale: slide.getBoundingClientRect().width / slide.offsetWidth }
+      })()`) as { x: number, y: number, scale: number }
+      await view.cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1, modifiers })
+      await view.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x + dx * scale, y: y + dy * scale, button: 'left', buttons: 1, modifiers })
+      await view.cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: x + dx * scale, y: y + dy * scale, button: 'left', buttons: 0, clickCount: 1, modifiers })
+    }
+    await gesture('#card', 90, 30)
+    await gesture('[data-drag-handle="resize"]', 46, 0, 8)
+    await view.evaluate(`document.querySelector('[data-drag-handle="rotate"]').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', shiftKey: true, bubbles: true, cancelable: true }))`)
+    const current = async (id: string) => view.evaluate(`JSON.parse(document.getElementById(${JSON.stringify(id)}).dataset.dragPosition)`)
+    expect(await current('card')).toEqual([210, 155, 230, 90, 10])
+    expect(await view.evaluate(`document.querySelector('.drag-toolbar')?.outerHTML`)).toContain('Save position')
+    await view.evaluate(`document.querySelector('.drag-toolbar button').click()`)
+    await view.evaluate(`document.querySelector('#arrow [data-drag-hit]').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`)
+    await gesture('[data-drag-handle="arrow-end"]', -42, 16)
+    expect(await current('arrow')).toEqual([420, 140, 178, 116, 0])
+
+    const until = Date.now() + 5000
+    let contents = ''
+    while (Date.now() < until) {
+      contents = await readFile(entry, 'utf8')
+      if (contents.includes('v-drag="[210, 155, 230, 90, 10]"') && contents.includes('pos="420, 140, 178, 116"')) break
+      await Bun.sleep(30)
+    }
+    expect(contents).toContain('v-drag="[210, 155, 230, 90, 10]"')
+    expect(contents).toContain('pos="420, 140, 178, 116"')
+    await view.evaluate(`document.querySelector('#next').click()`)
+    expect(await view.evaluate(`!!document.querySelector('.drag-controls')`)).toBe(false)
+    await view.navigate(origin! + '?capture')
+    expect(await current('card')).toEqual([210, 155, 230, 90, 10])
+    await view.evaluate(`document.querySelector('#card').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`)
+    expect(await view.evaluate(`!!document.querySelector('.drag-controls')`)).toBe(false)
+  }
+  finally {
+    view.close()
+    server.kill()
+    await server.exited
+    await rm(root, { recursive: true, force: true })
+  }
+}, 45_000)

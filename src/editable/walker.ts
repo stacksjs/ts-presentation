@@ -83,6 +83,8 @@ export function collectSnapshot(options: {
     const record: Record<string, string> = {}
     for (const key of STYLE_KEYS)
       record[key] = computed[key as any] ?? ''
+    if (computed.rotate && computed.rotate !== 'none' && computed.rotate !== '0deg' && record.transform === 'none')
+      record.transform = computed.rotate
     const key = JSON.stringify(record)
     const existing = styleIndex.get(key)
     if (existing !== undefined)

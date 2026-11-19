@@ -58,6 +58,7 @@ the deck and style slides with an optional `style.css`.
 | Progressive reveals | `v-click`, explicit and relative clicks, enter/leave ranges, animated modifiers, grouped `<v-clicks>` lists, and replacement content with `<v-switch>` |
 | Layouts | `layout: default`, `center`, `cover`, `intro`, `section`, `image-left`, or `image-right`. Set `image` for an image layout |
 | Slide CSS | A `<style>` block styles its authored slide. Use `style.css` for deck-wide rules |
+| Draggable elements | Use `v-drag`, `<v-drag>`, or `<v-drag-arrow>`. Double-click to move, resize, or rotate. Dev saves positions to the Markdown |
 | Local slides and ranges | `src: ./chapter.md#2-4` selects authored slides before nested imports expand. A leading slash resolves from the deck directory |
 | Markdown preparser | `setup/preparser.ts` can transform raw lines, per-slide Markdown, frontmatter, and speaker notes before rendering |
 | Navigation | `routeAlias: review`, then links such as `#review` or `#review/2`. Use `clicksStart` and `clicks` to set reveal bounds |

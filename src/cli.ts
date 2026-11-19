@@ -6,6 +6,7 @@ import { parseArgs } from 'node:util'
 import { asset, within } from './assets.ts'
 import { findChrome } from './chrome.ts'
 import { compileLiveCode, maxCodeLength } from './compile-code.ts'
+import { saveDrag } from './drag-source.ts'
 import { saveDrawing } from './drawing-store.ts'
 import type { CompiledDeck } from './loader.ts'
 import type { PowerPointFrame } from './powerpoint.ts'
@@ -133,6 +134,11 @@ async function main(): Promise<void> {
             if (!localAuthorRequest(request, url)) return new Response('Save requests must come from the local presenter.', { status: 403 })
             const input = await request.json().catch(() => undefined)
             return saveSnippet((await compile()).writableSnippets, input)
+          }
+          case '/__presentation/drag': {
+            if (request.method !== 'POST') return new Response(null, { status: 405, headers: { Allow: 'POST' } })
+            if (!localAuthorRequest(request, url)) return new Response('Save requests must come from the local presenter.', { status: 403 })
+            return saveDrag((await compile()).writableDrags, await request.json().catch(() => undefined))
           }
           case '/__presentation/drawing': {
             if (request.method !== 'POST') return new Response(null, { status: 405, headers: { Allow: 'POST' } })

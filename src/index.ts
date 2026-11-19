@@ -171,7 +171,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     })))
     const custom = layoutHooks[layout]
     const body = custom ? custom({ slide, index, html: slots.default, slots }) : slots.default
-    const prepared = prepareSlideHtml(body, destination, index + 1)
+    const prepared = prepareSlideHtml(body, destination, index + 1, slide.frontmatter)
     const className = [defaults?.className, slide.className].filter(Boolean).join(' ')
     const transition = String(slide.frontmatter?.transition ?? '')
     const motion = ['fade', 'slide-left', 'slide-up'].includes(transition) ? ` data-transition="${transition}"` : ''

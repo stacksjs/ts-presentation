@@ -16,6 +16,7 @@ in a new ts-presentation project.
 | KaTeX | Native MathML with chemistry, ruled and compact arrays, commutative diagrams, bra-ket and set notation, mixed text and math, colored and raised boxes, zero-width overlaps, numbered alignment rows, scoped macros, infix and generalized fractions, operator limits, and click highlighting |
 | PowerPoint export | Image slides or editable text and boxes with separate artwork |
 | First-party diagram authoring | YAML `charts` fences through `ts-charts` for flowcharts, sequence, state, class, ER, pie, timeline, journey, Gantt, and Git history |
+| Draggable elements | Inline directives, drag and arrow components, frontmatter positions, scaled editing, and local Markdown saves |
 | Imported Slidev diagrams | Compatibility fences translate the supported syntax to `ts-charts` input |
 | Presenter mode | Two synced browser windows, notes, timer, resizable layouts, next-frame preview, and reveal seeking |
 | Reveal scheduling | Absolute and relative steps, hide ranges, grouped and nested lists, CSS presets, and switch slots |

@@ -466,3 +466,39 @@ npm test
 <!--
 Use the arrow keys while a tab has focus to switch examples. The Copy button copies the current example.
 -->
+
+---
+dragPos:
+  draft: 96, 216, 290, 140
+
+---
+
+# Arrange a slide
+
+Double-click a card or the arrow to move it.
+
+<v-drag pos="draft" class="review-card"><strong>Draft</strong><span>Capture the main idea.</span></v-drag>
+
+<div v-drag="[572, 216, 290, 140]" class="review-card review-card-final"><strong>Review</strong><span>Agree on what to present.</span></div>
+
+<v-drag-arrow pos="414, 284, 130, 0" width="4" color="#3f6d89" aria-label="Draft leads to review" />
+
+<style>
+.review-card {
+  display: grid;
+  align-content: center;
+  gap: 6px;
+  padding: 18px 24px;
+  border: 2px solid #6e91a7;
+  border-radius: 12px;
+  background: #f7fbff;
+  color: #183347;
+}
+.review-card-final { background: #cfe3e9; }
+.review-card strong { font-size: 1.15em; }
+.review-card span { font-size: 0.71em; }
+</style>
+
+<!--
+Move a card, resize it with Shift, and then use the arrow handles to reconnect the two steps.
+-->

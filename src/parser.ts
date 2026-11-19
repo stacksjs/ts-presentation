@@ -128,14 +128,14 @@ export function extractImagesUsage(content: string, frontmatter: Frontmatter = {
   return imageReferences(visibleMarkdown(content), frontmatter)
 }
 
-interface Matter { attributes: Frontmatter, end: number }
+interface Matter { attributes: Frontmatter, start: number, end: number }
 
 function yamlMatter(lines: string[], index: number, end: number): Matter {
   const value: unknown = Bun.YAML.parse(lines.slice(index + 1, end).join('\n'))
   if (value !== null && value !== undefined && (typeof value !== 'object' || Array.isArray(value))) {
     throw new Error(`Slide frontmatter must be a YAML mapping at line ${index + 1}`)
   }
-  return { attributes: (value ?? {}) as Frontmatter, end }
+  return { attributes: (value ?? {}) as Frontmatter, start: index, end }
 }
 
 function dashedMatter(lines: string[], index: number): Matter | undefined {
@@ -171,6 +171,19 @@ interface SlideDraft {
   notes?: string
   visible: string
   attributes: Frontmatter
+  source: SlideSource
+}
+
+interface SlideSource {
+  bodyLine: number
+  leading: number
+  matter?: Pick<Matter, 'start' | 'end'>
+}
+
+const slideSources = new WeakMap<Slide, SlideSource>()
+
+export function slideSourceOf(slide: Slide): SlideSource | undefined {
+  return slideSources.get(slide)
 }
 
 function splitSlides(lines: string[]): SlideDraft[] {
@@ -186,12 +199,15 @@ function splitSlides(lines: string[]): SlideDraft[] {
     if (!hasContent && !matter) return
     const raw = lines.slice(start, end).join('\n')
     const note = scan.lastComment && !raw.slice(scan.lastComment.end).trim() ? scan.lastComment : undefined
-    const content = (note ? raw.slice(0, note.start) : raw).trim()
+    const body = note ? raw.slice(0, note.start) : raw
+    const leading = body.length - body.trimStart().length
+    const content = body.trim()
     drafts.push({
       content,
       notes: note ? raw.slice(note.start + 4, note.end - 3).trim() : undefined,
       visible: visible?.join('\n') ?? content,
       attributes: matter?.attributes ?? {},
+      source: { bodyLine: start, leading, matter },
     })
   }
 
@@ -226,14 +242,14 @@ function splitSlides(lines: string[]): SlideDraft[] {
   return drafts
 }
 
-function finishDeck(drafts: SlideDraft[]): Deck {
+function finishDeck(drafts: SlideDraft[], keepSources = false): Deck {
   if (!drafts.length) throw new Error('The deck contains no slides')
-  const slides = drafts.map(({ content, visible, notes, attributes }, index): Slide => {
+  const slides = drafts.map(({ content, visible, notes, attributes, source }, index): Slide => {
     const heading = /^ {0,3}(#{1,6})[ \t]+(.+?)\s*$/m.exec(visible)
     const htmlTitle = heading ? undefined : visible.match(/<h1\b[^>]*>([\s\S]+?)<\/h1>/i)?.[1].replace(/<[^>]+>/g, ' ')
     const title = attributes.title ?? attributes.name ?? heading?.[2].replace(/[ \t]+#+$/, '').trim() ?? htmlTitle
     const level = typeof attributes.level === 'number' ? attributes.level : heading?.[1].length
-    return {
+    const slide: Slide = {
       title: String(title ?? `Slide ${index + 1}`),
       level,
       content,
@@ -243,13 +259,15 @@ function finishDeck(drafts: SlideDraft[]): Deck {
       frontmatter: attributes,
       images: imageReferences(visible, attributes),
     }
+    if (keepSources) slideSources.set(slide, source)
+    return slide
   })
   const headmatter = drafts[0].attributes
   return { title: slides[0].title, slides, headmatter: Object.keys(headmatter).length ? headmatter : undefined }
 }
 
 export function parseDeck(markdown: string): Deck {
-  return finishDeck(splitSlides(splitLines(markdown)))
+  return finishDeck(splitSlides(splitLines(markdown)), true)
 }
 
 export async function parseDeckAsync(markdown: string, extensions: readonly PreparserExtension[] = []): Promise<Deck> {

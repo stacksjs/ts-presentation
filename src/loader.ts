@@ -1,4 +1,4 @@
-import { realpath } from 'node:fs/promises'
+import { readFile, realpath } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
@@ -11,6 +11,8 @@ import { resolveCanvas } from './canvas.ts'
 import { loadSavedDrawings } from './drawing-store.ts'
 import type { DrawingStore } from './drawing-store.ts'
 import { drawingEnabled, resolveDrawings } from './drawings.ts'
+import { bindDragSources, dragDocument } from './drag-source.ts'
+import type { WritableDrag } from './drag-source.ts'
 import { loadExtensions } from './extensions.ts'
 import { renderPresentation } from './index.ts'
 import { extractImagesUsage, parseDeckAsync, readHeadmatter } from './parser.ts'
@@ -28,6 +30,7 @@ export interface CompiledDeck extends ExtensionAssets {
   canvas: SlideCanvas
   routeAliases: ReadonlySet<string>
   writableSnippets: ReadonlyMap<string, WritableSnippet>
+  writableDrags: ReadonlyMap<string, WritableDrag>
   drawingStore?: DrawingStore
 }
 
@@ -57,8 +60,10 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
     }
 
     const files = new Map<string, string | undefined>()
-    const origins = new WeakMap<Slide, string>()
+    const origins = new WeakMap<Slide, { path: string, slide: Slide, index: number }>()
     const writableSnippets = new Map<string, WritableSnippet>()
+    const writableDrags = new Map<string, WritableDrag>()
+    const dragSources = new Map<string, ReturnType<typeof dragDocument>>()
     const directory = await realpath(root)
     async function observe(path: string): Promise<string> {
       const revision = await fileRevision(path)
@@ -69,7 +74,7 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
     const filepath = await realpath(resolve(entry))
     if (!within(directory, filepath)) throw new Error('Slide source must stay inside the deck directory')
     await observe(filepath)
-    const source = await Bun.file(filepath).text()
+    const source = await readFile(filepath, 'utf8')
     const preparserPath = join(directory, 'setup', 'preparser.ts')
     const preparserRevision = await fileRevision(preparserPath).catch(() => undefined)
     files.set(preparserPath, preparserRevision)
@@ -85,8 +90,15 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
       preparsers = result ?? []
     }
     loadedPreparserRevision = preparserRevision
-    const entryDeck = await parseDeckAsync(source, preparsers)
-    const documents = new Map<string, Deck>([[filepath, entryDeck]])
+    const documents = new Map<string, Deck>()
+    async function parseDocument(path: string, input: string): Promise<Deck> {
+      const deck = await parseDeckAsync(input, preparsers)
+      documents.set(path, deck)
+      if (writerKey && !preparsers.length && /v-?drag/i.test(input))
+        dragSources.set(path, dragDocument(path, directory, input, writerKey))
+      return deck
+    }
+    const entryDeck = await parseDocument(filepath, source)
 
     async function read(path: string, stack: string[], range?: string): Promise<Deck> {
       if (!within(directory, path)) throw new Error('Slide source must stay inside the deck directory')
@@ -96,8 +108,7 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
       let deck = documents.get(filePath)
       if (!deck) {
         await observe(filePath)
-        deck = await parseDeckAsync(await Bun.file(filePath).text(), preparsers)
-        documents.set(filePath, deck)
+        deck = await parseDocument(filePath, await readFile(filePath, 'utf8'))
       }
       const slides: Slide[] = []
       for (const number of slideRange(deck.slides.length, range)) {
@@ -105,7 +116,7 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
         const attributes = slide.frontmatter ?? {}
         const reference = attributes.src
         if (typeof reference !== 'string' || attributes.hide === true || attributes.disabled === true) {
-          origins.set(slide, filePath)
+          origins.set(slide, { path: filePath, slide, index: number })
           slides.push(slide)
           continue
         }
@@ -122,7 +133,7 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
             frontmatter,
             images: extractImagesUsage(item.content, frontmatter),
           }
-          origins.set(selected, origins.get(item) ?? filePath)
+          origins.set(selected, origins.get(item)!)
           slides.push(selected)
         }
       }
@@ -136,7 +147,10 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
     }
     deck.slides = await Promise.all(deck.slides.map(async (slide) => {
       if (slide.frontmatter?.hide === true || slide.frontmatter?.disabled === true) return slide
-      const content = await expandSnippets(slide.content, directory, origins.get(slide) ?? resolve(entry), observe, (path, source) => {
+      const origin = origins.get(slide)!
+      const dragSource = dragSources.get(origin.path)
+      const marked = dragSource ? bindDragSources(dragSource, slide, origin.slide, origin.index, writableDrags) : slide.content
+      const content = await expandSnippets(marked, directory, origin.path, observe, (path, source) => {
         if (!writerKey || source.length > maxCodeLength || source.includes('\0')) return
         const token = snippetToken(writerKey, path)
         writableSnippets.set(token, { path, root: directory, revision: snippetRevision(source) })
@@ -161,7 +175,7 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
     const author = typeof deck.headmatter?.author === 'string' ? deck.headmatter.author : undefined
     const routeAliases = new Set(routes.flatMap(route => route.alias ? [route.alias] : []))
     const drawingStore = saveDrawings ? { ...store, slideCount: routes.length } : undefined
-    const compiled = { title: deck.title, author, canvas, html, styles: extensions.styles, client: extensions.client, mounts: extensions.mounts, writableSnippets, routeAliases, drawingStore }
+    const compiled = { title: deck.title, author, canvas, html, styles: extensions.styles, client: extensions.client, mounts: extensions.mounts, writableSnippets, writableDrags, routeAliases, drawingStore }
     cached = { files, deck: compiled }
     return compiled
   }

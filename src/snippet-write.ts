@@ -30,7 +30,21 @@ export async function saveSnippet(
     return new Response('Invalid snippet update', { status: 400 })
   const file = files.get(token)
   if (!file) return new Response('Snippet is unavailable', { status: 404 })
-  const stale = () => new Response('The snippet changed on disk. Reload the slide before saving.', { status: 409 })
+  return writeDeckFile(file, revision, maxCodeLength * 4, 'snippet', (previous) => {
+    const newline = previous.includes('\r\n') ? '\r\n' : '\n'
+    return source.replace(/\r?\n/g, newline) + (previous.endsWith('\n') && !source.endsWith('\n') ? newline : '')
+  })
+}
+
+export async function writeDeckFile(
+  file: WritableSnippet,
+  revision: string,
+  maxSize: number,
+  subject: string,
+  update: (source: string) => string | undefined,
+): Promise<Response> {
+  const stale = () => new Response(`The ${subject} changed on disk. Reload the slide before saving.`, { status: 409 })
+  if (file.revision !== revision) return stale()
   if (writes.has(file.path)) return stale()
   writes.add(file.path)
   const staged = join(dirname(file.path), `.presentation-${randomBytes(16).toString('hex')}.tmp`)
@@ -38,11 +52,12 @@ export async function saveSnippet(
     const actual = await realpath(file.path)
     if (actual !== file.path || !within(file.root, actual)) return stale()
     const metadata = await stat(actual)
-    if (!metadata.isFile() || metadata.size > maxCodeLength * 4) return stale()
+    if (!metadata.isFile() || metadata.size > maxSize) return stale()
     const previous = await readFile(actual, 'utf8')
     if (snippetRevision(previous) !== revision) return stale()
-    const newline = previous.includes('\r\n') ? '\r\n' : '\n'
-    const saved = source.replace(/\r?\n/g, newline) + (previous.endsWith('\n') && !source.endsWith('\n') ? newline : '')
+    const saved = update(previous)
+    if (saved === undefined) return stale()
+    if (saved === previous) return new Response(revision)
     await writeFile(staged, saved, { mode: metadata.mode & 0o777, flag: 'wx' })
     await chmod(staged, metadata.mode & 0o777)
     if (await realpath(file.path) !== file.path || await readFile(file.path, 'utf8') !== previous) return stale()
@@ -50,7 +65,7 @@ export async function saveSnippet(
     return new Response(snippetRevision(saved))
   }
   catch {
-    return new Response('Could not save the snippet', { status: 409 })
+    return new Response(`Could not save the ${subject}`, { status: 409 })
   }
   finally {
     await rm(staged, { force: true }).catch(() => undefined)

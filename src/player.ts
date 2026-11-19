@@ -1,5 +1,6 @@
 import { defaultCanvas } from './canvas.ts'
 import { setupCodeCopy, setupCodeTabs } from './code-controls.ts'
+import { setupDrags } from './drag-player.ts'
 import { setupDrawings } from './drawing-player.ts'
 import type { DrawingClientConfig } from './drawings.ts'
 import { setupLiveCode } from './live-code.ts'
@@ -73,6 +74,9 @@ const codeTabs = !isCapture && !isPreview ? setupCodeTabs(stage, (codeTab) => {
   refreshCode()
   syncPeer({ slide: current, codeTab })
 }) : undefined
+const drags = !isCapture && !isPreview ? setupDrags(stage, (slide, presentationDrag) => {
+  syncPeer({ dragSlide: articles.indexOf(slide) + 1, presentationDrag })
+}) : undefined
 
 function show(number: number, step?: number, writeHistory = true, sync = true): void {
   const { slide: selected, click: nextStep } = slidePosition(number, step, bounds)
@@ -85,6 +89,7 @@ function show(number: number, step?: number, writeHistory = true, sync = true): 
     else history.pushState(null, '', hash)
   }
 
+  drags?.clear()
   if (slideChanged) {
     if (imageView.open) imageView.close()
     articles[current - 1].hidden = true
@@ -200,6 +205,8 @@ window.addEventListener('message', (event: MessageEvent) => {
     presentationClick?: unknown
     presenterReady?: unknown
     presentationDrawing?: unknown
+    presentationDrag?: unknown
+    dragSlide?: number
     codeTab?: { group?: unknown, tab?: unknown }
     codeTabs?: { group?: unknown, tab?: unknown }[]
     slide?: unknown
@@ -208,6 +215,8 @@ window.addEventListener('message', (event: MessageEvent) => {
     open?: unknown
   } | null
   if (data?.presentationDrawing) drawing?.receive(data.presentationDrawing)
+  if (data?.presentationDrag && Number.isInteger(data.dragSlide) && articles[data.dragSlide! - 1])
+    drags?.receive(articles[data.dragSlide! - 1], data.presentationDrag)
   if (data?.presenterReady === true && popup) {
     popup.postMessage({ presentationSlide: current, presentationClick: click, codeTabs: codeTabs?.selections() }, messageOrigin)
   }
@@ -294,7 +303,7 @@ stage.addEventListener('click', (event) => {
   show(slide, click)
 })
 stage.addEventListener('keydown', (event) => {
-  if (event.key !== 'Enter' && event.key !== ' ') return
+  if (event.defaultPrevented || (event.key !== 'Enter' && event.key !== ' ')) return
   if (event.target instanceof HTMLImageElement && event.target.hasAttribute('data-zoom')) {
     event.preventDefault()
     zoom(event.target)
