@@ -150,8 +150,8 @@ The port branches from [Slidev v53.1.0](https://github.com/slidevjs/slidev/tree/
 Credit goes to Anthony Fu and the Slidev community. The original MIT
 license is included in [licenses/Slidev-MIT.txt](licenses/Slidev-MIT.txt).
 
-The supplemental TeX symbol mappings and trust option draw on KaTeX. Credit goes to Khan
-Academy and the KaTeX contributors. Their MIT notice is included in
+The supplemental TeX symbol mappings, atom spacing, and trust option draw on KaTeX. Credit
+goes to Khan Academy and the KaTeX contributors. Their MIT notice is included in
 [licenses/KaTeX-MIT.txt](licenses/KaTeX-MIT.txt).
 
 GitGraph theme colors come from Mermaid 12.3.0. The Mermaid MIT notice is

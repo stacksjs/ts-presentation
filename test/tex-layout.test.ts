@@ -3,26 +3,30 @@ import { findChrome } from '../packages/slidev/node/runtime/chrome.ts'
 import { collectSnapshot } from '../packages/slidev/node/runtime/editable/walker.ts'
 import { createMathRenderer, renderMath } from '../packages/slidev/node/runtime/math.ts'
 
+const thin = '<mspace width="0.16666666666666666em"/>'
+const medium = '<mspace width="0.2222222222222222em"/>'
+const thick = '<mspace width="0.2777777777777778em"/>'
+const zeroGap = 'lspace="0em" rspace="0em"'
+const operator = (glyph: string) => `<mo ${zeroGap}>${glyph}</mo>`
+
 test('renders supplemental AMS relations, binary operators, and punctuation with distinct spacing', () => {
   const math = createMathRenderer({ throwOnError: true })
   const html = math(String.raw`
     \def\containsMore{\supsetneqq}
     a \containsMore b \boxplus c \nleqslant d \rightleftharpoons e \cdotp \And \beth \lvertneqq \nsupseteqq
   `, true)
-  expect(html).toMatch(/<mo lspace="0\.277[^"]+" rspace="0\.277[^"]+">⫌<\/mo>/)
-  expect(html).toMatch(/<mo lspace="0\.222[^"]+" rspace="0\.222[^"]+">⊞<\/mo>/)
-  expect(html).toMatch(/<mo lspace="0\.277[^"]+" rspace="0\.277[^"]+">⩽̸<\/mo>/)
+  expect(html).toContain(thick + operator('⫌') + thick)
+  expect(html).toContain(medium + operator('⊞') + medium)
+  expect(html).toContain(thick + operator('⩽̸') + thick)
   expect(html).toContain('>⇌</mo>')
   expect(html).toContain('>≨\uFE00</mo>')
   expect(html).toContain('>⫆\u0338</mo>')
-  expect(html).toMatch(/<mo lspace="0em" rspace="0\.166[^"]+" separator="true">⋅<\/mo>/)
-  expect(html).toContain('&amp;</mo>')
-  expect(html).toContain('<mtext>ℶ</mtext>')
+  expect(html).toContain(`<mi>e</mi><mo separator="true" ${zeroGap}>⋅</mo>${thin}${operator('&amp;')}<mtext>ℶ</mtext>`)
 })
 
 test('uses supplemental symbols in contextual dots, negations, text, and operator names', () => {
   const math = createMathRenderer({ throwOnError: true })
-  expect(math(String.raw`a \dots \subsetneqq b + \not\gtrsim c`, false)).toContain('<mo>⋯</mo>')
+  expect(math(String.raw`a \dots \subsetneqq b + \not\gtrsim c`, false)).toContain('>⋯</mo>')
   const literal = 'a ' + String.raw`\dots` + ' ⫋ b'
   expect(math(literal, false)).toContain('<mo>⋯</mo>')
   const html = math(String.raw`\text{\S\textdagger\textbraceleft\textsterling\textbraceright}+\operatorname{\vdash\,closure}(x)`, false)
@@ -86,13 +90,35 @@ test('renders spacing and expanded symbols in named TeX operators', () => {
 test('sets spacing and fences for explicit TeX atom classes', () => {
   const math = createMathRenderer({ throwOnError: true })
   const markup = math(String.raw`a\mathbin{*}b\mathrel{:}c\mathpunct{!}\mathopen{[}d\mathclose{]}\mathord{+}\mathinner{\frac e f}`, false)
-  expect(markup).toContain('<mo lspace="0.2222222222222222em" rspace="0.2222222222222222em">*</mo>')
-  expect(markup).toContain('<mo lspace="0.2777777777777778em" rspace="0.2777777777777778em">:</mo>')
-  expect(markup).toContain('<mo lspace="0em" rspace="0.16666666666666666em" separator="true">!</mo>')
-  expect(markup).toContain('form="prefix">[</mo>')
-  expect(markup).toContain('form="postfix">]</mo>')
+  expect(markup).toContain(medium + operator('*') + medium)
+  expect(markup).toContain(thick + operator(':') + thick)
+  expect(markup).toContain(`<mo separator="true" ${zeroGap}>!</mo>${thin}`)
+  expect(markup).toContain(`form="prefix" ${zeroGap}>[</mo>`)
+  expect(markup).toContain(`form="postfix" ${zeroGap}>]</mo>`)
   expect(markup).toContain('<mi mathvariant="normal">+</mi>')
   expect(markup).toMatch(/<mspace width="0\.1666[^"]+"\/><mrow><mrow><mfrac>/)
+})
+
+test('uses one TeX gap per pair and gives unary binary symbols no extra space', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const run = math(String.raw`\mathbin{-}a \mathbin{+}-b = \mathbin{-}c\mathbin{+}`, false)
+  expect(run).toContain(`<mrow>${operator('−')}<mi>a</mi>${medium}${operator('+')}${medium}${operator('−')}<mi>b</mi>${thick}${operator('=')}${thick}${operator('−')}<mi>c</mi>${operator('+')}</mrow>`)
+  expect(math(String.raw`a\mathrel{=}\mathrel{<}b`, false))
+    .toContain(thick + operator('=') + operator('&lt;') + thick)
+  expect(math(String.raw`(\mathbin{-}a\mathbin{+})`, false)).not.toContain('<mspace')
+  expect(math(String.raw`a\mathbin{+}\kern2mu b`, false))
+    .toContain(medium + operator('+') + '<mspace width="0.1111111111111111em"/>' + medium)
+})
+
+test('sets gaps outside composite script bases and uses tight spacing inside scripts', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  expect(math(String.raw`a\mathrel{\frac{1}{2}}_k b`, false))
+    .toContain(`${thick}<msub><mrow><mrow><mfrac><mrow><mn>1</mn></mrow><mrow><mn>2</mn></mrow></mfrac></mrow></mrow><mi>k</mi></msub>${thick}`)
+  const script = math(String.raw`x^{a\mathbin{+}b\mathrel{=}c\mathop{F}d}`, false)
+  expect(script).toContain(`<mrow><mi>a</mi>${operator('+')}<mi>b</mi>${operator('=')}<mi>c</mi>${thin}`)
+  expect(script).toContain(`>F</mo>${thin}<mi>d</mi></mrow></msup>`)
+  expect(math(String.raw`\tfrac{a\boxplus b}{c\mathrel{=}d}`, false)).not.toContain('<mspace')
+  expect(math(String.raw`\dfrac{a\boxplus b}{c\mathrel{=}d}`, false)).toContain(medium + operator('⊞') + medium)
 })
 
 test('handles operator limits and literal Unicode large operators in display and inline math', () => {
@@ -100,7 +126,7 @@ test('handles operator limits and literal Unicode large operators in display and
   const source = String.raw`\mathop{\mathrm{select}}\displaylimits_{i=1}^n + \bigotimes_i X_i + ${'∑'}_j a_j`
   expect(math(source, true).match(/<munderover>|<munder>/g)).toHaveLength(3)
   expect(math(source, false)).not.toMatch(/<munderover>|<munder>/)
-  expect(math(String.raw`\mathop{X}\limits_i + ${'∫'}\limits_0^1`, false)).toContain('<munderover><mo movablelimits="false">∫</mo>')
+  expect(math(String.raw`\mathop{X}\limits_i + ${'∫'}\limits_0^1`, false)).toContain(`<munderover><mo movablelimits="false" ${zeroGap}>∫</mo>`)
   expect(math('∑' + String.raw`\nolimits_i + \mathop{\mathrm{arg\,min}}_j`, true)).not.toContain('<munder>')
 })
 
@@ -295,6 +321,44 @@ test('keeps style-dependent math in a lap and uses text mode for plain laps', ()
 })
 
 const chrome = await findChrome()
+test.skipIf(!chrome)('lays out TeX atom gaps at the expected widths in Chromium', async () => {
+  const formulas = [
+    String.raw`a\mathbin{+}b`,
+    String.raw`\mathbin{+}a`,
+    String.raw`a\mathrel{=}b`,
+    String.raw`x^{a\mathbin{+}b}`,
+    String.raw`a\mathinner{+}b`,
+    String.raw`a\mathinner{+}_i b`,
+  ]
+  const body = formulas.map(tex => `<div>${renderMath(tex)}</div>`).join('')
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response(`<!doctype html><meta charset="utf-8"><main style="font-size:36px">${body}</main>`, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    }),
+  })
+  const view = new Bun.WebView({ width: 720, height: 400, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await view.navigate(server.url.href)
+    const gaps = await view.evaluate<number[][]>(`[...document.querySelectorAll('main div mo')].map(glyph => {
+      const operator = glyph.closest('semantics > mrow > :is(msub, mrow)') ?? glyph
+      const box = operator.getBoundingClientRect()
+      const gap = (sibling, before) => {
+        if (!sibling) return 0
+        const bounds = sibling.getBoundingClientRect()
+        const isSpace = sibling.localName === 'mspace'
+        return before ? box.left - (isSpace ? bounds.left : bounds.right) : (isSpace ? bounds.right : bounds.left) - box.right
+      }
+      return [gap(operator.previousElementSibling, true), gap(operator.nextElementSibling, false)]
+    })`)
+    expect(gaps.map(pair => pair.map(Math.round))).toEqual([[8, 8], [0, 0], [10, 10], [0, 0], [6, 6], [6, 6]])
+  }
+  finally {
+    view.close()
+    server.stop(true)
+  }
+}, 45000)
+
 test.skipIf(!chrome)('positions lap contents and explicit operator limits in Chromium', async () => {
   const formulas = [
     { id: 'reference', tex: 'AB' },

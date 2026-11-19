@@ -1,6 +1,8 @@
 import { escapeHtml } from './html.ts'
 import type { KatexOptions, KatexTrustContext } from './authoring-setup.ts'
 import { chemicalFormula, physicalUnits } from './math-chemistry.ts'
+import { rowSpacing } from './math-spacing.ts'
+import type { MathClass } from './math-spacing.ts'
 import { isCenteredGlyph, mathSymbol, textSymbol } from './math-symbols.ts'
 import type { MathSymbol, MathSymbolKind } from './math-symbols.ts'
 import { isMathAttributeCommand, isMathUrlCommand, mathAttributes, mathKeyValues, mathUrl, trustedMath } from './math-trust.ts'
@@ -42,12 +44,12 @@ const big = new Set(['sum', 'prod', 'coprod', 'bigcup', 'bigcap', 'bigvee', 'big
 const integrals = new Set(['int', 'iint', 'iiint', 'oint', 'oiint', 'oiiint'])
 const integralGlyphs = new Set([...integrals].map(name => operators[name]))
 const largeOperatorGlyphs = new Set([...big].filter(name => !integralGlyphs.has(operators[name]) && Object.hasOwn(operators, name)).map(name => operators[name]))
-const classSpacing: Record<string, readonly [number, number]> = {
-  mathord: [0, 0], mathopen: [0, 0], mathclose: [0, 0], mathpunct: [0, 3],
-  mathbin: [4, 4], mathrel: [5, 5], mathinner: [3, 3], mathop: [3, 3],
+const mathClasses: Record<string, MathClass> = {
+  mathord: 'ord', mathopen: 'open', mathclose: 'close', mathpunct: 'punct',
+  mathbin: 'bin', mathrel: 'rel', mathinner: 'inner', mathop: 'op',
 }
-const symbolClasses: Partial<Record<MathSymbolKind, string>> = {
-  binary: 'mathbin', relation: 'mathrel', punctuation: 'mathpunct', inner: 'mathinner',
+const symbolClasses: Partial<Record<MathSymbolKind, MathClass>> = {
+  binary: 'bin', relation: 'rel', punctuation: 'punct', inner: 'inner',
 }
 const namedLimits: Record<string, string> = {
   liminf: 'lim inf', limsup: 'lim sup', injlim: 'inj lim', projlim: 'proj lim',
@@ -114,6 +116,7 @@ const matrixDelimiters: Record<string, [string, string]> = {
   pmatrix: ['(', ')'], bmatrix: ['[', ']'], Bmatrix: ['{', '}'], vmatrix: ['|', '|'], Vmatrix: ['‖', '‖'], cases: ['{', ''],
 }
 const spacing: Record<string, string> = { ',': '0.17em', ':': '0.22em', ';': '0.28em', '!': '-0.17em', ' ': '0.33em', quad: '1em', qquad: '2em' }
+const spacingCommands = new Set(['hspace', 'kern', 'mkern', 'mskip', 'hskip'])
 const styledLetters: Record<string, { upper: number, lower: number, digits?: number, exceptions: string }> = {
   'double-struck': { upper: 0x1D538, lower: 0x1D552, digits: 0x1D7D8, exceptions: 'CℂHℍNℕPℙQℚRℝZℤ' },
   'script': { upper: 0x1D49C, lower: 0x1D4B6, exceptions: 'BℬEℰFℱHℋIℐLℒMℳRℛeℯgℊoℴ' },
@@ -226,9 +229,16 @@ const operatorSpaces: Readonly<Record<string, string>> = {
 
 interface Atom {
   markup: Markup
-  spacing?: readonly [number, number]
+  mathClass?: MathClass
   limits?: boolean
   brace?: 'lower' | 'upper'
+}
+
+interface RowPart {
+  markup: Markup
+  token?: string
+  mathClass?: MathClass
+  operator?: boolean
 }
 
 type Alignment = 'left' | 'center' | 'right'
@@ -318,35 +328,78 @@ function muSpace(mu: number): string {
   return spaceMarkup(`${mu / 18}em`)
 }
 
-function classifiedAtom(name: string, content: Markup): Atom {
-  const [left, right] = classSpacing[name]
-  const limits = name === 'mathop' ? false : undefined
-  if (typeof content === 'string' && name !== 'mathinner') {
-    const token = /^(?:<mrow>)*<(mn|mi|mo|mtext)( stretchy="(?:true|false)")?>([^<]*)<\/\1>(?:<\/mrow>)*$/.exec(content)
+function classifiedAtom(mathClass: MathClass, content: Markup): Atom {
+  const limits = mathClass === 'op' ? false : undefined
+  if (typeof content === 'string' && mathClass !== 'inner') {
+    const token = /^(?:<mrow>)*<(mn|mi|mo|mtext)(?: lspace="0em" rspace="0em")?( stretchy="(?:true|false)")?>([^<]*)<\/\1>(?:<\/mrow>)*$/.exec(content)
     if (token) {
       const [, kind, stretchy = '', glyph] = token
-      if (name === 'mathord') {
+      if (mathClass === 'ord') {
         const normal = kind === 'mo' ? ' mathvariant="normal"' : ''
         const element = kind === 'mo' ? 'mi' : kind
-        return { markup: `<${element}${normal}>${glyph}</${element}>` }
+        return { mathClass, markup: `<${element}${normal}>${glyph}</${element}>` }
       }
-      const spacing = `lspace="${left / 18}em" rspace="${right / 18}em"`
       const font = kind === 'mi' ? ' style="font-style:italic"' : ''
-      const role = name === 'mathopen' || name === 'mathclose'
-        ? ` fence="true" form="${name === 'mathopen' ? 'prefix' : 'postfix'}"`
-        : name === 'mathpunct' ? ' separator="true"' : ''
-      return { markup: `<mo ${spacing}${font}${stretchy}${role}>${glyph}</mo>`, limits }
+      const role = mathClass === 'open' || mathClass === 'close'
+        ? ` fence="true" form="${mathClass === 'open' ? 'prefix' : 'postfix'}"`
+        : mathClass === 'punct' ? ' separator="true"' : ''
+      return { mathClass, markup: `<mo lspace="0em" rspace="0em"${stretchy}${font}${role}>${glyph}</mo>`, limits }
     }
   }
   // MathML token elements contain text. Space composite atoms outside their
   // script base so fractions, styles, and accents remain valid MathML.
-  return { markup: xml`<mrow>${content}</mrow>`, limits, spacing: [left, right] }
+  return { mathClass, markup: xml`<mrow>${content}</mrow>`, limits }
 }
 
 function supplementalAtom([glyph, kind]: MathSymbol): Atom {
   const category = symbolClasses[kind]
   if (!category) return { markup: tag(kind === 'identifier' ? 'mi' : 'mtext', glyph) }
   return classifiedAtom(category, tag('mo', glyph))
+}
+
+function rowClass({ markup, token = '', mathClass, operator }: RowPart): MathClass | undefined {
+  if (!markup) return
+  if (mathClass) return mathClass
+  if (operator) return 'op'
+  const name = token.startsWith('\\') ? token.slice(1) : ''
+  if (Object.hasOwn(spacing, name) || spacingCommands.has(name)) return
+  if (name === 'left') return 'inner'
+  if (name === 'middle' || name === 'not' || name === 'stackrel' || Object.hasOwn(extensibleArrows, name)) return 'rel'
+  const sized = /^(?:bigg|Bigg|big|Big)([lrm]?)$/.exec(name)
+  if (sized) return sized[1] === 'l' ? 'open' : sized[1] === 'r' ? 'close' : sized[1] === 'm' ? 'rel' : 'ord'
+  if (name === 'colon') return 'punct'
+  if (name === 'lvert' || name === 'lVert') return 'open'
+  if (name === 'rvert' || name === 'rVert') return 'close'
+  const glyph = delimiters[token] ?? operators[name] ?? token
+  if (/^[+\-−*±∓·×÷∘∗∖∩∪∧∨⊕⊗⊙]$/u.test(glyph)) return 'bin'
+  if (/^[=<>:≤≥≠≈∼≃≡∝∈∉∋∌∣∤∥∦⊥⊂⊆⊃⊇≰≱⊈⊉≅≪≫←→↔↑↓↕⇒⇐⇔⇑⇓⇕↦⟵⟶⟷⟹⟸⟺⟼]$/u.test(glyph)) return 'rel'
+  if (/^[(\[{⟨⌊⌈⟮⎰⌜⌞⟦⦃]$/u.test(glyph)) return 'open'
+  if (/^[)\]}⟩⌋⌉⟯⎱⌝⌟⟧⦄!?]$/u.test(glyph)) return 'close'
+  return glyph === ',' || glyph === ';' ? 'punct' : 'ord'
+}
+
+function neutralizeOperator(markup: string): string {
+  // MathML propagates a glyph's native spacing through scripts and singleton
+  // rows. Preserve spacing within a group that has several children.
+  const operator = /^((?:<(?:msub|msup|msubsup|mover|munder|munderover)(?: [^>]*)?>)*)((?:<mrow>)*)<mo([^>]*)>([^<]*<\/mo>)((?:<\/mrow>)*)/
+  return markup.replace(operator, (match, scripts: string, groups: string, attrs: string, glyph: string, ends: string) => {
+    if (groups.length / '<mrow>'.length !== ends.length / '</mrow>'.length) return match
+    const attributes = attrs.replace(/ (?:lspace|rspace)="[^"]*"/g, '')
+    return `${scripts}${groups}<mo${attributes} lspace="0em" rspace="0em">${glyph}${ends}`
+  })
+}
+
+function joinRow(parts: RowPart[]): Markup {
+  if (!parts.some(part => part.mathClass)) return joinMarkup(parts.map(part => part.markup))
+  const classes = parts.map(rowClass)
+  const normal = rowSpacing(classes, false)
+  const tight = rowSpacing(classes, true)
+  return style => parts.map((part, index) => {
+    const gap = (style < 2 ? normal : tight)[index]
+    const value = renderMarkup(part.markup, style)
+    // The renderer inserts a single gap between neighbors, including composites.
+    return (gap ? muSpace(gap) : '') + (classes[index] ? neutralizeOperator(value) : value)
+  }).join('')
 }
 
 function negatedMarkup(markup: string): string {
@@ -602,14 +655,18 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return definition
   }
 
-  function argument(): Markup {
+  function argumentAtom(): Atom {
     if (depth++ > 100) throw new Error('Math arguments are nested too deeply')
     const token = take()
     if (!token || token === '}' || token === boundary || token === '^' || token === '_') throw new Error('Missing math argument')
     if (infixFractions.has(token)) throw new Error('An infix fraction argument requires a group')
-    const markup = atom(token).markup
+    const result = atom(token)
     depth--
-    return markup
+    return result
+  }
+
+  function argument(): Markup {
+    return argumentAtom().markup
   }
 
   function bracket(): string | undefined {
@@ -882,7 +939,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
 
   function row(stop: string[] = [], breakOnInfix = false): Markup {
     if (depth++ > 100) throw new Error('Math groups are nested too deeply')
-    const before: Markup[] = []
+    const before: RowPart[] = []
     let parts = before
     let infix = ''
     let thickness: string | undefined
@@ -898,20 +955,20 @@ export function renderMath(source: string, display = false, configured: MathMacr
       }
       if (Object.hasOwn(styleCommands, token)) {
         const selected = styleCommands[token]
-        parts.push(mathSize(selected, renderMarkup(row(stop, true), selected)))
+        parts.push({ markup: mathSize(selected, renderMarkup(row(stop, true), selected)) })
         continue
       }
       if (Object.hasOwn(sizeCommands, token)) {
         const baseScale = fontScale
         fontScale = sizeCommands[token]
-        parts.push(scaledMath(row(stop, true), fontScale / baseScale))
+        parts.push({ markup: scaledMath(row(stop, true), fontScale / baseScale) })
         fontScale = baseScale
         continue
       }
       if (token === '\\color') {
         const color = safeColor(literalGroup())
         const content = row(stop, true)
-        parts.push(color ? xml`<mrow style="color:${color}">${content}</mrow>` : content)
+        parts.push({ markup: color ? xml`<mrow style="color:${color}">${content}</mrow>` : content })
         continue
       }
       let part: Atom
@@ -971,15 +1028,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
           content = style => renderMarkup(style === 0 ? display : inline, style)
         }
       }
-      const [left, right] = part.spacing ?? []
-      if (left) parts.push(muSpace(left))
-      parts.push(content)
-      if (right) parts.push(muSpace(right))
+      parts.push({ markup: content, token, mathClass: part.mathClass, operator: part.limits !== undefined })
     }
     depth--
-    const result = joinMarkup(parts)
+    const result = joinRow(parts)
     if (!infix) return result
-    const quotient = fractionMarkup(xml`<mrow>${joinMarkup(before)}</mrow>`, xml`<mrow>${result}</mrow>`, undefined, thickness)
+    const quotient = fractionMarkup(xml`<mrow>${joinRow(before)}</mrow>`, xml`<mrow>${result}</mrow>`, undefined, thickness)
     const fences = fractionFences[infix]
     return fences ? xml`<mrow>${fence(fences[0])}${quotient}${fence(fences[1])}</mrow>` : quotient
   }
@@ -1214,7 +1268,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       return { markup: (name === 'ce' ? chemicalFormula : physicalUnits)(literalGroup()) }
     }
     if (isMathAttributeCommand(token) || isMathUrlCommand(token)) return { markup: htmlCommand(token) }
-    if (Object.hasOwn(classSpacing, name)) return classifiedAtom(name, argument())
+    if (Object.hasOwn(mathClasses, name)) return classifiedAtom(mathClasses[name], argument())
     if (['def', 'gdef', 'edef', 'xdef'].includes(name)) {
       const command = literalGroup()
       space()
@@ -1361,7 +1415,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const side = bracket()
       return { markup: xml`<mpadded${side !== 'b' ? ' height="0"' : ''}${side !== 't' ? ' depth="0"' : ''}>${argument()}</mpadded>` }
     }
-    if (['hspace', 'kern', 'mkern', 'mskip', 'hskip'].includes(name)) {
+    if (spacingCommands.has(name)) {
       if (name === 'hspace' && peek() === '*') take()
       return { markup: spaceMarkup(readDimension()) }
     }
@@ -1405,8 +1459,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (name === 'mod' || name === 'bmod' || name === 'pmod' || name === 'pod') return { markup: modulus(name) }
     if (contextualDots.has(name)) return { markup: ellipsis(name) }
     if (name === 'not') {
-      const operand = argument()
-      return { markup: typeof operand === 'string' ? negatedMarkup(operand) : style => negatedMarkup(operand(style)) }
+      const { markup, mathClass } = argumentAtom()
+      return { mathClass, markup: typeof markup === 'string' ? negatedMarkup(markup) : style => negatedMarkup(markup(style)) }
     }
     if (Object.hasOwn(namedLimits, name)) return { markup: tag('mo', namedLimits[name]), limits: true }
     if (Object.hasOwn(accentedLimits, name)) {

@@ -113,10 +113,14 @@ test.skipIf(!chrome)('navigates nested outlines with route aliases and refreshes
       depthShown: false,
       active: [true, true, true],
     })
-    expect(await view.evaluate(`(() => {
+    expect(await view.evaluate(`(async () => {
       const nav = window.presentationNavigation
       nav.go(2, 1)
-      const visible = getComputedStyle(document.querySelector('#depth')).visibility
+      const outline = document.querySelector('#depth')
+      const deadline = performance.now() + 1000
+      while (getComputedStyle(outline).visibility !== 'visible' && performance.now() < deadline)
+        await new Promise(resolve => requestAnimationFrame(resolve))
+      const visible = getComputedStyle(outline).visibility
       document.querySelector('#branch [data-slide-link="3"]').click()
       return [visible, nav.currentPage, nav.clicks, nav.mode, location.hash]
     })()`)).toEqual(['visible', 3, 2, 'presenter', '#export-review/2'])
