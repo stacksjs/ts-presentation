@@ -1,5 +1,8 @@
 import { renderMath } from './math.ts'
-import type { MathMacros } from './math.ts'
+import type { EquationOptions } from './equation-steps.ts'
+import { parseEquationOptions } from './equation-steps.ts'
+import type { FenceScalar } from './fence-options.ts'
+import { readFenceOptions } from './fence-options.ts'
 
 const fenceStart = /^ {0,3}(`{3,}|~{3,})(.*)$/
 const inlineCode = /^`+/
@@ -38,14 +41,24 @@ interface PreparedMarkdown {
   restore: (rendered: string) => string
 }
 
-export function prepareMarkdown(source: string, macros?: MathMacros): PreparedMarkdown {
-  if (!source.includes('$') && !source.includes('\\(') && !source.includes('\\[') && !source.includes('{monaco') && !source.includes('{live')) {
+interface MarkdownSyntax {
+  renderMath?: (body: string, display: boolean) => string
+  mathEnabled?: boolean
+  registerMermaid?: (options: Record<string, FenceScalar>) => string
+}
+
+export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): PreparedMarkdown {
+  if (!source.includes('$') && !source.includes('\\(') && !source.includes('\\[') && !source.includes('{monaco') && !source.includes('{live') && !source.includes('mermaid')) {
     return { source, restore: html => html }
   }
 
   const math: string[] = []
-  const marker = (body: string, display: boolean) => {
-    const index = math.push(renderMath(body.trim(), display, macros)) - 1
+  const marker = (body: string, display: boolean, options?: EquationOptions) => {
+    const content = (syntax.renderMath ?? renderMath)(body.trim(), display)
+    const block = options
+      ? `<div class="equation-steps" data-equation-steps="${options.ranges.join('|')}" data-equation-at="${options.at}" data-equation-first="${options.startLine}" data-equation-finally="${options.finally}">${content}</div>`
+      : content
+    const index = math.push(block) - 1
     return `<tp-math data-equation="${index}"></tp-math>`
   }
 
@@ -54,7 +67,7 @@ export function prepareMarkdown(source: string, macros?: MathMacros): PreparedMa
     for (let at = 0; at < line.length;) {
       const char = line[at]
       if (char === '\\' && line[at + 1]) {
-        if (line[at + 1] === '(') {
+        if (syntax.mathEnabled !== false && line[at + 1] === '(') {
           const end = line.indexOf('\\)', at + 2)
           if (end > at + 2) {
             result += marker(line.slice(at + 2, end), false)
@@ -82,7 +95,7 @@ export function prepareMarkdown(source: string, macros?: MathMacros): PreparedMa
         const chunk = protectedHtml.exec(line.slice(at))?.[0] ?? /^<[^>]+>/.exec(line.slice(at))?.[0]
         if (chunk) { result += chunk; at += chunk.length; continue }
       }
-      if (char === '$' && line[at + 1] && !/\s|\$/.test(line[at + 1]) && line[at - 1] !== '$') {
+      if (syntax.mathEnabled !== false && char === '$' && line[at + 1] && !/\s|\$/.test(line[at + 1]) && line[at - 1] !== '$') {
         let end = at + 1
         for (; end < line.length; end++) {
           if (line[end] === '\\') { end++; continue }
@@ -119,6 +132,12 @@ export function prepareMarkdown(source: string, macros?: MathMacros): PreparedMa
     }
     if (opening) {
       fence = opening[1]
+      const [, diagramInfo] = /^\s*mermaid\s+(\{.*\})\s*$/i.exec(opening[2]) ?? []
+      const diagram = diagramInfo && readFenceOptions(diagramInfo)
+      if (diagram && syntax.registerMermaid) {
+        output.push(`${line.slice(0, line.indexOf(fence))}${fence}${syntax.registerMermaid(diagram)}`)
+        continue
+      }
       const options = runnerOptions.exec(opening[2])
       const module = options?.[2].toLowerCase().startsWith('j') ? 'js' : 'ts'
       const mode = options?.[4].toLowerCase().endsWith('run') ? 'run' : 'edit'
@@ -131,18 +150,22 @@ export function prepareMarkdown(source: string, macros?: MathMacros): PreparedMa
       output.push(line)
       continue
     }
-    const display = /^ {0,3}(\$\$|\\\[)(.*)$/.exec(line)
+    const display = syntax.mathEnabled !== false && /^ {0,3}(\$\$|\\\[)(.*)$/.exec(line)
     if (display) {
       const delimiter = display[1] === '$$' ? '$$' : '\\]'
       if (display[2].trimEnd().endsWith(delimiter) && display[2].trim().length > 2) {
         output.push('', marker(display[2].trimEnd().slice(0, -2), true), '')
         continue
       }
-      if (!display[2].trim()) {
-        let close = index + 1
-        while (close < lines.length && lines[close].trim() !== delimiter && !fenceStart.test(lines[close])) close++
-        if (close > index + 1 && lines[close]?.trim() === delimiter) {
-          output.push('', marker(lines.slice(index + 1, close).join('\n'), true), '')
+      const options = parseEquationOptions(display[2])
+      const ends = (value: string) => value.trimEnd().endsWith(delimiter)
+      let close = index + 1
+      while (close < lines.length && !fenceStart.test(lines[close]) && !ends(lines[close])) close++
+      if (close < lines.length && ends(lines[close]) && !fenceStart.test(lines[close])) {
+        const last = lines[close].trimEnd().slice(0, -2)
+        const body = [options ? '' : display[2], ...lines.slice(index + 1, close), last].join('\n').trim()
+        if (body) {
+          output.push('', marker(body, true, options), '')
           index = close
           continue
         }
@@ -157,7 +180,7 @@ export function prepareMarkdown(source: string, macros?: MathMacros): PreparedMa
       return html
         .replace(/<p>(<tp-math data-equation="\d+"><\/tp-math>)<\/p>/g, (whole, placeholder) => {
           const index = Number(/\d+/.exec(placeholder)?.[0])
-          return math[index]?.includes(' display="block"') ? placeholder : whole
+          return /^<div class="equation-steps"|^<math [^>]* display="block"/.test(math[index] ?? '') ? placeholder : whole
         })
         .replace(/<tp-math data-equation="(\d+)"><\/tp-math>/g, (whole, index: string) => math[Number(index)] ?? whole)
     },

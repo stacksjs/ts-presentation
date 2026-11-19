@@ -1,4 +1,6 @@
 import { defaultCanvas } from './canvas.ts'
+import type { EquationReveal } from './equation-steps.ts'
+import { equationReveal, showEquation } from './equation-steps.ts'
 import { setupLiveCode } from './live-code.ts'
 
 const canvasWidth = Number(document.documentElement.dataset.slideWidth) || defaultCanvas.width
@@ -36,14 +38,19 @@ interface Reveal {
   hide: boolean
 }
 
-const reveals = articles.map((article) => {
+const reveals: (Reveal | EquationReveal)[][] = articles.map((article) => {
   let cursor = 0
   const groups = article.querySelectorAll('v-clicks')
   for (const group of groups) {
     const childNodes = group.firstElementChild?.matches('ol, ul') ? group.firstElementChild.children : group.children
     for (const child of childNodes) child.setAttribute('v-click', '')
   }
-  return [...article.querySelectorAll<HTMLElement>('v-click, v-after, [v-click], [v-after], [data-click]')].map((element): Reveal => {
+  return [...article.querySelectorAll<HTMLElement>('v-click, v-after, [v-click], [v-after], [data-click], [data-equation-steps]')].map((element) => {
+    if (element.hasAttribute('data-equation-steps')) {
+      const reveal = equationReveal(element, cursor)
+      cursor = Math.max(cursor, reveal.step)
+      return reveal
+    }
     const raw = element.getAttribute('data-click') ?? element.getAttribute('v-click') ?? element.getAttribute('at')
     const explicit = raw && /^\d+$/.test(raw) ? Number(raw) : 0
     const after = element.matches('v-after, [v-after]')
@@ -94,7 +101,8 @@ function show(number: number, step = 0, writeHistory = true, sync = true): void 
   articles[current - 1].hidden = false
   notes[current - 1].hidden = false
   for (const reveal of reveals[current - 1]) {
-    reveal.element.toggleAttribute('data-reveal-hidden', reveal.hide ? click >= reveal.step : click < reveal.step)
+    if ('lines' in reveal) showEquation(reveal, click)
+    else reveal.element.toggleAttribute('data-reveal-hidden', reveal.hide ? click >= reveal.step : click < reveal.step)
   }
   noteSteps[current - 1].forEach((note, index) => { note.hidden = index > click })
   nextTitle.textContent = articles[current]?.getAttribute('aria-label') ? `Next: ${articles[current].getAttribute('aria-label')}` : 'Last slide'

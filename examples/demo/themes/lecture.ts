@@ -7,7 +7,7 @@ const extension: PresentationTheme = defineTheme({
     [data-theme="lecture"] .slide { background: #eaf0f3; color: #132b40; color-scheme: light }
     [data-theme="lecture"] .slide a { color: #00556a }
     [data-theme="lecture"] .slide pre { color: #edf5ff }
-    [data-theme="lecture"] .slide-diagram { background: #14202c; border-radius: 0.4em }
+    [data-theme="lecture"] .slide-diagram { background: var(--diagram-background, #14202c); border-radius: 0.4em }
     [data-theme="lecture"] .live-code { color: #edf5ff; color-scheme: dark }
     .example-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 2em; }
   `,

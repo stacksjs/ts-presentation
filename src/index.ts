@@ -1,13 +1,16 @@
+import type { AuthoringSetup, MermaidOptions } from './authoring-setup.ts'
 import type { LoadedExtensions, PresentationAddon } from './extensions.ts'
 import { resolveGrammar, tokenClass, Tokenizer } from 'ts-syntax-highlighter/browser'
 import { resolveCanvas } from './canvas.ts'
-import { mermaid } from './diagram.ts'
+import { renderMermaid } from './diagram.ts'
 import { escapeHtml, unescapeHtml } from './html.ts'
 import { liveBlock } from './live-markup.ts'
-import { resolveMathMacros } from './math.ts'
+import { createMathRenderer, resolveMathMacros } from './math.ts'
 import { prepareMarkdown, splitSlots } from './syntax.ts'
 
 export { defineAddon, defineTheme } from './extensions.ts'
+export { defineKatexSetup, defineMermaidRendererSetup, defineMermaidSetup } from './authoring-setup.ts'
+export type { KatexOptions, MermaidOptions, MermaidRenderer } from './authoring-setup.ts'
 export type { LayoutContext, PresentationAddon, PresentationTheme } from './extensions.ts'
 
 export interface Slide {
@@ -131,11 +134,22 @@ const escapedCode = /<pre><code class="language-([\w+#.-]+)">([\s\S]*?)<\/code><
 export interface RenderOptions {
   liveCompile?: boolean
   extensions?: LoadedExtensions
+  setup?: AuthoringSetup
 }
 
 export async function renderDeck(deck: Deck, options: RenderOptions = {}): Promise<string> {
   const { width, height } = resolveCanvas(deck.headmatter)
-  const macros = resolveMathMacros(deck.headmatter)
+  const configuration = options.setup
+  const renderMath = createMathRenderer({
+    ...configuration?.katex,
+    macros: { ...configuration?.katex?.macros, ...resolveMathMacros(deck.headmatter) },
+  })
+  const mermaidConfig = deck.headmatter?.mermaid
+  const diagramOptions = {
+    ...configuration?.mermaid,
+    ...(mermaidConfig && typeof mermaidConfig === 'object' && !Array.isArray(mermaidConfig) ? mermaidConfig : {}),
+  }
+  const diagramFences = new Map<string, MermaidOptions>()
   const { extensions } = options
   const activeExtensions: PresentationAddon[] = extensions ? [extensions.theme, ...extensions.addons] : []
   const defaults = extensions?.theme.defaults
@@ -153,7 +167,15 @@ export async function renderDeck(deck: Deck, options: RenderOptions = {}): Promi
     return slide.layout === 'default' && typeof slide.frontmatter?.layout !== 'string' ? defaults?.layout ?? slide.layout : slide.layout
   }
   function markdown(content: string): string {
-    const prepared = prepareMarkdown(content, macros)
+    const prepared = prepareMarkdown(content, {
+      renderMath,
+      mathEnabled: (deck.headmatter?.math ?? deck.headmatter?.katex) !== false,
+      registerMermaid(value) {
+        const marker = `mermaid-fence-${diagramFences.size}`
+        diagramFences.set(marker, value)
+        return marker
+      },
+    })
     return prepared.restore(Bun.markdown.html(prepared.source))
   }
   const html = activeSlides.map((slide) => {
@@ -161,20 +183,25 @@ export async function renderDeck(deck: Deck, options: RenderOptions = {}): Promi
     return Object.fromEntries(Object.entries(splitSlots(slide.content)).map(([name, content]) => [name, markdown(content)]))
   })
   const languages = new Set(html.flatMap(slide => Object.values(slide).flatMap(slot => Array.from(slot.matchAll(escapedCode), match => match[1]))))
-  const highlightedLanguages = [...languages].filter(language => !language.endsWith('-tp-run') && !language.endsWith('-tp-edit') && language !== 'mermaid')
+  const highlightedLanguages = [...languages].filter(language => !language.endsWith('-tp-run') && !language.endsWith('-tp-edit') && language !== 'mermaid' && !diagramFences.has(language))
   const grammars = new Map(await Promise.all(highlightedLanguages.map(async language => [language, await resolveGrammar(language)] as const)))
-  const slides = activeSlides.map((slide, index) => {
+  const slides = await Promise.all(activeSlides.map(async (slide, index) => {
     let diagram = 0
     const layout = effectiveLayout(slide)
-    const renderCode = (block: string, language: string, code: string) => {
+    const renderCode = async (block: string, language: string, code: string) => {
       const decoded = unescapeHtml(code)
+      const diagramProps = diagramFences.get(language)
+      if (diagramProps) language = 'mermaid'
       for (const hook of codeHooks) {
         const custom = hook(decoded, language, slide)
         if (custom !== undefined) return custom
       }
       const live = /^(js|ts)-tp-(run|edit)$/.exec(language)
       if (live) return liveBlock(decoded.trimEnd(), live[1] === 'ts' ? 'ts' : 'js', live[2] === 'run')
-      if (language === 'mermaid') return mermaid(decoded, `arrow-${index}-${diagram++}`) || block
+      if (language === 'mermaid') {
+        const svg = mermaidConfig === false ? undefined : await renderMermaid(decoded, `arrow-${index}-${diagram++}`, diagramOptions, diagramProps, configuration?.diagramRenderer)
+        return svg || (diagramProps ? block.replace(/language-mermaid-fence-\d+/, 'language-mermaid') : block)
+      }
       const grammar = grammars.get(language)
       if (!grammar) return block
       const lines = new Tokenizer(grammar).tokenize(decoded)
@@ -183,7 +210,18 @@ export async function renderDeck(deck: Deck, options: RenderOptions = {}): Promi
         .join('')).join('\n')
       return `<pre><code class="language-${language}">${highlighted}</code></pre>`
     }
-    const slots = Object.fromEntries(Object.entries(html[index]).map(([name, markup]) => [name, markup.replace(escapedCode, renderCode)]))
+    const slots = Object.fromEntries(await Promise.all(Object.entries(html[index]).map(async ([name, markup]) => {
+      const blocks = [...markup.matchAll(escapedCode)]
+      if (!blocks.length) return [name, markup]
+      const replacements = await Promise.all(blocks.map(block => renderCode(block[0], block[1], block[2])))
+      let cursor = 0
+      const parts = blocks.map((block, index) => {
+        const part = markup.slice(cursor, block.index) + replacements[index]
+        cursor = block.index + block[0].length
+        return part
+      })
+      return [name, parts.join('') + markup.slice(cursor)]
+    })))
     const custom = layoutHooks[layout]
     const body = custom ? custom({ slide, index, html: slots.default, slots }) : slots.default
     const className = [defaults?.className, slide.className].filter(Boolean).join(' ')
@@ -197,7 +235,7 @@ export async function renderDeck(deck: Deck, options: RenderOptions = {}): Promi
       ? `<img class="slide-layout-image" src="${escapeHtml(safeImage)}" alt="" loading="lazy">`
       : ''
     return `<article id="slide-${index + 1}" class="slide slidev-layout layout-${escapeHtml(layout)} ${escapeHtml(className)}" aria-label="${escapeHtml(slide.title)}"${route}${motion}>${background ? `${background}<div class="slide-content">${body}</div>` : body}</article>`
-  })
+  }))
 
   const choices = activeSlides.map((slide, index) => `<option value="${index + 1}">${index + 1}. ${escapeHtml(slide.title)}</option>`)
   const notes = activeSlides.map((slide) => {

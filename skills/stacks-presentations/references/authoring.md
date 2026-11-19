@@ -33,11 +33,19 @@ deck. For example, `canvasWidth: 800` and `aspectRatio: 4/3` produce an
   `\[...\]` for display equations. Native MathML handles fractions, roots,
   sums, matrices, math alphabets, and alignments. Use `\tag{1}` for a
   custom equation number and `\newcommand` for a formula-local macro.
+- Put ranges after a display opener, as in `$$ {hide|1|2|all}`. Each
+  additional range uses one click. Add `{at: 3, startLine: 2, finally: 'all'}`
+  after the ranges to control click and line numbering and the final state.
+  Row numbers and explicit tags work in `align` and `gather`.
+- Use `\ce{...}` for common reactions and molecular notation, and
+  `\pu{...}` for quantities and units.
 - Use deck-wide macros under `math.macros`. Quote TeX with YAML single
   quotes so backslashes are preserved.
 - A `mermaid` fence supports flowcharts with styled nodes and subgraphs,
-  sequence diagrams with participants, messages, notes and sections,
-  and simple state transitions. Flowchart and state layout uses `ts-charts`.
+  sequence diagrams, simple state transitions, class and entity relationship
+  diagrams, and pie charts. Options like `{scale:0.5, theme:'neutral'}` on the
+  fence override deck defaults. Diagram YAML can also provide a title and
+  configuration, including pie legend placement and donut radius.
   Use an external SVG if a diagram requires unsupported syntax.
 
 ```yaml
@@ -45,6 +53,13 @@ math:
   macros:
     '\norm': '\left\lVert #1 \right\rVert'
 ```
+
+In a deck, `setup/katex.ts`, `setup/mermaid.ts`, and
+`setup/mermaid-renderer.ts` can export callbacks created with
+`defineKatexSetup`, `defineMermaidSetup`, and
+`defineMermaidRendererSetup` from `ts-presentation`. The callbacks run in
+Bun during compilation. A custom renderer receives plain Mermaid source
+and options and returns an SVG string.
 
 ## Rehearsal
 

@@ -205,26 +205,55 @@ v-click, v-after, v-clicks { display: contents; }
   }
 }
 
-.slide-diagram { display: block; max-width: 100%; max-height: 380px; margin-inline: auto; }
-.slide-diagram text { fill: #f9f2ed; font: 14px system-ui, sans-serif; }
+.slide-diagram {
+  display: block;
+  max-width: 100%;
+  max-height: 380px;
+  margin-inline: auto;
+  background: var(--diagram-background, transparent);
+}
+.slide-diagram:is([data-diagram-theme="base"], [data-diagram-theme="neutral"]) {
+  --diagram-background: #f3f5f7;
+  --diagram-fill: #e7ecf2;
+  --diagram-ink: #1b2b3c;
+  --diagram-stroke: #405b77;
+  --diagram-callout: #dde6f2;
+}
+.slide-diagram[data-diagram-theme="forest"] {
+  --diagram-background: #173531;
+  --diagram-fill: #214640;
+  --diagram-ink: #effaf4;
+  --diagram-stroke: #9ad1bb;
+  --diagram-callout: #26524b;
+}
+.slide-diagram[data-diagram-theme="dark"] { --diagram-background: #14202c; }
+.slide-diagram text { fill: var(--diagram-ink, #f9f2ed); font: 14px system-ui, sans-serif; }
 .slide-diagram .diagram-node :is(rect, ellipse, polygon, path) {
   fill: var(--diagram-fill, #2c3440);
   stroke: var(--diagram-stroke, #9bb7d0);
   stroke-width: var(--diagram-stroke-width, 1.2);
   stroke-dasharray: var(--diagram-stroke-dasharray, none);
 }
-.slide-diagram .diagram-node-label { fill: var(--diagram-color, #f9f2ed); }
-.slide-diagram .diagram-edge { stroke: #9bb7d0; stroke-width: 1.7; fill: none; }
+.slide-diagram .diagram-node-label { fill: var(--diagram-color, var(--diagram-ink, #f9f2ed)); }
+.slide-diagram .diagram-edge { stroke: var(--diagram-stroke, #9bb7d0); stroke-width: 1.7; fill: none; }
 .slide-diagram .diagram-edge-thick { stroke-width: 3.2; }
 .slide-diagram .diagram-edge-dotted, .slide-diagram .diagram-lifeline { stroke-dasharray: 5 4; }
-.slide-diagram .diagram-arrow { fill: #9bb7d0; }
-.slide-diagram .diagram-cross { fill: none; stroke: #9bb7d0; stroke-width: 1.4; }
-.slide-diagram .diagram-edge-label { font-size: 12px; paint-order: stroke; stroke: #1b2028; stroke-width: 3px; }
-.slide-diagram .diagram-cluster rect, .slide-diagram .diagram-sequence-section rect { fill: #273a49; fill-opacity: 0.55; stroke: #7694a9; stroke-dasharray: 4 3; }
+.slide-diagram .diagram-arrow { fill: var(--diagram-stroke, #9bb7d0); }
+.slide-diagram .diagram-cross { fill: none; stroke: var(--diagram-stroke, #9bb7d0); stroke-width: 1.4; }
+.slide-diagram .diagram-edge-label { font-size: 12px; paint-order: stroke; stroke: var(--diagram-background, #1b2028); stroke-width: 3px; }
+.slide-diagram .diagram-cluster rect, .slide-diagram .diagram-sequence-section rect { fill: var(--diagram-callout, #273a49); fill-opacity: 0.55; stroke: var(--diagram-stroke, #7694a9); stroke-dasharray: 4 3; }
 .slide-diagram .diagram-cluster-label { font-size: 12px; font-weight: 600; }
-.slide-diagram .diagram-lifeline { fill: none; stroke: #7893aa; stroke-width: 1.2; }
-.slide-diagram :is(.diagram-participant, .diagram-activation) { fill: #2c3440; stroke: #9bb7d0; }
-.slide-diagram .diagram-sequence-note rect { fill: #3b4358; stroke: #9bb7d0; }
+.slide-diagram .diagram-lifeline { fill: none; stroke: var(--diagram-stroke, #7893aa); stroke-width: 1.2; }
+.slide-diagram :is(.diagram-participant, .diagram-activation) { fill: var(--diagram-fill, #2c3440); stroke: var(--diagram-stroke, #9bb7d0); }
+.slide-diagram .diagram-sequence-note rect { fill: var(--diagram-callout, #3b4358); stroke: var(--diagram-stroke, #9bb7d0); }
+.slide-diagram :is(.diagram-card-divider, .diagram-marker-open) { stroke: var(--diagram-stroke, #9bb7d0); fill: var(--diagram-background, #14202c); }
+.slide-diagram .diagram-marker-solid { stroke: var(--diagram-stroke, #9bb7d0); fill: var(--diagram-stroke, #9bb7d0); }
+.slide-diagram :is(.diagram-title, .diagram-card-title) { font-weight: 700; }
+.slide-diagram .diagram-card-annotation { font-size: 11px; }
+.slide-diagram .diagram-card-member { font: 13px ui-monospace, monospace; }
+.slide-diagram .diagram-pie-slice path { stroke: var(--diagram-background, #14202c); stroke-width: 1.5; }
+.slide-diagram .diagram-pie-highlight path, .slide-diagram .diagram-pie-slice:hover path { stroke: var(--diagram-ink, #f9f2ed); stroke-width: 2.5; }
+.slide-diagram .diagram-pie-percent { fill: #192333; font-weight: 700; }
 
 body.capturing { grid-template-rows: minmax(0, 1fr); }
 body.capturing #controls { display: none; }
@@ -241,6 +270,10 @@ body.capturing #controls { display: none; }
 @keyframes slide-up { from { opacity: 0; translate: 0 16px; } }
 
 .slide math[display="block"] { margin-block: 0.7em; }
+@media screen {
+  [data-equation-dim] { opacity: 0.24; }
+  [data-equation-hidden] { visibility: hidden; }
+}
 .slide math .math-bold, .slide math .math-bold-italic { font-weight: 700; }
 .slide math .math-italic, .slide math .math-bold-italic { font-style: italic; }
 .slide math .math-sans-serif { font-family: sans-serif; }

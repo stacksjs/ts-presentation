@@ -139,3 +139,57 @@ sequenceDiagram
 <!--
 Show how the participants, messages and note come from the diagram fence.
 -->
+
+---
+
+# Highlight each equation
+
+The first step expands the square. The second gives the result.
+
+$$ {hide|1|2|all}
+\begin{aligned}
+24^2 &= (20 + 4)^2 \\
+     &= 400 + 160 + 16 = 576
+\end{aligned}
+$$
+
+<!--
+Start by reading the expression.
+[click]
+Show the square in its expanded form.
+[click]
+Reveal the arithmetic.
+-->
+
+---
+layout: compare
+
+---
+
+# Plan the work
+
+```mermaid {theme:'neutral'}
+pie showData
+  "Review" : 4
+  "Build" : 6
+  "Test" : 3
+```
+
+::right::
+
+```mermaid {theme:'neutral'}
+erDiagram
+  direction LR
+  PROJECT ||--o{ TASK : contains
+  PROJECT {
+    string name
+  }
+  TASK {
+    string title
+    string status
+  }
+```
+
+<!--
+The pie chart shows an estimate. The relationship diagram shows the records behind it.
+-->

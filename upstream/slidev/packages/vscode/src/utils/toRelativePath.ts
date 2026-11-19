@@ -1,8 +1,0 @@
-import { slash } from '@antfu/utils'
-import { relative } from 'pathe'
-import { workspace } from 'vscode'
-
-export function toRelativePath(path: string) {
-  const workspaceRoot = workspace.workspaceFolders?.[0]?.uri.fsPath ?? ''
-  return slash(relative(workspaceRoot, path))
-}

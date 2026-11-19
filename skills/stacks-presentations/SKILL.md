@@ -27,7 +27,7 @@ engines, layouts and generic examples in library projects.
 - [Themes and addons](references/extensions.md) for extension configuration,
   layouts, hooks, client scripts, and assets.
 - [Export and verification](references/exporting.md) for PDF, PNG and PowerPoint.
-- [Upstream reference](references/upstream/skills/slidev/SKILL.md) for
+- [Slidev reference](references/slidev-source/skills/slidev/SKILL.md) for
   interpreting Slidev decks and checking feature conventions. Refer to the
   [compatibility notes](references/compatibility.md) before applying upstream
   instructions to a Stacks deck.

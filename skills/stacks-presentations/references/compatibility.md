@@ -10,14 +10,14 @@ in a new ts-presentation project.
 | Markdown, frontmatter, slide includes, click steps | Native Bun parser and browser player |
 | Scoped layouts and themes | TypeScript theme and addon modules, named slots, deck CSS |
 | Monaco editor and runner | Local editor and timed browser-worker runner. TypeScript compilation for edits uses Bun in dev |
-| KaTeX | Native MathML with deck macros, TeX delimiters and tagged equations |
+| KaTeX | Native MathML with chemistry, numbered alignment rows, deck macros, and click highlighting |
 | PowerPoint export | Image slides or editable text and boxes with separate artwork |
-| Mermaid | Local flowchart, sequence, and basic state rendering |
+| Mermaid | Local flowchart, sequence, basic state, class, ER, and pie rendering |
 | Presenter mode | Two synced browser windows, notes and timer |
 | Drawing and recording | Canvas drawing and browser screen capture |
 
 Existing Vue components, UnoCSS configuration, Monaco IntelliSense, Shiki
 transformers, PlantUML, and the full KaTeX and Mermaid grammars need
 additional ports. Keep the source deck when
-a user needs those features later. Refer to the [upstream guide](upstream/skills/slidev/SKILL.md)
+a user needs those features later. Refer to the [Slidev guide](slidev-source/skills/slidev/SKILL.md)
 for interpreting that source.

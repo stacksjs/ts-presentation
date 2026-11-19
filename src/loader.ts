@@ -3,6 +3,7 @@ import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import type { Deck, RenderOptions, Slide } from './index.ts'
 import type { ExtensionAssets } from './extensions.ts'
 import type { SlideCanvas } from './canvas.ts'
+import { loadAuthoringSetup } from './authoring-setup.ts'
 import { resolveCanvas } from './canvas.ts'
 import { loadExtensions } from './extensions.ts'
 import { parseDeck, renderDeck } from './index.ts'
@@ -77,8 +78,11 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
     }
 
     const deck = await read(resolve(entry), [])
-    const extensions = await loadExtensions(deck, directory, observe, options.theme)
-    const html = await renderDeck(deck, { liveCompile: options.liveCompile, extensions })
+    const [extensions, setup] = await Promise.all([
+      loadExtensions(deck, directory, observe, options.theme),
+      loadAuthoringSetup(directory, observe),
+    ])
+    const html = await renderDeck(deck, { liveCompile: options.liveCompile, extensions, setup })
     const author = typeof deck.headmatter?.author === 'string' ? deck.headmatter.author : undefined
     const compiled = { title: deck.title, author, canvas: resolveCanvas(deck.headmatter), html, styles: extensions.styles, client: extensions.client, mounts: extensions.mounts }
     cached = { files, deck: compiled }

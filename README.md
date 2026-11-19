@@ -55,8 +55,8 @@ the deck and style slides with an optional `style.css`.
 | Navigation | `routeAlias: review`, then links such as `#review` |
 | Per-slide options | `class`, `hide`, `disabled`, and `transition: fade`, `slide-left`, or `slide-up` |
 | Images and component markup | Trusted HTML, with optional `data-zoom` on an image |
-| Diagrams | Mermaid flowcharts, sequence diagrams, and basic state diagrams |
-| Math | Inline and display TeX, deck macros, math alphabets, and aligned equations rendered as MathML |
+| Diagrams | Mermaid flowcharts, sequence, basic state, class, entity relationship, and pie diagrams |
+| Math | Native MathML with TeX macros, numbered equations, click-based equation highlighting, and common chemistry notation |
 | Live code | A `js` or `ts` fence followed by `{live-run}` or `{monaco-run}`. Use `{live}` or `{monaco}` for an editor |
 | Themes and addons | Set `theme: paper` or `theme: serif`, or load trusted local modules through `theme` and `addons` |
 | Canvas size | Set `canvasWidth: 800` and `aspectRatio: 4/3` in deck frontmatter for an 800 × 600 canvas |
@@ -76,10 +76,12 @@ The port branches from [Slidev v53.1.0](https://github.com/slidevjs/slidev/tree/
 Credit goes to Anthony Fu and the Slidev community. The original MIT
 license is included in [licenses/Slidev-MIT.txt](licenses/Slidev-MIT.txt).
 
-All seven packages and the test tree are preserved in the pinned
-[upstream source snapshot](upstream/slidev/README.md). The editable
-exporter ports Slidev's DOM walker and layout normalization to Bun
-WebView and the native PowerPoint writer. Its adapted tests run with Bun.
+All seven Slidev packages and the complete test tree are preserved in the
+[source snapshot in Git history](https://github.com/stacksjs/ts-presentation/tree/fd663ef704a3dbd27ad07cf7151003490f3c21b1/upstream/slidev).
+The active checkout contains the Bun port. The editable exporter ports
+Slidev's DOM walker and layout normalization to Bun WebView and the native
+PowerPoint writer. Adapted tests for export, math, and diagrams run with
+`bun test`.
 
 Open compatibility work includes Vue components and extensions, Monaco tooling,
 Shiki transformers, the full TeX and Mermaid grammars, PlantUML, and remote slide

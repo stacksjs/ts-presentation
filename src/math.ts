@@ -1,4 +1,6 @@
 import { escapeHtml } from './html.ts'
+import type { KatexOptions } from './authoring-setup.ts'
+import { chemicalFormula, physicalUnits } from './math-chemistry.ts'
 
 const greek: Record<string, string> = {
   alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε', varepsilon: 'ϵ', zeta: 'ζ', eta: 'η',
@@ -30,6 +32,8 @@ const variants: Record<string, string> = {
   mathsf: 'sans-serif', mathtt: 'monospace', mathcal: 'script', mathfrak: 'fraktur', boldsymbol: 'bold-italic',
 }
 const accents: Record<string, string> = { hat: 'ˆ', widehat: 'ˆ', bar: '¯', overline: '¯', vec: '→', dot: '˙', ddot: '¨', tilde: '˜', widetilde: '˜' }
+const stretchedAccents: Record<string, string> = { overrightarrow: '→', overleftarrow: '←', overleftrightarrow: '↔', underrightarrow: '→', underleftarrow: '←', underleftrightarrow: '↔', overbracket: '⎴', underbracket: '⎵' }
+const extensibleArrows: Record<string, string> = { xrightarrow: '→', xleftarrow: '←', xleftrightarrow: '↔', xRightarrow: '⇒', xLeftarrow: '⇐', xLeftrightarrow: '⇔', xmapsto: '↦', xhookrightarrow: '↪', xhookleftarrow: '↩' }
 const delimiters: Record<string, string> = {
   '\\{': '{', '\\}': '}', '\\lbrace': '{', '\\rbrace': '}', '\\langle': '⟨', '\\rangle': '⟩',
   '\\lVert': '‖', '\\rVert': '‖', '\\lvert': '|', '\\rvert': '|',
@@ -57,7 +61,19 @@ export function resolveMathMacros(headmatter?: Record<string, unknown>): MathMac
 }
 
 function tokenize(source: string): string[] {
-  return source.match(/\\[A-Z]+|\\[^A-Z\r\n]|#[1-9]|\s+|./giu) ?? []
+  return source.match(/\\[A-Z@]+|\\[^A-Z@\r\n]|#[1-9]|\s+|./giu) ?? []
+}
+
+interface Macro { body: string[], arguments: number }
+interface MathState { globals: Map<string, Macro>, options: KatexOptions }
+
+export function createMathRenderer(options: KatexOptions = {}): (source: string, display: boolean) => string {
+  const state: MathState = { globals: new Map(), options }
+  return (source, display) => renderMath(source, display, options.macros, state)
+}
+
+function safeColor(value: string): string {
+  return /^(?:#[\da-f]{3}|#[\da-f]{6}|[a-z]{1,24})$/i.test(value) ? value : ''
 }
 
 function applyVariant(content: string, variant: string): string {
@@ -91,22 +107,27 @@ function fence(token: string): string {
 }
 
 /** Translate a bounded TeX math subset to native MathML, with the source retained for accessibility. */
-export function renderMath(source: string, display = false, configured: MathMacros = {}): string {
+export function renderMath(source: string, display = false, configured: MathMacros = {}, state?: MathState): string {
   const tokens = tokenize(source)
   if (tokens.length > 6000) return `<code>${escapeHtml(source)}</code>`
   let cursor = 0
   let depth = 0
   let expandedCount = 0
-  let equationTag = ''
+  let tagState = { label: '', suppressed: false }
+  let environmentDepth = 0
+  let equationNumber = 0
 
-  const macros = new Map<string, { body: string[], arguments: number }>()
-  function define(name: string, replacement: string, arity = 0): void {
-    if (!/^\\[A-Za-z]+$/.test(name) || replacement.length > 8192 || arity < 0 || arity > 9) return
+  const macros = new Map<string, Macro>()
+  function define(name: string, replacement: string, arity = 0, global = false): void {
+    if (!/^\\[A-Za-z@]+$/.test(name) || replacement.length > 8192 || arity < 0 || arity > 9) return
     const body = tokenize(replacement)
     const inferred = Math.max(0, ...body.map(token => /^#[1-9]$/.test(token) ? Number(token[1]) : 0))
-    macros.set(name, { body, arguments: Math.max(arity, inferred) })
+    const definition = { body, arguments: Math.max(arity, inferred) }
+    macros.set(name, definition)
+    if (global) state?.globals.set(name, definition)
   }
   for (const [name, replacement] of Object.entries(configured)) define(name, replacement)
+  for (const [name, definition] of state?.globals ?? []) macros.set(name, definition)
 
   const space = () => { while (/^\s+$/.test(tokens[cursor] ?? '')) cursor++ }
 
@@ -151,6 +172,20 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return markup
   }
 
+  function bracket(): string | undefined {
+    if (peek() !== '[') return
+    take()
+    const start = cursor
+    while (cursor < tokens.length && tokens[cursor] !== ']') cursor++
+    if (cursor === tokens.length) throw new Error('Unclosed optional math argument')
+    return tokens.slice(start, cursor++).join('')
+  }
+
+  function nextTag(automatic: boolean): string {
+    if (tagState.label) return tagState.label
+    return automatic && !tagState.suppressed ? `(${++equationNumber})` : ''
+  }
+
   function row(stop: string[] = []): string {
     if (depth++ > 100) throw new Error('Math groups are nested too deeply')
     const parts: string[] = []
@@ -193,29 +228,53 @@ export function renderMath(source: string, display = false, configured: MathMacr
   function matrix(environment: string): string {
     if (/^equation[*]?$/.test(environment)) {
       const content = row(['\\end'])
-      if (peek() === '\\end') { take(); literalGroup() }
+      if (take() !== '\\end' || literalGroup() !== environment) throw new Error(`Unclosed math environment: ${environment}`)
+      tagState.label = nextTag(display && environment === 'equation')
       return `<mrow>${content}</mrow>`
     }
-    if (!/^(?:[pbBvV]?matrix|smallmatrix|cases|align(?:ed|edat|at[*]?|[*])?|gather(?:ed|[*])?|split|array|multline[*]?)$/.test(environment))
+    if (!/^(?:[pbBvV]?matrix[*]?|smallmatrix|[d]?[r]?cases|align(?:ed|edat|at[*]?|[*])?|gather(?:ed|[*])?|split|[d]?array|multline[*]?)$/.test(environment))
       return tag('mtext', `\\begin{${environment}}`)
-    const columns = environment === 'array' || /^align(?:ed)?at[*]?$/.test(environment) ? literalGroup() : ''
-    const rows: string[] = []
+    const columns = environment.endsWith('array') || /^align(?:ed)?at[*]?$/.test(environment)
+      ? literalGroup()
+      : environment.endsWith('matrix*') ? bracket() ?? '' : ''
+    const outerTag = tagState
+    const automatic = display && environmentDepth === 0 && /^(?:align|alignat|gather)$/.test(environment)
+    environmentDepth++
+    tagState = { label: '', suppressed: false }
+    const rows: { cells: string[], label: string }[] = []
     let cells: string[] = []
     while (peek()) {
-      cells.push(`<mtd>${row(['&', '\\\\', '\\end'])}</mtd>`)
+      cells.push(row(['&', '\\\\', '\\cr', '\\end']))
       const separator = take()
       if (separator === '&') continue
-      rows.push(`<mtr>${cells.join('')}</mtr>`)
+      if (cells.length > 1 || cells[0] || rows.length === 0) rows.push({ cells, label: nextTag(automatic) })
       cells = []
-      if (separator === '\\end') { literalGroup(); break }
-      if (!separator) break
+      tagState = { label: '', suppressed: false }
+      if (separator === '\\end' && literalGroup() === environment) break
+      if (separator !== '\\\\' && separator !== '\\cr') throw new Error(`Unclosed math environment: ${environment}`)
+      bracket()
     }
-    const [left, right] = matrixDelimiters[environment] ?? ['', '']
-    const columnAlign = environment === 'array'
+    environmentDepth--
+    tagState = outerTag
+    const style = environment.replace(/[*]$/, '').replace(/^d(?=(?:array|[r]?cases)$)/, '')
+    const [left, right] = style === 'rcases' ? ['', '}'] : matrixDelimiters[style] ?? ['', '']
+    const aligned = environment.startsWith('align') || environment === 'split'
+    const columnAlign = columns && (style === 'array' || style.endsWith('matrix'))
       ? [...columns].filter(column => /[lcr]/.test(column)).map(column => ({ l: 'left', c: 'center', r: 'right' })[column]).join(' ')
-      : environment.startsWith('align') || environment === 'split' ? 'right left' : environment === 'cases' ? 'left left' : ''
+      : aligned ? 'right left' : style.endsWith('cases') ? 'left left' : ''
     const align = columnAlign ? ` columnalign="${columnAlign}"` : ''
-    return `<mrow>${fence(left)}<mtable${align}>${rows.join('')}</mtable>${fence(right)}</mrow>`
+    const tags = rows.some(entry => entry.label)
+    const alignment = columnAlign ? columnAlign.split(' ') : []
+    const markup = rows.map((entry) => {
+      const cell = tags ? `<mtd class="math-equation-number">${tag('mtext', entry.label)}</mtd>` : ''
+      // MathML Core browsers use CSS alignment on cells.
+      const content = entry.cells.map((value, index) => {
+        const align = aligned ? alignment[index % alignment.length] : alignment[index] ?? alignment.at(-1)
+        return `<mtd${align ? ` style="text-align:${align}"` : ''}>${value}</mtd>`
+      }).join('')
+      return `<mtr>${state?.options.leqno ? cell : ''}${content}${state?.options.leqno ? '' : cell}</mtr>`
+    }).join('')
+    return `<mrow>${fence(left)}<mtable data-equation-lines${align}>${markup}</mtable>${fence(right)}</mrow>`
   }
 
   function atom(token: string): Atom {
@@ -231,6 +290,27 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
 
     const name = token.slice(1)
+    if (name === 'ce' || name === 'pu') {
+      return { markup: (name === 'ce' ? chemicalFormula : physicalUnits)(literalGroup()) }
+    }
+    if (name === 'def' || name === 'gdef') {
+      const command = literalGroup()
+      let arity = 0
+      space()
+      while (/^#[1-9]$/.test(tokens[cursor] ?? '')) arity = Math.max(arity, Number(tokens[cursor++][1]))
+      define(command, literalGroup(), arity, name === 'gdef')
+      return { markup: '' }
+    }
+    if (name === 'let') {
+      const target = literalGroup()
+      space()
+      if (tokens[cursor] === '=') cursor++
+      const source = literalGroup()
+      const existing = macros.get(source)
+      if (existing && /^\\[A-Za-z@]+$/.test(target)) macros.set(target, existing)
+      else define(target, source)
+      return { markup: '' }
+    }
     if (name === 'newcommand' || name === 'renewcommand' || name === 'providecommand') {
       const command = literalGroup().trim()
       space()
@@ -244,19 +324,19 @@ export function renderMath(source: string, display = false, configured: MathMacr
       return { markup: '' }
     }
     if (name === 'tag') {
-      if (peek() === '*') { take(); equationTag = literalGroup() }
-      else equationTag = `(${literalGroup()})`
+      if (peek() === '*') { take(); tagState.label = literalGroup() }
+      else tagState.label = `(${literalGroup()})`
       return { markup: '' }
     }
     if (name === 'label') { literalGroup(); return { markup: '' } }
-    if (name === 'notag' || name === 'nonumber') return { markup: '' }
+    if (name === 'notag' || name === 'nonumber') { tagState.suppressed = true; return { markup: '' } }
     if (name === 'boxed' || name === 'cancel' || name === 'bcancel' || name === 'xcancel') {
       return { markup: `<mrow class="math-${name}">${argument()}</mrow>` }
     }
     if (name === 'textcolor') {
       const color = literalGroup()
       const content = argument()
-      const safe = /^(?:#[\da-f]{3,8}|[a-z]{1,24})$/i.test(color) ? ` style="color:${color}"` : ''
+      const safe = safeColor(color) ? ` style="color:${color}"` : ''
       return { markup: `<mrow${safe}>${content}</mrow>` }
     }
     if (name === 'left') {
@@ -291,11 +371,32 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const element = above ? 'mover' : 'munder'
       return { markup: `<${element}>${argument()}${tag('mo', name === 'underline' ? '_' : above ? '⏞' : '⏟')}</${element}>` }
     }
-    if (name === 'overset' || name === 'underset') {
+    if (name === 'overset' || name === 'underset' || name === 'stackrel') {
       const annotation = argument()
-      const element = name === 'overset' ? 'mover' : 'munder'
+      const element = name === 'underset' ? 'munder' : 'mover'
       return { markup: `<${element}>${argument()}${annotation}</${element}>` }
     }
+    if (Object.hasOwn(stretchedAccents, name)) {
+      const element = name.startsWith('under') ? 'munder' : 'mover'
+      return { markup: `<${element}>${argument()}<mo stretchy="true">${stretchedAccents[name]}</mo></${element}>` }
+    }
+    if (Object.hasOwn(extensibleArrows, name)) {
+      let subscript = ''
+      if (peek() === '[') {
+        take()
+        subscript = `<mrow>${row([']'])}</mrow>`
+        if (take() !== ']') throw new Error('Unclosed arrow subscript')
+      }
+      const base = `<mo stretchy="true">${extensibleArrows[name]}</mo>`
+      const superscript = argument()
+      return { markup: subscript ? `<munderover>${base}${subscript}${superscript}</munderover>` : `<mover>${base}${superscript}</mover>` }
+    }
+    if (name === 'phantom' || name === 'hphantom' || name === 'vphantom') {
+      const invisible = `<mphantom>${argument()}</mphantom>`
+      const dimensions = name === 'hphantom' ? ' height="0" depth="0"' : name === 'vphantom' ? ' width="0"' : ''
+      return { markup: dimensions ? `<mpadded${dimensions}>${invisible}</mpadded>` : invisible }
+    }
+    if (name === 'relax' || name === 'allowbreak' || name === 'nobreak') return { markup: '' }
     if (Object.hasOwn(variants, name)) {
       const variant = variants[name]
       const content = argument()
@@ -310,17 +411,21 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (Object.hasOwn(delimiters, token)) return { markup: fence(token) }
     if (Object.hasOwn(spacing, name)) return { markup: `<mspace width="${spacing[name]}"/>` }
     if (/^[%$#&_{}|]$/.test(name)) return { markup: tag('mo', name) }
-    return { markup: tag('mtext', token) }
+    if (state?.options.throwOnError) throw new Error(`Unsupported math command: ${token}`)
+    const color = safeColor(state?.options.errorColor ?? '')
+    return { markup: color ? `<mtext style="color:${color}">${escapeHtml(token)}</mtext>` : tag('mtext', token) }
   }
 
   try {
     const expression = `<mrow>${row()}</mrow>`
+    const equationTag = tagState.label ? `<mtd class="math-equation-number">${tag('mtext', tagState.label)}</mtd>` : ''
     const numbered = equationTag
-      ? `<mtable><mtr><mtd>${expression}</mtd><mtd>${tag('mtext', equationTag)}</mtd></mtr></mtable>`
+      ? `<mtable><mtr>${state?.options.leqno ? equationTag : ''}<mtd>${expression}</mtd>${state?.options.leqno ? '' : equationTag}</mtr></mtable>`
       : expression
     return `<math xmlns="http://www.w3.org/1998/Math/MathML"${display ? ' display="block"' : ''}><semantics>${numbered}<annotation encoding="application/x-tex">${escapeHtml(source)}</annotation></semantics></math>`
   }
-  catch {
+  catch (error) {
+    if (state?.options.throwOnError) throw error
     return `<code class="math-unrendered">${escapeHtml(source)}</code>`
   }
 }
