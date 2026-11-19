@@ -1,36 +1,49 @@
-import type { ResolvedSlidevOptions } from '@slidev/types'
-import type { VirtualModuleContext } from '../packages/slidev/node/virtual/types'
-import { describe, expect, it } from 'vitest'
-import { templateSetups } from '../packages/slidev/node/virtual/setups'
+import { describe, expect, it } from 'bun:test'
+import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { createDeckCompiler } from '../node/runtime/loader.ts'
 
-describe('mermaid-renderer virtual module', () => {
-  it('registers /@slidev/setups/mermaid-renderer', () => {
-    const ids = templateSetups.map(t => t.id)
-    expect(ids).toContain('/@slidev/setups/mermaid-renderer')
-  })
+describe('diagram renderer setup', () => {
+  it('discovers a new setup, combines its options, and reloads changed local imports', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'presentation-diagram-setup-'))
+    try {
+      const entry = join(root, 'slides.md')
+      const directory = join(root, 'setup')
+      const renderer = join(directory, 'mermaid-renderer.ts')
+      const label = join(directory, 'label.ts')
+      await Bun.write(entry, ['# Diagrams', '', '$\\x$', '', '```mermaid {theme:"forest"}', 'flowchart TD', '  A --> B', '```'].join('\n'))
 
-  it('generates content with mermaid-renderer glob', () => {
-    const template = templateSetups.find(t => t.id === '/@slidev/setups/mermaid-renderer')!
-    const context: VirtualModuleContext = {
-      makeAbsoluteImportGlob: () => '/node_modules/.slidev/virtual/setups/mermaid-renderer.test.ts',
-      resolve: async () => null,
+      const compile = createDeckCompiler(entry, { liveCompile: true })
+      const initial = await compile()
+      expect(initial.html).toContain('data-diagram-theme="forest"')
+      expect(await compile()).toBe(initial)
+      await mkdir(directory)
+      await Bun.write(join(directory, 'mermaid.ts'), "export default () => ({ theme: 'dark', author: 'Deck settings' })")
+      await Bun.write(renderer, [
+        "import { title } from './label.ts'",
+        "export default () => (source, options) => '<svg viewBox=\"0 0 100 40\"><text>' + title + ': ' + options.author + ' / ' + options.theme + '</text></svg>'",
+      ].join('\n'))
+      await Bun.write(join(directory, 'katex.ts'), [
+        "import { symbol } from './label.ts'",
+        "export default () => ({ macros: { '\\\\x': symbol } })",
+      ].join('\n'))
+      await Bun.write(label, "export const title = 'Custom renderer'; export const symbol = 'a'")
+      expect((await compile()).html).toContain('Custom renderer: Deck settings / forest')
+
+      await Bun.write(label, "export const title = 'Reloaded renderer'; export const symbol = 'z'")
+      const updated = await compile()
+      expect(updated.html).toContain('Reloaded renderer: Deck settings / forest')
+      expect(updated.html).toContain('<mi>z</mi>')
+      expect(updated.live?.slides[0].revision).not.toBe(initial.live?.slides[0].revision)
+
+      await rm(renderer)
+      const restored = await compile()
+      expect(restored.html).not.toContain('Reloaded renderer')
+      expect(restored.html).toContain('data-diagram-theme="forest"')
     }
-    const content = template.getContent.call(context, {
-      userRoot: '/user/project',
-      roots: ['/user/project'],
-    } as ResolvedSlidevOptions)
-
-    expect(content).toContain('mermaid-renderer')
-    expect(content).toContain('import __slidev_setup_0 from "/node_modules/.slidev/virtual/setups/mermaid-renderer.test.ts"')
-    expect(content).toContain('export default')
-    expect(content).toContain('filter(Boolean)')
-  })
-
-  it('comes after mermaid in templateSetups', () => {
-    const ids = templateSetups.map(t => t.id)
-    const mermaidIdx = ids.indexOf('/@slidev/setups/mermaid')
-    const rendererIdx = ids.indexOf('/@slidev/setups/mermaid-renderer')
-    expect(mermaidIdx).toBeGreaterThanOrEqual(0)
-    expect(rendererIdx).toBeGreaterThan(mermaidIdx)
+    finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 })

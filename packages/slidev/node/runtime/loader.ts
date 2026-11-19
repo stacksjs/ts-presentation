@@ -1,12 +1,12 @@
 import { readFile, realpath } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { randomBytes } from 'node:crypto'
-import { pathToFileURL } from 'node:url'
 import type { Deck, RenderOptions, Slide } from './index.ts'
 import type { ExtensionAssets } from './extensions.ts'
 import type { SlideCanvas } from '../../../types/src/canvas.ts'
 import type { LiveDeck } from '../../../types/src/dev-protocol.ts'
 import { loadAuthoringSetup } from './authoring-setup.ts'
+import { importDeckModule } from './deck-modules.ts'
 import { within } from './assets.ts'
 import { resolveCanvas } from '../../../types/src/canvas.ts'
 import { loadSavedDrawings } from './drawing-store.ts'
@@ -56,7 +56,6 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
   const mode = options.mode ?? (options.liveCompile ? 'dev' : 'build')
   let cached: { files: Map<string, string | undefined>, deck: CompiledDeck } | undefined
   let pending: Promise<CompiledDeck> | undefined
-  let loadedPreparserRevision: string | undefined
 
   async function compile(): Promise<CompiledDeck> {
     if (cached) {
@@ -80,25 +79,30 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
       return revision
     }
 
+    async function observeOptional(path: string): Promise<string | undefined> {
+      try {
+        return await observe(path)
+      }
+      catch (error) {
+        const { code } = error as NodeJS.ErrnoException
+        if (code !== 'ENOENT' && code !== 'ENOTDIR') throw error
+        files.set(path, undefined)
+      }
+    }
+
     const filepath = await realpath(resolve(entry))
     if (!within(directory, filepath)) throw new Error('Slide source must stay inside the deck directory')
     await observe(filepath)
     const source = await readFile(filepath, 'utf8')
     const preparserPath = join(directory, 'setup', 'preparser.ts')
-    const preparserRevision = await fileRevision(preparserPath).catch(() => undefined)
-    files.set(preparserPath, preparserRevision)
     let preparsers: readonly PreparserExtension[] = []
-    if (preparserRevision !== undefined) {
-      const modulePath = require.resolve(preparserPath)
-      // Bun normalizes file URLs to the module path and shares the cache with require.
-      if (loadedPreparserRevision !== preparserRevision) delete require.cache[modulePath]
-      const { default: setup } = await import(pathToFileURL(modulePath).href) as { default?: PreparserSetup }
+    if (await observeOptional(preparserPath) !== undefined) {
+      const { default: setup } = await importDeckModule<PreparserSetup>(preparserPath, directory, observe)
       if (typeof setup !== 'function') throw new Error('setup/preparser.ts must export a setup function')
       const result = await setup({ filepath, headmatter: readHeadmatter(source), mode })
       if (result !== undefined && !Array.isArray(result)) throw new Error('setup/preparser.ts must return a list of extensions')
       preparsers = result ?? []
     }
-    loadedPreparserRevision = preparserRevision
     const documents = new Map<string, Deck>()
     async function parseDocument(path: string, input: string): Promise<Deck> {
       const deck = await parseDeckAsync(input, preparsers)
@@ -175,7 +179,7 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
     }))
     const [extensions, setup] = await Promise.all([
       loadExtensions(deck, directory, observe, options.theme),
-      loadAuthoringSetup(directory, observe),
+      loadAuthoringSetup(directory, observe, observeOptional),
     ])
     const canvas = resolveCanvas(deck.headmatter)
     const drawings = resolveDrawings(deck.headmatter, extensions.theme.defaults?.drawings, basename(filepath, '.md'))

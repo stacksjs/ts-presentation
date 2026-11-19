@@ -4,6 +4,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import type { DrawingOptions } from '../../../types/src/drawings.ts'
 import type { Deck, Slide } from './index.ts'
+import { importDeckModule } from './deck-modules.ts'
 
 export interface LayoutContext {
   slide: Readonly<Slide>
@@ -44,13 +45,22 @@ export interface LoadedExtensions extends ExtensionAssets {
   addons: PresentationAddon[]
 }
 
+const stxLayouts = new WeakMap<PresentationLayout, (observe: (path: string) => Promise<string>) => Promise<void>>()
+
 export function defineStxLayout(template: URL): PresentationLayout {
+  let revision: string | undefined
   let renderer: ReturnType<typeof compileTemplate> | undefined
-  return async ({ html, slots, slide, index }) => {
+  const layout: PresentationLayout = async ({ html, slots, slide, index }) => {
     renderer ??= compileTemplate(template)
     const render = await renderer
     return render({ ...slots, content: html, title: slide.title, slideNumber: index + 1 })
   }
+  stxLayouts.set(layout, async (observe) => {
+    const next = await observe(fileURLToPath(template))
+    if (revision !== next) renderer = undefined
+    revision = next
+  })
+  return layout
 }
 
 export function defineTheme(theme: PresentationTheme): PresentationTheme {
@@ -145,12 +155,13 @@ export async function loadExtensions(
     }
 
     const entry = await extensionEntry(reference, kind, directory)
-    const data = (await import(pathToFileURL(entry).href)).default as PresentationTheme | undefined
+    const { default: data } = await importDeckModule<PresentationTheme>(entry, directory, observe)
     if (!data || typeof data.name !== 'string' || !/^[a-z][a-z0-9-]+$/i.test(data.name))
       throw new Error(`Presentation ${kind} ${reference} requires a default export with a name`)
     if (seen.has(data.name)) throw new Error(`Duplicate presentation extension: ${data.name}`)
     seen.add(data.name)
     if (data.styles) styles.push(data.styles)
+    for (const layout of Object.values(data.layouts ?? {})) await stxLayouts.get(layout)?.(observe)
     if (data.styleFile) {
       const path = moduleAsset(entry, data.styleFile)
       await observe(path)

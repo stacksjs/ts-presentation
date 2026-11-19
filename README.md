@@ -78,6 +78,8 @@ the deck and style slides with an optional `style.css`.
 | Images and component markup | Trusted HTML, with optional `data-zoom` on an image |
 | First-party diagrams | YAML in a `charts` fence. `ts-charts` renders flowcharts, sequence and state diagrams, class and entity relationships, pie charts, Gantt schedules, Git histories, timelines, and user journeys |
 | Imported diagrams | Slidev diagram fences are translated to structured data and rendered by the same `ts-charts` functions |
+| PlantUML sequence diagrams | `plantuml` fences render messages, participants, notes, and groups locally through `ts-charts` |
+| Markdown alerts | Start a blockquote with `[!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, or `[!CAUTION]` |
 | Math | Native MathML with scoped macros, styled fractions, numbered equations, ruled arrays, commutative diagrams, stacked subscripts, mixed text and math, click highlighting, and chemistry notation |
 | Code walkthroughs | `ts [build.ts] {1\|2-3\|all}{lines:true}` for titles and click highlights, or `md magic-move` around nested fences to animate between frames |
 | Code groups | Enable `comark: true` and place titled fences between `::code-group` and `::` to create keyboard-accessible tabs |
@@ -99,6 +101,12 @@ edges:
 The dev server shares an in-flight compilation and reuses rendered HTML
 until an included source or the preparser entry changes. STX compiles the presentation shell and built-in layout templates once per process.
 The TypeScript player updates only the active slide and its reveal state.
+
+Set `codeTheme: nord` in deck headmatter to choose a first-party syntax palette.
+Use `setup/code-highlighter.ts` to set the palette in code. Existing
+`setup/shiki.ts` files can return a palette name through `theme`. In dev
+mode, edits to setup files, their local imports, and STX layouts refresh the
+preview.
 
 Theme and addon authors can register an STX layout with
 `defineStxLayout(new URL('./layouts/hero.stx', import.meta.url))`. In that

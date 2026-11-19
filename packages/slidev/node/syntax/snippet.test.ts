@@ -1,106 +1,66 @@
-import MarkdownExit from 'markdown-exit'
-import path from 'pathe'
-import { expect, it } from 'vitest'
-import { monacoWriterWhitelist } from '../vite/monacoWrite'
-import MarkdownItSnippet, { resolveSnippetImport } from './snippet'
+import { expect, test } from 'bun:test'
+import { mkdtemp, rm, symlink } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { createDeckCompiler } from '../runtime/loader.ts'
+import { resolveSnippet } from '../runtime/snippets.ts'
+import { saveSnippet } from '../runtime/snippet-write.ts'
+import { fenced, fixture, source } from '../../test/code-fixture.ts'
 
-const fixturesRoot = path.join(__dirname, '../../../../test/fixtures/')
+// Adapted from Slidev's node/syntax/snippet.test.ts. Test the actual loader
+// used for dev, offline builds and exports.
+test('imports VS Code regions inside lists and leaves fenced directives literal', () => fixture(async (root, entry, file) => {
+  const markdown = '# Snippets\n\n- Example\n   <<< @/snippets/fixture.ts#sample\n\n' + fenced('', '<<< @/snippets/fixture.ts')
+  await Bun.write(entry, markdown)
+  const compile = createDeckCompiler(entry)
+  const html = (await compile()).html
+  expect(html).toMatch(/<li>Example\n<pre><code class="language-ts">/)
+  expect(html).toContain('return')
+  expect(html).not.toContain('before')
+  expect(html).toContain('&lt;&lt;&lt; @/snippets/fixture.ts')
+  expect((await resolveSnippet('<<< @/snippets/fixture.ts#sample', root, entry))?.file).toEndWith('/snippets/fixture.ts')
+  await Bun.write(file, source.replace('42', '802'))
+  expect((await compile()).html).toContain('802')
+}))
 
-const options = {
-  userRoot: fixturesRoot,
-  userWorkspaceRoot: fixturesRoot,
-  roots: [fixturesRoot],
-  data: {
-    watchFiles: {},
-    slides: [
-      {
-        index: 0,
-        source: {
-          filepath: path.join(fixturesRoot, 'test.md'),
-        },
-      },
-    ],
-  },
-} as any
+test('resolves snippets relative to the included slide and rejects escapes', () => fixture(async (root, entry, file) => {
+  const child = join(root, 'snippets/page.md')
+  await Bun.write(child, '# Subdeck\n\n<<< ./fixture.ts#sample')
+  await Bun.write(entry, '# Root\n\n---\nsrc: ./snippets/page.md\n---\n')
+  expect((await createDeckCompiler(entry)()).html).toContain('language-ts')
+  await expect(resolveSnippet('<<< ../outside.ts', root, entry)).rejects.toThrow(/escapes the project root/)
+  const anotherRoot = await mkdtemp(join(tmpdir(), 'presentation-other-'))
+  try {
+    const other = join(anotherRoot, 'outside.ts')
+    await Bun.write(other, 'const outside = true')
+    const alias = join(root, 'snippets/escape.ts')
+    await symlink(other, alias)
+    await expect(resolveSnippet('<<< @/snippets/escape.ts', root, entry)).rejects.toThrow(/escapes the project root/)
+    expect(await Bun.file(file).text()).toBe(source)
+  }
+  finally {
+    await rm(anotherRoot, { recursive: true, force: true })
+  }
+}))
 
-it('snippet import', async () => {
-  const md = MarkdownExit()
-  md.use(MarkdownItSnippet, options)
-
-  const result = await md.renderAsync('<<< @/snippets/snippet.ts#snippet', { id: 'slides.md__slidev_1.md' })
-
-  expect(result).toMatchInlineSnapshot(`
-    "<pre><code class="language-ts">function _foo() {
-      // ...
-    }
-    </code></pre>
-    "
-  `)
-})
-
-it('snippet in indented block', async () => {
-  const md = MarkdownExit()
-  md.use(MarkdownItSnippet, options)
-
-  const result = await md.renderAsync('- item\n   <<< @/snippets/snippet.ts#snippet', { id: 'slides.md__slidev_1.md' })
-
-  expect(result).toMatchInlineSnapshot(`
-    "<ul>
-    <li>item<pre><code class="language-ts">function _foo() {
-      // ...
-    }
-    </code></pre>
-    </li>
-    </ul>
-    "
-  `)
-})
-
-it('not transform in code block', async () => {
-  const md = MarkdownExit()
-  md.use(MarkdownItSnippet, options)
-
-  const result = await md.renderAsync('```\n<<< @/snippets/snippet.ts\n```', { id: 'slides.md__slidev_1.md' })
-
-  expect(result).toMatchInlineSnapshot(`
-    "<pre><code>&lt;&lt;&lt; @/snippets/snippet.ts
-    </code></pre>
-    "
-  `)
-})
-
-it('resolves a snippet path that stays inside the allowed roots', () => {
-  const slide = {
-    source: {
-      filepath: path.join(fixturesRoot, 'test.md'),
-    },
-  } as any
-  const result = resolveSnippetImport('<<< @/snippets/snippet.ts#snippet', fixturesRoot, slide, [fixturesRoot])
-  expect(result?.src).toBe(path.join(fixturesRoot, 'snippets/snippet.ts').replaceAll('\\', '/'))
-})
-
-it('throws when a snippet path escapes the allowed roots', () => {
-  const slide = {
-    source: {
-      filepath: path.join(fixturesRoot, 'test.md'),
-    },
-  } as any
-  expect(() => resolveSnippetImport('<<< ../../../../../outside.ts', fixturesRoot, slide, [fixturesRoot]))
-    .toThrow(/escapes the project root/)
-})
-
-it('whitelists a {monaco-write} snippet under the path the writer resolves', async () => {
-  monacoWriterWhitelist.clear()
-  const md = MarkdownExit()
-  md.use(MarkdownItSnippet, options)
-
-  const result = await md.renderAsync('<<< @/snippets/snippet.ts {monaco-write}', { id: 'slides.md__slidev_1.md' })
-
-  // createMonacoWriterPlugin does path.resolve(userRoot, file), so the value it
-  // is handed has to resolve back to the file that was read.
-  expect([...monacoWriterWhitelist]).toEqual(['snippets/snippet.ts'])
-  expect(result).toContain('writable="snippets/snippet.ts"')
-  // pathe normalises separators, so this is the writer's path.resolve verbatim.
-  expect(path.resolve(fixturesRoot, [...monacoWriterWhitelist][0]))
-    .toBe(path.join(fixturesRoot, 'snippets/snippet.ts'))
-})
+test('authorizes saving only for opted-in dev snippets and detects stale edits', () => fixture(async (_root, entry, file) => {
+  await Bun.write(entry, '# Editable snippet\n\n<<< @/snippets/fixture.ts {monaco-write}')
+  const offline = await createDeckCompiler(entry)()
+  expect(offline.html).not.toContain('data-live-save')
+  expect(offline.writableSnippets.size).toBe(0)
+  const compile = createDeckCompiler(entry, { liveCompile: true })
+  const online = await compile()
+  const [token, target] = [...online.writableSnippets][0]
+  expect(online.html).toContain('data-live-save')
+  expect(online.html).toContain(`data-snippet-token="${token}"`)
+  expect(online.html).not.toContain(target.path)
+  const content = 'export const updated = 23'
+  expect((await saveSnippet(online.writableSnippets, { token: 'unknown', revision: target.revision, source: content })).status).toBe(404)
+  const saved = await saveSnippet(online.writableSnippets, { token, revision: target.revision, source: content })
+  expect(saved.status).toBe(200)
+  expect(await Bun.file(file).text()).toBe(content + '\n')
+  expect((await saveSnippet(online.writableSnippets, { token, revision: target.revision, source: 'must not overwrite' })).status).toBe(409)
+  const refreshed = await compile()
+  expect(refreshed.writableSnippets.get(token)?.revision).toBe(await saved.text())
+  expect(refreshed.html).toContain('export const updated = 23')
+}))

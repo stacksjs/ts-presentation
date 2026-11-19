@@ -6,8 +6,10 @@ import { resolveCanvas } from '../../../types/src/canvas.ts'
 import type { LiveDeck } from '../../../types/src/dev-protocol.ts'
 import { renderChart } from './charts.ts'
 import type { CodeBlockInfo } from './code-blocks.ts'
-import { codeBlock, codeFrame, createCodeHighlighter, magicFrames, parseCodeInfo } from './code-blocks.ts'
+import { codeBlock, codeFrame, createCodeHighlighter, codeThemeStyles, magicFrames, parseCodeInfo } from './code-blocks.ts'
 import { renderMermaid } from './diagram.ts'
+import { optionsForSvg } from './diagram-svg.ts'
+import { renderPlantUml } from './plantuml.ts'
 import { drawingOverlay } from './drawing-store.ts'
 import { drawingEnabled, resolveDrawings } from '../../../types/src/drawings.ts'
 import type { DrawingClientConfig, SavedDrawing } from '../../../types/src/drawings.ts'
@@ -18,13 +20,13 @@ import type { SlideRoute } from '../../../client/runtime/navigation.ts'
 import { slideAlias } from '../../../client/runtime/navigation.ts'
 import type { Deck, PreparserContext, Slide } from '../../../parser/src/deck.ts'
 import { createSlideDestinations, prepareSlideHtml } from './slide-html.ts'
-import { prepareMarkdown, splitSlots } from './syntax.ts'
+import { prepareMarkdown, renderAlerts, splitSlots } from './syntax.ts'
 import type { WritableSnippet } from './snippet-write.ts'
 import { snippetRevision } from './snippet-write.ts'
 
 export { defineAddon, defineStxLayout, defineTheme } from './extensions.ts'
-export { defineKatexSetup, defineMermaidRendererSetup, defineMermaidSetup } from './authoring-setup.ts'
-export type { KatexOptions, MermaidOptions, MermaidRenderer } from './authoring-setup.ts'
+export { defineCodeHighlightSetup, defineShikiSetup, defineKatexSetup, defineMermaidRendererSetup, defineMermaidSetup } from './authoring-setup.ts'
+export type { CodeHighlightOptions, KatexOptions, MermaidOptions, MermaidRenderer } from './authoring-setup.ts'
 export type { PresentationNavigation, SlideRoute } from '../../../client/runtime/navigation.ts'
 export type { LayoutContext, PresentationAddon, PresentationLayout, PresentationTheme } from './extensions.ts'
 export type { DrawingOptions } from '../../../types/src/drawings.ts'
@@ -83,9 +85,10 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     ...configuration?.mermaid,
     ...(mermaidConfig && typeof mermaidConfig === 'object' && !Array.isArray(mermaidConfig) ? mermaidConfig : {}),
   }
-  const diagramFences = new Map<string, MermaidOptions>()
+  const diagramFences = new Map<string, { type: 'mermaid' | 'plantuml', options: MermaidOptions }>()
   const codeFences = new Map<string, CodeBlockInfo>()
   const highlight = createCodeHighlighter()
+  const codeTheme = codeThemeStyles(deck.headmatter?.codeTheme ?? configuration?.codeHighlight?.theme)
   const { extensions } = options
   const activeExtensions: PresentationAddon[] = extensions ? [extensions.theme, ...extensions.addons] : []
   const defaults = extensions?.theme.defaults
@@ -110,9 +113,9 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     const prepared = prepareMarkdown(content, {
       renderMath,
       mathEnabled: (deck.headmatter?.math ?? deck.headmatter?.katex) !== false,
-      registerMermaid(value) {
-        const marker = `mermaid-fence-${diagramFences.size}`
-        diagramFences.set(marker, value)
+      registerDiagram(type, options) {
+        const marker = `tp-diagram-${diagramFences.size}`
+        diagramFences.set(marker, { type, options })
         return marker
       },
       registerCode(info) {
@@ -122,7 +125,8 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
       },
       codeGroups: comark === undefined ? undefined : { nextId: () => `code-group-${++groups}`, comark },
     })
-    return prepared.restore(Bun.markdown.html(prepared.source))
+    const html = prepared.restore(Bun.markdown.html(prepared.source))
+    return content.includes('[!') ? renderAlerts(html) : html
   }
   const html = activeSlides.map((slide) => {
     const comark = (slide.frontmatter?.comark ?? deck.headmatter?.comark ?? settings?.comark) === true
@@ -147,7 +151,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
       const diagramProps = diagramFences.get(language)
       const info = codeFences.get(language)
       if (info) language = info.language
-      if (diagramProps) language = 'mermaid'
+      if (diagramProps) language = diagramProps.type
       for (const hook of codeHooks) {
         const custom = hook(decoded, language, slide)
         if (custom !== undefined) return custom
@@ -160,9 +164,13 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
       if (language === 'charts' || language === 'ts-charts') {
         return renderChart(decoded, `chart-${index}-${diagram++}`) ?? block
       }
+      if (language === 'plantuml') {
+        const svg = renderPlantUml(decoded, `plantuml-${index}-${diagram++}`)
+        return svg ? optionsForSvg(svg, diagramProps?.options ?? {}) : block.replace(/language-tp-diagram-\d+/, 'language-plantuml')
+      }
       if (language === 'mermaid') {
-        const svg = mermaidConfig === false ? undefined : await renderMermaid(decoded, `arrow-${index}-${diagram++}`, diagramOptions, diagramProps, configuration?.diagramRenderer)
-        return svg || (diagramProps ? block.replace(/language-mermaid-fence-\d+/, 'language-mermaid') : block)
+        const svg = mermaidConfig === false ? undefined : await renderMermaid(decoded, `arrow-${index}-${diagram++}`, diagramOptions, diagramProps?.options, configuration?.diagramRenderer)
+        return svg || (diagramProps ? block.replace(/language-tp-diagram-\d+/, 'language-mermaid') : block)
       }
       if (info?.magic) {
         const frames = magicFrames(decoded)
@@ -238,7 +246,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   if (options.liveCompile) {
     const drawingOptions = [drawings.enabled, drawings.presenterOnly, drawings.syncAll, drawings.persist]
     const theme = extensions?.theme.name
-    const frame = snippetRevision(JSON.stringify([width, height, clicksPreset, drawingOptions, theme, extensions?.styles, extensions?.client, globalTop, globalBottom]))
+    const frame = snippetRevision(JSON.stringify([width, height, clicksPreset, drawingOptions, theme, codeTheme, extensions?.styles, extensions?.client, globalTop, globalBottom]))
     const parts = slides.map((slide, index) => {
       const source = options.sourceBindings?.get(activeSlides[index])
       const part = { ...slide, notes: notes[index], route: routes[index], sourceToken: source?.token }
@@ -258,7 +266,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     liveAttribute: options.liveCompile ? ' data-live-compile="true"' : '',
     title: deck.title,
     extensionStyles: extensions?.styles ? '<link rel="stylesheet" href="./extensions.css">' : '',
-    scopedStyles: slides.map(slide => slide.css).filter(Boolean).join('\n  '),
+    scopedStyles: [codeTheme, ...slides.map(slide => slide.css)].filter(Boolean).join('\n  '),
     extensionScript: extensions?.client ? '<script defer src="./extensions.js"></script>' : '',
     globalTop,
     playerScript: '<script defer src="./presentation.js"></script>',

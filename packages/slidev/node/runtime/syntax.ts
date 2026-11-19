@@ -75,7 +75,7 @@ interface PreparedMarkdown {
 interface MarkdownSyntax {
   renderMath?: (body: string, display: boolean) => string
   mathEnabled?: boolean
-  registerMermaid?: (options: Record<string, FenceScalar>) => string
+  registerDiagram?: (type: 'mermaid' | 'plantuml', options: Record<string, FenceScalar>) => string
   registerCode?: (info: CodeBlockInfo) => string
   codeGroups?: { nextId: () => string, comark: boolean }
 }
@@ -173,9 +173,9 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
   function renderFenceStart(line: string, opening: RegExpExecArray): string {
     const [, marker, info] = opening
     const prefix = line.slice(0, line.indexOf(marker)) + marker
-    const [, diagramInfo] = /^\s*mermaid\s+(\{.*\})\s*$/i.exec(info) ?? []
+    const [, type, diagramInfo] = /^\s*(mermaid|plantuml)\s+(\{.*\})\s*$/i.exec(info) ?? []
     const diagram = diagramInfo && readFenceOptions(diagramInfo)
-    if (diagram && syntax.registerMermaid) return prefix + syntax.registerMermaid(diagram)
+    if (diagram && syntax.registerDiagram) return prefix + syntax.registerDiagram(type.toLowerCase() as 'mermaid' | 'plantuml', diagram)
     const decoration = decoratedCode(info)
     return decoration && syntax.registerCode ? prefix + syntax.registerCode(decoration) : line
   }
@@ -279,4 +279,13 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
         .replace(/<tp-math data-equation="(\d+)"><\/tp-math>/g, (whole, index: string) => math[Number(index)] ?? whole)
     },
   }
+}
+
+/** Decorate GFM blockquote alerts after Markdown escapes literal examples. */
+export function renderAlerts(html: string): string {
+  return html.replace(/<blockquote>\n<p>\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\](?:[ \t]*\n|(?=<\/p>))/gi, (_, label: string) => {
+    const kind = label.toLowerCase()
+    const title = kind[0].toUpperCase() + kind.slice(1)
+    return `<blockquote class="markdown-alert markdown-alert-${kind}"><p class="markdown-alert-title">${title}</p><p>`
+  })
 }

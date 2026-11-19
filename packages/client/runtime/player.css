@@ -715,3 +715,15 @@ body:is(.capturing, .previewing) .live-code-static { display: block; margin: 0; 
   transform-origin: top left;
 }
 .slide .frame-layout:not(.frame-layout-split) .layout-frame { height: 100%; }
+
+.slide .markdown-alert {
+  border-inline-start: 0.17em solid var(--alert-color, #5298ea);
+  margin-inline: 0;
+  padding-inline: 0.85em;
+}
+
+.markdown-alert-title { color: var(--alert-color, #5298ea); font-weight: 700; }
+.markdown-alert-tip { --alert-color: #36ac72; }
+.markdown-alert-important { --alert-color: #a976ee; }
+.markdown-alert-warning { --alert-color: #ce982d; }
+.markdown-alert-caution { --alert-color: #e76d77; }

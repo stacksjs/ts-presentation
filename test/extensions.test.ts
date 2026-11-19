@@ -55,3 +55,40 @@ test('compiles a local theme and refreshes changed addon styles', async () => {
     await rm(directory, { recursive: true, force: true })
   }
 })
+
+test('reloads local theme imports and STX layouts independently', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-theme-reload-'))
+  try {
+    const entry = join(root, 'slides.md')
+    const theme = join(root, 'theme.ts')
+    const helper = join(root, 'settings.ts')
+    const layout = join(root, 'layout.stx')
+    const api = new URL('../src/index.ts', import.meta.url).href
+    await Bun.write(entry, '---\ntheme: ./theme.ts\nlayout: practice\n---\n\n# Rehearsal')
+    await Bun.write(theme, [
+      `import { defineStxLayout } from ${JSON.stringify(api)}`,
+      "import { styles } from './settings.ts'",
+      "export default { name: 'practice', styles, layouts: { practice: defineStxLayout(new URL('./layout.stx', import.meta.url)) } }",
+    ].join('\n'))
+    await Bun.write(helper, "export const styles = '.slide { color: red }'")
+    await Bun.write(layout, '<section class="original">{!! content !!}</section>')
+
+    const compile = createDeckCompiler(entry, { liveCompile: true })
+    const first = await compile()
+    expect(first.styles).toContain('color: red')
+    expect(first.html).toContain('class="original"')
+    await Bun.write(layout, '<main class="replacement">{!! content !!}</main>')
+    const second = await compile()
+    expect(second.html).toContain('<main class="replacement"><h1>Rehearsal</h1>')
+    expect(second.live?.frame).toBe(first.live?.frame)
+    expect(second.live?.revision).not.toBe(first.live?.revision)
+    await Bun.write(helper, "export const styles = '.slide { color: blue }'")
+    const third = await compile()
+    expect(third.styles).toContain('color: blue')
+    expect(third.live?.frame).not.toBe(second.live?.frame)
+    expect(third.html).toContain('class="replacement"')
+  }
+  finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})

@@ -1,4 +1,4 @@
-import { resolveGrammar, tokenClass, Tokenizer } from 'ts-syntax-highlighter/browser'
+import { getTheme, resolveGrammar, themeTokenCss, tokenClass, Tokenizer } from 'ts-syntax-highlighter/browser'
 import { parseEquationOptions } from '../../../client/runtime/equation-steps.ts'
 import { readFenceOptions } from './fence-options.ts'
 import { escapeHtml } from './html.ts'
@@ -100,6 +100,15 @@ export function magicFrames(source: string): CodeFrame[] | undefined {
     }
   }
   if (!fence && frames.length) return frames
+}
+
+export function codeThemeStyles(name: unknown): string {
+  const theme = typeof name === 'string' ? getTheme(name) : undefined
+  if (!theme) return ''
+  const selector = '.slide pre'
+  const css = themeTokenCss(theme, { selector, classPrefix: 'tok-', variablePrefix: '--tp-code-' })
+  return `<style id="presentation-code-theme">${css}
+${selector} { background: var(--tp-code-background); color: var(--tp-code-foreground); }</style>`
 }
 
 export function createCodeHighlighter(): (source: string, language: string) => Promise<string[] | undefined> {

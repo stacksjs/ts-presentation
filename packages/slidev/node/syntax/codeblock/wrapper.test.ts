@@ -1,31 +1,13 @@
-import MarkdownExit from 'markdown-exit'
-import * as shiki from 'shiki'
-import { expect, it } from 'vitest'
-import { MarkdownItCodeblocks } from '.'
-import MarkdownItShiki from '../shiki'
+import { expect, test } from 'bun:test'
+import { parseDeck, renderDeck } from '../../runtime/index.ts'
+import { fenced } from '../../../test/code-fixture.ts'
 
-it('keeps languages containing `#` or `+`', async () => {
-  const md = MarkdownExit({ html: true })
-  const options = {
-    data: { config: {} },
-    mode: 'dev',
-    utils: {
-      shiki,
-      shikiOptions: { theme: 'nord' },
-    },
-  } as any
-
-  md.use(await MarkdownItShiki(options))
-  md.use(MarkdownItCodeblocks, options, [])
-
-  const result = await md.renderAsync([
-    '```c# [Program.cs] {1}',
-    'using System;',
-    '```',
-  ].join('\n'))
-
-  expect(result).toContain('title="Program.cs"')
-  expect(result).toContain(':ranges=\'["1"]\'')
-  expect(result).toContain('<code class="language-c#">')
-  expect(result).toContain('<span style="color:#81A1C1">using</span>')
+test('retains C# punctuation, filename, range and syntax highlighting', async () => {
+  const html = await renderDeck(parseDeck(fenced('c# [Program.cs] {1} {lines:true,startLine:1}', 'using System;')))
+  expect(html).toContain('<figcaption>Program.cs</figcaption>')
+  expect(html).toContain('data-code-ranges="1"')
+  expect(html).toContain('language-c#')
+  expect(html).toMatch(/class="tok-[^"]+">using</)
+  expect(html).toContain('data-code-number="1"')
+  expect(html).toContain('class="code-line-number" aria-hidden="true">1</span>')
 })
