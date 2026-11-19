@@ -80,10 +80,12 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   if (!activeSlides.length) throw new Error('The deck contains no visible slides')
   const layoutHooks = Object.assign(Object.create(null), ...activeExtensions.map(addon => addon.layouts ?? {})) as NonNullable<PresentationAddon['layouts']>
   const codeHooks = activeExtensions.flatMap(addon => addon.renderCode ? [addon.renderCode] : [])
+  const settings = deck.headmatter?.config as Record<string, unknown> | undefined
   function effectiveLayout(slide: Slide): string {
     return slide.layout === 'default' && typeof slide.frontmatter?.layout !== 'string' ? defaults?.layout ?? slide.layout : slide.layout
   }
-  function markdown(content: string): string {
+  let groups = 0
+  function markdown(content: string, comark?: boolean): string {
     const prepared = prepareMarkdown(content, {
       renderMath,
       mathEnabled: (deck.headmatter?.math ?? deck.headmatter?.katex) !== false,
@@ -97,12 +99,14 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
         codeFences.set(marker, info)
         return marker
       },
+      codeGroups: comark === undefined ? undefined : { nextId: () => `code-group-${++groups}`, comark },
     })
     return prepared.restore(Bun.markdown.html(prepared.source))
   }
   const html = activeSlides.map((slide) => {
-    if (!layoutHooks[effectiveLayout(slide)]) return { default: markdown(slide.content) }
-    return Object.fromEntries(Object.entries(splitSlots(slide.content)).map(([name, content]) => [name, markdown(content)]))
+    const comark = (slide.frontmatter?.comark ?? deck.headmatter?.comark ?? settings?.comark) === true
+    if (!layoutHooks[effectiveLayout(slide)]) return { default: markdown(slide.content, comark) }
+    return Object.fromEntries(Object.entries(splitSlots(slide.content)).map(([name, content]) => [name, markdown(content, comark)]))
   })
   const routes = activeSlides.map((slide, index): SlideRoute => ({
     no: index + 1,
@@ -126,12 +130,10 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
         const custom = hook(decoded, language, slide)
         if (custom !== undefined) return custom
       }
-      const live = /^(js|ts)-tp-(run|edit)$/.exec(language)
-      if (live) return liveBlock(decoded.trimEnd(), live[1] === 'ts' ? 'ts' : 'js', live[2] === 'run')
       const writable = info?.writeToken && options.liveCompile && options.writableSnippets?.get(info.writeToken)
-      if (writable && /^(js|javascript|ts|typescript)$/.test(language)) {
-        return liveBlock(decoded.replace(/\n$/, ''), language.startsWith('t') ? 'ts' : 'js', false,
-          { token: info.writeToken!, revision: writable.revision })
+      if ((info?.runner || writable) && /^(?:js|javascript|ts|typescript)$/.test(language)) {
+        return liveBlock(decoded.replace(/\n$/, ''), language.startsWith('t') ? 'ts' : 'js', info?.runner === 'run',
+          writable && info?.writeToken ? { token: info.writeToken, revision: writable.revision } : undefined)
       }
       if (language === 'charts' || language === 'ts-charts') {
         return renderChart(decoded, `chart-${index}-${diagram++}`) ?? block
@@ -182,8 +184,10 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     const drawing = options.savedDrawings?.get(index + 1)
     const overlay = drawing && (drawing.sketch.strokes.length || drawing.legacy) ? drawingOverlay(drawing, { width, height }) : ''
     const content = background ? `${background}<div class="slide-content">${prepared.html}</div>` : prepared.html
+    const copy = (slide.frontmatter?.codeCopy ?? deck.headmatter?.codeCopy ?? settings?.codeCopy) === false ? ' data-code-copy-disabled' : ''
+    const magic = (slide.frontmatter?.magicMoveCopy ?? deck.headmatter?.magicMoveCopy ?? settings?.magicMoveCopy) === false ? ' data-magic-copy-disabled' : ''
     return {
-      html: `<article id="slide-${index + 1}" class="slide slidev-layout layout-${escapeHtml(layout)} ${escapeHtml(className)}" aria-label="${escapeHtml(slide.title)}"${route}${motion}>${content}${overlay}</article>`,
+      html: `<article id="slide-${index + 1}" class="slide slidev-layout layout-${escapeHtml(layout)} ${escapeHtml(className)}" aria-label="${escapeHtml(slide.title)}"${route}${motion}${copy}${magic}>${content}${overlay}</article>`,
       css: prepared.css,
     }
   }))

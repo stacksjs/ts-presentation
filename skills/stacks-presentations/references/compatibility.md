@@ -12,6 +12,7 @@ in a new ts-presentation project.
 | Scoped styles, layouts, and themes | Slide-local CSS and keyframes, TypeScript theme and addon modules, and named slots |
 | Monaco editor and runner | Local editor and timed browser-worker runner. Bun compiles TypeScript edits in dev and can save opted-in snippets |
 | Snippets, line highlights, Magic Move | Local file and region imports, numbered click highlights, native token animations |
+| Code groups and copying | Comark code tabs, synchronized presenter selection, source and live editor copying |
 | KaTeX | Native MathML with chemistry, ruled and compact arrays, commutative diagrams, bra-ket and set notation, mixed text and math, colored and raised boxes, zero-width overlaps, numbered alignment rows, scoped macros, infix and generalized fractions, operator limits, and click highlighting |
 | PowerPoint export | Image slides or editable text and boxes with separate artwork |
 | First-party diagram authoring | YAML `charts` fences through `ts-charts` for flowcharts, timelines, user journeys, Gantt schedules, and Git histories |

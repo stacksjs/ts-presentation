@@ -61,6 +61,18 @@ function animateTokens(frame: HTMLElement, positions: Map<string, DOMRect[]>, sc
   }
 }
 
+function scrollHighlight(frame: HTMLElement, first: Element, last: Element, scale: number, motion: boolean): void {
+  const container = frame.querySelector<HTMLPreElement>('pre[style*="max-height"]')
+  if (!container || !container.clientHeight || container.scrollHeight <= container.clientHeight) return
+  const top = container.getBoundingClientRect().top + container.clientTop * scale
+  const start = (first.getBoundingClientRect().top - top) / scale
+  const end = (last.getBoundingClientRect().bottom - top) / scale
+  if (start >= 0 && end <= container.clientHeight) return
+  const target = container.scrollTop + (end - start > container.clientHeight ? start : (start + end - container.clientHeight) / 2)
+  if (motion && !matchMedia('(prefers-reduced-motion: reduce)').matches) container.scrollTo({ top: target, behavior: 'smooth' })
+  else container.scrollTop = target
+}
+
 export function showCode(reveal: CodeReveal, click: number, motion: boolean, scale = 1): void {
   if (!reveal.steps.length) return
   const offset = Math.max(0, click - reveal.start)
@@ -80,7 +92,15 @@ export function showCode(reveal: CodeReveal, click: number, motion: boolean, sca
   }
   reveal.element.toggleAttribute('data-code-hidden', range === 'hide')
   const highlight = range === 'hide' ? 'all' : range
+  let first: Element | undefined
+  let last: Element | undefined
   next.frame.frame.querySelectorAll('[data-code-line]').forEach((line, index) => {
-    line.toggleAttribute('data-code-dim', !lineMatches(highlight, next.frame.start + index))
+    const match = lineMatches(highlight, next.frame.start + index)
+    line.toggleAttribute('data-code-dim', !match)
+    if (match) {
+      first ??= line
+      last = line
+    }
   })
+  if (first && last && highlight !== 'all') scrollHighlight(next.frame.frame, first, last, scale, motion)
 }

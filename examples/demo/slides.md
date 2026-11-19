@@ -5,6 +5,7 @@ addons:
   - ./addons/status.ts
 class: demo
 layout: center
+comark: true
 math:
   macros:
     '\norm': '\left\lVert #1 \right\rVert'
@@ -426,4 +427,28 @@ $$
 
 <!--
 Compare the ordinary fraction bar with the thicker bar in the average. The binomial coefficient stacks its terms inside parentheses.
+-->
+
+---
+
+# Run the checks
+
+Choose the tab for your package manager.
+
+::code-group
+
+```sh [Bun]
+bun run lint
+bun test
+```
+
+```sh [npm]
+npm run lint
+npm test
+```
+
+::
+
+<!--
+Use the arrow keys while a tab has focus to switch examples. The Copy button copies the current example.
 -->

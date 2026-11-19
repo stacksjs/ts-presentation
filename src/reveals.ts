@@ -200,6 +200,17 @@ export function collectReveals(article: HTMLElement, preset: unknown): SlideReve
         }
       }
     }
+    if (element instanceof HTMLElement && element.hasAttribute('data-code-group')) {
+      const before = offset
+      let end = before
+      for (const panel of element.querySelectorAll(':scope > .code-group-panel')) {
+        offset = before
+        visit(panel)
+        end = Math.max(end, offset)
+      }
+      offset = end
+      return
+    }
     for (const child of element.children) visit(child)
   }
 

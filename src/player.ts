@@ -1,4 +1,5 @@
 import { defaultCanvas } from './canvas.ts'
+import { setupCodeCopy, setupCodeTabs } from './code-controls.ts'
 import { setupDrawings } from './drawing-player.ts'
 import type { DrawingClientConfig } from './drawings.ts'
 import { setupLiveCode } from './live-code.ts'
@@ -66,6 +67,12 @@ function resize(): void {
 function syncPeer(data: Record<string, unknown>): void {
   (opener ?? popup)?.postMessage(data, messageOrigin)
 }
+
+const refreshCode = () => showReveals(reveals[current - 1], click, false, Number(stage.style.getPropertyValue('--slide-scale')) || 1)
+const codeTabs = !isCapture && !isPreview ? setupCodeTabs(stage, (codeTab) => {
+  refreshCode()
+  syncPeer({ slide: current, codeTab })
+}) : undefined
 
 function show(number: number, step?: number, writeHistory = true, sync = true): void {
   const { slide: selected, click: nextStep } = slidePosition(number, step, bounds)
@@ -193,6 +200,8 @@ window.addEventListener('message', (event: MessageEvent) => {
     presentationClick?: unknown
     presenterReady?: unknown
     presentationDrawing?: unknown
+    codeTab?: { group?: unknown, tab?: unknown }
+    codeTabs?: { group?: unknown, tab?: unknown }[]
     slide?: unknown
     screenshot?: unknown
     disclosure?: unknown
@@ -200,13 +209,23 @@ window.addEventListener('message', (event: MessageEvent) => {
   } | null
   if (data?.presentationDrawing) drawing?.receive(data.presentationDrawing)
   if (data?.presenterReady === true && popup) {
-    popup.postMessage({ presentationSlide: current, presentationClick: click }, messageOrigin)
+    popup.postMessage({ presentationSlide: current, presentationClick: click, codeTabs: codeTabs?.selections() }, messageOrigin)
   }
   if (typeof data?.presentationSlide === 'number' && Number.isInteger(data.presentationSlide)) {
     const step = typeof data.presentationClick === 'number' && Number.isInteger(data.presentationClick) ? data.presentationClick : 0
     show(data.presentationSlide, step, true, false)
   }
+  if (isPresenter && Array.isArray(data?.codeTabs)) {
+    let changed = false
+    for (const selection of data.codeTabs) {
+      if (typeof selection?.group === 'string' && typeof selection.tab === 'number')
+        changed = codeTabs?.select(selection.group, selection.tab) || changed
+    }
+    if (changed) refreshCode()
+  }
   if (data?.slide !== current) return
+  if (typeof data.codeTab?.group === 'string' && typeof data.codeTab.tab === 'number' && codeTabs?.select(data.codeTab.group, data.codeTab.tab))
+    refreshCode()
 
   if (typeof data.screenshot === 'number' && Number.isInteger(data.screenshot)) {
     const screenshot = screenshots[current - 1][data.screenshot]
@@ -366,7 +385,10 @@ if (isPresenter) {
 }
 resize()
 
-if (!isCapture && !isPreview) setupLiveCode()
+if (!isCapture && !isPreview) {
+  setupCodeCopy(stage)
+  setupLiveCode()
+}
 
 const recordButton = control.querySelector<HTMLButtonElement>('#record-button')!
 let recorder: MediaRecorder | undefined

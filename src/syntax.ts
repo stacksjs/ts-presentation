@@ -4,13 +4,13 @@ import { parseEquationOptions } from './equation-steps.ts'
 import type { FenceScalar } from './fence-options.ts'
 import { readFenceOptions } from './fence-options.ts'
 import type { CodeBlockInfo } from './code-blocks.ts'
-import { decoratedCode } from './code-blocks.ts'
+import { codeTabLabel, decoratedCode, parseCodeInfo } from './code-blocks.ts'
+import { escapeHtml } from './html.ts'
 
 const fenceStart = /^ {0,3}(`{3,}|~{3,})(.*)$/
 const inlineCode = /^`+/
 const protectedHtml = /^<(pre|code|script|style)(?:\s[^>]*)?>[\s\S]*?<\/\1\s*>/i
 const htmlTag = /^<(?:[^>"']|"[^"]*"|'[^']*')+>/
-const runnerOptions = /^(\s*)(js|javascript|ts|typescript)(\s+)\{(monaco-run|monaco|live-run|live)\}(\s*)$/i
 const slotMarker = /^::\s*([\w.:-]+?)\s*::\s*$/
 const bareDisplay = /^ {0,3}\\begin\{((?:equation|align|alignat|gather)\*?|CD)\}/
 
@@ -77,6 +77,33 @@ interface MarkdownSyntax {
   mathEnabled?: boolean
   registerMermaid?: (options: Record<string, FenceScalar>) => string
   registerCode?: (info: CodeBlockInfo) => string
+  codeGroups?: { nextId: () => string, comark: boolean }
+}
+
+interface GroupFence { opening: RegExpExecArray, start: number, end: number, label: string }
+
+function readCodeGroup(lines: string[], start: number, terminator: RegExp): { end: number, tabs: GroupFence[] } | undefined {
+  const tabs: GroupFence[] = []
+  for (let at = start + 1; at < lines.length; at++) {
+    if (!lines[at].trim()) continue
+    if (terminator.test(lines[at])) return tabs.length ? { end: at, tabs } : undefined
+    const opening = fenceStart.exec(lines[at])
+    const info = opening && parseCodeInfo(opening[2])
+    if (!opening || !info || tabs.length >= 100) return
+    const start = at
+    const marker = opening[1]
+    for (at++; at < lines.length; at++) {
+      const close = fenceStart.exec(lines[at])
+      if (close && close[1][0] === marker[0] && close[1].length >= marker.length && !close[2].trim()) break
+    }
+    if (at === lines.length) return
+    tabs.push({ opening, start, end: at, label: codeTabLabel(info) })
+  }
+}
+
+function tabsMarkup(id: string, tabs: GroupFence[]): string {
+  const buttons = tabs.map(({ label }, index) => `<button type="button" class="code-group-tab" role="tab" id="${id}-tab-${index}" aria-controls="${id}-panel-${index}" aria-selected="${index === 0}" tabindex="${index === 0 ? 0 : -1}">${escapeHtml(label)}</button>`)
+  return `<div class="code-group-tabs" role="tablist" aria-label="Code examples">${buttons.join('')}</div>`
 }
 
 export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): PreparedMarkdown {
@@ -143,6 +170,15 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
 
   const lines = source.split('\n')
   const output: string[] = []
+  function renderFenceStart(line: string, opening: RegExpExecArray): string {
+    const [, marker, info] = opening
+    const prefix = line.slice(0, line.indexOf(marker)) + marker
+    const [, diagramInfo] = /^\s*mermaid\s+(\{.*\})\s*$/i.exec(info) ?? []
+    const diagram = diagramInfo && readFenceOptions(diagramInfo)
+    if (diagram && syntax.registerMermaid) return prefix + syntax.registerMermaid(diagram)
+    const decoration = decoratedCode(info)
+    return decoration && syntax.registerCode ? prefix + syntax.registerCode(decoration) : line
+  }
   let fence = ''
   let htmlCode = ''
   let comment = false
@@ -166,22 +202,24 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
     }
     if (opening) {
       fence = opening[1]
-      const [, diagramInfo] = /^\s*mermaid\s+(\{.*\})\s*$/i.exec(opening[2]) ?? []
-      const diagram = diagramInfo && readFenceOptions(diagramInfo)
-      if (diagram && syntax.registerMermaid) {
-        output.push(`${line.slice(0, line.indexOf(fence))}${fence}${syntax.registerMermaid(diagram)}`)
-        continue
-      }
-      const options = runnerOptions.exec(opening[2])
-      const decoration = !options && decoratedCode(opening[2])
-      if (decoration && syntax.registerCode) {
-        output.push(`${line.slice(0, line.indexOf(fence))}${fence}${syntax.registerCode(decoration)}`)
-        continue
-      }
-      const module = options?.[2].toLowerCase().startsWith('j') ? 'js' : 'ts'
-      const mode = options?.[4].toLowerCase().endsWith('run') ? 'run' : 'edit'
-      output.push(options ? `${line.slice(0, line.indexOf(fence))}${fence}${module}-tp-${mode}` : line)
+      output.push(renderFenceStart(line, opening))
       continue
+    }
+    if (syntax.codeGroups) {
+      const component = /^ {0,3}<CodeGroup\s*>\s*$/.test(line)
+      const hasGroup = component || (syntax.codeGroups.comark && /^ {0,3}::code-group\s*$/.test(line))
+      const group = hasGroup && readCodeGroup(lines, index, component ? /^ {0,3}<\/CodeGroup\s*>\s*$/ : /^ {0,3}::\s*$/)
+      if (group) {
+        const id = syntax.codeGroups.nextId()
+        output.push('', `<div class="code-group" data-code-group="${id}">`, tabsMarkup(id, group.tabs), '')
+        for (const [tab, panel] of group.tabs.entries()) {
+          output.push(`<div class="code-group-panel" role="tabpanel" id="${id}-panel-${tab}" aria-labelledby="${id}-tab-${tab}" tabindex="0"${tab ? ' hidden' : ''}>`, '')
+          output.push(renderFenceStart(lines[panel.start], panel.opening), ...lines.slice(panel.start + 1, panel.end + 1), '', '</div>', '')
+        }
+        output.push('</div>', '')
+        index = group.end
+        continue
+      }
     }
     const rawCode = /^ {0,3}<(pre|code|script|style)(?:>|\s)/i.exec(line)
     if (rawCode && !new RegExp(`</${rawCode[1]}\\s*>`, 'i').test(line)) {

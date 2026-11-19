@@ -13,6 +13,7 @@ export interface CodeBlockInfo {
   lines?: boolean
   maxHeight?: string
   magic: boolean
+  runner?: 'run' | 'edit'
   writeToken?: string
 }
 
@@ -30,11 +31,17 @@ export function parseCodeInfo(input: string): CodeBlockInfo | undefined {
   if (caption) info = info.slice(caption[0].length).trim()
   let ranges = ''
   let options = {}
+  let runner: CodeBlockInfo['runner']
   while (info) {
     decoration.lastIndex = 0
     const group = decoration.exec(info)?.[0]
     if (!group) return
-    if (!ranges && parseEquationOptions(group)) ranges = group
+    const launch = /^\{\s*(live|monaco)(-run)?\s*\}$/i.exec(group)
+    if (launch) {
+      if (runner || magic || !/^(?:js|javascript|ts|typescript)$/i.test(lang)) return
+      runner = launch[2] ? 'run' : 'edit'
+    }
+    else if (!ranges && parseEquationOptions(group)) ranges = group
     else {
       const fields = readFenceOptions(group)
       if (!fields) return
@@ -53,13 +60,14 @@ export function parseCodeInfo(input: string): CodeBlockInfo | undefined {
   return {
     language: (lang || 'text').toLowerCase(), title: caption?.[1], ranges: parseEquationOptions(ranges)?.ranges ?? [],
     start: Number(first), at, final, lines: typeof props.lines === 'boolean' ? props.lines : undefined, maxHeight, magic,
+    ...(runner && { runner }),
     writeToken: typeof props.tpSnippet === 'string' && /^[a-f0-9]{64}$/.test(props.tpSnippet) ? props.tpSnippet : undefined,
   }
 }
 
 export function decoratedCode(input: string): CodeBlockInfo | undefined {
   const options = parseCodeInfo(input)
-  if (options && (options.title || options.ranges.length || options.lines !== undefined || options.maxHeight || options.magic || options.writeToken))
+  if (options && (options.title || options.ranges.length || options.lines !== undefined || options.maxHeight || options.magic || options.writeToken || options.runner))
     return options
 }
 
@@ -87,7 +95,7 @@ export function magicFrames(source: string): CodeFrame[] | undefined {
     }
     else if (match) {
       info = parseCodeInfo(match[2])
-      if (!info || info.magic || info.writeToken) return
+      if (!info || info.magic || info.writeToken || info.runner) return
       fence = match[1]
     }
   }
@@ -124,15 +132,24 @@ export function codeFrame(frame: CodeFrame, highlighted: string[] | undefined, l
   const raw = source.replace(/\n$/, '')
   const lines = highlighted?.slice(0, raw.split('\n').length) ?? raw.split('\n').map(escapeHtml)
   const style = info.maxHeight ? ` style="max-height:${info.maxHeight}"` : ''
-  const title = info.title ? `<figcaption>${escapeHtml(info.title)}</figcaption>` : ''
+  const title = info.title ? `<figcaption>${escapeHtml(codeTitle(info.title))}</figcaption>` : ''
   const numbers = info.lines ?? lineNumbers
   const rows = lines.map((line, index) => {
     const number = info.start + index
     const count = numbers ? ` data-code-number="${number}"` : ''
     const gutter = numbers ? `<span class="code-line-number" aria-hidden="true">${number}</span>` : ''
-    return `<span class="code-line" data-code-line${count}>${gutter}${line || '&#8203;'}</span>`
+    return `<span class="code-line" data-code-line${count}${line ? '' : ' data-code-empty'}>${gutter}${line || '&#8203;'}</span>`
   }).join('\n')
   return `<figure class="code-frame"${data(info)}>${title}<pre${style}><code class="language-${info.language}">${rows}</code></pre></figure>`
+}
+
+export function codeTitle(title: string): string {
+  return title.replace(/~[^~]+~/g, '').trim()
+}
+
+const tabLabels = new Map([['js', 'JavaScript'], ['ts', 'TypeScript'], ['sh', 'Shell'], ['bash', 'Bash'], ['text', 'Text']])
+export function codeTabLabel(info: CodeBlockInfo): string {
+  return (info.title && codeTitle(info.title)) || tabLabels.get(info.language) || info.language
 }
 
 export function codeBlock(info: CodeBlockInfo, frames: string[], magic = false): string {

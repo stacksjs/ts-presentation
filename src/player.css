@@ -39,11 +39,41 @@ button, select { font: inherit; }
 }
 
 .presentation-code { text-align: start; }
+.code-group { text-align: start; margin-block: 1em; min-width: 0; }
+.code-group-tabs { display: flex; flex-wrap: wrap; gap: 0.15em; border-bottom: 1px solid currentColor; }
+.code-group-tab {
+  border: 0;
+  border-bottom: 3px solid transparent;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.65em;
+  padding: 0.45em 0.8em;
+  cursor: pointer;
+  opacity: 0.78;
+}
+.code-group-tab[aria-selected="true"] { border-bottom-color: currentColor; font-weight: 700; opacity: 1; }
+.code-group-tab:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
+.slide .code-group-panel :is(.code-frame, pre) { margin-block: 0.4em 0; }
+.slide .code-group-panel .code-frame figcaption { display: none; }
 .slide .code-frame { margin: 1em 0; min-width: 0; }
 .slide .code-frame figcaption { font-size: 0.67em; color: inherit; }
 .slide .code-frame figcaption + pre { margin-top: 0.35em; }
 .slide .code-frame pre { overflow: auto; white-space: pre; }
 .code-frame code { white-space: normal; }
+.code-copy-overlay { position: sticky; z-index: 1; top: 0; left: 0; display: block; height: 0; }
+.code-copy-action {
+  color: #f5f7fb;
+  background: #354456;
+  border: 1px solid #718093;
+  border-radius: 0.3em;
+  padding: 0.22em 0.5em;
+  font: inherit;
+  font-size: 0.72em;
+  cursor: pointer;
+}
+.code-copy-overlay > .code-copy-action { position: absolute; inset-block-start: 0.2em; inset-inline-end: 0; }
+.code-copy-overlay > .code-copy-action:focus-visible { outline: 2px solid #c2e4ff; outline-offset: 2px; }
 .code-line { display: block; min-height: 1em; white-space: pre; }
 .code-line-number {
   display: inline-block;
@@ -62,9 +92,12 @@ button, select { font: inherit; }
   [data-code-hidden] { visibility: hidden; }
 }
 @media print {
+  :is(.code-copy-overlay, .code-copy-action) { display: none !important; }
+  .code-group-tab[aria-selected="false"] { display: none; }
   [data-code-motion] > .code-frame { display: none !important; }
   [data-code-motion] > .code-frame:last-child { display: block !important; }
 }
+.capturing .code-group-tab[aria-selected="false"] { display: none; }
 
 .tok-comment { color: #929cab; }
 .tok-keyword, .tok-operator { color: #ff9eab; }

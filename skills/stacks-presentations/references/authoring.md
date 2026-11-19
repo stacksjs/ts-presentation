@@ -75,6 +75,13 @@ speaker notes. Each hook can be asynchronous.
   relative to the deck root. Append `#example` to select a named region.
   Opt in to writing a whole JavaScript or TypeScript file by appending
   `{monaco-write}`. Saving is available on the local dev server.
+- To group examples, set `comark: true` and wrap titled fences between
+  `::code-group` and `::`. `<CodeGroup>` with `</CodeGroup>` also works.
+  Tabs share a reveal timeline, and the first tab appears in generated exports.
+- Use **Copy** to copy the active example, including current text from a
+  live editor. Set `codeCopy: false` or `magicMoveCopy: false` to hide
+  the corresponding controls. Code blocks with `maxHeight` scroll to
+  highlighted lines as the reveal progresses.
 - Open a four-backtick `md magic-move` fence and add ordinary code fences
   or snippet imports inside it. Advancing a click animates tokens between
   frames. Reduced motion switches frames immediately.
