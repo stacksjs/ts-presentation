@@ -1,4 +1,5 @@
 import { resolveGrammar, tokenClass, Tokenizer } from 'ts-syntax-highlighter/browser'
+import { flowchart } from './diagram.ts'
 
 export interface Slide {
   title: string
@@ -6,6 +7,7 @@ export interface Slide {
   notes: string
   className: string
   layout: string
+  frontmatter?: Record<string, unknown>
 }
 
 export interface Deck {
@@ -31,7 +33,7 @@ export function parseDeck(markdown: string): Deck {
 
   function appendSlide(): void {
     const body = content.join('\n').trim()
-    if (body || notes) {
+    if (body || notes || typeof attributes.src === 'string') {
       const heading = body.match(/^#{1,6}\s+(.+)$/m)?.[1]
         ?? body.match(/<h1\b[^>]*>([\s\S]+?)<\/h1>/i)?.[1].replace(/<[^>]+>/g, ' ')
       slides.push({
@@ -40,6 +42,7 @@ export function parseDeck(markdown: string): Deck {
         notes,
         className: typeof attributes.class === 'string' ? attributes.class : '',
         layout: typeof attributes.layout === 'string' ? attributes.layout : 'default',
+        frontmatter: attributes,
       })
     }
     attributes = {}
@@ -76,12 +79,22 @@ export function parseDeck(markdown: string): Deck {
     }
     else if (!comment && line.trimStart().startsWith('<!--')) {
       // A final HTML comment belongs to the speaker, in the Slidev format.
-      const rest = lines.slice(index).join('\n').trimStart()
-      const end = rest.indexOf('-->')
-      if (end >= 0 && /^\s*(?:---[^\S\n]*(?:\n|$)|$)/.test(rest.slice(end + 3))) {
-        notes = rest.slice(4, end).trim()
-        index += rest.slice(0, end + 3).split('\n').length - 1
-        continue
+      const commentLines = [line.trimStart().slice(4)]
+      let endLine = index
+      while (!commentLines[commentLines.length - 1].includes('-->') && endLine + 1 < lines.length) {
+        commentLines.push(lines[++endLine])
+      }
+      const finalLine = commentLines[commentLines.length - 1]
+      const end = finalLine.indexOf('-->')
+      if (end !== -1 && !finalLine.slice(end + 3).trim()) {
+        let nextLine = endLine + 1
+        while (nextLine < lines.length && !lines[nextLine].trim()) nextLine++
+        if (nextLine === lines.length || lines[nextLine].trimEnd() === '---') {
+          commentLines[commentLines.length - 1] = finalLine.slice(0, end)
+          notes = commentLines.join('\n').trim()
+          index = endLine
+          continue
+        }
       }
     }
 
@@ -115,26 +128,42 @@ const escapedCode = /<pre><code class="language-([\w+#.-]+)">([\s\S]*?)<\/code><
 const characters = Object.fromEntries(Object.entries(entities).map(([character, escaped]) => [escaped, character]))
 
 export async function renderDeck(deck: Deck): Promise<string> {
-  const html = deck.slides.map(slide => Bun.markdown.html(slide.content))
+  const activeSlides = deck.slides.filter(slide => slide.frontmatter?.hide !== true && slide.frontmatter?.disabled !== true)
+  if (!activeSlides.length) throw new Error('The deck contains no visible slides')
+  const html = activeSlides.map(slide => Bun.markdown.html(slide.content))
   const languages = new Set(html.flatMap(slide => Array.from(slide.matchAll(escapedCode), match => match[1])))
   const grammars = new Map(await Promise.all([...languages].map(async language => [language, await resolveGrammar(language)] as const)))
-  const slides = deck.slides.map((slide, index) => {
+  const slides = activeSlides.map((slide, index) => {
+    let diagram = 0
     const body = html[index].replace(escapedCode, (block, language: string, code: string) => {
+      const decoded = code.replace(/&(?:amp|lt|gt|quot|#39);/g, entity => characters[entity])
+      if (language === 'mermaid') return flowchart(decoded, `arrow-${index}-${diagram++}`) || block
       const grammar = grammars.get(language)
       if (!grammar) return block
-
-      const decoded = code.replace(/&(?:amp|lt|gt|quot|#39);/g, entity => characters[entity])
       const lines = new Tokenizer(grammar).tokenize(decoded)
       const highlighted = lines.map(line => line.tokens
         .map(token => `<span class="tok-${tokenClass(token.type)}">${escapeHtml(token.content)}</span>`)
         .join('')).join('\n')
       return `<pre><code class="language-${language}">${highlighted}</code></pre>`
     })
-    return `<article id="slide-${index + 1}" class="slide slidev-layout layout-${escapeHtml(slide.layout)} ${escapeHtml(slide.className)}" aria-label="${escapeHtml(slide.title)}">${body}</article>`
+    const alias = String(slide.frontmatter?.routeAlias ?? '')
+    const transition = String(slide.frontmatter?.transition ?? '')
+    const motion = ['fade', 'slide-left', 'slide-up'].includes(transition) ? ` data-transition="${transition}"` : ''
+    const route = /^[a-z][a-z0-9-]*$/i.test(alias) ? ` data-route="${escapeHtml(alias)}"` : ''
+    const image = slide.frontmatter?.image ?? slide.frontmatter?.background
+    const safeImage = typeof image === 'string' && /^(?:https?:\/\/|[./]|[\w-]+\/)/.test(image) ? image : ''
+    const background = safeImage && slide.layout.startsWith('image-')
+      ? `<img class="slide-layout-image" src="${escapeHtml(safeImage)}" alt="" loading="lazy">`
+      : ''
+    return `<article id="slide-${index + 1}" class="slide slidev-layout layout-${escapeHtml(slide.layout)} ${escapeHtml(slide.className)}" aria-label="${escapeHtml(slide.title)}"${route}${motion}>${background ? `${background}<div class="slide-content">${body}</div>` : body}</article>`
   })
 
-  const options = deck.slides.map((slide, index) => `<option value="${index + 1}">${index + 1}. ${escapeHtml(slide.title)}</option>`)
-  const notes = deck.slides.map(slide => `<section hidden>${Bun.markdown.html(slide.notes || 'No speaker notes for this slide.')}</section>`)
+  const options = activeSlides.map((slide, index) => `<option value="${index + 1}">${index + 1}. ${escapeHtml(slide.title)}</option>`)
+  const notes = activeSlides.map((slide) => {
+    const segments = (slide.notes || 'No speaker notes for this slide.').split(/^\[click\]\s*$/m)
+    return `<section hidden>${segments.map((text, index) => `<div data-note-step="${index}">${Bun.markdown.html(text)}</div>`).join('')}</section>`
+  })
+  const overview = activeSlides.map((slide, index) => `<li><button type="button" value="${index + 1}"><span>${index + 1}</span> ${escapeHtml(slide.title)}</button></li>`)
 
   return `<!doctype html>
 <html lang="en">
@@ -150,7 +179,14 @@ export async function renderDeck(deck: Deck): Promise<string> {
 <body>
   <main id="stage">${slides.join('\n')}</main>
   <aside id="presenter-notes" hidden aria-label="Speaker notes">
-    <h2>Speaker notes</h2>
+    <header class="presenter-header">
+      <h2>Speaker notes</h2>
+      <div class="presenter-timing">
+        <span id="presenter-time" aria-label="Elapsed time">0:00</span>
+        <button id="presenter-reset" type="button">Reset timer</button>
+      </div>
+      <p id="presenter-next"></p>
+    </header>
     ${notes.join('\n')}
   </aside>
   <nav id="controls" aria-label="Presentation controls">
@@ -158,8 +194,20 @@ export async function renderDeck(deck: Deck): Promise<string> {
     <select id="goto" aria-label="Go to slide">${options.join('')}</select>
     <button id="next" type="button" aria-label="Next slide">→</button>
     <button id="presenter" type="button">Presenter view</button>
+    <button id="overview-button" type="button">Overview</button>
+    <button id="draw-button" type="button" aria-pressed="false">Draw</button>
     <button id="fullscreen" type="button">Fullscreen</button>
+    <button id="record-button" type="button" hidden>Record</button>
   </nav>
+  <dialog id="overview" aria-label="Slide overview">
+    <form method="dialog"><button aria-label="Close overview">Close</button></form>
+    <h2>Slide overview</h2>
+    <ol>${overview.join('')}</ol>
+  </dialog>
+  <dialog id="image-view" aria-label="Screenshot detail">
+    <form method="dialog"><button aria-label="Close screenshot">Close</button></form>
+    <img alt="">
+  </dialog>
 </body>
 </html>
 `
