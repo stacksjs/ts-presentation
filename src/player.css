@@ -493,3 +493,34 @@ body:is(.capturing, .previewing) .live-code-static { display: block; margin: 0; 
   .live-code :is(.live-code-toolbar, textarea, .live-output) { display: none; }
   .live-code-static { display: block; margin: 0; }
 }
+
+.slide-diagram :is(.diagram-timeline-section, .diagram-timeline-period, .diagram-journey-section) rect {
+  fill: var(--chronology-fill);
+}
+.slide-diagram .diagram-timeline-event rect {
+  fill: var(--chronology-fill);
+  fill-opacity: 0.18;
+  stroke: var(--chronology-fill);
+  stroke-width: 1;
+}
+.slide-diagram :is(.diagram-timeline-section, .diagram-timeline-period, .diagram-journey-section) text {
+  fill: var(--chronology-ink);
+  font-weight: 650;
+}
+.slide-diagram .diagram-journey-task rect {
+  fill: var(--chronology-fill);
+  fill-opacity: 0.22;
+  stroke: var(--chronology-fill);
+}
+.slide-diagram :is(.diagram-chronology-axis, .diagram-chronology-guide, .diagram-journey-trajectory) {
+  fill: none;
+  stroke: var(--diagram-stroke, #a4b7c4);
+}
+.slide-diagram .diagram-chronology-guide { stroke-opacity: 0.55; }
+.slide-diagram .diagram-journey-trajectory { stroke-width: 2; }
+.slide-diagram .diagram-journey-score {
+  fill: var(--chronology-fill);
+  stroke: var(--diagram-stroke, #243c50);
+  stroke-width: 1.5;
+}
+.slide-diagram .diagram-journey-actor { stroke: var(--diagram-stroke, #243c50); stroke-width: 1; }

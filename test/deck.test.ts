@@ -34,7 +34,7 @@ describe('ts-presentation', () => {
 
   test('loads the public example deck', async () => {
     const deck = parseDeck(await Bun.file('examples/demo/slides.md').text())
-    expect(deck.slides).toHaveLength(16)
+    expect(deck.slides).toHaveLength(18)
     expect(deck.slides.every(slide => slide.notes.length > 0)).toBe(true)
     const html = await renderDeck(deck)
     expect(html).toContain('data-route="reveal"')

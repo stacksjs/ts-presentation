@@ -3,9 +3,11 @@ import { escapeHtml } from './html.ts'
 import { flowchart } from './mermaid/flowchart.ts'
 import { gantt } from './mermaid/gantt.ts'
 import { gitGraph } from './mermaid/gitgraph.ts'
+import { journey } from './mermaid/journey.ts'
 import { pieDiagram } from './mermaid/pie.ts'
 import { relationshipsDiagram } from './mermaid/relationships.ts'
 import { sequence } from './mermaid/sequence.ts'
+import { timeline } from './mermaid/timeline.ts'
 
 function mapping(value: unknown): MermaidOptions {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as MermaidOptions : {}
@@ -26,8 +28,10 @@ function prepare(source: string, options?: MermaidOptions): { code: string, opti
 }
 
 function render(code: string, marker: string, options: MermaidOptions): string | undefined {
-  const header = code.split('\n').find(line => line.trim() && !line.trimStart().startsWith('%%'))?.trim()
+  const header = code.split('\n').find(line => line.trim() && !/^\s*(?:%%|#)/.test(line))?.trim()
   const title = typeof options.title === 'string' ? options.title : ''
+  if (/^timeline(?:\s|$)/i.test(header ?? '')) return timeline(code, marker, options)
+  if (/^journey$/i.test(header ?? '')) return journey(code, marker, options)
   if (header === 'gantt') return gantt(code, options.gantt, title)
   if (/^gitGraph(?:\s|:|$)/.test(header ?? '')) return gitGraph(code, options.gitGraph, options.themeVariables, title)
   if (header === 'sequenceDiagram') return sequence(code, marker)
@@ -44,7 +48,7 @@ function optionsForSvg(svg: string, options: MermaidOptions): string {
     const height = scale && viewBox ? Math.round(scale * Number(viewBox[1])) : undefined
     let opening = tag.slice(0, -1)
     if (theme) opening += ` data-diagram-theme="${theme}"`
-    if (typeof options.title === 'string') {
+    if (typeof options.title === 'string' && !tag.includes('aria-labelledby=')) {
       opening = opening.replace(/\saria-label="[^"]*"/, '')
       opening += ` aria-label="${escapeHtml(options.title)}"`
     }

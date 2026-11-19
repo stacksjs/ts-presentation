@@ -66,12 +66,18 @@ deck. For example, `canvasWidth: 800` and `aspectRatio: 4/3` produce an
   quotes so backslashes are preserved.
 - A `mermaid` fence supports flowcharts with styled nodes and subgraphs,
   sequence diagrams, simple state transitions, class and entity relationship
-  diagrams, pie charts, Gantt schedules, and GitGraph histories. Options like `{scale:0.5, theme:'neutral'}` on the
+  diagrams, pie charts, Gantt schedules, GitGraph histories, timelines, and user journeys. Options like `{scale:0.5, theme:'neutral'}` on the
   fence override deck defaults. Diagram YAML can also provide a title and
   configuration, including pie legend placement and donut radius.
 - Gantt supports date and axis formats, weekday and date exclusions,
   task dependencies, and milestones. GitGraph supports branch ordering,
   checkout, merges, tags, cherry-picking, and horizontal or vertical lanes.
+- Use `timeline` or `timeline TD` for chronological periods. A period can
+  have several events on one line or continuation lines starting with `:`.
+  Add `section` headings and use `<br>` to break a label manually.
+- Use `journey` to document a workflow with `Task: score: Actor, Actor` entries.
+  Scores run from 1 to 5. Sections group tasks, and actor dots map to the legend.
+  Add `accTitle:` or `accDescr:` for an accessible name or description.
   Use an external SVG if a diagram requires unsupported syntax.
 
 ```yaml

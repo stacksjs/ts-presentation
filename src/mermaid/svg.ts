@@ -5,7 +5,10 @@ export function labelLines(label: string): string[] {
 }
 
 export function svgText(label: string, x: number, y: number, classes = '', anchor = 'middle'): string {
-  const lines = labelLines(label)
+  return svgTextLines(labelLines(label), x, y, classes, anchor)
+}
+
+export function svgTextLines(lines: string[], x: number, y: number, classes = '', anchor = 'middle'): string {
   const dy = -(lines.length - 1) * 8
   return `<text x="${x}" y="${y}" class="${classes}" text-anchor="${anchor}" dominant-baseline="central">${lines.map((line, index) => `<tspan x="${x}" dy="${index ? 16 : dy}">${escapeHtml(line)}</tspan>`).join('')}</text>`
 }
