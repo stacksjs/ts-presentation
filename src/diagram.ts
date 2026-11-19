@@ -36,7 +36,7 @@ function render(code: string, marker: string, options: MermaidOptions): string |
   if (/^gitGraph(?:\s|:|$)/.test(header ?? '')) return gitGraph(code, marker, options.gitGraph, options.themeVariables, title)
   if (header === 'sequenceDiagram') return sequence(code, marker)
   if (header === 'classDiagram' || header === 'erDiagram') return relationshipsDiagram(code, marker)
-  if (/^pie(?:\s|$)/.test(header ?? '')) return pieDiagram(code, options.pie, title)
+  if (/^pie(?:\s|$)/.test(header ?? '')) return pieDiagram(code, marker, options.pie, title)
   return flowchart(code, marker)
 }
 

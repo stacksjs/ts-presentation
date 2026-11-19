@@ -129,9 +129,21 @@ speaker notes. Each hook can be asynchronous.
   set-builder notation. Labeled arrows accept `[below]{above}`.
 - Use deck-wide macros under `math.macros`. Quote TeX with YAML single
   quotes so backslashes are preserved.
-- For new diagrams, use a `charts` fence with YAML. Set `type: flowchart`
-  and supply `nodes` and `edges`, use `type: timeline` with `sections`,
-  or use `type: journey` with `phases`.
+- Use a `charts` YAML fence. For `type: flowchart` or `type: state`, supply
+  `nodes` with stable IDs and `edges` linking those IDs with `from` and
+  `to`. Label decisions with `shape: diamond`. Use `style: dotted` for
+  retries and `groups` to label related steps. Add `accessibleTitle` and
+  `description` to describe the workflow.
+- Use `type: sequence` with `participants` and ordered `events`. Messages
+  name a `from` and `to` participant. Notes list participant `ids`. Use
+  `change: start` or `change: end` on messages to show activity periods.
+- Use `type: class` or `type: er` with `cards` and `edges`. Cards can
+  contain `fields` and `operations`. Connections use `source` and
+  `target` IDs and may set `start` and `end` markers.
+- Use `type: pie` with `slices` containing a `label` and positive
+  `value`. Set `showData: true` to include values in the legend and
+  `donutHole` to set the inner radius as a fraction of the outer radius.
+- Use `type: timeline` with `sections` and `type: journey` with `phases`.
 - Use `type: gantt` with `sections` containing tasks. Give each task a
   `name`, an optional `id`, a `start` date or `after` list, and one
   of `end`, `duration`, or `until`. A task without a start follows the
@@ -140,11 +152,10 @@ speaker notes. Each hook can be asynchronous.
   `commit`, `branch`, `checkout`, `merge`, or `cherry-pick`. Give
   branches and checkouts a `name`, merges a `branch`, and cherry-picks
   a source `commit`. When picking a merge, identify its `parent`.
-- The compatibility `mermaid` fence reads existing flowcharts with styled nodes and subgraphs,
-  sequence diagrams, simple state transitions, class and entity relationship
-  diagrams, pie charts, Gantt schedules, GitGraph histories, timelines, and user journeys. Options like `{scale:0.5, theme:'neutral'}` on the
-  fence override deck defaults. Diagram YAML can also provide a title and
-  configuration, including pie legend placement and donut radius.
+- Imported Slidev diagram fences pass through a compatibility parser.
+  Styled flowchart groups, sequence and state diagrams, relationships,
+  pie charts, Gantt schedules, Git histories, timelines, and journeys use
+  the same `ts-charts` renderers as `charts` fences.
 - Gantt supports date and axis formats, weekday and date exclusions,
   task dependencies, and milestones. GitGraph supports branch ordering,
   checkout, merges, tags, cherry-picking, and horizontal or vertical lanes.

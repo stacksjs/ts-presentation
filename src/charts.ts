@@ -1,20 +1,28 @@
-import type { FlowchartDiagramOptions, GanttChartOptions, GitGraphOptions, JourneyChartOptions, TimelineChartOptions } from 'ts-charts/diagrams'
-import { flowchartDiagram, ganttChart, gitGraphChart, journeyChart, timelineChart } from 'ts-charts/diagrams'
+import type { FlowchartDiagramOptions, GanttChartOptions, GitGraphOptions, JourneyChartOptions, PieChartOptions, RelationshipChartOptions, SequenceChartOptions, TimelineChartOptions } from 'ts-charts/diagrams'
+import { flowchartDiagram, ganttChart, gitGraphChart, journeyChart, pieChart, relationshipChart, sequenceChart, timelineChart } from 'ts-charts/diagrams'
 import { optionsForSvg } from './diagram-svg.ts'
 
 type Chart =
-  | ({ type: 'flowchart' } & FlowchartDiagramOptions)
+  | ({ type: 'flowchart' | 'state' } & FlowchartDiagramOptions)
   | ({ type: 'gantt' } & GanttChartOptions)
   | ({ type: 'gitgraph' } & GitGraphOptions)
   | ({ type: 'journey' } & JourneyChartOptions)
+  | ({ type: 'pie' } & PieChartOptions)
+  | ({ type: 'class' | 'er' } & RelationshipChartOptions)
+  | ({ type: 'sequence' } & SequenceChartOptions)
   | ({ type: 'timeline' } & TimelineChartOptions)
 
 function chartSvg(chart: Chart): string | undefined {
   switch (chart.type) {
-    case 'flowchart': return flowchartDiagram(chart)
+    case 'flowchart':
+    case 'state': return flowchartDiagram({ ...chart, kind: chart.type })
     case 'gantt': return ganttChart(chart)
     case 'gitgraph': return gitGraphChart(chart)
     case 'journey': return journeyChart(chart)
+    case 'pie': return pieChart(chart)
+    case 'class':
+    case 'er': return relationshipChart({ ...chart, kind: chart.type })
+    case 'sequence': return sequenceChart(chart)
     case 'timeline': return timelineChart(chart)
   }
 }

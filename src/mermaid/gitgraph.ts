@@ -1,6 +1,6 @@
 import type { GitCommitStyle, GitGraphDirection, GitGraphOperation, GitGraphOptions, GitHistory } from 'ts-charts/diagrams'
 import { buildGitHistory as buildHistory, gitGraphChart } from 'ts-charts/diagrams'
-import { syntaxMask } from './svg.ts'
+import { syntaxMask } from './syntax.ts'
 
 function commands(source: string): string[] {
   return source.split(/\r?\n/).flatMap((line) => {

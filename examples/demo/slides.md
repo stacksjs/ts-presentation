@@ -72,22 +72,24 @@ Then ask for the decision.
 
 ---
 
-# A simple flowchart
+# From draft to presentation
 
 ```charts
 type: flowchart
 theme: neutral
+accessibleTitle: Draft, review, and present
+description: Approval leads to the presentation. A requested change sends the draft back for another review.
 direction: right
 nodes:
-  - { id: draft, label: Draft }
+  - { id: draft, label: Draft, shape: stadium }
   - { id: ready, label: 'Ready?', shape: diamond }
   - { id: present, label: Present, shape: rounded }
   - { id: revise, label: Revise }
 edges:
   - { from: draft, to: ready }
   - { from: ready, to: present, label: 'Yes' }
-  - { from: ready, to: revise, label: 'No' }
-  - { from: revise, to: draft }
+  - { from: ready, to: revise, label: 'No', style: dotted }
+  - { from: revise, to: draft, style: dotted }
 ```
 
 <!--
@@ -134,13 +136,17 @@ Connect the formula to the preceding live example.
 
 # Exchange messages
 
-```mermaid
-sequenceDiagram
-  actor A as Author
-  participant R as Reviewer
-  A->>+R: Share a draft
-  Note over R: Read and annotate
-  R-->>-A: Return feedback
+```charts
+type: sequence
+theme: neutral
+accessibleTitle: Review exchange
+participants:
+  - { id: author, name: Author, actor: true }
+  - { id: reviewer, name: Reviewer }
+events:
+  - { kind: message, from: author, to: reviewer, label: Share a draft, change: start }
+  - { kind: note, ids: [reviewer], label: Read and annotate }
+  - { kind: message, from: reviewer, to: author, label: Return feedback, change: end, dashed: true }
 ```
 
 <!--
@@ -175,26 +181,34 @@ layout: compare
 
 # Plan the work
 
-```mermaid {theme:'neutral'}
-pie showData
-  "Review" : 4
-  "Build" : 6
-  "Test" : 3
+```charts
+type: pie
+theme: neutral
+showData: true
+donutHole: 0.28
+accessibleTitle: Estimated time by activity
+slices:
+  - { label: Review, value: 4 }
+  - { label: Build, value: 6 }
+  - { label: Test, value: 3 }
 ```
 
 ::right::
 
-```mermaid {theme:'neutral'}
-erDiagram
-  direction LR
-  PROJECT ||--o{ TASK : contains
-  PROJECT {
-    string name
-  }
-  TASK {
-    string title
-    string status
-  }
+<style>
+.example-columns > div:last-child { padding-top: 92px; }
+</style>
+
+```charts
+type: er
+theme: neutral
+direction: right
+accessibleTitle: Projects contain tasks
+cards:
+  - { id: project, name: Project, fields: ['name: string'] }
+  - { id: task, name: Task, fields: ['title: string', 'status: string'] }
+edges:
+  - { source: project, target: task, label: contains, start: one, end: zero-many }
 ```
 
 <!--

@@ -63,8 +63,8 @@ the deck and style slides with an optional `style.css`.
 | Navigation | `routeAlias: review`, then links such as `#review` or `#review/2`. Use `clicksStart` and `clicks` to set reveal bounds |
 | Per-slide options | `class`, `hide`, `disabled`, and `transition: fade`, `slide-left`, or `slide-up` |
 | Images and component markup | Trusted HTML, with optional `data-zoom` on an image |
-| First-party diagrams | YAML in a `charts` fence. Supports flowcharts, timelines, user journeys, Gantt schedules, and Git histories through `ts-charts` |
-| Existing diagrams | Slidev-compatible diagram syntax for flowcharts, sequence, state, class, entity relationship, pie, Gantt, GitGraph, timelines, and user journeys |
+| First-party diagrams | YAML in a `charts` fence. `ts-charts` renders flowcharts, sequence and state diagrams, class and entity relationships, pie charts, Gantt schedules, Git histories, timelines, and user journeys |
+| Imported diagrams | Slidev diagram fences are translated to structured data and rendered by the same `ts-charts` functions |
 | Math | Native MathML with scoped macros, styled fractions, numbered equations, ruled arrays, commutative diagrams, stacked subscripts, mixed text and math, click highlighting, and chemistry notation |
 | Code walkthroughs | `ts [build.ts] {1\|2-3\|all}{lines:true}` for titles and click highlights, or `md magic-move` around nested fences to animate between frames |
 | Code groups | Enable `comark: true` and place titled fences between `::code-group` and `::` to create keyboard-accessible tabs |
