@@ -102,3 +102,18 @@ test('recognizes whole AMS display environments and nested inline math delimiter
   const disabled = await renderDeck(parseDeck('---\nmath: false\n---\n\n' + source))
   expect(disabled).not.toContain('<math ')
 })
+
+test('renders a bare commutative diagram through the deck compiler and preserves fenced examples', async () => {
+  const source = [String.raw`# A commuting square`, '',
+    String.raw`\begin{CD}`,
+    String.raw`  U @>f>> V \\`,
+    String.raw`  @VgVV @VVhV \\`,
+    String.raw`  X @>>k> Y`,
+    String.raw`\end{CD}`, '', '~~~tex',
+    String.raw`\begin{CD}U @>f>> V\end{CD}`, '~~~'].join('\n')
+  const html = await renderDeck(parseDeck(source))
+  expect(html.match(/class="math-cd"/g)).toHaveLength(1)
+  expect(html.match(/<math [^>]* display="block"/g)).toHaveLength(1)
+  expect(html).toContain('language-tex')
+  expect(html).toContain('<mo stretchy="true" movablelimits="false" minsize="2em">→</mo>')
+})

@@ -1,6 +1,7 @@
 import type { AuthoringSetup, MermaidOptions } from './authoring-setup.ts'
 import type { LoadedExtensions, PresentationAddon } from './extensions.ts'
 import { resolveCanvas } from './canvas.ts'
+import { renderChart } from './charts.ts'
 import type { CodeBlockInfo } from './code-blocks.ts'
 import { codeBlock, codeFrame, createCodeHighlighter, magicFrames, parseCodeInfo } from './code-blocks.ts'
 import { renderMermaid } from './diagram.ts'
@@ -226,6 +227,9 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
       if (writable && /^(js|javascript|ts|typescript)$/.test(language)) {
         return liveBlock(decoded.replace(/\n$/, ''), language.startsWith('t') ? 'ts' : 'js', false,
           { token: info.writeToken!, revision: writable.revision })
+      }
+      if (language === 'charts' || language === 'ts-charts') {
+        return renderChart(decoded, `chart-${index}-${diagram++}`) ?? block
       }
       if (language === 'mermaid') {
         const svg = mermaidConfig === false ? undefined : await renderMermaid(decoded, `arrow-${index}-${diagram++}`, diagramOptions, diagramProps, configuration?.diagramRenderer)

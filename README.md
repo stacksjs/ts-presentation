@@ -60,13 +60,24 @@ the deck and style slides with an optional `style.css`.
 | Navigation | `routeAlias: review`, then links such as `#review` or `#review/2`. Set `clicksStart` or `clicks` to override a slide's reveal range |
 | Per-slide options | `class`, `hide`, `disabled`, and `transition: fade`, `slide-left`, or `slide-up` |
 | Images and component markup | Trusted HTML, with optional `data-zoom` on an image |
-| Diagrams | Mermaid flowcharts, sequence, basic state, class, entity relationship, pie, Gantt, GitGraph, timelines, and user journeys |
-| Math | Native MathML with scoped macros, styled fractions, numbered equations, ruled arrays, stacked subscripts, mixed text and math, click highlighting, and chemistry notation |
+| First-party diagrams | YAML in a `charts` fence. Supports flowcharts, timelines, and user journeys through `ts-charts` |
+| Existing diagrams | Slidev-compatible diagram syntax for flowcharts, sequence, state, class, entity relationship, pie, Gantt, GitGraph, timelines, and user journeys |
+| Math | Native MathML with scoped macros, styled fractions, numbered equations, ruled arrays, commutative diagrams, stacked subscripts, mixed text and math, click highlighting, and chemistry notation |
 | Code walkthroughs | `ts [build.ts] {1\|2-3\|all}{lines:true}` for titles and click highlights, or `md magic-move` around nested fences to animate between frames |
 | Source snippets | `<<< @/snippets/build.ts#example` for a named region. Use `{monaco-write}` with a whole JavaScript or TypeScript file to allow saving from the local dev editor |
 | Live code | A `js` or `ts` fence followed by `{live-run}` or `{monaco-run}`. Use `{live}` or `{monaco}` for an editor |
 | Themes and addons | Set `theme: paper` or `theme: serif`, or load trusted local modules through `theme` and `addons` |
 | Canvas size | Set `canvasWidth: 800` and `aspectRatio: 4/3` in deck frontmatter for an 800 × 600 canvas |
+
+```charts
+type: flowchart
+direction: right
+nodes:
+  - { id: draft, label: Draft }
+  - { id: review, label: Review }
+edges:
+  - { from: draft, to: review }
+```
 
 The dev server shares an in-flight compilation and reuses rendered HTML
 until an included source changes. The browser renders local decks

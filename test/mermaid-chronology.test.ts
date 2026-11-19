@@ -68,7 +68,7 @@ test('plots scores and lists actor assignments for Mermaid journeys', () => {
   expect(svg?.match(/<title>Author<\/title>/g)).toHaveLength(3)
   expect(svg?.match(/<title>Reviewer<\/title>/g)).toHaveLength(2)
   expect(svg).toContain('Request feedback, 2 out of 5, Author, Reviewer')
-  expect(svg).toMatch(/class="diagram-journey-trajectory" d="M[^"]+L[^"]+"/)
+  expect(svg).toMatch(/class="diagram-journey-trajectory"[^>]* d="M[^"]+L[^"]+"/)
   expect(svg).toContain('fill="#004488"')
   expect(svg).toContain('fill="#ee7733"')
 })

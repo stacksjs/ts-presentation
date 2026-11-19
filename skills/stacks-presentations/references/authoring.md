@@ -62,9 +62,17 @@ deck. For example, `canvasWidth: 800` and `aspectRatio: 4/3` produce an
   between rows, and `\\[1ex]` for extra row space.
 - Use `\text{for $n$ samples}` to mix upright labels with nested math.
   Font commands such as `\textbf` can appear inside the label.
+- Use an AMS `\begin{CD} … \end{CD}` block for a commutative diagram.
+  Use `@>f>>` for a horizontal arrow marked `f` and `@VgVV` for a downward
+  arrow with `g` on the left. Put vertical arrows on their own rows.
+- Use `\Braket{\phi|H|\psi}` and `\Set{x|x>0}` for scalable bra-ket and
+  set-builder notation. Labeled arrows accept `[below]{above}`.
 - Use deck-wide macros under `math.macros`. Quote TeX with YAML single
   quotes so backslashes are preserved.
-- A `mermaid` fence supports flowcharts with styled nodes and subgraphs,
+- For new diagrams, use a `charts` fence with YAML. Set `type: flowchart`
+  and supply `nodes` and `edges`, use `type: timeline` with `sections`,
+  or use `type: journey` with `phases`. These diagrams render through `ts-charts`.
+- The compatibility `mermaid` fence reads existing flowcharts with styled nodes and subgraphs,
   sequence diagrams, simple state transitions, class and entity relationship
   diagrams, pie charts, Gantt schedules, GitGraph histories, timelines, and user journeys. Options like `{scale:0.5, theme:'neutral'}` on the
   fence override deck defaults. Diagram YAML can also provide a title and

@@ -97,3 +97,69 @@ test('ignores TeX comments while preserving escaped percent signs inside text', 
   expect(html).not.toContain('<mtext>\\badcommand</mtext>')
   expect(html).toContain('%\\badcommand')
 })
+
+test('lays out AMS commutative diagrams with labeled arrows and aligned columns', () => {
+  const source = String.raw`\begin{CD}
+  U @>f>p> V @= W \\
+  @VaVV @AA b A @| \cr
+  X @<q<< Y @. Z
+  \end{CD}`
+  const math = createMathRenderer({ throwOnError: true })
+  const html = math(source, true)
+  expect(html).toContain('<mtable class="math-cd">')
+  expect(html.match(/<mtr>/g)).toHaveLength(3)
+  expect(html.match(/<mtd>/g)).toHaveLength(15)
+  expect(html).toContain('<munderover><mo stretchy="true" movablelimits="false" minsize="2em">→</mo><mrow><mi>p</mi></mrow><mrow><mi>f</mi></mrow></munderover>')
+  expect(html).toContain('class="math-cd-vertical"')
+  expect(html).toContain('>↓</mo>')
+  expect(html).toContain('>↑</mo>')
+  expect(html).toContain('>‖</mo>')
+  expect(html).toContain('>←</mo>')
+  expect(html).not.toContain('data-equation-lines')
+})
+
+test('keeps CD labels scoped and rejects incomplete arrows and environments', () => {
+  const math = createMathRenderer({ throwOnError: true, macros: { '\\identity': 'I' } })
+  const html = math(String.raw`\begin{CD}
+    U @>\def\temporary{g}\temporary>> V \cr
+    @. @. \cr
+    X @>\identity>> Y
+  \end{CD}`, true)
+  expect(html).toContain('<mover><mo stretchy="true" movablelimits="false" minsize="2em">→</mo><mrow><mi>g</mi></mrow></mover>')
+  expect(html).toContain('<mrow><mi>I</mi></mrow></mover>')
+  expect(() => math(String.raw`\begin{CD}U @>f> V\end{CD}`, true)).toThrow('Incomplete CD arrow')
+  expect(() => math(String.raw`\begin{CD}U @* V\end{CD}`, true)).toThrow('Unknown CD arrow')
+  expect(() => math(String.raw`\begin{CD}
+    U @>\def\temp{g}\temp>> V \\
+    @. @. \\
+    X @>\temp>> Y
+  \end{CD}`, true)).toThrow('Unsupported math command')
+
+  expect(renderMath(String.raw`\begin{CD}U @>>> V`, true)).toContain('math-unrendered')
+})
+
+test('renders fixed and scalable bra-ket and set-builder delimiters', () => {
+  const html = renderMath(String.raw`\bra{\phi}\ket{\psi}+\Braket{\phi|\frac{H}{2}|\psi}\quad
+  \Set{x||x\in\mathbb{R}, |x|<1}+\set{n|n>0}`)
+  expect(html).toContain('<mo stretchy="false">⟨</mo>')
+  expect(html).toContain('<mo stretchy="false">⟩</mo>')
+  expect(html).toContain('<mo stretchy="true">⟨</mo>')
+  expect(html).toContain('<mo stretchy="true">⟩</mo>')
+  expect(html.match(/<mo stretchy="true">∣<\/mo>/g)).toHaveLength(2)
+  expect(html).toContain('<mo stretchy="true">‖</mo>')
+  expect(html).toContain('<mo stretchy="false">{</mo><mi>n</mi><mo>∣</mo>')
+  expect(html).toContain('<mo>|</mo><mi>x</mi><mo>|</mo>')
+  expect(renderMath(String.raw`\Braket{\psi|`)).toContain('math-unrendered')
+})
+
+test('places arrow, accent, and stretchy brace labels with the expected math styles', () => {
+  const input = String.raw`A\xrightleftharpoons[slow]{\mathchoice{D}{T}{S}{s}}B \quad
+  \overbrace{a+b}^{n} \quad \underbrace{c+d}_{m}
+  \quad \widecheck{fg}+\underleftharpoon{h}`
+  const html = renderMath(input, true)
+  expect(html).toContain('<munderover><mo stretchy="true" movablelimits="false">⇌</mo><mrow><mi>s</mi><mi>l</mi><mi>o</mi><mi>w</mi></mrow><mrow><mrow><mi>S</mi></mrow></mrow></munderover>')
+  expect(html).toContain('<mover><mover accent="true">')
+  expect(html).toContain('<munder><munder accentunder="true">')
+  expect(html).toContain('<mo stretchy="true">ˇ</mo>')
+  expect(html).toContain('<mo stretchy="true">↽</mo>')
+})

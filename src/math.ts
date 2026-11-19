@@ -31,9 +31,27 @@ const variants: Record<string, string> = {
   mathbf: 'bold', mathbb: 'double-struck', mathrm: 'normal', mathit: 'italic',
   mathsf: 'sans-serif', mathtt: 'monospace', mathcal: 'script', mathfrak: 'fraktur', boldsymbol: 'bold-italic',
 }
-const accents: Record<string, string> = { hat: 'ˆ', widehat: 'ˆ', bar: '¯', overline: '¯', vec: '→', dot: '˙', ddot: '¨', tilde: '˜', widetilde: '˜' }
-const stretchedAccents: Record<string, string> = { overrightarrow: '→', overleftarrow: '←', overleftrightarrow: '↔', underrightarrow: '→', underleftarrow: '←', underleftrightarrow: '↔', overbracket: '⎴', underbracket: '⎵' }
-const extensibleArrows: Record<string, string> = { xrightarrow: '→', xleftarrow: '←', xleftrightarrow: '↔', xRightarrow: '⇒', xLeftarrow: '⇐', xLeftrightarrow: '⇔', xmapsto: '↦', xhookrightarrow: '↪', xhookleftarrow: '↩' }
+const accents: Record<string, string> = {
+  hat: 'ˆ', bar: '¯', vec: '→', dot: '˙', ddot: '¨', dddot: '⃛', ddddot: '⃜', tilde: '˜',
+  acute: '´', grave: '`', breve: '˘', check: 'ˇ', mathring: '˚',
+}
+const stretchedAccents: Record<string, string> = {
+  widehat: 'ˆ', widetilde: '˜', widecheck: 'ˇ', overbrace: '⏞', underbrace: '⏟', utilde: '˜',
+  overrightarrow: '→', overleftarrow: '←', overleftrightarrow: '↔',
+  underrightarrow: '→', underleftarrow: '←', underleftrightarrow: '↔',
+  overleftharpoon: '↼', overrightharpoon: '⇀', underleftharpoon: '↽', underrightharpoon: '⇁',
+  Overrightarrow: '⇒', overbracket: '⎴', underbracket: '⎵', overgroup: '⏠', undergroup: '⏡',
+}
+const extensibleArrows: Record<string, string> = {
+  xrightarrow: '→', xleftarrow: '←', xleftrightarrow: '↔', xRightarrow: '⇒', xLeftarrow: '⇐', xLeftrightarrow: '⇔',
+  xmapsto: '↦', xhookrightarrow: '↪', xhookleftarrow: '↩', xtwoheadleftarrow: '↞', xtwoheadrightarrow: '↠',
+  xleftharpoonup: '↼', xleftharpoondown: '↽', xrightharpoonup: '⇀', xrightharpoondown: '⇁',
+  xleftrightharpoons: '⇋', xrightleftharpoons: '⇌', xtofrom: '⇄', xlongequal: '=',
+}
+const notationDelimiters: Record<string, [string, string]> = {
+  bra: ['⟨', '|'], Bra: ['⟨', '|'], ket: ['|', '⟩'], Ket: ['|', '⟩'],
+  braket: ['⟨', '⟩'], Braket: ['⟨', '⟩'], set: ['{', '}'], Set: ['{', '}'],
+}
 const delimiters: Record<string, string> = {
   '\\{': '{', '\\}': '}', '\\lbrace': '{', '\\rbrace': '}', '\\langle': '⟨', '\\rangle': '⟩',
   '\\lVert': '‖', '\\rVert': '‖', '\\lvert': '|', '\\rvert': '|',
@@ -116,6 +134,7 @@ const textAccents: Record<string, string> = {
 interface Atom {
   markup: string
   limits?: boolean
+  brace?: 'lower' | 'upper'
 }
 
 type Alignment = 'left' | 'center' | 'right'
@@ -146,15 +165,22 @@ function tag(name: string, value: string): string {
   return `<${name}>${escapeHtml(value)}</${name}>`
 }
 
-function fence(token: string): string {
+function fence(token: string, stretchy = true): string {
   if (!token || token === '.') return ''
-  return `<mo stretchy="true">${escapeHtml(delimiters[token] ?? token)}</mo>`
+  return `<mo stretchy="${stretchy}">${escapeHtml(delimiters[token] ?? token)}</mo>`
 }
 
 const styleCommands: Record<string, MathStyle> = {
   '\\displaystyle': 0, '\\textstyle': 1, '\\scriptstyle': 2, '\\scriptscriptstyle': 3,
 }
 const boundary = '\u0000math-expansion-boundary'
+
+function labelledOperator(symbol: string, above: string, below: string, size = ''): string {
+  const base = `<mo stretchy="true" movablelimits="false"${size ? ` minsize="${size}"` : ''}>${symbol}</mo>`
+  if (above && below) return `<munderover>${base}${below}${above}</munderover>`
+  if (above) return `<mover>${base}${above}</mover>`
+  return below ? `<munder>${base}${below}</munder>` : base
+}
 
 function mathSize(style: MathStyle, markup: string): string {
   return `<mstyle displaystyle="${style === 0}" scriptlevel="${Math.max(0, style - 1)}">${markup}</mstyle>`
@@ -313,6 +339,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return definition
   }
 
+  function scriptStyle(): MathStyle {
+    return Math.max(2, Math.min(3, style + 1)) as MathStyle
+  }
+
   function argument(): string {
     if (depth++ > 100) throw new Error('Math arguments are nested too deeply')
     const markup = atom(take()).markup
@@ -447,14 +477,21 @@ export function renderMath(source: string, display = false, configured: MathMacr
       if (peek() === '\\limits' || peek() === '\\nolimits') forceLimits = take() === '\\limits'
       while (peek() === '_' || peek() === '^' || peek() === "'") {
         const kind = take()
-        const scriptStyle = Math.max(2, Math.min(3, style + 1)) as MathStyle
-        if (kind === '_') lower = withStyle(scriptStyle, argument)
-        else if (kind === '^') upper = withStyle(scriptStyle, argument)
+        if (kind === '_') lower = withStyle(scriptStyle(), argument)
+        else if (kind === '^') upper = withStyle(scriptStyle(), argument)
         else {
           let primes = '′'
           while (peek() === "'") { take(); primes += '′' }
           upper = tag('mo', primes)
         }
+      }
+      if (part.brace === 'upper' && upper) {
+        part.markup = `<mover>${part.markup}${upper}</mover>`
+        upper = ''
+      }
+      if (part.brace === 'lower' && lower) {
+        part.markup = `<munder>${part.markup}${lower}</munder>`
+        lower = ''
       }
       const wrapper = lower && upper ? (forceLimits ? 'munderover' : 'msubsup')
         : lower ? (forceLimits ? 'munder' : 'msub')
@@ -465,8 +502,76 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return parts.join('')
   }
 
+  function commutativeDiagram(): string {
+    const stops = ['@', '&', '\\\\', '\\cr', '\\end']
+    const rows: string[][] = []
+    function arrowLabel(type: string): string {
+      const label = withStyle(2, () => inScope(() => row([...stops, type])))
+      if (take() !== type) throw new Error('Incomplete CD arrow')
+      return label ? `<mrow>${label}</mrow>` : ''
+    }
+    function commutativeArrow(): string {
+      const type = take()
+      if (type === '.') return ''
+      if (type === '=') return labelledOperator('=', '', '', '2em')
+      if (type === '|') return labelledOperator('‖', '', '', '1.7em')
+      if (!/^[<>AV]$/.test(type)) throw new Error('Unknown CD arrow')
+      const first = arrowLabel(type)
+      const second = arrowLabel(type)
+      if (type === '<' || type === '>') return labelledOperator(type === '<' ? '←' : '→', first, second, '2em')
+      const vertical = labelledOperator(type === 'A' ? '↑' : '↓', '', '', '1.7em')
+      return `<mrow class="math-cd-vertical">${mathSize(2, first || '<mrow/>')}${vertical}${mathSize(2, second || '<mrow/>')}</mrow>`
+    }
+    let cells: string[] = []
+    let closed = false
+    while (peek()) {
+      cells.push(withStyle(0, () => inScope(() => row(stops))))
+      const separator = take()
+      if (separator === '@') { cells.push(commutativeArrow()); continue }
+      if (separator === '&') continue
+      const lineBreak = separator === '\\\\' || separator === '\\cr'
+      if (!lineBreak && (separator !== '\\end' || literalGroup() !== 'CD')) break
+      if (rows.length % 2) {
+        if (cells[0] === '') cells.shift()
+        if (cells.at(-1) === '') cells.pop()
+      }
+      if (cells.some(Boolean) || lineBreak) rows.push(cells)
+      cells = []
+      if (!lineBreak) { closed = true; break }
+    }
+    if (!closed || !rows.length) throw new Error('Unclosed CD environment')
+    const columns = Math.max(...rows.map(cells => cells.length))
+    if (columns * rows.length > 6000) throw new Error('CD environment has too many cells')
+    const markup = rows.map(cells => `<mtr>${Array.from({ length: columns }, (_, index) => `<mtd>${cells[index] ?? ''}</mtd>`).join('')}</mtr>`).join('')
+    return `<mtable class="math-cd">${markup}</mtable>`
+  }
+
+  function delimitedNotation(name: string): string {
+    const [left, right] = notationDelimiters[name]
+    const stretchy = /^[A-Z]/.test(name)
+    const separator = name === 'Braket' || name === 'Set' || name === 'set'
+    if (!separator || peek() !== '{') return `<mrow>${fence(left, stretchy)}${argument()}${fence(right, stretchy)}</mrow>`
+    take()
+    const content = inScope(() => {
+      const parts: string[] = []
+      const stops = name === 'set' ? ['|', '}'] : ['|', '\\|', '}']
+      parts.push(row(stops))
+      while (peek() && peek() !== '}') {
+        const join = take()
+        const doubled = join === '\\|' || (stretchy && tokens[cursor] === '|')
+        if (join === '|' && doubled) cursor++
+        parts.push(stretchy ? fence(doubled && name === 'Set' ? '‖' : '∣') : tag('mo', '∣'))
+        parts.push(row(name === 'Braket' ? stops : ['}']))
+      }
+      if (take() !== '}') throw new Error('Unclosed math notation')
+      return parts.join('')
+    })
+    return `<mrow>${fence(left, stretchy)}${content}${fence(right, stretchy)}</mrow>`
+  }
+
   function matrix(environment: string): string {
     const unclosed = () => new Error(`Unclosed math environment: ${environment}`)
+    if (environment === 'CD') return commutativeDiagram()
     if (/^equation[*]?$/.test(environment)) {
       environmentDepth++
       const content = row(['\\end'])
@@ -709,6 +814,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       if (name === 'hspace' && peek() === '*') take()
       return { markup: `<mspace width="${readDimension()}"/>` }
     }
+    if (Object.hasOwn(notationDelimiters, name)) return { markup: delimitedNotation(name) }
     if (name === 'prescript') {
       const upper = withStyle(2, argument)
       const lower = withStyle(2, argument)
@@ -730,30 +836,28 @@ export function renderMath(source: string, display = false, configured: MathMacr
       if (star) take()
       return { markup: tag('mo', literalGroup().replace(/\\([_%#$&{}])/g, '$1')), limits: star }
     }
-    if (name === 'overbrace' || name === 'underbrace' || name === 'underline') {
-      const above = name === 'overbrace'
-      const element = above ? 'mover' : 'munder'
-      return { markup: `<${element}>${argument()}${tag('mo', name === 'underline' ? '_' : above ? '⏞' : '⏟')}</${element}>` }
+    if (name === 'overline' || name === 'underline') {
+      return { markup: `<mrow class="math-${name}">${argument()}</mrow>` }
     }
     if (name === 'overset' || name === 'underset' || name === 'stackrel') {
-      const annotation = argument()
+      const annotation = withStyle(scriptStyle(), argument)
       const element = name === 'underset' ? 'munder' : 'mover'
       return { markup: `<${element}>${argument()}${annotation}</${element}>` }
     }
     if (Object.hasOwn(stretchedAccents, name)) {
-      const element = name.startsWith('under') ? 'munder' : 'mover'
-      return { markup: `<${element}>${argument()}<mo stretchy="true">${stretchedAccents[name]}</mo></${element}>` }
+      const under = name.startsWith('under') || name === 'utilde'
+      const element = under ? 'munder' : 'mover'
+      const brace = name === 'overbrace' ? 'upper' : name === 'underbrace' ? 'lower' : undefined
+      return { brace, markup: `<${element} ${under ? 'accentunder' : 'accent'}="true">${argument()}<mo stretchy="true">${stretchedAccents[name]}</mo></${element}>` }
     }
     if (Object.hasOwn(extensibleArrows, name)) {
-      let subscript = ''
+      let below = ''
       if (peek() === '[') {
         take()
-        subscript = `<mrow>${row([']'])}</mrow>`
+        below = `<mrow>${withStyle(scriptStyle(), () => inScope(() => row([']'])))}</mrow>`
         if (take() !== ']') throw new Error('Unclosed arrow subscript')
       }
-      const base = `<mo stretchy="true">${extensibleArrows[name]}</mo>`
-      const superscript = argument()
-      return { markup: subscript ? `<munderover>${base}${subscript}${superscript}</munderover>` : `<mover>${base}${superscript}</mover>` }
+      return { markup: labelledOperator(extensibleArrows[name], withStyle(scriptStyle(), argument), below) }
     }
     if (name === 'phantom' || name === 'hphantom' || name === 'vphantom') {
       const invisible = `<mphantom>${argument()}</mphantom>`

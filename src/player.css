@@ -429,6 +429,10 @@ v-click, v-after, v-clicks { display: contents; }
 .slide math .math-italic, .slide math .math-bold-italic { font-style: italic; }
 .slide math .math-sans-serif { font-family: sans-serif; }
 .slide math .math-monospace { font-family: monospace; }
+math .math-overline { border-top: 0.06em solid currentColor; }
+math .math-underline { border-bottom: 0.06em solid currentColor; }
+math .math-cd mtd { padding: 0.12em 0.28em; math-style: normal; }
+math .math-cd-vertical { padding-inline: 0.08em; }
 math .math-boxed { border: 1px solid currentColor; padding-inline: 0.14em; }
 math .math-cancel { background: linear-gradient(to top right, transparent 48%, currentColor 49% 51%, transparent 52%); }
 math .math-bcancel { background: linear-gradient(to bottom right, transparent 48%, currentColor 49% 51%, transparent 52%); }

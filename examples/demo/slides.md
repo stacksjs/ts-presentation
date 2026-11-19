@@ -73,14 +73,20 @@ Then ask for the decision.
 
 # A simple flowchart
 
-```mermaid
-flowchart LR
-  subgraph Preparation
-    A[Draft] --> B{Ready?}
-  end
-  B ==>|Yes| C([Present])
-  B -.->|No| D[Revise]
-  style C fill:#20504c,stroke:#80c7bc
+```charts
+type: flowchart
+theme: neutral
+direction: right
+nodes:
+  - { id: draft, label: Draft }
+  - { id: ready, label: 'Ready?', shape: diamond }
+  - { id: present, label: Present, shape: rounded }
+  - { id: revise, label: Revise }
+edges:
+  - { from: draft, to: ready }
+  - { from: ready, to: present, label: 'Yes' }
+  - { from: ready, to: revise, label: 'No' }
+  - { from: revise, to: draft }
 ```
 
 <!--
@@ -308,16 +314,20 @@ Read the two conditions under the sum. In the second row, point out the rules th
 
 # Follow a release timeline
 
-```mermaid {theme:'neutral'}
-timeline
-  accTitle: Release milestones by phase
-  accDescr: Research and planning precede the public preview and launch.
-  section Planning
-    Week 1 : Interview users : Collect feedback
-    Week 2 : Agree on scope
-  section Delivery
-    Week 3 : Open a preview
-    Week 4 : Publish the release
+```charts
+type: timeline
+theme: neutral
+accessibleTitle: Release milestones by phase
+description: Research and planning precede the public preview and launch.
+sections:
+  - name: Planning
+    periods:
+      - { label: Week 1, events: [Interview users, Collect feedback] }
+      - { label: Week 2, events: [Agree on scope] }
+  - name: Delivery
+    periods:
+      - { label: Week 3, events: [Open a preview] }
+      - { label: Week 4, events: [Publish the release] }
 ```
 
 <!--
@@ -328,17 +338,37 @@ Read the periods from left to right. The first period contains two events.
 
 # Map a reviewer's journey
 
-```mermaid {theme:'neutral'}
-journey
-  accTitle: Proposal review journey
-  section Prepare
-    Start a draft: 5: Author
-    Request feedback: 2: Author, Reviewer
-  section Submit
-    Resolve comments: 4: Author, Reviewer
-    Approve the proposal: 5: Reviewer
+```charts
+type: journey
+theme: neutral
+accessibleTitle: Proposal review journey
+phases:
+  - name: Prepare
+    tasks:
+      - { name: Start a draft, score: 5, actors: [Author] }
+      - { name: Request feedback, score: 2, actors: [Author, Reviewer] }
+  - name: Submit
+    tasks:
+      - { name: Resolve comments, score: 4, actors: [Author, Reviewer] }
+      - { name: Approve the proposal, score: 5, actors: [Reviewer] }
 ```
 
 <!--
 The low score marks the wait for feedback. The colored dots identify who takes part in each step.
+-->
+
+---
+
+# Compare two paths
+
+\begin{CD}
+A @>f>> B \\
+@VuVV @VVvV \\
+C @>>g> D
+\end{CD}
+
+The diagram commutes when \(v\circ f=g\circ u\).
+
+<!--
+Follow the top and right arrows, then the left and bottom arrows. Both paths start at A and end at D.
 -->
