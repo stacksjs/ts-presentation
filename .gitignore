@@ -16,3 +16,4 @@ pantry
 
 # Local presentation exports
 /output/
+**/.slidev/drawings/

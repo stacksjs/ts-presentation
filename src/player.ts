@@ -1,4 +1,6 @@
 import { defaultCanvas } from './canvas.ts'
+import { setupDrawings } from './drawing-player.ts'
+import type { DrawingClientConfig } from './drawings.ts'
 import { setupLiveCode } from './live-code.ts'
 import type { SlidePosition, SlideRoute } from './navigation.ts'
 import { clickBounds, createNavigationContext, nextPosition, previousPosition, readSlideHash, slideHash, slidePosition } from './navigation.ts'
@@ -20,7 +22,6 @@ const fullscreen = control.querySelector<HTMLButtonElement>('#fullscreen')!
 const overview = document.querySelector<HTMLDialogElement>('#overview')!
 const imageView = document.querySelector<HTMLDialogElement>('#image-view')!
 const detail = imageView.querySelector('img')!
-const drawButton = control.querySelector<HTMLButtonElement>('#draw-button')!
 const timer = document.querySelector<HTMLElement>('#presenter-time')!
 const routes: SlideRoute[] = JSON.parse(document.querySelector('#presentation-navigation')!.textContent ?? '[]')
 const params = new URLSearchParams(location.search)
@@ -101,7 +102,7 @@ function show(number: number, step?: number, writeHistory = true, sync = true): 
   previous.disabled = previousPosition(here, bounds) === undefined
   next.disabled = nextPosition(here, bounds) === undefined
   presenterControls?.update(here)
-  if (!canvas.hidden) mountDrawing()
+  drawing?.refresh()
   window.dispatchEvent(new CustomEvent('presentation:slide', {
     detail: { ...here, title: routes[current - 1].title, route: routes[current - 1] },
   }))
@@ -157,6 +158,7 @@ function togglePresenter(): void {
   if (!notesPanel.hidden) presenterControls ??= setupPresenter(routes, bounds, step => show(current, step))
   presenterControls?.setActive(!notesPanel.hidden)
   presenterControls?.update(position())
+  drawing?.refresh()
   if (timerTick !== undefined) clearInterval(timerTick)
   timerTick = notesPanel.hidden ? undefined : setInterval(updateTimer, 1000)
   resize()
@@ -187,11 +189,13 @@ window.addEventListener('message', (event: MessageEvent) => {
     presentationSlide?: unknown
     presentationClick?: unknown
     presenterReady?: unknown
+    presentationDrawing?: unknown
     slide?: unknown
     screenshot?: unknown
     disclosure?: unknown
     open?: unknown
   } | null
+  if (data?.presentationDrawing) drawing?.receive(data.presentationDrawing)
   if (data?.presenterReady === true && popup) {
     popup.postMessage({ presentationSlide: current, presentationClick: click }, messageOrigin)
   }
@@ -217,53 +221,19 @@ async function toggleFullscreen(): Promise<void> {
   else if (document.fullscreenEnabled) await document.documentElement.requestFullscreen()
 }
 
-const canvas = document.createElement('canvas')
-canvas.className = 'slide-ink'
-canvas.width = canvasWidth
-canvas.height = canvasHeight
-canvas.hidden = true
-canvas.setAttribute('aria-hidden', 'true')
-const ink = canvas.getContext('2d')
-const drawings = new Map<number, Path2D[]>()
-let stroke: Path2D | undefined
-
-function mountDrawing(): void {
-  if (canvas.parentElement !== articles[current - 1]) articles[current - 1].append(canvas)
-  ink?.clearRect(0, 0, canvas.width, canvas.height)
-  if (!ink) return
-  ink.lineWidth = 3
-  ink.strokeStyle = '#ff7b70'
-  ink.lineCap = 'round'
-  ink.lineJoin = 'round'
-  for (const path of drawings.get(current) ?? []) ink.stroke(path)
-}
-
-function toggleDrawing(): void {
-  canvas.hidden = !canvas.hidden
-  drawButton.setAttribute('aria-pressed', String(!canvas.hidden))
-  if (!canvas.hidden) mountDrawing()
-}
-
-function point(event: PointerEvent): [number, number] {
-  const rect = canvas.getBoundingClientRect()
-  return [(event.clientX - rect.x) * canvas.width / rect.width, (event.clientY - rect.y) * canvas.height / rect.height]
-}
-
-canvas.addEventListener('pointerdown', (event) => {
-  if (event.button !== 0) return
-  stroke = new Path2D()
-  stroke.moveTo(...point(event))
-  const lines = drawings.get(current) ?? []
-  lines.push(stroke)
-  drawings.set(current, lines)
-  canvas.setPointerCapture(event.pointerId)
-})
-canvas.addEventListener('pointermove', (event) => {
-  if (!stroke || !canvas.hasPointerCapture(event.pointerId)) return
-  stroke.lineTo(...point(event))
-  mountDrawing()
-})
-canvas.addEventListener('lostpointercapture', () => { stroke = undefined })
+const drawingConfig: DrawingClientConfig = JSON.parse(document.querySelector('#presentation-drawings')?.textContent ?? '{}')
+const drawing = !isCapture && drawingConfig.enabled ? setupDrawings(drawingConfig, {
+  stage,
+  articles,
+  canvas: { width: canvasWidth, height: canvasHeight },
+  button: control.querySelector<HTMLButtonElement>('#draw-button')!,
+  clearButton: control.querySelector<HTMLButtonElement>('#clear-drawing')!,
+  status: control.querySelector<HTMLElement>('#drawing-status')!,
+  preview: isPreview,
+  presenter: () => isPresenter || !notesPanel.hidden,
+  currentSlide: () => current,
+  sendToPeer: presentationDrawing => syncPeer({ presentationDrawing }),
+}) : undefined
 
 function showImage(image: HTMLImageElement): void {
   detail.src = image.currentSrc || image.src
@@ -312,7 +282,6 @@ next.addEventListener('click', nextStep)
 goto.addEventListener('change', () => show(Number(goto.value)))
 presenter.addEventListener('click', openPresenter)
 fullscreen.addEventListener('click', () => { void toggleFullscreen() })
-drawButton.addEventListener('click', toggleDrawing)
 control.querySelector('#overview-button')!.addEventListener('click', () => overview.showModal())
 document.querySelector('#presenter-reset')!.addEventListener('click', () => {
   startedAt = Date.now()
@@ -364,13 +333,11 @@ window.addEventListener('keydown', (event) => {
       break
     case 'd':
     case 'D':
-      toggleDrawing()
+      if (!drawing?.toggle()) return
       break
     case 'c':
     case 'C':
-      if (canvas.hidden) return
-      drawings.delete(current)
-      mountDrawing()
+      if (!drawing?.clear()) return
       break
     default:
       return

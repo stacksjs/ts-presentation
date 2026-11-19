@@ -1,5 +1,5 @@
 import { realpath } from 'node:fs/promises'
-import { dirname, join, relative, resolve } from 'node:path'
+import { basename, dirname, join, relative, resolve } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
 import type { Deck, RenderOptions, Slide } from './index.ts'
@@ -8,10 +8,13 @@ import type { SlideCanvas } from './canvas.ts'
 import { loadAuthoringSetup } from './authoring-setup.ts'
 import { within } from './assets.ts'
 import { resolveCanvas } from './canvas.ts'
+import { loadSavedDrawings } from './drawing-store.ts'
+import type { DrawingStore } from './drawing-store.ts'
+import { drawingEnabled, resolveDrawings } from './drawings.ts'
 import { loadExtensions } from './extensions.ts'
 import { renderPresentation } from './index.ts'
 import { extractImagesUsage, parseDeckAsync, readHeadmatter } from './parser.ts'
-import type { PreparserContext, PreparserExtension, PreparserSetup } from './parser.ts'
+import type { PreparserExtension, PreparserSetup } from './parser.ts'
 import { slideRange } from './selection.ts'
 import type { WritableSnippet } from './snippet-write.ts'
 import { snippetRevision, snippetToken } from './snippet-write.ts'
@@ -25,11 +28,11 @@ export interface CompiledDeck extends ExtensionAssets {
   canvas: SlideCanvas
   routeAliases: ReadonlySet<string>
   writableSnippets: ReadonlyMap<string, WritableSnippet>
+  drawingStore?: DrawingStore
 }
 
-export interface CompileOptions extends Pick<RenderOptions, 'liveCompile'> {
+export interface CompileOptions extends Pick<RenderOptions, 'liveCompile' | 'mode'> {
   theme?: string
-  mode?: PreparserContext['mode']
 }
 
 async function fileRevision(path: string): Promise<string> {
@@ -40,6 +43,7 @@ async function fileRevision(path: string): Promise<string> {
 export function createDeckCompiler(entry: string, options: CompileOptions = {}): () => Promise<CompiledDeck> {
   const root = dirname(resolve(entry))
   const writerKey = options.liveCompile ? randomBytes(32).toString('hex') : undefined
+  const mode = options.mode ?? (options.liveCompile ? 'dev' : 'build')
   let cached: { files: Map<string, string | undefined>, deck: CompiledDeck } | undefined
   let pending: Promise<CompiledDeck> | undefined
   let loadedPreparserRevision: string | undefined
@@ -76,7 +80,7 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
       if (loadedPreparserRevision !== preparserRevision) delete require.cache[modulePath]
       const { default: setup } = await import(pathToFileURL(modulePath).href) as { default?: PreparserSetup }
       if (typeof setup !== 'function') throw new Error('setup/preparser.ts must export a setup function')
-      const result = await setup({ filepath, headmatter: readHeadmatter(source), mode: options.mode ?? (options.liveCompile ? 'dev' : 'build') })
+      const result = await setup({ filepath, headmatter: readHeadmatter(source), mode })
       if (result !== undefined && !Array.isArray(result)) throw new Error('setup/preparser.ts must return a list of extensions')
       preparsers = result ?? []
     }
@@ -144,10 +148,20 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
       loadExtensions(deck, directory, observe, options.theme),
       loadAuthoringSetup(directory, observe),
     ])
-    const { html, routes } = await renderPresentation(deck, { liveCompile: options.liveCompile, extensions, setup, writableSnippets })
+    const canvas = resolveCanvas(deck.headmatter)
+    const drawings = resolveDrawings(deck.headmatter, extensions.theme.defaults?.drawings, basename(filepath, '.md'))
+    const store = drawings.persist ? { root: directory, directory: resolve(directory, drawings.persist), canvas, slideCount: deck.slides.length } : undefined
+    const savedDrawings = store && await loadSavedDrawings(store, async (path) => {
+      const revision = await fileRevision(path).catch(() => undefined)
+      files.set(path, revision)
+      return revision
+    })
+    const saveDrawings = store !== undefined && mode === 'dev' && drawingEnabled(drawings, mode)
+    const { html, routes } = await renderPresentation(deck, { liveCompile: options.liveCompile, mode, extensions, setup, writableSnippets, savedDrawings, saveDrawings })
     const author = typeof deck.headmatter?.author === 'string' ? deck.headmatter.author : undefined
     const routeAliases = new Set(routes.flatMap(route => route.alias ? [route.alias] : []))
-    const compiled = { title: deck.title, author, canvas: resolveCanvas(deck.headmatter), html, styles: extensions.styles, client: extensions.client, mounts: extensions.mounts, writableSnippets, routeAliases }
+    const drawingStore = saveDrawings ? { ...store, slideCount: routes.length } : undefined
+    const compiled = { title: deck.title, author, canvas, html, styles: extensions.styles, client: extensions.client, mounts: extensions.mounts, writableSnippets, routeAliases, drawingStore }
     cached = { files, deck: compiled }
     return compiled
   }

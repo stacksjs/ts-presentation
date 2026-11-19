@@ -54,6 +54,7 @@ the deck and style slides with an optional `style.css`.
 | feature | syntax |
 | --- | --- |
 | Speaker notes | Trailing HTML comment, with `[click]` on its own line for notes revealed on the next click |
+| Drawing annotations | Draw with a mouse or stylus. Set `drawings.persist: true` to save SVG overlays for the built site and exports |
 | Progressive reveals | `v-click`, explicit and relative clicks, enter/leave ranges, animated modifiers, grouped `<v-clicks>` lists, and replacement content with `<v-switch>` |
 | Layouts | `layout: default`, `center`, `cover`, `intro`, `section`, `image-left`, or `image-right`. Set `image` for an image layout |
 | Local slides and ranges | `src: ./chapter.md#2-4` selects authored slides before nested imports expand. A leading slash resolves from the deck directory |

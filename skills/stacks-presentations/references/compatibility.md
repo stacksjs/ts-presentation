@@ -19,7 +19,7 @@ in a new ts-presentation project.
 | Presenter mode | Two synced browser windows, notes, timer, resizable layouts, next-frame preview, and reveal seeking |
 | Reveal scheduling | Absolute and relative steps, hide ranges, grouped and nested lists, CSS presets, and switch slots |
 | Navigation context | Slide-local metadata, route aliases, reveal bounds, and navigation controls |
-| Drawing and recording | Canvas drawing and browser screen capture |
+| Drawing and recording | Native SVG ink, mouse and stylus input, same-browser sync, SVG persistence, drawing options, and screen capture |
 
 Existing Vue components, UnoCSS configuration, Monaco IntelliSense, Shiki
 transformers, PlantUML, and the full KaTeX and Mermaid grammars need

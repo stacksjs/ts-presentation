@@ -44,6 +44,22 @@ before splitting, `transformSlide(content, frontmatter)` to change slide
 Markdown or frontmatter, and `transformNote(note, frontmatter)` to change
 speaker notes. Each hook can be asynchronous.
 
+## Draw on slides
+
+- Click **Draw** or press **D** to turn on mouse and touch drawing. A stylus
+  can start a stroke with Draw turned off. The overlay stays visible
+  when Draw is turned off.
+- Choose **Clear drawing** or press **C** while Draw is on to remove ink from
+  the current slide.
+- Set `drawings.presenterOnly: true` to allow editing from presenter view.
+  Set `drawings.syncAll: false` to keep audience edits local to their tabs.
+  Open windows of the same presentation receive the presenter's edits.
+- Set `drawings.enabled: dev` to enable editing only in the dev server.
+  Set the value to `false` to disable editing.
+- Set `drawings.persist: true` to save SVGs under
+  `.slidev/drawings/<deck-name>/`, or supply a directory relative to the
+  deck. Saved ink appears in static builds, PDF, PNG, and PowerPoint.
+
 ## Code, math, and diagrams
 
 - Add a title and click ranges to a fence, as in

@@ -5,12 +5,15 @@ import { renderChart } from './charts.ts'
 import type { CodeBlockInfo } from './code-blocks.ts'
 import { codeBlock, codeFrame, createCodeHighlighter, magicFrames, parseCodeInfo } from './code-blocks.ts'
 import { renderMermaid } from './diagram.ts'
+import { drawingOverlay } from './drawing-store.ts'
+import { drawingEnabled, resolveDrawings } from './drawings.ts'
+import type { DrawingClientConfig, SavedDrawing } from './drawings.ts'
 import { escapeHtml, unescapeHtml } from './html.ts'
 import { liveBlock } from './live-markup.ts'
 import { createMathRenderer, resolveMathMacros } from './math.ts'
 import type { SlideRoute } from './navigation.ts'
 import { slideAlias } from './navigation.ts'
-import type { Deck, Slide } from './parser.ts'
+import type { Deck, PreparserContext, Slide } from './parser.ts'
 import { prepareMarkdown, splitSlots } from './syntax.ts'
 import type { WritableSnippet } from './snippet-write.ts'
 
@@ -19,6 +22,7 @@ export { defineKatexSetup, defineMermaidRendererSetup, defineMermaidSetup } from
 export type { KatexOptions, MermaidOptions, MermaidRenderer } from './authoring-setup.ts'
 export type { PresentationNavigation, SlideRoute } from './navigation.ts'
 export type { LayoutContext, PresentationAddon, PresentationTheme } from './extensions.ts'
+export type { DrawingOptions } from './drawings.ts'
 
 export { definePreparserSetup, extractImagesUsage, parseDeck, parseDeckAsync } from './parser.ts'
 export type { Deck, PreparserContext, PreparserExtension, PreparserSetup, Slide } from './parser.ts'
@@ -27,9 +31,12 @@ const escapedCode = /<pre><code(?: class="language-([\w+#.-]+)")?>([\s\S]*?)<\/c
 
 export interface RenderOptions {
   liveCompile?: boolean
+  mode?: PreparserContext['mode']
   extensions?: LoadedExtensions
   setup?: AuthoringSetup
   writableSnippets?: ReadonlyMap<string, WritableSnippet>
+  savedDrawings?: ReadonlyMap<number, SavedDrawing>
+  saveDrawings?: boolean
 }
 
 export async function renderDeck(deck: Deck, options?: RenderOptions): Promise<string> {
@@ -38,6 +45,14 @@ export async function renderDeck(deck: Deck, options?: RenderOptions): Promise<s
 
 export async function renderPresentation(deck: Deck, options: RenderOptions = {}): Promise<{ html: string, routes: SlideRoute[] }> {
   const { width, height } = resolveCanvas(deck.headmatter)
+  const drawSettings = resolveDrawings(deck.headmatter, options.extensions?.theme.defaults?.drawings)
+  const drawings: DrawingClientConfig = {
+    enabled: drawingEnabled(drawSettings, options.mode ?? (options.liveCompile ? 'dev' : 'build')),
+    presenterOnly: drawSettings.presenterOnly,
+    syncAll: drawSettings.syncAll,
+    persist: options.saveDrawings === true,
+    saved: Object.fromEntries([...(options.savedDrawings ?? [])].map(([slide, drawing]) => [slide, drawing.sketch])),
+  }
   const configuration = options.setup
   const renderMath = createMathRenderer({
     ...configuration?.katex,
@@ -161,7 +176,9 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     const background = safeImage && layout.startsWith('image-') && !custom
       ? `<img class="slide-layout-image" src="${escapeHtml(safeImage)}" alt="" loading="lazy">`
       : ''
-    return `<article id="slide-${index + 1}" class="slide slidev-layout layout-${escapeHtml(layout)} ${escapeHtml(className)}" aria-label="${escapeHtml(slide.title)}"${route}${motion}>${background ? `${background}<div class="slide-content">${body}</div>` : body}</article>`
+    const drawing = options.savedDrawings?.get(index + 1)
+    const overlay = drawing && (drawing.sketch.strokes.length || drawing.legacy) ? drawingOverlay(drawing, { width, height }) : ''
+    return `<article id="slide-${index + 1}" class="slide slidev-layout layout-${escapeHtml(layout)} ${escapeHtml(className)}" aria-label="${escapeHtml(slide.title)}"${route}${motion}>${background ? `${background}<div class="slide-content">${body}</div>` : body}${overlay}</article>`
   }))
 
   const choices = activeSlides.map((slide, index) => `<option value="${index + 1}">${index + 1}. ${escapeHtml(slide.title)}</option>`)
@@ -174,6 +191,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   const preset = deck.headmatter?.clickAnimation
   const clicksPreset = typeof preset === 'string' ? escapeHtml(preset) : ''
   const navigation = JSON.stringify(routes).replaceAll('<', '\\u003c')
+  const drawingConfig = JSON.stringify(drawings).replaceAll('<', '\\u003c')
   const document = `<!doctype html>
 <html lang="en"${clicksPreset ? ` data-click-animation="${clicksPreset}"` : ''} data-slide-width="${width}" data-slide-height="${height}" data-theme="${escapeHtml(extensions?.theme.name ?? 'default')}"${options.liveCompile ? ' data-live-compile="true"' : ''}>
 <head>
@@ -191,6 +209,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
 <body>
   ${activeExtensions.map(extension => extension.globalTop || '').join('')}
   <script id="presentation-navigation" type="application/json">${navigation}</script>
+  <script id="presentation-drawings" type="application/json">${drawingConfig}</script>
   <main id="stage">${slides.join('\n')}</main>
   ${activeExtensions.map(extension => extension.globalBottom || '').join('')}
   <aside id="presenter-notes" hidden aria-label="Speaker notes">
@@ -224,7 +243,9 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
       <output for="presenter-seek"></output>
     </div>
     <button id="overview-button" type="button">Overview</button>
-    <button id="draw-button" type="button" aria-pressed="false">Draw</button>
+    <button id="draw-button" type="button" aria-pressed="false"${!drawings.enabled || drawings.presenterOnly ? ' hidden' : ''}>Draw</button>
+    <button id="clear-drawing" type="button" hidden>Clear drawing</button>
+    <span id="drawing-status" role="status" hidden></span>
     <button id="fullscreen" type="button">Fullscreen</button>
     <button id="record-button" type="button" hidden>Record</button>
   </nav>

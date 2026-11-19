@@ -1,6 +1,7 @@
 import { realpath, stat } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import type { DrawingOptions } from './drawings.ts'
 import type { Deck, Slide } from './index.ts'
 
 export interface LayoutContext {
@@ -26,7 +27,7 @@ export interface PresentationAddon {
 }
 
 export interface PresentationTheme extends PresentationAddon {
-  defaults?: { layout?: string, className?: string }
+  defaults?: { layout?: string, className?: string, drawings?: DrawingOptions }
 }
 
 export interface ExtensionAssets {
