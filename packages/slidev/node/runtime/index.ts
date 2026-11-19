@@ -1,8 +1,8 @@
 import { deckFontMarkup } from './fonts.ts'
 import { applyNotesAutoRuby } from './notes.ts'
-import { hasBuiltinLayout, renderBuiltinLayout, renderPresentationShell } from '../../../client/index.ts'
+import { hasBuiltinLayoutSlots, renderBuiltinLayout, renderPresentationShell } from '../../../client/index.ts'
 import type { AuthoringSetup, MermaidOptions } from './authoring-setup.ts'
-import type { LoadedExtensions, PresentationAddon } from './extensions.ts'
+import type { LoadedExtensions, PresentationAddon, PresentationLayout } from './extensions.ts'
 import { resolveCanvas } from '../../../types/src/canvas.ts'
 import type { LiveDeck } from '../../../types/src/dev-protocol.ts'
 import { renderChart } from './charts.ts'
@@ -42,6 +42,7 @@ export interface RenderOptions {
   mcpNavigation?: boolean
   mode?: PreparserContext['mode']
   extensions?: LoadedExtensions
+  resolveFileLayout?: (name: string, registered?: PresentationLayout) => Promise<PresentationLayout | undefined>
   setup?: AuthoringSetup
   writableSnippets?: ReadonlyMap<string, WritableSnippet>
   savedDrawings?: ReadonlyMap<number, SavedDrawing>
@@ -108,11 +109,19 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   })) : deck.slides
   const activeSlides = adapted.filter(slide => slide.frontmatter?.hide !== true && slide.frontmatter?.disabled !== true)
   if (!activeSlides.length) throw new Error('The deck contains no visible slides')
-  const layoutHooks = Object.assign(Object.create(null), ...activeExtensions.map(addon => addon.layouts ?? {})) as NonNullable<PresentationAddon['layouts']>
+  const layoutHooks = Object.assign(Object.create(null), ...activeExtensions.map(addon => addon.layouts ?? {})) as Record<string, PresentationLayout | undefined>
   const codeHooks = activeExtensions.flatMap(addon => addon.renderCode ? [addon.renderCode] : [])
   const settings = deck.headmatter?.config as Record<string, unknown> | undefined
   function effectiveLayout(slide: Slide): string {
     return slide.layout === 'default' && typeof slide.frontmatter?.layout !== 'string' ? defaults?.layout ?? slide.layout : slide.layout
+  }
+  const layoutNames = activeSlides.map(effectiveLayout)
+  if (options.resolveFileLayout) {
+    const resolve = options.resolveFileLayout
+    await Promise.all([...new Set(layoutNames)].map(async (name) => {
+      const layout = await resolve(name, layoutHooks[name])
+      if (layout) layoutHooks[name] = layout
+    }))
   }
   let groups = 0
   function markdown(content: string, comark?: boolean): string {
@@ -134,17 +143,17 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     const html = prepared.restore(Bun.markdown.html(prepared.source))
     return content.includes('[!') ? renderAlerts(html) : html
   }
-  const html = activeSlides.map((slide) => {
+  const html = activeSlides.map((slide, index) => {
     const comark = (slide.frontmatter?.comark ?? deck.headmatter?.comark ?? settings?.comark) === true
-    const layout = effectiveLayout(slide)
-    if (!layoutHooks[layout] && !hasBuiltinLayout(layout)) return { default: markdown(slide.content, comark) }
+    const layout = layoutNames[index]
+    if (!layoutHooks[layout] && !hasBuiltinLayoutSlots(layout)) return { default: markdown(slide.content, comark) }
     return Object.fromEntries(Object.entries(splitSlots(slide.content)).map(([name, content]) => [name, markdown(content, comark)]))
   })
   const routes = activeSlides.map((slide, index): SlideRoute => ({
     no: index + 1,
     alias: slideAlias(slide.frontmatter?.routeAlias),
     title: slide.title,
-    layout: effectiveLayout(slide),
+    layout: layoutNames[index],
     frontmatter: slide.frontmatter ?? {},
   }))
   const destination = createSlideDestinations(routes)
@@ -206,26 +215,22 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
       return [name, parts.join('') + markup.slice(cursor)]
     })))
     const custom = layoutHooks[layout]
+    const builtInBody = custom ? undefined : await renderBuiltinLayout(layout, slots, slide.frontmatter)
     const body = custom
       ? await custom({ slide, index, html: slots.default, slots })
-      : await renderBuiltinLayout(layout, slots, slide.frontmatter) ?? slots.default
+      : builtInBody ?? slots.default
     const prepared = prepareSlideHtml(body, destination, index + 1, slide.frontmatter, socialTheme)
     const className = [defaults?.className, slide.className].filter(Boolean).join(' ')
     const transition = String(slide.frontmatter?.transition ?? '')
     const motion = ['fade', 'slide-left', 'slide-up'].includes(transition) ? ` data-transition="${transition}"` : ''
     const route = alias ? ` data-route="${escapeHtml(alias)}"` : ''
-    const image = slide.frontmatter?.image ?? slide.frontmatter?.backgroundImage ?? slide.frontmatter?.background
-    const safeImage = typeof image === 'string' && /^(?:https?:\/\/|[./]|[\w-]+\/)/.test(image) ? image : ''
-    const background = safeImage && layout.startsWith('image-') && !custom
-      ? `<img class="slide-layout-image" src="${escapeHtml(safeImage)}" alt="" loading="lazy">`
-      : ''
     const drawing = options.savedDrawings?.get(index + 1)
     const overlay = drawing && (drawing.sketch.strokes.length || drawing.legacy) ? drawingOverlay(drawing, { width, height }) : ''
-    const content = background ? `${background}<div class="slide-content">${prepared.html}</div>` : prepared.html
     const copy = (slide.frontmatter?.codeCopy ?? deck.headmatter?.codeCopy ?? settings?.codeCopy) === false ? ' data-code-copy-disabled' : ''
     const magic = (slide.frontmatter?.magicMoveCopy ?? deck.headmatter?.magicMoveCopy ?? settings?.magicMoveCopy) === false ? ' data-magic-copy-disabled' : ''
+    const builtin = builtInBody === undefined ? '' : ' data-builtin-layout'
     return {
-      html: `<article id="slide-${index + 1}" class="slide slidev-layout layout-${escapeHtml(layout)} ${escapeHtml(className)}" aria-label="${escapeHtml(slide.title)}"${route}${motion}${copy}${magic}>${content}${overlay}</article>`,
+      html: `<article id="slide-${index + 1}" class="slide slidev-layout layout-${escapeHtml(layout)} ${escapeHtml(className)}" aria-label="${escapeHtml(slide.title)}"${route}${motion}${copy}${magic}${builtin}>${prepared.html}${overlay}</article>`,
       css: prepared.css,
     }
   }))

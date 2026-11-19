@@ -1,0 +1,4 @@
+<div class="slide-image-split">
+  <div class="slide-image-panel">{!! imageMarkup !!}</div>
+  <div class="slide-content">{!! content !!}</div>
+</div>

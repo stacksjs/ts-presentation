@@ -1,0 +1,2 @@
+<div class="slide-image-backdrop">{!! imageMarkup !!}</div>
+<div class="slide-content">{!! content !!}</div>

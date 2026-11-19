@@ -6,5 +6,5 @@ await scaffold({
   command: 'create-ts-presentation-theme',
   defaultDirectory: 'ts-presentation-theme-starter',
   template: fileURLToPath(new URL('./template', import.meta.url)),
-  files: ['README.md', 'example.md', 'index.ts', 'styles/layout.css', '_gitignore'],
+  files: ['README.md', 'example.md', 'index.ts', 'layouts/cover.stx', 'styles/layout.css', '_gitignore'],
 })

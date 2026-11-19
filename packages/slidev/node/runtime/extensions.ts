@@ -1,4 +1,4 @@
-import { compileTemplate } from '../../../client/index.ts'
+import { compileLayoutTemplate } from '../../../client/index.ts'
 import { realpath, stat } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -54,11 +54,11 @@ const stxLayouts = new WeakMap<PresentationLayout, (observe: (path: string) => P
 
 export function defineStxLayout(template: URL): PresentationLayout {
   let revision: string | undefined
-  let renderer: ReturnType<typeof compileTemplate> | undefined
+  let renderer: ReturnType<typeof compileLayoutTemplate> | undefined
   const layout: PresentationLayout = async ({ html, slots, slide, index }) => {
-    renderer ??= compileTemplate(template)
+    renderer ??= compileLayoutTemplate(template)
     const render = await renderer
-    return render({ ...slots, content: html, title: slide.title, slideNumber: index + 1 })
+    return render({ slots: { ...slots, default: html }, frontmatter: slide.frontmatter ?? {}, title: slide.title, slideNumber: index + 1 })
   }
   stxLayouts.set(layout, async (observe) => {
     const next = await observe(fileURLToPath(template))

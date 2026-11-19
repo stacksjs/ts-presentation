@@ -6,4 +6,4 @@ layout: cover
 
 # Theme preview
 
-Edit styles/layout.css to customize the theme.
+Edit `layouts/cover.stx` and `styles/layout.css` to customize the theme.

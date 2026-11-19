@@ -27,8 +27,13 @@ export default defineTheme({
 ```
 
 Select the layout with `layout: compare`. Add a `::right::` block to supply
-the second column. Named slots are Markdown and are optional. Use the built-in
-layouts for ordinary title, section and image slides.
+the second column. Named slots are Markdown and are optional.
+
+For an STX layout, save `layouts/compare.stx` in the deck, theme, or addon
+directory. Use `{!! content !!}` for the default slot and `{!! slots.right !!}`
+for the named slot. STX directives can read `frontmatter` and `slots`.
+Layouts in the deck directory take precedence. Extension modules can also
+register layouts with `defineStxLayout(new URL('./layouts/compare.stx', import.meta.url))`.
 
 Addons use `defineAddon`. A module can supply styles, layout renderers,
 slide transforms, a fenced-code renderer, a browser module, and

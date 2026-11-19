@@ -1,0 +1,3 @@
+<div class="theme-cover">
+  {!! content !!}
+</div>

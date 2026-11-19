@@ -1,6 +1,7 @@
 import { readFile, realpath } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { randomBytes } from 'node:crypto'
+import { pathToFileURL } from 'node:url'
 import type { Deck, RenderOptions, Slide } from './index.ts'
 import type { ExtensionAssets } from './extensions.ts'
 import type { SlideCanvas } from '../../../types/src/canvas.ts'
@@ -14,7 +15,7 @@ import type { DrawingStore } from './drawing-store.ts'
 import { drawingEnabled, resolveDrawings } from '../../../types/src/drawings.ts'
 import { bindDragSources } from './drag-source.ts'
 import type { WritableDrag } from './drag-source.ts'
-import { loadExtensions } from './extensions.ts'
+import { defineStxLayout, loadExtensions } from './extensions.ts'
 import { findWorkspaceRoot } from './extension-resolver.ts'
 import { renderPresentation } from './index.ts'
 import { markdownDocument, maxDeckSourceBytes } from './markdown-source.ts'
@@ -209,9 +210,20 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
     const saveDrawings = store !== undefined && mode === 'dev' && drawingEnabled(drawings, mode)
     const deckCss = options.liveCompile ? await observe(join(directory, 'style.css')).catch(() => undefined) : undefined
     if (options.liveCompile && deckCss === undefined) files.set(join(directory, 'style.css'), undefined)
+    const layoutRoots = [directory, ...(extensions.roots ?? []).filter(root => root !== directory).reverse()]
     const { html, routes, live } = await renderPresentation(deck, {
       liveCompile: options.liveCompile, mcpNavigation: options.mcpNavigation, mode, extensions, setup, writableSnippets, savedDrawings, saveDrawings,
       deckCssRevision: deckCss && snippetRevision(deckCss), sourceBindings,
+      async resolveFileLayout(name, registered) {
+        if (!/^[\w-]+$/.test(name)) return
+        for (const root of registered ? [directory] : layoutRoots) {
+          const path = join(root, 'layouts', `${name}.stx`)
+          if (await observeOptional(path) === undefined) continue
+          const template = await realpath(path)
+          if (!within(root, template)) throw new Error('STX layouts must stay inside their project or extension directory')
+          return defineStxLayout(pathToFileURL(template))
+        }
+      },
     })
     const author = typeof deck.headmatter?.author === 'string' ? deck.headmatter.author : undefined
     const routeAliases = new Set(routes.flatMap(route => route.alias ? [route.alias] : []))

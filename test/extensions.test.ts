@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createDeckCompiler } from '../packages/slidev/node/runtime/loader.ts'
@@ -91,4 +91,70 @@ test('reloads local theme imports and STX layouts independently', async () => {
   finally {
     await rm(root, { recursive: true, force: true })
   }
+})
+
+test('finds project STX layouts and renders directives around literal Markdown slots', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-project-layout-'))
+  try {
+    const entry = join(root, 'slides.md')
+    const layouts = join(root, 'layouts')
+    const layout = join(layouts, 'story.stx')
+    await Bun.write(entry, [
+      '---', 'layout: story', 'showCaption: true', 'caption: "<review>"', '---', '',
+      '# Heading', '', '```text', '{{ literal }} @if(true)', '```', '',
+      '::right::', '', 'Named slot',
+    ].join('\n'))
+    const compile = createDeckCompiler(entry, { liveCompile: true })
+    expect((await compile()).html).not.toContain('<aside>')
+
+    await mkdir(layouts)
+    await Bun.write(layout, [
+      '<main data-slide-number="{{ slideNumber }}">',
+      '@if(frontmatter.showCaption)',
+      '<aside>{{ frontmatter.caption }}</aside>',
+      '@endif',
+      '{!! content !!}',
+      '@if(slots.right)',
+      '<footer>{!! slots.right !!}</footer>',
+      '@endif',
+      '</main>',
+    ].join('\n'))
+    const rendered = await compile()
+    expect(rendered.html).toContain('<main data-slide-number="1">')
+    expect(rendered.html).toContain('<aside>&lt;review&gt;</aside>')
+    expect(rendered.html).toContain('{{ literal }} @if(true)')
+    expect(rendered.html).toMatch(/<footer><p>Named slot<\/p>\s*<\/footer>/)
+
+    await rm(layout)
+    const removed = await compile()
+    expect(removed.html).not.toContain('<main data-slide-number')
+    expect(removed.live?.frame).toBe(rendered.live?.frame)
+  }
+  finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('renders built-in image and text layouts from STX', async () => {
+  const deck = parseDeck([
+    '---', 'layout: image', 'image: "/photo.png?one=1&two=2"', 'imageAlt: "Demo <image>"',
+    'backgroundSize: contain', '---', '', '# Image overlay', '',
+    '---', 'layout: image-right', 'backgroundImage: photo.png', 'backgroundSize: 20em 70%',
+    '---', '', '# Split layout', '',
+    '---', 'layout: image-left', 'image: "javascript:alert(1)"',
+    '---', '', '# Plain content', '',
+    '---', 'layout: full', '---', '', '# Full canvas', '',
+    '---', 'layout: end', '---', '',
+  ].join('\n'))
+  const articles = (await renderDeck(deck)).match(/<article\b[\s\S]+?<\/article>/g) ?? []
+  expect(articles).toHaveLength(5)
+  expect(articles[0]).toContain('class="slide-image-backdrop"')
+  expect(articles[0]).toContain('src="/photo.png?one=1&amp;two=2" alt="Demo &lt;image&gt;" style="object-fit:contain"')
+  expect(articles[0]).toContain('<div class="slide-content"><h1>Image overlay</h1>')
+  expect(articles[1]).toContain('class="slide-image-split"')
+  expect(articles[1]).toContain('src="photo.png" alt="" style="width:20em;height:70%;object-fit:fill"')
+  expect(articles[2]).not.toContain('<img')
+  expect(articles[2]).toContain('<h1>Plain content</h1>')
+  expect(articles[3]).toMatch(/layout-full .*data-builtin-layout><h1>Full canvas<\/h1>/)
+  expect(articles[4]).toContain('<p>END</p>')
 })

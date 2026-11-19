@@ -117,10 +117,12 @@ installed packages can provide `setup/preparser.ts`. Include Markdown from
 selected extensions or from a declared workspace. The side editor writes
 only within the deck directory.
 
-Theme and addon authors can register an STX layout with
-`defineStxLayout(new URL('./layouts/hero.stx', import.meta.url))`. In that
-template, use `{!! content !!}` for the default slot, `{!! right !!}` for
-a named slot, and `{{ title }}` or `{{ slideNumber }}` for escaped metadata.
+Put `hero.stx` in a deck, theme, or addon's `layouts/` directory and select
+it with `layout: hero`. Extension modules can also register layouts with
+`defineStxLayout(new URL('./layouts/hero.stx', import.meta.url))`.
+Use `{!! content !!}` for the default Markdown slot and `{!! slots.right !!}`
+for a named slot. STX expressions can read `title`, `slideNumber`, and
+`frontmatter`. The image layouts accept `image`, `imageAlt`, and `backgroundSize`.
 
 TypeScript edits run when served by the Bun dev command. The offline build
 can run the original TypeScript and offers an editable JavaScript version.
@@ -158,9 +160,10 @@ The VS Code build provides Markdown syntax, audience and presenter commands,
 and a command to stop previews. It launches the project’s local Bun CLI.
 
 The original test tree lives in `packages/slidev/test`. `bun test` runs
-the adapted copied suites alongside the native regression suite. Some copied
-Vue components, Vite integrations, and VS Code language tooling still need
-porting. See the
+the adapted copied suites alongside the native regression suite. The Bun runtime
+uses the published [Stacks STX package](https://github.com/stacksjs/stx) for the
+shell, built-in layouts, and custom templates. Some copied components, Vite
+integrations, and VS Code language tooling still need porting. See the
 [compatibility guide](skills/stacks-presentations/references/compatibility.md)
 for authoring support and known gaps.
 

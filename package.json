@@ -55,6 +55,7 @@
     "packages/create-app/template/{README.md,_gitignore,package.json,slides.md}",
     "packages/create-theme/index.mjs",
     "packages/create-theme/template/{README.md,_gitignore,example.md,index.ts,package.json,styles/layout.css}",
+    "packages/create-theme/template/layouts/*.stx",
     "packages/parser/src",
     "packages/types/src",
     "packages/slidev/bin/slidev.mjs",
