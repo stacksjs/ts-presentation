@@ -667,7 +667,8 @@ $$
 $$
 
 $$
-\left\lbrace \frac{x}{2} \middle| x>0 \middle| x<2 \right\rbrace
+\DeclarePairedDelimiterXPP\condition[3]{\mathbb P}\lbrace\rbrace{_q}{#1\delimsize\vert#2\delimsize\vert#3}
+\condition*{\frac{x}{2}}{x>0}{x<2}
 $$
 
 $$
@@ -704,6 +705,7 @@ $$`)
     expect(first).toContain('<m:sSubSup><m:e><m:d><m:dPr><m:begChr/><m:endChr m:val="|"/></m:dPr><m:e>')
     expect(first).toContain('<m:t xml:space="preserve">\u200a</m:t>')
     expect(first).toMatch(/<m:begChr m:val="\{"\/><m:endChr m:val="\}"\/><m:sepChr m:val="\|"\/><\/m:dPr><m:e>.*?<m:f>.*?<\/m:e><m:e>.*?>x<\/m:t>.*?&gt;<\/m:t>.*?<\/m:e><m:e>.*?&lt;<\/m:t>/)
+    expect(first).toMatch(/>P<\/m:t><\/m:r><m:sSub><m:e><m:d>.*?<\/m:d><\/m:e><m:sub>.*?>q<\/m:t>/)
     expect(first).toMatch(/<m:begChr m:val="⟦"\/><m:endChr m:val="⟧"\/><m:sepChr m:val="‖"\/><m:ctrlPr>.*?<a:srgbClr val="800080"\/>/)
     expect(second.match(/<a14:m>/g)).toHaveLength(1)
     expect(second.match(/<p:pic>/g)).toHaveLength(2)

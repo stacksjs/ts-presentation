@@ -698,6 +698,42 @@ test('declares reusable paired delimiters with fixed and automatic sizes', () =>
   expect(deck(String.raw`\norm*{x}`, false)).toContain('<mrow data-math-delimiters=""><mo stretchy="true">‖</mo><mi>x</mi><mo stretchy="true">‖</mo>')
 })
 
+test('expands multi-argument paired delimiters with a locally scoped scaler', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const declaration = String.raw`\DeclarePairedDelimiterX\inner[2]{\langle}{\rangle}{#1\nonscript\,\delimsize\vert\nonscript\,#2}`
+  const formula = (source: string) => math(declaration + source, true).split('<annotation')[0]
+  const plain = formula(String.raw`\inner{A}{B}`)
+  expect(plain).toBe(formula(String.raw`\inner[]{A}{B}`))
+  expect(plain.match(/<mo stretchy="false"/g)).toHaveLength(3)
+  expect(plain.match(/width="0.17em"/g)).toHaveLength(2)
+  expect(formula(String.raw`x_{\inner{A}{B}}`)).not.toContain('width="0.17em"')
+  const automatic = formula(String.raw`\inner*{A}{\frac{1}{2}}`)
+  expect(automatic).toContain('<mrow data-math-delimiters=""><mo stretchy="true">⟨</mo>')
+  expect(automatic).toContain('symmetric="true" form="infix" fence="true"')
+  expect(formula(String.raw`\edef\saved{\inner*{A}{\frac{1}{2}}}\saved`)).toBe(automatic)
+  expect(formula(String.raw`\inner[\Bigg]{\inner*{A}{B}}{C}`).match(/minsize="3em" maxsize="3em"/g)).toHaveLength(3)
+  const custom = formula(String.raw`\let\scale=\Bigg\let\scalel=\Bigl\let\scaler=\Bigr \inner[\scale]{A}{B}`)
+  expect(custom.match(/minsize="1.8em" maxsize="1.8em"/g)).toHaveLength(2)
+  expect(custom.match(/minsize="3em" maxsize="3em"/g)).toHaveLength(1)
+  expect(() => formula(String.raw`\inner{A}{B}\delimsize`)).toThrow('Unsupported math command')
+  expect(() => math(String.raw`\DeclarePairedDelimiterX\inner[0]{(}{)}{x}`, false)).toThrow('Expected an argument count from 1 to 9')
+})
+
+test('places pre and post code around extended paired delimiters', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const probability = math(String.raw`
+    \providecommand\given{}
+    \newcommand\separator[1][]{\nonscript\:#1\vert\nonscript\:\mathopen{}}
+    \DeclarePairedDelimiterXPP\Prob[1]{\mathbb{P}}(){}{\renewcommand\given{\separator[\delimsize]}#1}
+    \Prob*{A\given\frac{x}{y}}+\given B
+  `, true).split('<annotation')[0]
+  expect(probability).toMatch(/<mi>ℙ<\/mi>.*?<mo stretchy="true">\(<\/mo><mi>A<\/mi>.*?form="infix"[^>]*>\|<\/mo>.*?<mfrac>/)
+  expect(probability.match(/>\|<\/mo>/g)).toHaveLength(1)
+  expect(probability).toContain('<mi>B</mi>')
+  const norm = math(String.raw`\DeclarePairedDelimiterXPP\lnorm[1]{}\lVert\rVert{_2}{#1}\lnorm*{x}`, false)
+  expect(norm).toMatch(/<msub>.*?<mrow data-math-delimiters=""><mo stretchy="true">‖<\/mo><mi>x<\/mi><mo stretchy="true">‖<\/mo><\/mrow>.*?<mn>2<\/mn><\/msub>/)
+})
+
 test('toggles nested TeX emphasis in the active text shape', () => {
   const math = createMathRenderer({ throwOnError: true })
   const nested = String.raw`\emph{foo \emph{bar} baz}`

@@ -310,14 +310,18 @@ function tokenize(source: string, onTrailingComment?: () => void): string[] {
 type MathMode = 'math' | 'text'
 const expansionPrimitives = ['\\expandafter', '\\noexpand', '\\@firstoftwo', '\\@secondoftwo', '\\@ifnextchar', '\\@ifstar', '\\TextOrMath', '\\html@mathml', '\\message', '\\errmessage', '\\char'] as const
 const expansionPrimitiveNames = new Set<string>(expansionPrimitives)
-const macroDeclaration = /^\\(?:[gex]?def|(?:future)?let|(?:new|renew|provide)command|DeclarePairedDelimiter|global|long)$/
+const macroDeclaration = /^\\(?:[gex]?def|(?:future)?let|(?:new|renew|provide)command|DeclarePairedDelimiter(?:X(?:PP)?)?|global|long)$/
 const assignmentCommand = /^\\(?:[gex]?def|(?:future)?let)$/
 type ExpansionPrimitive = typeof expansionPrimitives[number]
 type ConditionalPrimitive = Exclude<ExpansionPrimitive, '\\expandafter' | '\\noexpand' | '\\message' | '\\errmessage' | '\\char'>
 interface TokenMacro { body: string[], parameters: string[][], prefix: string[], optional?: string[], unexpandable?: boolean, source?: string }
 type DelimitedNotation = 'Braket' | 'Set' | 'set'
 type DotsMacro = 'dots' | 'dotsc' | 'dotso' | 'cdots'
-type PairedDelimiter = readonly [opening: string[], closing: string[]]
+interface PairedDelimiter {
+  opening: string[]
+  closing: string[]
+  template?: { arity: number, before: string[], body: string[], after: string[] }
+}
 type NativeMacro = { primitive: ExpansionPrimitive } | { notation: DelimitedNotation } | { separator: () => string[] } | { dots: DotsMacro } | { pairedDelimiter: PairedDelimiter }
 type Macro = TokenMacro | NativeMacro | MathMacroFunction
 interface MathState {
@@ -907,7 +911,7 @@ const mathModeFunctions = new Set([
   'prescript', 'mathstrut', 'sideset', 'overset', 'underset', 'overunderset', 'stackrel',
   'shoveleft', 'shoveright', ...Array.from(intertextCommands.keys(), command => command.slice(1)),
   'overline', 'operatorname', 'operatorname@', 'operatornamewithlimits', 'limits', 'nolimits', 'displaylimits',
-  'not', 'mod', 'bmod', 'pmod', 'pod', 'ce', 'pu', 'allowbreak',
+  'not', 'mod', 'bmod', 'pmod', 'pod', 'ce', 'pu', 'allowbreak', 'nonscript',
 ])
 const sharedFunctions = new Set([
   ...Object.keys(textFonts), ...typesettingNames, ...textBoxes, ...verticalBoxCommands, ...spacingCommands,
@@ -1259,6 +1263,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       return false
     }
     if (eager && typeof definition !== 'function' && 'body' in definition && definition.unexpandable) return false
+    if (eager && typeof definition !== 'function' && 'pairedDelimiter' in definition && definition.pairedDelimiter.template) return false
     countExpansions(1)
     const start = cursor++
     if (controlWord.test(token)) space()
@@ -1280,10 +1285,14 @@ export function renderMath(source: string, display = false, configured: MathMacr
       if (index === 0 && macro.optional !== undefined) return rawBracket() ?? macro.optional
       return delimiter.length ? delimitedArgument(delimiter, true) : rawGroup()
     })
+    return replaceExpansion(start, substituteMacroArguments(macro.body, values))
+  }
+
+  function substituteMacroArguments(template: readonly string[], values: readonly string[][]): string[] {
     const body: string[] = []
-    for (let index = 0; index < macro.body.length; index++) {
-      const token = macro.body[index]
-      const next = macro.body[index + 1] ?? ''
+    for (let index = 0; index < template.length; index++) {
+      const token = template[index]
+      const next = template[index + 1] ?? ''
       if (token === '#' && /^#[1-9]?$/.test(next)) {
         body.push(next)
         index++
@@ -1291,11 +1300,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
       else if (/^#[1-9]$/.test(token)) {
         const value = values[Number(token[1]) - 1]
         if (!value) throw new MathParseError(`Unbound macro parameter: ${token}`)
+        if (body.length + value.length > 12000) throw new MathParseError('Expanded equation is too long')
         body.push(...value)
       }
       else body.push(token)
     }
-    return replaceExpansion(start, body)
+    return body
   }
 
   function expand(skipSpace = true, eager = false): void {
@@ -1540,30 +1550,40 @@ export function renderMath(source: string, display = false, configured: MathMacr
     })
   }
 
-  function expandPairedDelimiter([opening, closing]: PairedDelimiter): string[] {
+  function expandPairedDelimiter({ opening, closing, template }: PairedDelimiter): string[] {
     const starred = tokenText(tokens[cursor] ?? '') === '*'
     if (starred) cursor++
     const optionalSize = starred ? undefined : rawBracket()
-    const body = rawGroup()
+    const args = Array.from({ length: template?.arity ?? 1 }, () => rawGroup())
+    const body = template ? substituteMacroArguments(template.body, args) : args[0]
     function readFence(tokens: string[]): string {
       const expanded = expandDefinition(tokens).join('').trim()
       const glyph = delimiter(expanded, 'DeclarePairedDelimiter')
       return glyph === '{' ? '\\{' : glyph === '}' ? '\\}' : glyph === '\\' ? '\\backslash' : glyph
     }
-    const left = readFence(opening)
-    const right = readFence(closing)
-    // The empty opening atom gives the paired row ordinary fence spacing.
-    // The real stretchy fences stay together so scripts and export see one base.
-    if (starred) return ['\\mathopen', '{', '}', '\\mathclose', '{', '\\left', left, ...body, '\\right', right, '}']
-    if (optionalSize === undefined) {
+    function pairedTokens(left: string, right: string, scale: string): string[] {
+      // The empty opening atom gives the paired row ordinary fence spacing.
+      // The stretchy fences stay together so scripts and export see one base.
+      if (starred) return ['\\mathopen', '{', '}', '\\mathclose', '{', '\\left', left, ...body, '\\right', right, '}']
+      if (scale) return [`${scale}l`, left, ...body, `${scale}r`, right]
       const start = left === '.' ? [] : ['\\mathopen', '{', left, '}']
       const end = right === '.' ? [] : ['\\mathclose', '{', right, '}']
       return [...start, ...body, ...end]
     }
-    const scale = expandDefinition(optionalSize).join('').trim()
-    if (!Object.hasOwn(sizedDelimiters, scale.slice(1)) || !scale.startsWith('\\'))
+    const left = readFence(opening)
+    const right = readFence(closing)
+    const isScaler = (name: string) => controlWord.test(name) && defined(name) && defined(`${name}l`) && defined(`${name}r`)
+    const authoredSize = optionalSize?.map(tokenValue).join('').trim() ?? ''
+    const scale = isScaler(authoredSize) ? authoredSize : optionalSize ? expandDefinition(optionalSize).join('').trim() : ''
+    if (scale && !isScaler(scale))
       throw new MathParseError('Expected a delimiter size such as \\big or \\Bigg')
-    return [`${scale}l`, left, ...body, `${scale}r`, right]
+    const expression = pairedTokens(left, right, scale)
+    if (!template) return expression
+    const scaler = starred ? ['\\middle'] : scale ? [scale] : []
+    return [
+      '\\begingroup', '\\def', '\\delimsize', '{', ...scaler, '}',
+      ...substituteMacroArguments(template.before, args), ...expression, ...substituteMacroArguments(template.after, args), '\\endgroup',
+    ]
   }
 
   function chemistryMath(source: string): Markup {
@@ -2779,11 +2799,21 @@ export function renderMath(source: string, display = false, configured: MathMacr
         throw new MathParseError(`Invalid macro name in ${token}`)
       return target
     }
-    if (name === 'DeclarePairedDelimiter') {
+    if (name.startsWith('DeclarePairedDelimiter')) {
       const target = definitionTarget(true)
-      if (!controlSequence.test(target)) throw new MathParseError('Expected a command name in \\DeclarePairedDelimiter')
+      if (!controlSequence.test(target)) throw new MathParseError(`Expected a command name in ${token}`)
       if (defined(target)) throw new MathParseError(`Macro ${target} is already defined`)
-      assign(target, { pairedDelimiter: [rawGroup(), rawGroup()] })
+      const extended = name !== 'DeclarePairedDelimiter'
+      const hasAffixes = name === 'DeclarePairedDelimiterXPP'
+      const arityTokens = extended ? rawBracket() : undefined
+      const count = arityTokens && expandDefinition(arityTokens).join('').trim()
+      if (extended && !/^[1-9]$/.test(count ?? '')) throw new MathParseError(`Expected an argument count from 1 to 9 in ${token}`)
+      const before = hasAffixes ? rawGroup() : []
+      const opening = rawGroup()
+      const closing = rawGroup()
+      const after = hasAffixes ? rawGroup() : []
+      const template = extended ? { arity: Number(count), before, body: rawGroup('Missing paired delimiter body'), after } : undefined
+      assign(target, { pairedDelimiter: { opening, closing, template } })
       return true
     }
     if (['def', 'gdef', 'edef', 'xdef'].includes(name)) {
@@ -2993,6 +3023,17 @@ export function renderMath(source: string, display = false, configured: MathMacr
       return { markup: horizontalPhantom(markup, parts, 'math'), mathClass: 'ord' }
     }
     if (verticalBoxCommands.has(name)) return { markup: verticalBox(name, argument) }
+    if (name === 'nonscript') {
+      const next = peek()
+      const command = next.startsWith('\\') ? next.slice(1) : ''
+      if (next !== '~' && !Object.hasOwn(spacing, command) && !spacingCommands.has(command)) return { markup: '' }
+      cursor++
+      const { markup } = atom(next)
+      return {
+        markup: style => style < 2 ? renderMarkup(markup, style) : '',
+        fragment: style => style < 2 ? [{ token: next, markup }] : [],
+      }
+    }
     if (spacingCommands.has(name)) return { markup: spacingMarkup(name) }
     if (name === 'prescript') {
       const upper = inScript(argument())
