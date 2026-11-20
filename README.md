@@ -56,6 +56,12 @@ bun src/cli.ts format examples/demo/slides.md
 Markdown exports keep speaker notes and link to PNGs in a sibling
 `<name>-images` directory. Notes PDFs include slide titles, numbers, and all
 note reveal steps for slides with notes. Pass `--range` to select slides.
+Pass multiple entries to `export` or `export-notes` to export a batch, for
+example `ts-presentation export review.md training.md --out reports`. Each
+deck uses its own export settings. Relative filenames resolve beside each
+deck by default or inside the shared directory passed to `--out`. Assign
+distinct `exportFilename` values if two decks would produce the same path.
+
 The formatter normalizes slide boundaries and note blocks in the entry file
 while preserving the Markdown body and YAML.
 

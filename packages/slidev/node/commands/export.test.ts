@@ -92,17 +92,76 @@ const deck = [
   '', '---', '', '# Third chapter omitted',
 ].join('\n')
 
-async function deckCommand(root: string, name: string, ...args: string[]): Promise<void> {
-  const command = Bun.spawn([process.execPath, cli, name, 'slides.md', ...args], {
+async function runCommand(root: string, ...args: string[]): Promise<string> {
+  const command = Bun.spawn([process.execPath, cli, ...args], {
     cwd: root, stdout: 'pipe', stderr: 'pipe', timeout: exportTestTimeout - 10_000,
   })
-  const [status, output] = await Promise.all([command.exited, new Response(command.stderr).text()])
-  if (status !== 0) throw new Error(output.trim() || `Export command exited with status ${status}`)
+  const [status, stdout, stderr] = await Promise.all([command.exited, new Response(command.stdout).text(), new Response(command.stderr).text()])
+  if (status !== 0) throw new Error(stderr.trim() || `Export command exited with status ${status}`)
+  return stdout.trim()
+}
+
+async function deckCommand(root: string, name: string, ...args: string[]): Promise<void> {
+  await runCommand(root, name, 'slides.md', ...args)
 }
 
 function exportDeck(root: string, ...args: string[]): Promise<void> {
   return deckCommand(root, 'export', '--executable-path', chrome!, ...args)
 }
+
+it.skipIf(!chrome)('exports multiple decks in input order with independent formats and reveal settings', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'presentation-batch-export-')))
+  try {
+    await Bun.write(join(root, 'slides.md'), '# Review\n\n[Review source](https://example.com/review)')
+    await Bun.write(join(root, 'training', 'slides.md'), [
+      '---', 'export:', '  format: md', '  range: 2', '  withClicks: true', '---',
+      '', '# Omitted', '', '---', '', '# Exercise', '', '<p v-click>Solution</p>',
+      '', '<!-- Training notes for this handout. -->',
+    ].join('\n'))
+    const pdf = join(root, 'slides.pdf')
+    const markdown = join(root, 'training', 'slides-export.md')
+    const stdout = await runCommand(root, 'export', 'slides.md', 'training', '--executable-path', chrome!)
+    expect(stdout.split('\n')).toEqual([pdf, markdown])
+    expect(await Bun.file(pdf).text()).toContain('/URI (https://example.com/review)')
+    const handout = await Bun.file(markdown).text()
+    expect(handout).toContain('![Exercise](./slides-export-images/slide-2-0.png)')
+    expect(handout).toContain('![Exercise](./slides-export-images/slide-2-1.png)')
+    expect(handout).toContain('Training notes for this handout.')
+    expect(await Bun.file(join(root, 'training/slides-export-images/slide-2-1.png')).exists()).toBe(true)
+    expect(handout).not.toContain('Omitted')
+  }
+  finally { await rm(root, { recursive: true, force: true }) }
+}, exportTestTimeout)
+
+it.skipIf(!chrome)('exports notes for multiple decks under a shared output directory', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-batch-notes-'))
+  try {
+    await Bun.write(join(root, 'review.md'), '# Review\n\n<!-- [Review notes](https://example.com/review-notes) -->')
+    await Bun.write(join(root, 'training.md'), '---\nexportFilename: handouts/training\n---\n\n# Training\n\n<!-- [Training notes](https://example.com/training-notes) -->')
+    await runCommand(root, 'export-notes', 'review.md', 'training.md', '--output', 'notes', '--executable-path', chrome!)
+    expect(await Bun.file(join(root, 'notes/review-export-notes.pdf')).text()).toContain('/URI (https://example.com/review-notes)')
+    expect(await Bun.file(join(root, 'notes/handouts/training-notes.pdf')).text()).toContain('/URI (https://example.com/training-notes)')
+  }
+  finally { await rm(root, { recursive: true, force: true }) }
+}, exportTestTimeout)
+
+it('detects overlapping batch exports and protects all entry files before capture', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-batch-conflict-'))
+  try {
+    await Bun.write(join(root, 'slides.md'), '# Review')
+    await Bun.write(join(root, 'training', 'slides.md'), '# Training')
+    await expect(runCommand(root, 'export', 'slides.md', 'training', '--out', 'reports')).rejects.toThrow('conflicts with another output')
+    expect(await Bun.file(join(root, 'reports/slides.pdf')).exists()).toBe(false)
+
+    const original = '---\nexportFilename: slides\n---\n\n# Agenda'
+    await Bun.write(join(root, 'agenda.md'), original)
+    await expect(runCommand(root, 'export', 'slides.md', 'agenda.md', '--format', 'md')).rejects.toThrow('would overwrite the deck source')
+    expect(await Bun.file(join(root, 'slides.md')).text()).toBe('# Review')
+    expect(await Bun.file(join(root, 'agenda.md')).text()).toBe(original)
+    expect(await Bun.file(join(root, 'slides-export.md')).exists()).toBe(false)
+  }
+  finally { await rm(root, { recursive: true, force: true }) }
+})
 
 it('exposes an existing PDF in the static player without generating a second file', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-linked-pdf-'))

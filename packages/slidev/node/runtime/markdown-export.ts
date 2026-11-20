@@ -1,11 +1,12 @@
 import { mkdir } from 'node:fs/promises'
-import { basename, dirname, join } from 'node:path'
+import { basename, join } from 'node:path'
 import type { CaptureOptions } from './capture.ts'
 import { captureFrames } from './capture.ts'
+import { markdownImageDirectory } from './export-options.ts'
 
 export async function exportMarkdown(output: string, notes: readonly string[], options: CaptureOptions): Promise<void> {
-  const images = `${basename(output).replace(/\.md$/i, '')}-images`
-  const assets = join(dirname(output), images)
+  const assets = markdownImageDirectory(output)
+  const images = basename(assets)
   await mkdir(assets, { recursive: true })
   const links = new Map<number, string[]>()
   const folder = encodeURIComponent(images).replaceAll('(', '%28').replaceAll(')', '%29')

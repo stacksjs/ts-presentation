@@ -1,10 +1,10 @@
-import { basename, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 
 type Format = 'pdf' | 'png' | 'pptx' | 'pptx-editable' | 'md'
 export type ExportColorScheme = 'light' | 'dark'
 export type ExportWaitUntil = 'load' | 'domcontentloaded' | 'networkidle' | 'none'
 
-interface ExportFlags {
+export interface ExportFlags {
   output?: string
   out?: string
   format?: string
@@ -127,7 +127,7 @@ export function resolveDownloadCapture(headmatter: Record<string, unknown> = {},
   }
 }
 
-export function resolveExportSettings(source: string, headmatter: Record<string, unknown> = {}, flags: ExportFlags = {}): ExportSettings {
+export function resolveExportSettings(source: string, headmatter: Record<string, unknown> = {}, flags: ExportFlags = {}, directory = '.'): ExportSettings {
   const defaults = exportDefaults(headmatter)
   const format = flags.format ?? nonempty(defaults.format) ?? 'pdf'
   if (format !== 'pdf' && format !== 'png' && format !== 'pptx' && format !== 'pptx-editable' && format !== 'md')
@@ -150,22 +150,26 @@ export function resolveExportSettings(source: string, headmatter: Record<string,
   const target = output ?? (format === 'png' ? `${fallback}-frames` : format === 'md' ? `${fallback}-export.md` : fallback + extension)
   const path = (format === 'pptx-editable' || format === 'md' || explicit === undefined && format !== 'png') && !target.toLowerCase().endsWith(extension) ? target + extension : target
   return {
-    format, output: resolve(path), scale,
+    format, output: resolve(directory, path), scale,
     ...frameSelection(defaults, flags, powerPoint),
     ...renderSettings(defaults, flags),
     withToc: format === 'pdf' && (flags['with-toc'] ?? (defaults.withToc === true)),
   }
 }
 
-export function resolveNotesExportSettings(source: string, headmatter: Record<string, unknown> = {}, flags: ExportFlags = {}): NotesExportSettings {
+export function resolveNotesExportSettings(source: string, headmatter: Record<string, unknown> = {}, flags: ExportFlags = {}, directory = '.'): NotesExportSettings {
   const name = exportFilename(headmatter)
   const target = flags.out ?? flags.output ?? (name ? `${name}-notes` : `${basename(source, '.md')}-export-notes`)
   const defaults = exportDefaults(headmatter)
   return {
     format: 'notes',
-    output: resolve(target.toLowerCase().endsWith('.pdf') ? target : `${target}.pdf`),
+    output: resolve(directory, target.toLowerCase().endsWith('.pdf') ? target : `${target}.pdf`),
     executablePath: flags['executable-path'] ?? nonempty(defaults.executablePath),
     range: flags.range,
     ...exportTiming(defaults, flags, 30_000),
   }
+}
+
+export function markdownImageDirectory(output: string): string {
+  return join(dirname(output), `${basename(output).replace(/\.md$/i, '')}-images`)
 }
