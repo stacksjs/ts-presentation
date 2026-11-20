@@ -109,6 +109,49 @@ test('uses strict input dates, validates dependencies and supports timezone offs
   expect(mermaid('gantt\nA :a, after b, 1d\nB :b, after a, 1d', 'cycle')).toBeUndefined()
 })
 
+test('accepts validated ISO Gantt starts with custom date formats and keeps ends format-specific', async () => {
+  const warning = spyOn(console, 'warn').mockImplementation(() => {})
+  const reference = Date.UTC(2026, 2, 1)
+  const source = `gantt
+dateFormat DD-MM-YYYY
+todayMarker off
+Legacy start :legacy, 2026-3-2, 2d
+Timestamp start :stamp, 2026-03-03T12:34:56.7-0500, 1h
+Strict end :strict, 2026-03-06, 2026-03-07
+Formatted end :formatted, 2026-03-06, 07-03-2026`
+  try {
+    expect(scheduleGantt(source, reference)?.tasks.map(({ start, end }) => [new Date(start).toISOString(), new Date(end).toISOString()])).toEqual([
+      ['2026-03-02T00:00:00.000Z', '2026-03-04T00:00:00.000Z'],
+      ['2026-03-03T17:34:56.700Z', '2026-03-03T18:34:56.700Z'],
+      ['2026-03-06T00:00:00.000Z', '2026-03-06T00:00:00.000Z'],
+      ['2026-03-06T00:00:00.000Z', '2026-03-07T00:00:00.000Z'],
+    ])
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining('has an invalid end "2026-03-07"'))
+    const html = await renderDeck(parseDeck(['~~~mermaid', source, '~~~'].join('\n')))
+    expect(html).toContain('data-task-id="stamp" data-task-start="2026-03-03T17:34:56.700Z"')
+    for (const invalid of ['2026-02-30', '2026-03-03T24:10', '2026-03-03T12:00+28:00', '202304']) {
+      expect(scheduleGantt(`gantt\ndateFormat DD-MM-YYYY\nTask :${invalid}, 2d`, reference)).toBeUndefined()
+    }
+  }
+  finally { warning.mockRestore() }
+})
+
+test('applies partial Gantt calendar tokens across the scheduled span', () => {
+  const source = `gantt
+dateFormat D
+excludes 15
+includes 2026-02-15
+todayMarker off
+Long window :work, 2026-01-30, 45d`
+  const reference = Date.UTC(2026, 3, 8)
+  const schedule = scheduleGantt(source, reference)
+  expect(schedule?.tasks[0].end).toBe(Date.UTC(2026, 2, 17))
+  expect(schedule?.isExcluded(Date.UTC(2026, 1, 15))).toBe(false)
+  expect(schedule?.isExcluded(Date.UTC(2026, 2, 15))).toBe(true)
+  expect(schedule?.isExcluded(Date.UTC(2026, 3, 15))).toBe(true)
+  expect(mermaid(source, 'partial-holidays')?.match(/class="diagram-gantt-excluded"/g)).toHaveLength(1)
+})
+
 // Based on Mermaid 12.3.0 Gantt parser and rendering fixtures (MIT).
 test('imports multiline Gantt sections, repeated reference markers, and legacy exclusion lists', () => {
   const source = String.raw`gantt

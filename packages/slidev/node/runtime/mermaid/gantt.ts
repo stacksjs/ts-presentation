@@ -143,18 +143,12 @@ function parseGantt(source: string, now: number, interactionsEnabled = false, co
     sections.at(-1)!.tasks.push(task)
   }
   const parseDate = ganttDateParser(dateFormat, now)
-  const isoDate = ganttDateParser('YYYY-MM-DD', now)
-  const calendarDate = (value: string) => isoDate(value) !== undefined || parseDate(value) !== undefined
   const taskIds = new Set(sections.flatMap(section => section.tasks.map(task => task.id)))
   for (const section of sections) {
     for (const task of section.tasks) {
       for (const kind of ['after', 'until'] as const) {
         const unknown = task[kind]?.filter(id => !taskIds.has(id))
         if (unknown?.length) console.warn(`Gantt task "${task.name}" references unknown IDs in "${kind}": ${unknown.join(', ')}`)
-      }
-      if (task.start && dateFormat === 'YYYY-MM-DD') {
-        const [, year, month, day] = /^(\d{3,4})-(\d{1,2})-(\d{1,2})$/.exec(task.start) ?? []
-        if (year) task.start = `${year.padStart(4, '0')}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
       }
       // A literal suffix in dateFormat can make a date look like a duration.
       if (task.end !== undefined && parseDate(task.end) === undefined) {
@@ -171,9 +165,7 @@ function parseGantt(source: string, now: number, interactionsEnabled = false, co
   return { sections, title: chart.title, accessibleTitle: chart.accessibleTitle, description: chart.description, dateFormat,
     axisFormat: axisFormat || configuredAxisFormat || (dateFormat === 'D' ? '%d' : ''), tickInterval: ticks,
     weekday, weekend, topAxis, todayMarker, todayMarkerStyle, inclusiveEndDates,
-    // Mermaid compares these tokens to formatted dates and weekday names. Unmatched tokens are inert.
-    excludes: exclusions.filter(value => value.toLowerCase() === 'weekends' || weekdays.has(value.toLowerCase()) || calendarDate(value)),
-    includes: inclusions.filter(calendarDate),
+    excludes: exclusions, includes: inclusions, calendarMatch: 'formatted', startDateFallback: 'iso',
     exclusionMode: 'whole-days', fixedEndDateFormat: 'YYYY-MM-DD',
     durationMode: 'calendar', missingDependencyFallback: 'today', now }
 }
