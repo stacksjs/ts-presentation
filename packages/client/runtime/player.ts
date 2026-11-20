@@ -1,5 +1,6 @@
 import { defaultCanvas } from '../../types/src/canvas.ts'
 import { createAutoFitText } from './auto-fit-text.ts'
+import { createBlueskyEmbeds } from './bluesky.ts'
 import { setupCodeCopy, setupCodeTabs } from './code-controls.ts'
 import { setupCodeDiffs } from './code-diff.ts'
 import { createSlideConditions } from './conditions.ts'
@@ -180,6 +181,7 @@ const drags = !isCapture && !isPreview ? setupDrags(stage, (slide, presentationD
   syncPeer({ dragSlide: articles.indexOf(slide) + 1, presentationDrag })
 }, isLive) : undefined
 const media = createSlideMedia(!isCapture && !isPreview)
+const showBluesky = !isCapture && !isPreview ? createBlueskyEmbeds(stage) : undefined
 if (isCapture) {
   window.presentationMediaReady = media.ready
   window.presentationFitText = root => fittedText(root, true)
@@ -247,6 +249,7 @@ function show(number: number, step?: number, writeHistory = true, sync = true, r
     }
     showCurrentReveals(animate)
     media.show(active)
+    showBluesky?.(active)
     conditions.observe(active)
     displayNotes(current, click, slideChanged)
     const here = position()

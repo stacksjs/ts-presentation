@@ -1,6 +1,7 @@
 import { defaultConfig, renderComponentWithSlot } from '@stacksjs/stx'
 import { readdir, realpath } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { MarkdownFenceReader } from '../../../parser/src/markdown-fences.ts'
 import { within } from './assets.ts'
 import { escapeHtml, readBoundValue, unescapeHtml } from './html.ts'
@@ -59,6 +60,11 @@ const builtins = new Set([
   'autofittext', 'codegroup', 'drag', 'dragarrow', 'goto', 'lightordark', 'link', 'renderwhen', 'slidecurrentno', 'slidevvideo', 'titles',
   'toc', 'totals', 'transform', 'tweet', 'vafter', 'vclick', 'vclickgap', 'vclickhide', 'vclicks', 'vswitch', 'youtube',
 ])
+const stxBuiltins = new Map(['BlueSky', 'PoweredBySlidev'].flatMap((name) => {
+  const file = fileURLToPath(new URL(`../../../client/runtime/builtin/${name}.stx`, import.meta.url))
+  return [[name, file], [kebab(name), file]] as const
+}))
+const stxBuiltinTag = new RegExp(`<(?:${[...stxBuiltins.keys()].join('|')})(?=[\\s/>])`)
 
 function* fencedRanges(source: string): Generator<{ start: number, end: number }> {
   if (!/\x60{3,}|~{3,}/.test(source)) return
@@ -294,16 +300,18 @@ export function createDeckComponentRenderer(
   headmatter?: Record<string, unknown>,
 ): DeckComponentRenderer {
   const root = dirname(entry)
-  const context = { __filename: `${entry}.slide-${slideNumber}`, __importedComponents: paths, frontmatter, slideNumber }
+  const components = paths.size ? new Map([...stxBuiltins, ...paths]) : stxBuiltins
+  const context = { __filename: `${entry}.slide-${slideNumber}`, __importedComponents: components, frontmatter, slideNumber }
   const bindingFrontmatter = { ...headmatter, ...frontmatter }
   const options = { ...defaultConfig, root, componentsDir: join(root, 'components'), partialsDir: '', layoutsDir: '', seo: { enabled: false } }
   const marker = `tp-component-${Bun.randomUUIDv7().replaceAll('-', '')}`
   let markerCount = 0
 
-  const isComponent = ({ name }: Tag) => (/^[A-Z]/.test(name) || name.includes('-')) && paths.has(name) && !builtins.has(name.replaceAll('-', '').toLowerCase())
+  const isComponent = ({ name }: Tag) => (/^[A-Z]/.test(name) || name.includes('-')) && components.has(name) && !builtins.has(name.replaceAll('-', '').toLowerCase())
 
   async function render(source: string, markdown: (source: string) => string, depth = 0, project?: ProjectSlot, parentProps?: Record<string, unknown>): Promise<string> {
-    const ranges = depth < 48 && source.includes('<') ? findRanges(source, isComponent) : []
+    const hasComponents = paths.size ? source.includes('<') : stxBuiltinTag.test(source)
+    const ranges = depth < 48 && hasComponents ? findRanges(source, isComponent) : []
     if (!ranges.length) {
       const html = markdown(source)
       return project ? project(html, html => html) : html
@@ -325,7 +333,7 @@ export function createDeckComponentRenderer(
         continue
       }
       const { tag, body } = range
-      const file = paths.get(tag.name)!
+      const file = components.get(tag.name)!
       const { props, forwarded } = readProps(tag.attrs, bindingFrontmatter, parentProps)
       const values = new Map<string, string>()
       let slots = ''
@@ -372,5 +380,5 @@ export function createDeckComponentRenderer(
     return project ? project(paragraphs, restore) : restore(paragraphs)
   }
 
-  return (source, markdown, comark) => render(comark ? expandComarkComponents(source, name => paths.has(name)) : source, markdown)
+  return (source, markdown, comark) => render(comark ? expandComarkComponents(source, name => components.has(name)) : source, markdown)
 }

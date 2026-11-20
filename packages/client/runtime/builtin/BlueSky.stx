@@ -1,0 +1,25 @@
+<script server>
+const input = typeof props.uri === 'string' ? props.uri.trim() : ''
+const atPost = /^at:\/\/([^/]+)\/app\.bsky\.feed\.post\/([^/?#]+)$/.exec(input)
+const webPost = /^https:\/\/bsky\.app\/profile\/([^/]+)\/post\/([^/?#]+)\/?(?:[?#].*)?$/i.exec(input)
+const postMatch = atPost ?? webPost
+const authority = postMatch?.[1] ?? ''
+const record = postMatch?.[2] ?? ''
+const did = /^did:[a-z]+:[a-zA-Z0-9_:.%-]{1,253}$/.test(authority)
+const handle = authority.length <= 253 && /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(authority)
+const valid = (did || handle) && /^[a-zA-Z0-9_~.-]{1,512}$/.test(record) && record !== '.' && record !== '..'
+const postUrl = valid ? `https://bsky.app/profile/${encodeURIComponent(authority)}/post/${encodeURIComponent(record)}` : ''
+const scale = typeof props.scale === 'number' || typeof props.scale === 'string' ? Number(props.scale) : 1
+const zoom = Number.isFinite(scale) && scale >= 0.1 && scale <= 3 ? scale : 1
+</script>
+
+<template>
+  @if(valid)
+    <span class="slidev-bluesky" style="zoom:{{ zoom }}">
+      <iframe data-bluesky-authority="{{ authority }}" data-bluesky-record="{{ record }}" title="Bluesky post" width="600" height="1" referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox" hidden></iframe>
+      <a href="{{ postUrl }}" target="_blank" rel="noopener noreferrer">View post on Bluesky</a>
+    </span>
+  @else
+    <span class="slidev-bluesky">Bluesky post unavailable</span>
+  @endif
+</template>

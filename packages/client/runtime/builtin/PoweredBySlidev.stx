@@ -1,0 +1,3 @@
+<template>
+  <span class="slidev-credit">Powered by <a href="https://sli.dev/">Slidev</a></span>
+</template>

@@ -1,5 +1,5 @@
 import { getCachedSignalsRuntime } from '@stacksjs/stx'
-import { dirname } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import type { Grammar } from 'ts-syntax-highlighter'
 import { deckFontMarkup } from './fonts.ts'
 import { applyNotesAutoRuby } from './notes.ts'
@@ -16,7 +16,7 @@ import { diagramOptionsRecord, mergeDiagramOptions } from './diagram-options.ts'
 import { optionsForSvg } from './diagram-svg.ts'
 import { renderPlantUml } from './plantuml.ts'
 import type { DeckComponentRenderer } from './deck-components.ts'
-import { expandComarkComponents } from './comark-components.ts'
+import { createDeckComponentRenderer } from './deck-components.ts'
 import { drawingOverlay } from './drawing-store.ts'
 import { drawingEnabled, resolveDrawings } from '../../../types/src/drawings.ts'
 import type { DrawingClientConfig, SavedDrawing } from '../../../types/src/drawings.ts'
@@ -239,7 +239,9 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
       })),
     },
   }
-  const componentRenderers = activeSlides.map((slide, index) => options.components?.(slide.frontmatter ?? {}, index + 1))
+  const componentRenderer = options.components ?? ((frontmatter: Record<string, unknown>, number: number) =>
+    createDeckComponentRenderer(new Map(), options.entry ?? resolve('slides.md'), number, frontmatter, undefined, deck.headmatter))
+  const componentRenderers = activeSlides.map((slide, index) => componentRenderer(slide.frontmatter ?? {}, index + 1))
   const comarkSlides = activeSlides.map(({ frontmatter }) => comarkSetting(frontmatter, deck.headmatter) === true)
   function effectiveLayout(slide: Slide): string {
     return slide.layout === 'default' && typeof slide.frontmatter?.layout !== 'string' ? defaults?.layout ?? slide.layout : slide.layout
@@ -292,9 +294,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     const slots: Record<string, string> = Object.create(null)
     const renderComponents = componentRenderers[index]
     for (const [name, content] of Object.entries(contents)) {
-      slots[name] = renderComponents
-        ? await renderComponents(content, source => markdown(source, comark), comark)
-        : markdown(comark ? expandComarkComponents(content) : content, comark)
+      slots[name] = await renderComponents(content, source => markdown(source, comark), comark)
     }
     html.push(slots)
   }
@@ -363,8 +363,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
         for (const transform of transformers.codeblocks) {
           const result = await transform(context)
           if (result != null) {
-            const render = componentRenderers[index]
-            return render ? render(result, source => source) : result
+            return componentRenderers[index](result, source => source)
           }
         }
       }

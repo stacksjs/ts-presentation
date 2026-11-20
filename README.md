@@ -159,7 +159,8 @@ the deck and style slides with an optional `style.css`.
 | Per-slide options | `class`, `hide`, and `disabled` |
 | Slide transitions | Set `transition` in deck or slide frontmatter. Use `fade`, `fade-out`, `slide-left`, `slide-right`, `slide-up`, `slide-down`, `view-transition`, or a custom CSS name. Separate custom forward and backward names with `\|`. Give matching elements a `view-transition-<name>` class for shared animations |
 | Images and component markup | Trusted HTML, with optional `data-zoom` on an image |
-| Post embeds | `<Tweet id="…" />` or `<Tweet url="…" />` loads the X widget in a sandboxed iframe |
+| Post embeds | `<Tweet id="…" />` or `<Tweet url="…" />` loads an X post in a sandboxed iframe. `<BlueSky uri="…" />` accepts Bluesky post URLs and AT URIs, and shows a post link in exports |
+| Slidev credit | `<PoweredBySlidev />` adds a linked credit to a slide |
 | Video | `<SlidevVideo v-click controls>` accepts native video sources, playback and reset options, and a print poster or seek time. `<Youtube id="…" />` embeds playback in the deck and links to YouTube in exports |
 | Fonts | Set `fonts.sans`, `fonts.serif`, or `fonts.mono`. Choose `fonts.provider` as `google`, `coollabs`, or `none` |
 | First-party diagrams | YAML in a `charts` fence. `ts-charts` renders flowcharts, sequence and state diagrams, class and entity relationships, pie charts, XY bar and line charts, Sankey diagrams, Gantt schedules, Git histories, timelines, and user journeys |
