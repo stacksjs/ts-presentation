@@ -22,6 +22,11 @@ jobs:
           install: 'false'
           packages: bun.com@1.4.4
       - run: bun install --frozen-lockfile
+      - name: Install the MathML font used by Chrome on Linux
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends fonts-lmodern
+          fc-match --format '%{family}\n' 'Latin Modern Math' | grep -Fx 'Latin Modern Math'
       - name: Verify Chrome for browser tests
         run: |
           chrome=$(command -v google-chrome)

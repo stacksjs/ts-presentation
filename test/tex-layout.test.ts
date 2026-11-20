@@ -1840,7 +1840,7 @@ test.skipIf(!chrome)('shifts radical degrees in both axes without moving the rad
   const formulas = [
     String.raw`\sqrt[\beta]{x+1}`,
     String.raw`\sqrt[\leftroot{-3}\uproot{3}\beta]{x+1}`,
-    String.raw`\root\leftroot{3}\uproot{-3}\beta\of{x+1}`,
+    String.raw`\root\leftroot{12}\uproot{-3}\beta\of{x+1}`,
   ]
   const body = formulas.map(formula => `<div>${renderMath(formula)}</div>`).join('')
   const server = Bun.serve({
@@ -2058,7 +2058,7 @@ test.skipIf(!chrome)('sizes raised text boxes from their shifted baseline in Chr
   try {
     await view.navigate(server.url.href)
     const boxes = await view.evaluate<{
-      ascent: number, descent: number, ink: number, offset: number, font: number, text: string, weight: string,
+      ascent: number, descent: number, ink: number, offset: number, offsetBase: number, font: number, text: string, weight: string,
     }[]>(`[...document.querySelectorAll('main > div > math')].map(math => {
       const baseline = math.querySelector('.baseline').getBoundingClientRect().top
       const box = math.getBoundingClientRect()
@@ -2069,6 +2069,7 @@ test.skipIf(!chrome)('sizes raised text boxes from their shifted baseline in Chr
         descent: box.bottom - baseline,
         ink: baseline - text.getBoundingClientRect().top,
         offset: parseFloat(getComputedStyle(shifted).verticalAlign),
+        offsetBase: parseFloat(getComputedStyle(shifted).fontSize),
         font: parseFloat(getComputedStyle(text).fontSize),
         text: text.textContent,
         weight: getComputedStyle(text).fontWeight,
@@ -2086,7 +2087,8 @@ test.skipIf(!chrome)('sizes raised text boxes from their shifted baseline in Chr
     expect(fixed.ink).toBeCloseTo(raised.ink)
     expect(script.text).toBe('T')
     expect(script.font).toBe(normal.font)
-    expect(script.offset).toBeCloseTo(5.6, 1)
+    expect(script.offsetBase).toBeLessThan(normal.font)
+    expect(script.offset).toBeCloseTo(0.2 * script.offsetBase, 1)
     expect(bold.weight).toBe('700')
   }
   finally {
@@ -2593,7 +2595,15 @@ routeAlias: last
   try {
     await view.navigate(server.url.href)
     const countLines = (selector: string) => view.evaluate<number>(`new Set([...document.querySelectorAll(${JSON.stringify(selector + ' .math-inline-fragment')})]
-      .map(fragment => Math.round(fragment.getBoundingClientRect().top))).size`)
+      .map(fragment => {
+        const baseline = document.createElementNS(fragment.namespaceURI, 'mspace')
+        baseline.setAttribute('width', '0')
+        baseline.setAttribute('height', '0')
+        fragment.firstElementChild.append(baseline)
+        const top = Math.round(baseline.getBoundingClientRect().top)
+        baseline.remove()
+        return top
+      })).size`)
     expect(await countLines('#automatic')).toBe(3)
     expect(await countLines('#explicit')).toBe(2)
     expect(await view.evaluate("document.querySelectorAll('#suppressed math').length")).toBe(1)
@@ -2605,7 +2615,7 @@ routeAlias: last
       containerSelector: '#automatic', idAttribute: 'data-export-id', slide: 1, click: 0,
     })`)
     expect(snapshot.slides[0].nodes.filter(node => node.isMath)).toHaveLength(3)
-    await view.evaluate("document.querySelector('#automatic').style.width = '30em'")
+    await view.evaluate("document.querySelector('#automatic').style.width = 'max-content'")
     expect(await countLines('#automatic')).toBe(1)
     await view.evaluate("document.querySelector('#linked a').click()")
     expect(await view.evaluate('window.presentationNavigation.currentPage')).toBe(2)
