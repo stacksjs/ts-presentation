@@ -76,7 +76,7 @@ test('uses supplemental symbols in contextual dots, negations, text, and operato
   expect(math(literal, false)).toContain('<mo>⋯</mo>')
   const html = math(String.raw`\text{\S\textdagger\textbraceleft\textsterling\textbraceright}+\operatorname{\vdash\,closure}(x)`, false)
   expect(html).toContain('<mtext>§†{£}</mtext>')
-  expect(html).toContain('<mo>⊢\u2009closure</mo>')
+  expect(html).toContain(operator('⊢\u2009closure'))
   expect(math(String.raw`a \not\gtrsim b`, false)).toContain('≵</mo>')
   expect(() => math(String.raw`\notARealMacro`, false)).toThrow('Unsupported math command')
 })
@@ -345,13 +345,40 @@ test('scopes TeX font sizing across groups, text, and nested math', () => {
   expect(markup).toContain('<mo>+</mo><mi>E</mi></mrow>')
 })
 
-test('renders spacing and expanded symbols in named TeX operators', () => {
-  const markup = createMathRenderer({ throwOnError: true })(String.raw`
+// Operator and emphasis cases adapted from KaTeX v0.19.1 (licenses/KaTeX-MIT.txt).
+test('preserves spacing, markup, and limits in named TeX operators', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const markup = math(String.raw`
     \def\greekLabel{\alpha}
     \operatorname*{arg\,max}_{x} + \operatorname{D_\greekLabel}(x)
   `, true)
-  expect(markup).toContain('<munder><mo>arg\u2009max</mo><mrow><mi>x</mi></mrow></munder>')
-  expect(markup).toContain('<mo>D_α</mo>')
+  const fraction = String.raw`\operatorname*{x*Π∑\Pi\sum\frac a b}_y x`
+  expect(markup).toContain(`<munder>${operator('arg\u2009max')}<mrow><mi>x</mi></mrow></munder>`)
+  expect(markup).toContain('<msub><mi mathvariant="normal">D</mi><mi mathvariant="normal">α</mi></msub>')
+  expect(math(fraction, true)).toContain('<mfrac><mi mathvariant="normal">a</mi><mi mathvariant="normal">b</mi></mfrac></mrow><mi>y</mi></munder>')
+  expect(math(fraction, false)).toContain('</mfrac></mrow><mi>y</mi></msub>')
+  expect(math(String.raw`\operatorname{sn}\limits_{b>c}(b+c)`, true)).toContain(`<msub>${operator('sn')}`)
+  expect(math(String.raw`\operatorname*{sn}\limits_x`, false)).toContain('<munder><mo movablelimits="false"')
+  expect(math(String.raw`\operatorname*{sn}\nolimits_x`, true)).toContain(`<msub>${operator('sn')}`)
+  expect(math(String.raw`a\operatorname{p-\ast q}b`, false)).toContain(thin + operator('p-*q') + thin)
+  expect(() => math(String.raw`\operatorname{\unsupported}`, false)).toThrow('Unsupported math command')
+})
+
+test('toggles nested TeX emphasis in the active text shape', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const nested = String.raw`\emph{foo \emph{bar} baz}`
+  const upright = String.raw`\textit{foo \textup{bar} baz}`
+  const italic = String.raw`\textup{foo \textit{bar} baz}`
+  const formulas = [
+    [nested, upright],
+    [String.raw`\text{${nested}}`, String.raw`\text{${upright}}`],
+    [String.raw`\textup{${nested}}`, String.raw`\textup{${upright}}`],
+    [String.raw`\textit{${nested}}`, String.raw`\textit{${italic}}`],
+    [String.raw`\text{\it italic {\emph{up}} \emph{still up} {\rm \emph{italic again}}}`,
+      String.raw`\text{\it italic {\textup{up}} \textup{still up} {\rm \textit{italic again}}}`],
+  ]
+  for (const [source, reference] of formulas)
+    expect(math(source, false).split('<annotation')[0]).toBe(math(reference, false).split('<annotation')[0])
 })
 
 test('renders formatted equation tags and applies them to the correct alignment row', () => {
@@ -1552,7 +1579,7 @@ test('applies the last operator limit control even after scripts', () => {
   const side = formula(String.raw`\sum\limits_3^4\nolimits`, true)
   expect(side).toContain('<msubsup><mo>∑</mo><mn>3</mn><mn>4</mn></msubsup>')
   expect(formula(String.raw`\mathop{\mathrm{arg}}\limits_x`)).toContain('<munder><mrow>')
-  expect(formula(String.raw`\operatornamewithlimits{arg}_x`, true)).toContain('<munder><mo>arg</mo><mi>x</mi></munder>')
+  expect(formula(String.raw`\operatornamewithlimits{arg}_x`, true)).toContain(`<munder>${operator('arg')}<mi>x</mi></munder>`)
   expect(formula(String.raw`\smallint_{a}^{b}`, true)).toContain('<munderover><mo largeop="false">∫</mo>')
   expect(() => formula(String.raw`3\nolimits_2`)).toThrow('Limit control requires a math operator')
 })

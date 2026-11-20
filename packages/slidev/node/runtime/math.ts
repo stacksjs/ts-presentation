@@ -323,8 +323,10 @@ const textAccents: Record<string, [mark: string, glyph: string, below?: boolean]
   '\\u': ['\u0306', '˘'], '\\v': ['\u030c', 'ˇ'], '\\H': ['\u030b', '˝'], '\\r': ['\u030a', '˚'],
   '\\c': ['\u0327', '¸', true], '\\k': ['\u0328', '˛', true], '\\b': ['\u0331', '_', true], '\\d': ['\u0323', '.', true],
 }
-const operatorSpaces: Readonly<Record<string, string>> = {
-  '\\,': '\u2009', '\\:': '\u205f', '\\;': '\u2004', '\\!': '', '\\ ': ' ',
+const operatorSpaceGlyphs: Readonly<Record<string, string>> = {
+  [spacing.thinspace]: '\u2009', [spacing.medspace]: '\u205f',
+  [spacing.thickspace]: '\u2004', [spacing.space]: ' ',
+  [`${3 / 18}em`]: '', [`${4 / 18}em`]: '', [`${5 / 18}em`]: '',
 }
 
 interface Atom {
@@ -332,6 +334,7 @@ interface Atom {
   mathClass?: MathClass
   limits?: boolean
   forceLimits?: boolean
+  ignoreLimitControl?: boolean
   brace?: 'lower' | 'upper'
 }
 
@@ -406,6 +409,21 @@ function tableBorder(side: string, line: ArrayRule, minimum: number): string {
 
 function tag(name: string, value: string): string {
   return `<${name}>${escapeHtml(value)}</${name}>`
+}
+
+function operatorLabel(body: Markup): Markup {
+  const render = (markup: string) => {
+    // Keep short names as one upright operator. Preserve the MathML for
+    // structured names with fractions, scripts, or explicit formatting.
+    const text = markup
+      .replace(/<\/?mrow>/g, '')
+      .replace(/<(mi|mn|mo|mtext)(?: (?:mathvariant|stretchy|lspace|rspace)="[^"]*")*>([^<]*)<\/\1>/g,
+        (_token, element: string, value: string) => element === 'mo' ? value.replaceAll('−', '-').replaceAll('∗', '*') : value)
+      .replace(/<mspace width="([^"]+)"\/>/g, (space, width: string) => operatorSpaceGlyphs[width] ?? space)
+      .replace(/<mspace width="0" style="margin-inline-end:-0\.17em"\/>/g, '')
+    return text.includes('<') ? applyVariant(markup, 'normal') : `<mo>${text}</mo>`
+  }
+  return typeof body === 'string' ? render(body) : style => render(body(style))
 }
 
 function typesettingName(name: string): string {
@@ -584,7 +602,7 @@ const mathModeFunctions = new Set([
   'begin', 'end', 'right', 'middle', '@binrel', 'mathchoice', 'vcenter', 'substack',
   'boxed', 'cancel', 'bcancel', 'xcancel', 'pmb', 'phase', 'angl', 'angln', 'mathreflectbox',
   'prescript', 'mathstrut', 'overset', 'underset', 'stackrel',
-  'overline', 'operatorname', 'operatornamewithlimits', 'limits', 'nolimits', 'displaylimits',
+  'overline', 'operatorname', 'operatorname@', 'operatornamewithlimits', 'limits', 'nolimits', 'displaylimits',
   'not', 'mod', 'bmod', 'pmod', 'pod', 'ce', 'pu', 'allowbreak', 'implies', 'impliedby',
 ])
 const sharedFunctions = new Set([
@@ -647,6 +665,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   let delimiterDepth = 0
   let equationNumber = 0
   let fontScale = 1
+  let textItalic = false
   let linkDepth = 0
 
   const macros = new Map<string, Macro>()
@@ -1146,7 +1165,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
   }
 
   function textArgument(name: string, parentheses = false): Markup {
-    return inMode('text', () => parseTextArgument(name, parentheses))
+    const previousItalic = textItalic
+    const font = name === 'emph' ? (textItalic ? 'textup' : 'textit') : name
+    if (font === 'textit') textItalic = true
+    else if (font === 'textup' || font === 'textnormal') textItalic = false
+    try { return inMode('text', () => parseTextArgument(font, parentheses)) }
+    finally { textItalic = previousItalic }
   }
 
   function unsupportedCommand(token: string): string {
@@ -1261,6 +1285,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
         else if (Object.hasOwn(legacyFonts, token)) {
           flushFormatting()
           legacyFont = legacyFonts[token]
+          textItalic = legacyFont === 'italic'
           space()
         }
         else if (token === '$' || token === '\\(') {
@@ -1529,7 +1554,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
         if (kind === '\\limits' || kind === '\\nolimits' || kind === '\\displaylimits') {
           cursor++
           if (part.limits === undefined) throw new Error('Limit control requires a math operator')
-          forceLimits = kind === '\\displaylimits' ? 'display' : kind === '\\limits'
+          if (!part.ignoreLimitControl) forceLimits = kind === '\\displaylimits' ? 'display' : kind === '\\limits'
           continue
         }
         if (kind === '_' || unicodeSubscripts.has(kind)) {
@@ -2059,19 +2084,11 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
     if (Object.hasOwn(textFonts, name)) return { markup: textArgument(name) }
     if (typesettingNames.has(name)) return { markup: typesettingName(name) }
-    if (name === 'operatorname' || name === 'operatornamewithlimits') {
+    if (name === 'operatorname' || name === 'operatorname@' || name === 'operatornamewithlimits') {
       const star = name === 'operatorname' && peek() === '*'
       if (star) take()
-      const label = expandDefinition(rawGroup()).map((token) => {
-        if (Object.hasOwn(operatorSpaces, token)) return operatorSpaces[token]
-        if (Object.hasOwn(textSymbols, token)) return textSymbols[token]
-        const command = token.startsWith('\\') ? token.slice(1) : ''
-        const letter = greekLetter(command)
-        if (letter) return letter[0]
-        if (Object.hasOwn(operators, command)) return operators[command]
-        return mathSymbol(command)?.[0] ?? textSymbol(token) ?? token.replace(/^\\([_%#$&{}])$/, '$1')
-      }).join('').trim()
-      return { markup: tag('mo', label), limits: name === 'operatornamewithlimits' || star }
+      const limits = name === 'operatornamewithlimits' || star
+      return { markup: operatorLabel(argument()), mathClass: 'op', limits, ignoreLimitControl: !limits }
     }
     if (name === 'char') {
       const glyph = explicitCharacter()
