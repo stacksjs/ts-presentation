@@ -461,20 +461,51 @@ test('imports GitGraph rotation and multiline accessible descriptions', () => {
   expect(horizontal).toContain('>v1</tspan>')
 })
 
+// Based on Mermaid 12.3.0's GitGraph multiline branch-label fixture (MIT).
+test('keeps multiline quoted GitGraph names through branch and merge commands', async () => {
+  const graph = `gitGraph LR:
+  title Team's release
+  accDescr {
+    The review's history
+    includes a merge.
+  }
+  commit id: "base" %% ignore an unmatched quote: "
+  branch "Feature A
+  Review %% ongoing; verify"
+  commit id: "work"
+  checkout main
+  merge "Feature A
+  Review %% ongoing; verify" id: "merge"; commit id: "done"`
+  expect(buildGitHistory(graph)?.commits.map(commit => [commit.id, commit.parents.map(parent => parent.id)])).toEqual([
+    ['base', []], ['work', ['base']], ['merge', ['base', 'work']], ['done', ['merge']],
+  ])
+  const deck = ['# Release history', '', '~~~mermaid', '---', 'config:', '  theme: forest', '---', graph, '~~~'].join('\n')
+  const html = await renderDeck(parseDeck(deck))
+  expect(html).toMatch(/class="diagram-git-branch-label-box"[^>]*height="36"[^>]*fill="#7aff32"/)
+  expect(html).toMatch(/class="diagram-git-branch-label"[^>]*><tspan[^>]*>Feature A<\/tspan><tspan[^>]*>Review %% ongoing; verify<\/tspan>/)
+  expect(html).toContain('data-commit-id="merge" data-parent-ids="base, work"')
+  expect(html).toContain('Team&#39;s release</tspan>')
+  expect(html).toContain('The review&#39;s history includes a merge.</desc>')
+})
+
 test('imports Gantt compact frontmatter, dimensions, fonts, and themed section bands', () => {
   const source = `---
-displayMode: compact
-config:
-  gantt:
-    useWidth: 460
-    fontSize: 18
-    sectionFontSize: 20
-    gridLineStartPadding: 14
-    titleTopMargin: 28
-    numberSectionStyles: 2
-  themeVariables:
-    sectionBkgColor: '#4a6072'
-    altSectionBkgColor: '#a06528'
+    displayMode: compact
+    config:
+# Gantt and theme settings
+      themeCSS: "
+        .taskText { font-weight: bold; }
+        "
+      gantt:
+        useWidth: 460
+        fontSize: 18
+        sectionFontSize: 20
+        gridLineStartPadding: 14
+        titleTopMargin: 28
+        numberSectionStyles: 2
+      themeVariables:
+        sectionBkgColor: '#4a6072'
+        altSectionBkgColor: '#a06528'
 ---
 gantt
 title Overview
@@ -493,7 +524,26 @@ section Ship
   expect(svg).toContain('style="fill:#a06528;opacity:0.2"')
   expect(svg).toMatch(/class="diagram-gantt-grid"[^>]*d="M[\d.]+ 14V/)
   const height = (html: string) => Number(/viewBox="0 0 460 ([\d.]+)/.exec(html)?.[1])
-  expect(height(svg)).toBeLessThan(height(mermaid(source.replace('displayMode: compact\n', ''), 'ordinary-gantt')!))
+  expect(height(svg)).toBeLessThan(height(mermaid(source.replace('    displayMode: compact\n', ''), 'ordinary-gantt')!))
+})
+
+test('preserves literal YAML blocks when folding nested diagram options', () => {
+  const source = `---
+title: |-
+  Team: "urgent
+    review"
+config:
+  themeCSS: "
+    .taskText { font-weight: bold; }
+    "
+  gantt:
+    useWidth: 540
+---
+gantt
+Review :2026-03-01, 1d`
+  const svg = mermaid(source, 'literal-title')
+  expect(svg).toContain('aria-label="Team: &quot;urgent\n  review&quot;"')
+  expect(svg).toContain('viewBox="0 0 540 ')
 })
 
 test('applies Mermaid Gantt status colors, reference labels, and full date axis directives', () => {

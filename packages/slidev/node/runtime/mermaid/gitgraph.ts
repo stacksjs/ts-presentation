@@ -5,8 +5,21 @@ import { diagramPixels, readChronology } from './chronology.ts'
 import { gitGraphPreset } from './gitgraph-themes.ts'
 import { syntaxMask } from './syntax.ts'
 
-function commands(source: string): string[] {
-  return source.split(/\r?\n/).flatMap((line) => {
+function logicalLines(source: string): string[] {
+  const tokens = /^[ \t]*(?:(?:title\b|acc(?:Title|Descr)[ \t]*:)[^\r\n]*|accDescr[ \t]*\{[^}]*\})|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|(?:%%|^[ \t]*#)[^\r\n]*|(\r?\n)/gim
+  const lines: string[] = []
+  let start = 0
+  for (const match of source.matchAll(tokens)) {
+    if (!match[1]) continue
+    lines.push(source.slice(start, match.index))
+    start = match.index + match[0].length
+  }
+  lines.push(source.slice(start))
+  return lines
+}
+
+function commands(lines: string[]): string[] {
+  return lines.flatMap((line) => {
     const mask = syntaxMask(line, true)
     const comment = mask.indexOf('%%')
     const end = comment < 0 ? line.length : comment
@@ -63,9 +76,9 @@ function settings(value: unknown): Record<string, unknown> {
 }
 
 function parseGitHistory(source: string, options?: unknown): GitGraphOptions | undefined {
-  const chart = readChronology(source, '', true)
+  const chart = readChronology(logicalLines(source), '', true)
   if (!chart) return
-  const rows = commands([chart.header, ...chart.rows].join('\n'))
+  const rows = commands([chart.header, ...chart.rows])
   const header = /^gitGraph(?:\s+(LR|TB|BT))?\s*:?$/.exec(rows.shift() ?? '')
   if (!header || rows.length > 450) return
   const config = settings(options)

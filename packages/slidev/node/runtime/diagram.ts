@@ -41,12 +41,54 @@ function mergeDiagramOptions(base: MermaidOptions = {}, override: MermaidOptions
   return result
 }
 
+function inlineQuotedScalars(yaml: string): string {
+  const property = /^( *)(?:[\w.-]+|"(?:[^"\\\r\n]|\\.)*"|'(?:[^'\r\n]|'')*'):[ \t]*(?=(["'|>]))/gm
+  const quoted = /(?:"(?:[^"\\]|\\[\s\S])*"|'(?:[^']|'')*')(?=[ \t]*(?:#|$))/my
+  let cursor = 0
+  let normalized = ''
+  for (let match = property.exec(yaml); match; match = property.exec(yaml)) {
+    const [, indent, indicator] = match
+    if (indicator === '|' || indicator === '>') {
+      // Leave content inside YAML block scalars alone.
+      const content = new RegExp(`\\r?\\n(?:[ \\t]*(?=\\r?\\n)| {${indent.length + 1}}[^\\r\\n]*)`, 'y')
+      const nextLine = yaml.indexOf('\n', property.lastIndex)
+      if (nextLine < 0) break
+      content.lastIndex = nextLine
+      while (content.exec(yaml)) property.lastIndex = content.lastIndex
+      continue
+    }
+    const start = property.lastIndex
+    quoted.lastIndex = start
+    const scalar = quoted.exec(yaml)?.[0]
+    if (!scalar) continue
+    property.lastIndex = quoted.lastIndex
+    if (!scalar.includes('\n')) continue
+    // Bun can fold a quoted multiline value at the root of a YAML document.
+    const { value } = Bun.YAML.parse(`value: ${scalar}`) as { value: string }
+    normalized += yaml.slice(cursor, start) + JSON.stringify(value)
+    cursor = quoted.lastIndex
+  }
+  return normalized + yaml.slice(cursor)
+}
+
+function diagramFrontmatter(source: string): MermaidOptions {
+  // A diagram can indent its whole YAML mapping inside a fenced example.
+  const indent = Math.min(...Array.from(source.matchAll(/^ *(?=[^#\s])/gm), match => match[0].length))
+  const yaml = indent > 0 && Number.isFinite(indent) ? source.replace(new RegExp(`^ {${indent}}`, 'gm'), '') : source
+  try { return mapping(Bun.YAML.parse(yaml)) }
+  catch (error) {
+    const normalized = inlineQuotedScalars(yaml)
+    if (normalized === yaml) throw error
+    return mapping(Bun.YAML.parse(normalized))
+  }
+}
+
 function prepare(source: string, options?: MermaidOptions): { code: string, options: MermaidOptions } {
   let code = source.trim()
   let inline: MermaidOptions = {}
   const fields = /^---[ \t]*\r?\n([\s\S]+?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(code)
   if (fields) {
-    const defined = mapping(Bun.YAML.parse(fields[1]))
+    const defined = diagramFrontmatter(fields[1])
     const config = { ...mapping(defined.config) }
     if (typeof defined.title === 'string') config.title = defined.title
     if (defined.displayMode === 'compact') config.gantt = { ...mapping(config.gantt), displayMode: defined.displayMode }

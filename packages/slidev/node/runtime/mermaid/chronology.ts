@@ -13,14 +13,14 @@ export function diagramPixels(value: unknown): number | undefined {
   if (typeof value === 'string' && /^\d+(?:\.\d+)?(?:px)?$/i.test(value.trim())) return Number.parseFloat(value)
 }
 
-export function readChronology(source: string, title: string, singleQuotes = false): Chronology | undefined {
-  const lines = source.split(/\r?\n/).map(line => line.trim())
+export function readChronology(source: string | readonly string[], title: string, singleQuotes = false): Chronology | undefined {
+  const lines = (typeof source === 'string' ? source.split(/\r?\n/) : source).map(line => line.trim())
   const header = lines.findIndex(line => line && !/^(?:%%|#)/.test(line))
   if (header < 0) return
   const chart: Chronology = { title, header: lines[header], accessibleTitle: '', description: '', rows: [] }
   let description: string[] | undefined
   for (const line of lines.slice(header + 1)) {
-    const open = /^accDescr\s*\{\s*(.*)$/i.exec(line)
+    const open = /^accDescr\s*\{\s*([\s\S]*)$/i.exec(line)
     if (open && !description) description = [open[1]]
     else if (description) description.push(line)
     if (description) {
