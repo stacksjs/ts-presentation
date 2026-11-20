@@ -699,6 +699,7 @@ v-switch { display: block; }
 }
 .slide-diagram[data-diagram-theme="dark"] { --diagram-background: #14202c; }
 .slide-diagram text { fill: var(--diagram-ink, #f9f2ed); font: 14px system-ui, sans-serif; }
+.slide-diagram .diagram-gantt-tick { font-size: inherit; }
 .slide-diagram .diagram-node :is(rect, ellipse, polygon, path) {
   fill: var(--diagram-fill, #2c3440);
   stroke: var(--diagram-stroke, #9bb7d0);

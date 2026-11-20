@@ -39,6 +39,22 @@ test('schedules Gantt task dependencies and excludes nonworking days', () => {
   expect(svg).not.toContain('diagram-gantt-today')
 })
 
+test('keeps authored daily ticks across long imported Gantt schedules', async () => {
+  const source = `gantt
+topAxis
+tickInterval 1day
+todayMarker off
+Release :release, 2026-01-01, 90d`
+  const deck = parseDeck(['# Dense schedule', '', '~~~mermaid', source, '~~~'].join('\n'))
+  const html = await renderDeck(deck)
+  expect(html.match(/class="diagram-gantt-tick-group"/g)).toHaveLength(196)
+  expect(html.match(/<title>2026-02-17<\/title>/g)).toHaveLength(2)
+  expect(html.match(/<title>2026-04-01<\/title>/g)).toHaveLength(2)
+  expect(html.match(/class="diagram-gantt-tick"/g)!.length).toBeLessThan(196)
+  const overlyDense = mermaid(source.replace('1day', '1second'), 'bounded-schedule')!
+  expect(overlyDense.match(/class="diagram-gantt-tick-group"/g)!.length).toBeLessThan(60)
+})
+
 test('renders Gantt exclusion bands across a multi-year schedule', () => {
   const source = `gantt
 excludes weekends
@@ -440,6 +456,19 @@ test('renders a GitGraph header and preserves explicit IDs across the deck compi
   const html = await renderDeck(deck)
   expect(html.match(/data-diagram-kind="gitgraph"/g)).toHaveLength(2)
   expect(html).toContain('data-commit-id="c1" data-parent-ids="c3, c2"')
+})
+
+test('places bottom-to-top GitGraph branch names below their first commits', async () => {
+  const source = `gitGraph BT:
+commit id:"root"
+branch "review<br>and support"
+commit id:"draft"`
+  const html = await renderDeck(parseDeck(['# Review history', '', '~~~mermaid', source, '~~~'].join('\n')))
+  const rootY = Number(/data-commit-id="root".*?<circle[^>]+cy="([\d.]+)"/.exec(html)?.[1])
+  const names = [...html.matchAll(/<text[^>]+y="([\d.]+)" class="diagram-git-branch-label"[^>]*>/g)]
+  expect(names).toHaveLength(2)
+  for (const [, y] of names) expect(Number(y)).toBeGreaterThan(rootY)
+  expect(html).toMatch(/>review<\/tspan><tspan[^>]*>and support<\/tspan>/)
 })
 
 test('builds GitGraph branch history with merge parents, tags, and cherry-picks', () => {
@@ -1232,8 +1261,8 @@ test.skipIf(!chrome)('keeps dense Gantt axes readable and applies imported grid 
 topAxis
 tickInterval 1day
 todayMarker off
-Release :release, 2025-12-26, 2026-01-05`
-  const gantt = { useWidth: 340, useMaxWidth: false }
+Release :release, 2025-12-26, 2026-03-26`
+  const gantt = { useWidth: 880, useMaxWidth: false }
   const styled = mermaid(source, 'styled-axis', {
     gantt, theme: 'forest',
     themeCSS: `
@@ -1263,19 +1292,19 @@ Release :release, 2025-12-26, 2026-01-05`
         fit: boxes.every((box, i) => box.x >= 0 && box.x + box.width <= width &&
           (!i || boxes[i - 1].x + boxes[i - 1].width <= box.x)),
         paint: [getComputedStyle(axis.querySelector('path')).strokeWidth,
-          getComputedStyle(axis.querySelector('line')).stroke, getComputedStyle(captions[0]).fill],
+          getComputedStyle(axis.querySelector('line')).stroke, getComputedStyle(captions[0]).fill, getComputedStyle(captions[0]).fontSize],
       }
     })`)
     expect(axes).toHaveLength(4)
     for (const axis of axes) {
-      expect(axis.ticks).toBe(11)
+      expect(axis.ticks).toBe(98)
       expect(axis.labels.length).toBeLessThan(axis.ticks)
       expect(axis.labels[0]).toBe('2025-12-26')
-      expect(axis.labels.at(-1)).toBe('2026-01-05')
+      expect(axis.labels.at(-1)).toBe('2026-04-02')
       expect(axis.fit).toBe(true)
     }
     expect(axes[0]).toEqual(axes[1])
-    expect(axes[0].paint).toEqual(['0px', 'rgb(0, 85, 119)', 'rgb(119, 34, 17)'])
+    expect(axes[0].paint).toEqual(['0px', 'rgb(0, 85, 119)', 'rgb(119, 34, 17)', '12px'])
     expect(axes[2].paint[0]).toBe('1px')
     expect(axes[2].paint[1]).not.toBe(axes[0].paint[1])
   }

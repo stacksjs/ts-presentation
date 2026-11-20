@@ -214,6 +214,7 @@ export function gantt(source: string, idPrefix: string, options: MermaidOptions 
   const sectionColors = [color('sectionBkgColor'), alternateSection, color('sectionBkgColor2'), alternateSection]
   const svg = ganttChart({
     ...chart, idPrefix, title: chart.title || (typeof options.title === 'string' ? options.title : ''),
+    maxExplicitTicks: 10_000,
     tickInterval: chart.tickInterval || (typeof config.tickInterval === 'string' ? config.tickInterval : undefined),
     weekday: chart.weekday ?? (isWeekday(config.weekday) ? config.weekday : undefined),
     topAxis: chart.topAxis ?? config.topAxis === true,
