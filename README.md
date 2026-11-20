@@ -97,6 +97,7 @@ the deck and style slides with an optional `style.css`.
 | Outline and counters | `<Toc />` links to slides grouped by heading depth. Use `<TitleRenderer no="2" />` for a slide title, or `<SlideCurrentNo />` and `<SlidesTotal />` for page numbers |
 | Slide overview | Press **O** for a thumbnail grid and jump to any slide. Open `/overview` on the dev server or add `?overview=1` to a built deck URL to review speaker notes and reveal steps |
 | Conditional content | `<RenderWhen context="presenter">` selects content by view, with an optional `#fallback` slot. `<LightOrDark>` selects a `#light` or `#dark` slot. Set `colorSchema: auto` to follow system appearance |
+| Text fitting and scaling | `<AutoFitText :min="20" :max="72" modelValue="Heading" />` fits text to its width. `<Transform :scale="0.5">` scales its content with a configurable origin |
 | Per-slide options | `class`, `hide`, `disabled`, and `transition: fade`, `slide-left`, or `slide-up` |
 | Images and component markup | Trusted HTML, with optional `data-zoom` on an image |
 | Post embeds | `<Tweet id="…" />` or `<Tweet url="…" />` loads the X widget in a sandboxed iframe |

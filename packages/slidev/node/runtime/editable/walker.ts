@@ -73,18 +73,37 @@ export function collectSnapshot(options: {
 
   const styles: RawStyle[] = []
   const styleIndex = new Map<string, number>()
+  const scaledKeys = [
+    'fontSize', 'letterSpacing', 'lineHeight', 'paddingLeft', 'paddingRight',
+    'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth', 'borderTopLeftRadius',
+    'top', 'right', 'bottom', 'left', 'width', 'height',
+  ] as const
+
+  function componentScale(element: Element, computed: CSSStyleDeclaration): number | undefined {
+    if (computed.transform === 'none' || element.getAttribute('data-presentation-transform') === null) return
+    if (computed.rotate !== 'none' || computed.scale !== 'none') return
+    const matrix = new DOMMatrixReadOnly(computed.transform)
+    if (matrix.is2D && matrix.b === 0 && matrix.c === 0 && matrix.a === matrix.d && matrix.a > 0)
+      return matrix.a
+  }
 
   /**
    * Intern a computed style: `getComputedStyle` exposes several hundred properties,
    * so serializing a full style per node turns a snapshot into megabytes crossing
    * the CDP boundary. A few hundred nodes collapse to a few dozen distinct styles.
    */
-  function intern(computed: CSSStyleDeclaration): number {
+  function intern(computed: CSSStyleDeclaration, scale = 1, flattenTransform = false): number {
     const record: Record<string, string> = {}
     for (const key of STYLE_KEYS)
       record[key] = computed[key as any] ?? ''
     if (computed.rotate && computed.rotate !== 'none' && computed.rotate !== '0deg' && record.transform === 'none')
       record.transform = computed.rotate
+    if (flattenTransform) record.transform = 'none'
+    if (scale !== 1) {
+      for (const key of scaledKeys) {
+        if (/^-?[\d.]+px$/.test(record[key])) record[key] = `${Number.parseFloat(record[key]) * scale}px`
+      }
+    }
     const key = JSON.stringify(record)
     const existing = styleIndex.get(key)
     if (existing !== undefined)
@@ -280,7 +299,7 @@ export function collectSnapshot(options: {
       }
     }
 
-    function walk(node: Node, parent: number, fromShadowRoot: boolean, inheritedOpacity: number): void {
+    function walk(node: Node, parent: number, fromShadowRoot: boolean, inheritedOpacity: number, inheritedScale: number): void {
       if (node.nodeType === 3) {
         const text = node.textContent ?? ''
         // A whitespace-only node can hold the only space between two inline
@@ -353,6 +372,10 @@ export function collectSnapshot(options: {
         : 1)
       if (effectiveOpacity === 0)
         return
+      const ownScale = componentScale(el, computed)
+      // Bounding boxes already include these transforms. Scale the computed
+      // font and paint lengths to match those boxes in the editable output.
+      const scale = inheritedScale * (ownScale ?? 1)
 
       el.setAttribute(options.idAttribute, String(id))
       resolveStack(computed.fontFamily)
@@ -371,7 +394,7 @@ export function collectSnapshot(options: {
         id,
         parent,
         tag: el.tagName.toUpperCase(),
-        style: intern(computed),
+        style: intern(computed, scale, ownScale !== undefined),
         rect: relative(box),
         // Document coordinates too: an element overflowing the slide is
         // captured as a page clip, which needs a page-space rectangle.
@@ -451,8 +474,8 @@ export function collectSnapshot(options: {
         }
 
         const own = el.getBoundingClientRect()
-        const width = Number.parseFloat(pseudo.width) || 0
-        const height = Number.parseFloat(pseudo.height) || 0
+        const width = (Number.parseFloat(pseudo.width) || 0) * scale
+        const height = (Number.parseFloat(pseudo.height) || 0) * scale
         if (width <= 0 || height <= 0) {
           unplaceablePseudos.push(`${el.tagName.toLowerCase()}${which}`)
           continue
@@ -460,7 +483,7 @@ export function collectSnapshot(options: {
         // `auto` parses to NaN, which spreads through the whole `pageRect` and
         // loses the decoration to a failed clip. Zero is what `auto` resolves
         // to for an absolutely positioned box with no other constraint.
-        const px = (value: string): number => Number.parseFloat(value) || 0
+        const px = (value: string): number => (Number.parseFloat(value) || 0) * scale
         const left = pseudo.left === 'auto'
           ? own.width - px(pseudo.right) - width
           : px(pseudo.left)
@@ -490,7 +513,7 @@ export function collectSnapshot(options: {
           tag: which === '::before'
             ? '::BEFORE'
             : '::AFTER',
-          style: intern(pseudo),
+          style: intern(pseudo, scale),
           rect: relative(box),
           // A pseudo has no element to screenshot, so it is captured by clipping the page.
           pageRect,
@@ -507,13 +530,13 @@ export function collectSnapshot(options: {
       const shadow = (el as any).shadowRoot
       if (shadow) {
         for (const child of Array.from(shadow.childNodes) as Node[])
-          walk(child, id, true, effectiveOpacity)
+          walk(child, id, true, effectiveOpacity, scale)
       }
 
       // Recurse through zero-sized boxes rather than pruning them: a cover
       // slide commonly hangs its title off a wrapper that measures 0 high.
       for (const child of Array.from(el.childNodes) as Node[])
-        walk(child, id, fromShadowRoot, effectiveOpacity)
+        walk(child, id, fromShadowRoot, effectiveOpacity, scale)
     }
 
     // Keep the article background as its own layer. Its transform belongs to
@@ -523,7 +546,7 @@ export function collectSnapshot(options: {
     container.setAttribute(options.idAttribute, String(rootId))
     nodes.push({ id: rootId, parent: -1, tag: 'DIV', style: styles.push(rootStyle) - 1, rect: relative(containerRect) })
     for (const child of Array.from(container.childNodes) as Node[])
-      walk(child, rootId, false, 1)
+      walk(child, rootId, false, 1, 1)
 
     slides.push({
       no: options.slide,

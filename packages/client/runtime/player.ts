@@ -1,4 +1,5 @@
 import { defaultCanvas } from '../../types/src/canvas.ts'
+import { createAutoFitText } from './auto-fit-text.ts'
 import { setupCodeCopy, setupCodeTabs } from './code-controls.ts'
 import { setupCodeDiffs } from './code-diff.ts'
 import { createSlideConditions } from './conditions.ts'
@@ -28,6 +29,7 @@ import { registerShortcuts } from './shortcuts.ts'
 const canvasWidth = Number(document.documentElement.dataset.slideWidth) || defaultCanvas.width
 const canvasHeight = Number(document.documentElement.dataset.slideHeight) || defaultCanvas.height
 const stage = document.querySelector<HTMLElement>('#stage')!
+const fittedText = createAutoFitText(stage)
 const articles = [...stage.querySelectorAll<HTMLElement>(':scope > article')]
 const notesPanel = document.querySelector<HTMLElement>('#presenter-notes')!
 const notes = [...notesPanel.querySelectorAll<HTMLElement>(':scope > section')]
@@ -169,6 +171,7 @@ function syncPeer(data: Record<string, unknown>): void {
 
 function showCurrentReveals(animate: boolean): void {
   showReveals(reveals[current - 1], click, animate, Number(stage.style.getPropertyValue('--slide-scale')) || 1)
+  fittedText(articles[current - 1])
   if (!isCapture && !isPreview) syncLiveAutorun(articles[current - 1])
 }
 
@@ -181,7 +184,10 @@ const drags = !isCapture && !isPreview ? setupDrags(stage, (slide, presentationD
   syncPeer({ dragSlide: articles.indexOf(slide) + 1, presentationDrag })
 }, isLive) : undefined
 const media = createSlideMedia(!isCapture && !isPreview)
-if (isCapture) window.presentationMediaReady = media.ready
+if (isCapture) {
+  window.presentationMediaReady = media.ready
+  window.presentationFitText = root => fittedText(root, true)
+}
 const overviewGrid = isOverview ? setupOverviewGrid(stage, {
   routes, articles, notes, bounds, width: canvasWidth, height: canvasHeight, origin: messageOrigin, audienceUrl,
   render(index, step, nearViewport) {

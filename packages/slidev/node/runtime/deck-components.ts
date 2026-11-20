@@ -2,7 +2,7 @@ import { defaultConfig, renderComponentWithSlot } from '@stacksjs/stx'
 import { readdir, realpath } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { within } from './assets.ts'
-import { escapeHtml, unescapeHtml } from './html.ts'
+import { escapeHtml, readBoundValue, unescapeHtml } from './html.ts'
 import { htmlTag } from './slide-html.ts'
 
 type ComponentPaths = Map<string, string>
@@ -54,8 +54,8 @@ interface Tag {
 const blockRoot = /^\s*<(?:address|article|aside|blockquote|div|dl|figure|footer|h[1-6]|header|hr|main|nav|ol|p|section|table|ul)(?=[\s>])/i
 const raw = new Set(['code', 'pre', 'script', 'style', 'textarea', 'title', 'xmp', 'iframe', 'noembed', 'noframes', 'noscript'])
 const builtins = new Set([
-  'codegroup', 'drag', 'dragarrow', 'goto', 'lightordark', 'link', 'renderwhen', 'slidecurrentno', 'slidevvideo', 'titles',
-  'toc', 'totals', 'tweet', 'vafter', 'vclick', 'vclickgap', 'vclickhide', 'vclicks', 'vswitch', 'youtube',
+  'autofittext', 'codegroup', 'drag', 'dragarrow', 'goto', 'lightordark', 'link', 'renderwhen', 'slidecurrentno', 'slidevvideo', 'titles',
+  'toc', 'totals', 'transform', 'tweet', 'vafter', 'vclick', 'vclickgap', 'vclickhide', 'vclicks', 'vswitch', 'youtube',
 ])
 
 function* scanTags(source: string): Generator<Tag> {
@@ -132,21 +132,6 @@ function readSlots(source: string, component: (tag: Tag) => boolean): { name: st
   return slots
 }
 
-function propValue(value: string, frontmatter: Record<string, unknown>): unknown {
-  try { return JSON.parse(value) }
-  catch {
-    if (/^'[^']*'$/.test(value)) return value.slice(1, -1)
-    if (/^frontmatter(?:\.[a-z_$][\w$]*)+$/i.test(value)) {
-      let entry: unknown = frontmatter
-      for (const part of value.split('.').slice(1)) {
-        if (!entry || typeof entry !== 'object' || !Object.hasOwn(entry, part)) return undefined
-        entry = (entry as Record<string, unknown>)[part]
-      }
-      return entry
-    }
-  }
-}
-
 const attributes = /\s+([^\s=/\x22'<>]+)(?:\s*=\s*(?:\x22([^\x22]*)\x22|'([^']*)'|([^\s>]+)))?/g
 const slideDirectives = /^v-(?:click(?:-hide)?|after|drag)(?:\.[\w-]+)*$/
 
@@ -164,7 +149,7 @@ function readProps(markup: string, frontmatter: Record<string, unknown>) {
     if (!/^[\w-]+$/.test(key) || /^__|^(?:constructor|prototype)$/.test(key)) continue
     const normalized = key.replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase())
     if (Object.hasOwn(props, normalized)) continue
-    props[normalized] = value === undefined ? !bound : bound ? propValue(unescapeHtml(value).trim(), frontmatter) : unescapeHtml(value)
+    props[normalized] = value === undefined ? !bound : bound ? readBoundValue(unescapeHtml(value).trim(), frontmatter) : unescapeHtml(value)
   }
   return { props, forwarded }
 }

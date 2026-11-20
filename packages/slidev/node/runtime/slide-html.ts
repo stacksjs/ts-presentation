@@ -1,5 +1,5 @@
 import { resolveTweetId } from '../../../client/logic/tweet.ts'
-import { escapeHtml, unescapeHtml } from './html.ts'
+import { escapeHtml, readBoundValue, unescapeHtml } from './html.ts'
 import { arrowGeometry, defaultDragPosition, dragKey, dragStyle, parseDragPosition } from '../../../types/src/drag.ts'
 import type { DragKind } from '../../../types/src/drag.ts'
 import type { SlideRoute } from '../../../client/runtime/navigation.ts'
@@ -91,6 +91,53 @@ function literalAttribute(attributes: Map<string, Attribute>, name: string): str
   const quoted = /^(?:"([^"]*)"|'([^']*)')$/.exec(value)
   if (quoted) return quoted[1] ?? quoted[2]
   if (/^(?:true|false|-?\d+(?:\.\d+)?)$/.test(value)) return value
+}
+
+function takeLiteral(attributes: Map<string, Attribute>, frontmatter: Record<string, unknown>, ...names: string[]): string | undefined {
+  let value: string | undefined
+  for (const name of names) {
+    const literal = attributes.get(name)?.value
+    const binding = (attributes.get(`:${name}`) ?? attributes.get(`v-bind:${name}`))?.value
+    const bound = binding === undefined ? undefined : readBoundValue(binding.trim(), frontmatter)
+    if (literal !== undefined) value ??= literal
+    else if (typeof bound === 'string' || typeof bound === 'number' || typeof bound === 'boolean') value ??= String(bound)
+    for (const key of [name, `:${name}`, `v-bind:${name}`]) attributes.delete(key)
+  }
+  return value
+}
+
+function autoFitOpening(source: string, tag: 'div' | 'span', frontmatter: Record<string, unknown>): { html: string, fallback: string } {
+  const attributes = attributeValues(source)
+  const size = (key: string, fallback: number) => {
+    const number = Number(takeLiteral(attributes, frontmatter, key))
+    return Number.isFinite(number) && number > 0 ? number : fallback
+  }
+  const max = size('max', 100)
+  const min = Math.min(size('min', 30), max)
+  const wrap = takeLiteral(attributes, frontmatter, 'multiline', 'multi-line') !== 'false'
+  const fallback = escapeHtml(takeLiteral(attributes, frontmatter, 'modelvalue', 'model-value') ?? '')
+  const existingClass = attributes.get('class')?.value
+  setAttribute(attributes, 'class', ['slidev-auto-fit-text', existingClass].filter(Boolean).join(' '))
+  setAttribute(attributes, 'data-auto-fit-text', '')
+  setAttribute(attributes, 'data-fit-min', String(min))
+  setAttribute(attributes, 'data-fit-max', String(max))
+  if (wrap) setAttribute(attributes, 'data-fit-multiline', '')
+  const open = `<${tag}${serialized(attributes)}><${tag} class="slidev-auto-fit-text-inner" style="font-size:${min}px">`
+  return { html: open, fallback }
+}
+
+function transformOpening(source: string, tag: 'div' | 'span', frontmatter: Record<string, unknown>): string {
+  const attributes = attributeValues(source)
+  const scale = takeLiteral(attributes, frontmatter, 'scale')?.trim()
+  const origin = takeLiteral(attributes, frontmatter, 'origin')?.trim()
+  const style = attributes.get('style')?.value
+  const factor = /^[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:\s*,\s*[+-]?(?:\d+(?:\.\d+)?|\.\d+))?$/
+  const declarations = [tag === 'span' ? 'display:inline-block' : '', style,
+    `transform-origin:${origin && /^[\w\s.,%()+*/-]+$/.test(origin) ? origin : 'top left'}`]
+  if (scale && factor.test(scale)) declarations.push(`transform:scale(${scale})`)
+  setAttribute(attributes, 'style', declarations.filter(Boolean).join(';'))
+  setAttribute(attributes, 'data-presentation-transform', '')
+  return `<${tag}${serialized(attributes)}>`
 }
 
 function listProp(attributes: Map<string, Attribute>, name: string): string[] {
@@ -305,7 +352,7 @@ function tweetMarkup(source: string, theme: 'light' | 'dark'): string {
 
 /** Adapted from Slidev's Markdown link and scoped style transforms (MIT). */
 export function prepareSlideHtml(input: string, destination: (value: string) => SlideDestination | undefined, slide: number, frontmatter: Record<string, unknown> = {}, theme: 'light' | 'dark' = 'dark', outline?: SlideOutline): { html: string, css: string } {
-  if (!/<(?:style|(?:a|Link|Tweet|SlidevVideo|Youtube|Toc|TitleRenderer|SlideCurrentNo|SlidesTotal|RenderWhen|LightOrDark)(?=[\s/>])|v-?drag)|\sv-drag\b/i.test(input)) return { html: input, css: '' }
+  if (!/<(?:style|(?:a|Link|Tweet|SlidevVideo|Youtube|Toc|TitleRenderer|SlideCurrentNo|SlidesTotal|RenderWhen|LightOrDark|AutoFitText|Transform)(?=[\s/>])|v-?drag)|\sv-drag\b/i.test(input)) return { html: input, css: '' }
   const blocks: StyleBlock[] = []
   const tags = new RegExp(htmlTags)
   let offset = 0
@@ -313,10 +360,14 @@ export function prepareSlideHtml(input: string, destination: (value: string) => 
   let componentOpen = false
   let conditionalDepth = 0
   let arrowCount = 0
+  let paragraph = false
+  const layoutComponents: { name: string, tag: 'div' | 'span', content: number, fallback?: string }[] = []
+  const layoutSlots: boolean[] = []
   for (let token = tags.exec(input); token; token = tags.exec(input)) {
     const [original, closing, rawName, source] = token
     const name = rawName?.toLowerCase()
     let replacement = original
+    if (name === 'p') paragraph = !closing
     if (name && !closing && rawText.has(name)) {
       const close = new RegExp(`</${name}\\s*>`, 'gi')
       close.lastIndex = tags.lastIndex
@@ -356,6 +407,38 @@ export function prepareSlideHtml(input: string, destination: (value: string) => 
       if (closing && conditionalDepth) conditionalDepth--
       else if (!closing && !selfClosing) conditionalDepth++
       replacement = closing ? '</template></div>' : conditionalMarkup(rawName, source, selfClosing)
+    }
+    else if (rawName === 'AutoFitText' || rawName === 'Transform') {
+      if (closing) {
+        const previous = layoutComponents.at(-1)
+        if (previous?.name === rawName) {
+          layoutComponents.pop()
+          const fallback = previous.fallback && !input.slice(previous.content, token.index).trim() ? previous.fallback : ''
+          const close = `</${previous.tag}>`
+          replacement = rawName === 'AutoFitText' ? fallback + close + close : close
+        }
+      }
+      else {
+        const tag = paragraph ? 'span' : 'div'
+        const selfClosing = /\/>$/.test(original)
+        const props = selfClosing ? source.replace(/\/\s*$/, '') : source
+        const fitted = rawName === 'AutoFitText' ? autoFitOpening(props, tag, frontmatter) : undefined
+        replacement = fitted?.html ?? transformOpening(props, tag, frontmatter)
+        if (selfClosing) replacement += fitted ? `${fitted.fallback}</${tag}></${tag}>` : `</${tag}>`
+        else layoutComponents.push({ name: rawName, tag, content: tags.lastIndex, fallback: fitted?.fallback })
+      }
+    }
+    else if (name === 'template') {
+      if (closing) {
+        if (layoutSlots.pop()) replacement = ''
+      }
+      else {
+        const enclosing = layoutComponents.at(-1)
+        const namedDefault = enclosing && /^\s+(?:#|v-slot:)default\s*$/.test(source)
+          && !input.slice(enclosing.content, token.index).trim()
+        layoutSlots.push(Boolean(namedDefault))
+        if (namedDefault) replacement = ''
+      }
     }
     else if (rawName === 'Link') {
       if (closing && componentOpen) {

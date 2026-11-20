@@ -52,6 +52,7 @@ in a new ts-presentation project.
 | Reveal scheduling | Absolute and relative steps, hide ranges, grouped and nested lists, CSS presets, and switch slots |
 | Navigation context | Slide-local metadata, route aliases, reveal bounds, nested outlines, slide titles and counters, and native links to slides and reveal steps |
 | Conditional slots | `RenderWhen` for slide, presenter, next-frame preview, overview, print exports, and viewport visibility. `LightOrDark` for fixed or system appearance |
+| Text fitting and scaling | `AutoFitText` fits literal text or Markdown slots within min and max font sizes. `Transform` scales a slot from a configurable origin. Uniform positive scales preserve editable text in PowerPoint |
 | Entry and live notes pages | STX view selector and a read-only speaker notes view that follows slide position, reveal steps, and timer across tabs in the same browser profile |
 | Quick overview and overview page | Rendered thumbnails, keyboard navigation, standalone reveal sliders, and read-only speaker notes |
 | Drawing and recording | Native SVG ink, mouse and stylus input, same-browser sync, SVG persistence, drawing options, and screen capture |

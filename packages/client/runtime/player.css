@@ -39,6 +39,9 @@ button, select { font: inherit; }
 .presentation-layer[data-presentation-layer="global-top"] { z-index: 9; }
 
 .slide h1 { margin-top: 0; line-height: 1.1; }
+.slidev-auto-fit-text { display: block; min-inline-size: 0; overflow: auto; }
+.slidev-auto-fit-text-inner { display: inline-block; inline-size: max-content; white-space: nowrap; vertical-align: top; }
+.slidev-auto-fit-text-inner[data-fit-wrapped] { max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; }
 .light .slide { background: #f8f8f4; color: #202831; color-scheme: light; }
 .light .slide a { color: #155786; }
 .light .slide pre { color: #edf5ff; color-scheme: dark; }

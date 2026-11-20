@@ -136,6 +136,7 @@ export async function captureFrames(options: CaptureOptions, onFrame: (frame: Po
         await window.presentationMediaReady?.()
         await document.fonts.ready
         await (${prepareImages.toString()})(active, true)
+        window.presentationFitText?.(active)
         const note = document.querySelector('#presenter-notes > section[data-has-notes]:not([hidden])')
         const noteSteps = note?.querySelectorAll('[data-note-step]${options.withClicks ? ':not([hidden])' : ''}') ?? []
         const notes = [...noteSteps].map(part => [...part.children].map(node => {
@@ -221,6 +222,7 @@ export async function capturePdf(options: CaptureOptions): Promise<Uint8Array<Ar
       document.body.classList.add('printing-frames')
       await document.fonts.ready
       await (${prepareImages.toString()})(stage)
+      window.presentationFitText?.(stage)
     })(${JSON.stringify(positions)})`)
     const result = await chrome.cdp('Page.printToPDF', { printBackground: true, preferCSSPageSize: true }) as { data?: string }
     if (!result.data) throw new Error('Chrome PDF export returned no pages')
