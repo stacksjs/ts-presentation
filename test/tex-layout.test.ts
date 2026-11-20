@@ -1676,6 +1676,60 @@ test('enforces KaTeX strict settings for comments, markup, text commands, spacin
 
 const chrome = await findChrome()
 
+test('parses AMS root-index offsets and plain TeX roots through the same degree renderer', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const plain = math(String.raw`\root 3\of{y}`, false)
+  expect(plain.split('<annotation')[0]).toBe(math(String.raw`\sqrt[\uproot{0}\leftroot{0}3]{y}`, false).split('<annotation')[0])
+  const adjusted = math(String.raw`\def\shift{-3}\sqrt[\leftroot{\shift}\uproot{3}\beta]{y}`, false)
+  expect(adjusted).toContain('style="position:relative;left:0.3333333333333333em;top:-0.3333333333333333em"><mi>β</mi>')
+  expect(() => math(String.raw`\leftroot{2}x`, false)).toThrow('belongs at the start of a root index')
+  expect(() => math(String.raw`\sqrt[\uproot{0.5}3]{y}`, false)).toThrow('Expected a signed integer')
+})
+
+test.skipIf(!chrome)('shifts radical degrees in both axes without moving the radicand in Chromium', async () => {
+  const formulas = [
+    String.raw`\sqrt[\beta]{x+1}`,
+    String.raw`\sqrt[\leftroot{-3}\uproot{3}\beta]{x+1}`,
+    String.raw`\root\leftroot{3}\uproot{-3}\beta\of{x+1}`,
+  ]
+  const body = formulas.map(formula => `<div>${renderMath(formula)}</div>`).join('')
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response(`<!doctype html><style>math{font-size:36px}</style><main style="margin:24px">${body}</main>`, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    }),
+  })
+  const browser = new Bun.WebView({ backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await browser.navigate(server.url.href)
+    const boxes = await browser.evaluate<{ x: number, y: number, width: number, degreeLeft: number, mathLeft: number }[]>(`[...document.querySelectorAll('mroot')].map(root => {
+      const base = root.firstElementChild.getBoundingClientRect()
+      const degree = root.lastElementChild.querySelector('mi').getBoundingClientRect()
+      return {
+        x: degree.left - base.left, y: degree.top - base.top, width: root.getBoundingClientRect().width,
+        degreeLeft: degree.left, mathLeft: root.closest('math').getBoundingClientRect().left,
+      }
+    })`)
+    expect(boxes).toHaveLength(3)
+    const [normal, raised, lowered] = boxes
+    expect(raised.x).toBeGreaterThan(normal.x + 3)
+    expect(raised.y).toBeLessThan(normal.y - 3)
+    expect(lowered.x).toBeLessThan(normal.x - 3)
+    expect(lowered.y).toBeGreaterThan(normal.y + 3)
+    expect(raised.width).toBeCloseTo(normal.width)
+    expect(lowered.width).toBeCloseTo(normal.width)
+    expect(lowered.degreeLeft).toBeLessThan(lowered.mathLeft)
+    const { slides: [{ nodes }] } = await browser.evaluate<ReturnType<typeof collectSnapshot>>(`(${collectSnapshot.toString()})({
+      containerSelector: 'main', idAttribute: 'data-export-id', slide: 1, click: 0,
+    })`)
+    expect(nodes.filter(node => node.isMath).at(-1)?.pageRect?.x).toBeCloseTo(lowered.degreeLeft)
+  }
+  finally {
+    browser.close()
+    await server.stop(true)
+  }
+})
+
 test.skipIf(!chrome)('moves conflicting AMS tags and raises only tags on their own line', async () => {
   const align = String.raw`\begin{align}a&=\hspace{6em}b\tag*{Quality control check}\raisetag{6px}\\c&=d\tag*{OK}\end{align}`
   const displays = [

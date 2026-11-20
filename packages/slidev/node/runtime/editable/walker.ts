@@ -559,8 +559,8 @@ export function collectSnapshot(options: {
 
       let box = el.getBoundingClientRect()
       if (el.localName === 'math') {
-        // A TeX lap can paint outside the formula without taking up layout space.
-        for (const overlap of el.querySelectorAll('.math-overlap-l, .math-overlap-c, .math-overlap-r')) {
+        // Laps and shifted root indices can paint beyond the formula's layout box.
+        for (const overlap of el.querySelectorAll('.math-overlap-l, .math-overlap-c, .math-overlap-r, .math-root-offset')) {
           const ink = overlap.getBoundingClientRect()
           const left = Math.min(box.left, ink.left)
           const top = Math.min(box.top, ink.top)

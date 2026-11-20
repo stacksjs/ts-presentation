@@ -911,7 +911,7 @@ const mathModeFunctions = new Set([
   'prescript', 'mathstrut', 'sideset', 'overset', 'underset', 'overunderset', 'stackrel',
   'shoveleft', 'shoveright', ...Array.from(intertextCommands.keys(), command => command.slice(1)),
   'overline', 'operatorname', 'operatorname@', 'operatornamewithlimits', 'limits', 'nolimits', 'displaylimits',
-  'not', 'mod', 'bmod', 'pmod', 'pod', 'ce', 'pu', 'allowbreak', 'nonscript',
+  'not', 'mod', 'bmod', 'pmod', 'pod', 'ce', 'pu', 'allowbreak', 'nonscript', 'root', 'of', 'leftroot', 'uproot',
 ])
 const sharedFunctions = new Set([
   ...Object.keys(textFonts), ...typesettingNames, ...textBoxes, ...verticalBoxCommands, ...spacingCommands,
@@ -1584,6 +1584,29 @@ export function renderMath(source: string, display = false, configured: MathMacr
       '\\begingroup', '\\def', '\\delimsize', '{', ...scaler, '}',
       ...substituteMacroArguments(template.before, args), ...expression, ...substituteMacroArguments(template.after, args), '\\endgroup',
     ]
+  }
+
+  function radicalDegree(tokens: string[]): string {
+    return withTokens(tokens, () => inScope(() => {
+      let left = 0
+      let up = 0
+      for (let command = peek(); command === '\\leftroot' || command === '\\uproot'; command = peek()) {
+        take()
+        const input = expandDefinition(rawGroup()).join('').trim()
+        const value = Number(input)
+        if (!/^[+-]?\d+$/.test(input) || !Number.isSafeInteger(value))
+          throw new MathParseError(`Expected a signed integer after ${command}`)
+        if (command === '\\leftroot') left = value
+        else up = value
+      }
+      const degree = renderMarkup(row([boundary]), 3)
+      if (!left && !up) return `<mrow>${degree}</mrow>`
+      // The index uses scriptscript size. Convert the parent-style mu offset
+      // to index-sized ems before applying it to the degree box.
+      const horizontal = dimension(`${-left * 2}mu`)
+      const vertical = dimension(`${-up * 2}mu`)
+      return `<mrow class="math-root-offset" style="position:relative;left:${horizontal};top:${vertical}">${degree}</mrow>`
+    }))
   }
 
   function chemistryMath(source: string): Markup {
@@ -3041,12 +3064,13 @@ export function renderMath(source: string, display = false, configured: MathMacr
       return { markup: xml`<mmultiscripts>${argument()}<mprescripts/>${lower}${upper}</mmultiscripts>` }
     }
     if (name === 'sideset') return sidedOperator()
-    if (name === 'sqrt') {
-      const index = rawBracket()
+    if (name === 'sqrt' || name === 'root') {
+      const index = name === 'root' ? delimitedArgument(['\\of']) : rawBracket()
       if (index === undefined) return { markup: xml`<msqrt>${argument(true)}</msqrt>` }
-      const degree = withTokens(index, () => renderMarkup(inScope(() => row([boundary])), 3))
-      return { markup: xml`<mroot>${argument()}<mrow>${degree}</mrow></mroot>` }
+      const degree = radicalDegree(index)
+      return { markup: xml`<mroot>${argument()}${degree}</mroot>` }
     }
+    if (name === 'leftroot' || name === 'uproot') throw new MathParseError(`${token} belongs at the start of a root index`)
     if (Object.hasOwn(textFonts, name)) return { markup: textArgument(name) }
     if (typesettingNames.has(name)) return { markup: typesettingName(name) }
     if (name === 'operatorname' || name === 'operatorname@' || name === 'operatornamewithlimits') {

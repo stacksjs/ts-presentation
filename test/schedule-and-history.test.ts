@@ -853,6 +853,35 @@ section Ship
   expect(height(svg)).toBeLessThan(height(mermaid(source.replace('    displayMode: compact\n', ''), 'ordinary-gantt')!))
 })
 
+test('renders RGB and HSL theme variables in imported Gantt and GitGraph decks', async () => {
+  const source = [
+    '---',
+    'mermaid:',
+    '  themeVariables:',
+    '    taskBkgColor: "hsl(210, 50%, 40%)"',
+    '    sectionBkgColor: "rgba(15, 30, 45, 0.5)"',
+    '    git0: "rgb(21, 34, 55)"',
+    '    tagLabelBackground: "hsla(120, 50%, 40%, 0.5)"',
+    '---',
+    '# Project overview',
+    '~~~mermaid',
+    'gantt',
+    'section Release',
+    'Review : review, 2026-11-01, 1d',
+    '~~~',
+    '',
+    '~~~mermaid',
+    'gitGraph',
+    'commit id:"reviewed" tag:"release"',
+    '~~~',
+  ].join('\n')
+  const html = await renderDeck(parseDeck(source))
+  expect(html).toMatch(/class="diagram-gantt-bar"[^>]*style="fill:rgb\(51, 102, 153\)"/)
+  expect(html).toContain('style="fill:rgba(15, 30, 45, 0.5);opacity:0.2"')
+  expect(html).toMatch(/class="diagram-git-dot"[^>]*fill="rgb\(21, 34, 55\)"/)
+  expect(html).toMatch(/class="diagram-git-tag-box"[^>]*fill="rgba\(51, 153, 51, 0.5\)"/)
+})
+
 test('preserves literal YAML blocks when folding nested diagram options', () => {
   const source = `---
 title: |-

@@ -383,7 +383,7 @@ it.skipIf(!chrome)('exports supported TeX as editable Office equations with pict
 Inline formula $a^2+\nobreak\textsf{\textbf{rate $x+\text{unit}+\texttt{code}$}}$ beside editable text.
 
 $$
-\frac{1+x_i^2}{\sqrt[3]{y}}
+\frac{1+x_i^2}{\root3\of{y}}
 $$
 
 $$
@@ -469,6 +469,14 @@ $$
 
 $$
 \DeclareMathOperator{\rank}{rank}\rank\vcenter{\hbox{$\frac{a}{b}$}}+y
+$$
+
+---
+
+# Adjusted root index
+
+$$
+\sqrt[\uproot{2}\leftroot{3}\beta]{z+1}
 $$`)
     const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
     const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
@@ -476,7 +484,7 @@ $$`)
     if (status) throw new Error(stderr)
     const frames: PowerPointFrame[] = []
     await captureFrames({ root: join(root, 'dist'), executable: chrome!, scale: 1, canvas, editable: true, withClicks: false }, frame => { frames.push(frame) })
-    expect(frames).toHaveLength(6)
+    expect(frames).toHaveLength(7)
     const equations = frames[0].editable?.nodes.filter((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math') ?? []
     expect(equations).toHaveLength(4)
     expect(equations.filter(node => node.equation)).toHaveLength(3)
@@ -554,7 +562,7 @@ $$`)
       expect(script).toMatch(/^<m:sub>.*?>6<\/m:t>.*?<\/m:sub><m:sup>.*?>14<\/m:t>.*?<\/m:sup><m:e>/)
     expect(prescripts[0]).toContain('<m:sty m:val="p"/>')
     expect(prescripts[1]).toMatch(/<m:e><m:sSup><m:e>.*?>C<\/m:t>.*?<\/m:e><m:sup>.*?>−<\/m:t>/)
-    expect([...parts.keys()].filter(name => name.startsWith('ppt/media/'))).toHaveLength(18)
+    expect([...parts.keys()].filter(name => name.startsWith('ppt/media/'))).toHaveLength(19)
 
     const alphabets = parts.get('ppt/slides/slide5.xml')?.toString() ?? ''
     expect(alphabets.match(/<a14:m>/g)).toHaveLength(2)
@@ -577,6 +585,9 @@ $$`)
     expect(annotations).toMatch(/<m:limUpp><m:e><m:limLow><m:e><m:r>.*?>=<\/m:t>.*?<m:lim>.*?>B<\/m:t>.*?<m:lim>.*?>A<\/m:t>/)
     expect(annotations).toContain('<m:m><m:mPr><m:baseJc m:val="center"/></m:mPr><m:mr><m:e><m:f>')
     expect(annotations).toContain('<m:t xml:space="preserve">rank</m:t>')
+    const adjusted = parts.get('ppt/slides/slide7.xml')?.toString() ?? ''
+    expect(adjusted.match(/<p:pic>/g)).toHaveLength(1)
+    expect(adjusted).not.toContain('<m:rad>')
     for (const cell of ['a', 'b', 'c', 'd']) expect(fonts.get(cell)).toBe('<m:sty m:val="i"/>')
     expect(fonts.get('i')).toBe('<m:sty m:val="p"/>')
     expect(fonts.get('plain')).toBe('<m:sty m:val="p"/>')
