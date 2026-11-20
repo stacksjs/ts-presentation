@@ -153,6 +153,10 @@ speaker notes. Each hook can be asynchronous.
 - Use `\begin{align}`, `\begin{alignat}`, `\begin{gather}`, or
   `\begin{equation}` at the start of a line for standalone displays.
   The starred forms omit automatic numbering.
+  Use `alignat{2}` for two pairs of columns with explicit spacing between
+  them, or `align` for an automatic one-em gap between pairs. Use `aligned`
+  or `alignedat` inside inline math or an enclosing equation. Each pair
+  aligns at its `&`, as in `a&=b`.
 - Use `\substack{i>0\\j<n}` or `subarray` for multiline limits and
   `smallmatrix` for compact inline matrices. For ruled arrays, use
   `|` or `:` between column specifiers, `\hline` or `\hdashline`

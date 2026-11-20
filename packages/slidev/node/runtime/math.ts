@@ -420,20 +420,23 @@ function inlineBreaksBefore(parts: readonly RowPart[], classes: readonly (MathCl
   return offsets
 }
 
-function joinRow(parts: RowPart[], wrap = false): Markup {
-  const explicit = parts.some(part => part.mathClass)
+function joinRow(parts: RowPart[], wrap = false, followsOrdinary = false): Markup {
+  const explicit = followsOrdinary || parts.some(part => part.mathClass)
   if (!explicit && !wrap) return joinMarkup(parts.map(part => part.markup))
-  const classes = resolveRowClasses(parts.map(rowClass))
-  const breaks = wrap ? inlineBreaksBefore(parts, classes) : undefined
+  const categories = parts.map(rowClass)
+  // AMS alignment prepends an empty ordinary group in every right-hand cell.
+  const classes = resolveRowClasses(followsOrdinary ? ['ord', ...categories] : categories)
+  const breaks = wrap ? inlineBreaksBefore(parts, followsOrdinary ? classes.slice(1) : classes) : undefined
   if (!explicit && !breaks?.size) return joinMarkup(parts.map(part => part.markup))
   const normal = rowSpacing(classes, false)
   const tight = rowSpacing(classes, true)
   return style => parts.map((part, index) => {
-    const gap = (style < 2 ? normal : tight)[index]
+    const atomIndex = followsOrdinary ? index + 1 : index
+    const gap = (style < 2 ? normal : tight)[atomIndex]
     const value = renderMarkup(part.markup, style)
     // The renderer inserts a single gap between neighbors, including composites.
     const boundary = breaks?.has(index) ? '<mspace width="0" data-math-break=""/>' : ''
-    return (gap ? muSpace(gap) : '') + boundary + (classes[index] ? neutralizeOperator(value) : value)
+    return (gap ? muSpace(gap) : '') + boundary + (classes[atomIndex] ? neutralizeOperator(value) : value)
   }).join('')
 }
 
@@ -1161,7 +1164,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
   }
 
-  function row(stop: string[] = [], breakOnInfix = false, exposeLines = false, firstClass?: (value: MathClass | undefined) => void): Markup {
+  function row(stop: string[] = [], breakOnInfix = false, exposeLines = false, firstClass?: (value: MathClass | undefined) => void, followsOrdinary = false): Markup {
     if (depth++ > 100) throw new Error('Math groups are nested too deeply')
     const softWrap = !display && depth === 1 && state?.inlineBreaks === true
     let parts: RowPart[] = []
@@ -1170,7 +1173,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     let infix = ''
     let thickness: string | undefined
     const finish = (wrap = false) => {
-      const content = joinRow(parts, wrap && !lines)
+      const content = joinRow(parts, wrap && !lines, followsOrdinary)
       return lines ? lineTable([...lines, { content }], display && exposeLines, !display || options?.fleqn === true) : content
     }
     for (let token = peek(); token && !stop.includes(token); token = peek()) {
@@ -1182,6 +1185,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
         thickness = infixThickness(token)
         numerator = finish()
         parts = []
+        followsOrdinary = false
         lines = undefined
         continue
       }
@@ -1189,27 +1193,29 @@ export function renderMath(source: string, display = false, configured: MathMacr
         const gap = lineGap(token)
         if (gap !== undefined) {
           lines ??= []
-          lines.push({ content: joinRow(parts), gap })
+          lines.push({ content: joinRow(parts, false, followsOrdinary), gap })
           parts = []
+          followsOrdinary = false
         }
         continue
       }
       const exposeDeclarationLines = exposeLines && !parts.length && !infix && !lines
       if (Object.hasOwn(styleCommands, token)) {
         const selected = styleCommands[token]
-        parts.push({ markup: mathSize(selected, renderMarkup(row(stop, true, exposeDeclarationLines), selected)) })
+        const content = row(stop, true, exposeDeclarationLines, undefined, followsOrdinary && !parts.some(rowClass))
+        parts.push({ markup: mathSize(selected, renderMarkup(content, selected)) })
         continue
       }
       if (Object.hasOwn(sizeCommands, token)) {
         const baseScale = fontScale
         fontScale = sizeCommands[token]
-        parts.push({ markup: scaledMath(row(stop, true, exposeDeclarationLines), fontScale / baseScale) })
+        parts.push({ markup: scaledMath(row(stop, true, exposeDeclarationLines, undefined, followsOrdinary && !parts.some(rowClass)), fontScale / baseScale) })
         fontScale = baseScale
         continue
       }
       if (token === '\\color' && !options?.colorIsTextColor) {
         const color = safeColor(literalGroup())
-        const content = row(stop, true, exposeDeclarationLines)
+        const content = row(stop, true, exposeDeclarationLines, undefined, followsOrdinary && !parts.some(rowClass))
         parts.push({ markup: color ? xml`<mrow style="color:${color}">${content}</mrow>` : content })
         continue
       }
@@ -1368,11 +1374,14 @@ export function renderMath(source: string, display = false, configured: MathMacr
 
   function matrix(environment: string): Markup {
     const unclosed = () => new Error(`Unclosed math environment: ${environment}`)
+    if (!display && /^(?:equation\*?|align(?:at)?\*?|gather\*?|split|CD)$/.test(environment))
+      throw new Error(`${environment} requires display math`)
     if (environment === 'CD') return commutativeDiagram()
     if (/^equation[*]?$/.test(environment)) {
       environmentDepth++
-      const content = row(['\\end'], false, true)
+      const content = row(['&', '\\end'], false, true)
       environmentDepth--
+      if (peek() === '&') throw new Error('Too many columns in equation')
       if (take() !== '\\end' || literalGroup() !== environment) throw unclosed()
       tagState.label = nextTag(display && environment === 'equation')
       return xml`<mrow>${content}</mrow>`
@@ -1381,10 +1390,14 @@ export function renderMath(source: string, display = false, configured: MathMacr
       return tag('mtext', `\\begin{${environment}}`)
     const stack = environment === 'substack'
     const columnArray = /^(?:d?array|subarray)$/.test(environment)
-    const columns = columnArray ? literalGroup() : environment.endsWith('matrix*') ? bracket() ?? '' : ''
+    const alignmentTokens = environment.endsWith('matrix*') ? rawBracket() : undefined
+    const matrixAlignment = alignmentTokens && expandDefinition(alignmentTokens).join('').trim()
+    if (matrixAlignment !== undefined && !/^[lcr]$/.test(matrixAlignment)) throw new Error('Invalid matrix alignment')
+    const columns = columnArray ? expandDefinition(rawGroup()).join('') : matrixAlignment ?? ''
     const paired = /^align(?:ed)?at[*]?$/.test(environment)
-    const pairs = paired ? Number(literalGroup()) : 0
-    if (paired && (!Number.isSafeInteger(pairs) || pairs < 1)) throw new Error('Invalid alignment column count')
+    const pairCount = paired ? expandDefinition(rawGroup()).join('').replace(/\s/g, '') : ''
+    const pairs = Number(pairCount)
+    if (paired && (!/^\d+$/.test(pairCount) || !Number.isSafeInteger(pairs) || pairs < 1)) throw new Error('Invalid alignment column count')
     const layout = arrayColumns(columns)
     if (environment === 'subarray' && !/^\s*[lc]\s*$/.test(columns)) throw new Error('Invalid subarray alignment')
     const compact = stack || environment === 'subarray' || environment === 'smallmatrix'
@@ -1406,23 +1419,25 @@ export function renderMath(source: string, display = false, configured: MathMacr
     let closed = false
     const stops = ['&', '\\\\', '\\newline', '\\cr', end]
     while (peek()) {
-      if (columnArray && !cells.length) {
+      if (!cells.length) {
         while (peek() === '\\hline' || peek() === '\\hdashline') {
           const line = take() === '\\hline' ? 'solid' : 'dashed'
           rule = rule ? 'double' : line
         }
       }
-      cells.push(inScope(() => row(stops)))
+      const followsOrdinary = aligned && cells.length % 2 === 1
+      cells.push(inScope(() => row(stops, false, false, undefined, followsOrdinary)))
       const separator = take()
       if (separator === '&') {
         if (stack || environment === 'subarray' || gathered) throw new Error('Too many columns in math stack')
+        if (environment === 'split' && cells.length === 2) throw new Error('Too many columns in split')
         if (columnArray && cells.length === layout.columns.length) strictViolation('textEnv', 'Too few columns in the array specification')
         continue
       }
       if (pairs && cells.length > pairs * 2) throw new Error('Too many alignment columns')
       const lineBreak = separator === '\\\\' || separator === '\\newline' || separator === '\\cr'
-      const extra = lineBreak && separator !== '\\newline' ? bracket() : undefined
-      const gap = extra === undefined ? undefined : dimension(extra)
+      const extra = lineBreak && separator !== '\\newline' ? rawBracket() : undefined
+      const gap = extra === undefined ? undefined : dimension(expandDefinition(extra).join(''))
       if (extra !== undefined && gap === undefined) throw new Error('Invalid array row spacing')
       if (cells.length > 1 || cells[0] || tagState.label !== undefined || rows.length === 0 || lineBreak) {
         rows.push({ cells, label: nextTag(automatic), before: rule, gap })
@@ -1442,37 +1457,60 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const kind = environment.replace(/[*]$/, '').replace(/^d(?=(?:array|r?cases)$)/, '')
     const [left, right] = kind === 'rcases' ? ['', '}'] : matrixDelimiters[kind] ?? ['', '']
     const alignment = layout.columns.map(column => column.align)
-    const columnAlign = alignment.join(' ') || (aligned ? 'right left' : cases ? 'left left' : '')
-    const align = columnAlign ? ` columnalign="${columnAlign}"` : ''
     const tags = rows.some(entry => entry.label !== undefined)
+    const leqno = state?.options.leqno === true
     const columnCount = Math.max(layout.columns.length, ...rows.map(entry => entry.cells.length))
-    if (columnArray && columnCount * rows.length > 6000) throw new Error('Math array has too many cells')
-    const pad = compact ? '0.06' : (0.14 * stretch).toFixed(4).replace(/0+$/, '').replace(/\.$/, '')
+    const grid = !compact && (aligned || alignment.length > 0)
+    const rectangular = grid || columnArray || tags || rows.some(entry => entry.before) || rule !== undefined
+    if (rectangular && columnCount * rows.length > 6000) throw new Error('Math array has too many cells')
+    const alignmentAt = (index: number) => aligned ? (index % 2 ? 'left' : 'right') : alignment[index] ?? alignment.at(-1) ?? (cases ? 'left' : '')
+    const columnAlignment = Array.from({ length: columnCount }, (_, index) => alignmentAt(index) || 'center')
+    if (tags) {
+      if (leqno) columnAlignment.unshift('left')
+      else columnAlignment.push('right')
+    }
+    const align = aligned || cases || alignment.length || tags ? ` columnalign="${columnAlignment.join(' ')}"` : ''
+    const moreRowSpace = aligned || gathered || cases
+    const pad = compact ? '0.06' : moreRowSpace ? '0.125' : (0.14 * stretch).toFixed(4).replace(/0+$/, '').replace(/\.$/, '')
     const lines = compact ? ' class="math-compact-array"' : ' data-equation-lines'
+    const gridLayout = grid ? ` class="math-alignment-grid" style="--math-columns:${columnAlignment.length}"` : ''
     return (style) => {
       const cellStyle = compact ? Math.max(2, style) as MathStyle : ordinaryCellStyle
       const markup = rows.map((entry, rowIndex) => {
         const cell = tags ? equationNumberCell(entry.label) : ''
         // MathML Core browsers use CSS for cell alignment and visible rules.
-        const content = Array.from({ length: columnArray ? columnCount : entry.cells.length }, (_, index) => {
-          const align = aligned ? (index % 2 ? 'left' : 'right') : alignment[index] ?? alignment.at(-1) ?? (cases ? 'left' : '')
+        const content = Array.from({ length: rectangular ? columnCount : entry.cells.length }, (_, index) => {
+          const align = alignmentAt(index)
           const styling: string[] = []
           if (align) styling.push(`text-align:${align}`)
+          if (grid && align !== 'left')
+            styling.push(`--math-cell-align:${align === 'right' ? 'end' : 'center'}`)
+          if (aligned || cases) {
+            styling.push('padding-inline:0')
+            if ((aligned && !paired && index > 0 && index % 2 === 0) || (cases && index > 0))
+              styling.push('padding-inline-start:1em')
+          }
           if (cellStyle === 0) styling.push('math-style:normal')
           const before = layout.columns[index]?.before
           if (before) styling.push(tableBorder('left', before, minRule))
           if (layout.after && index === columnCount - 1) styling.push(tableBorder('right', layout.after, minRule))
           if (entry.before) styling.push(tableBorder('top', entry.before, minRule))
           if (rule && rowIndex === rows.length - 1) styling.push(tableBorder('bottom', rule, minRule))
-          if (compact || stretch !== 1) styling.push(`padding-block:${pad}em`)
+          if (compact || stretch !== 1 || moreRowSpace) styling.push(`padding-block:${pad}em`)
           if (entry.gap) styling.push(`padding-bottom:max(0px,calc(${pad}em + ${entry.gap}))`)
           const settings = styling.length ? ` style="${styling.join(';')}"` : ''
           const value = renderMarkup(entry.cells[index] ?? '', cellStyle)
-          return `<mtd${settings}>${style === cellStyle ? value : mathSize(cellStyle, value)}</mtd>`
+          const sized = style === cellStyle ? value : mathSize(cellStyle, value)
+          return `<mtd${settings}>${grid ? `<mrow>${sized}</mrow>` : sized}</mtd>`
+        }).join('')
+        return `<mtr>${leqno ? cell : ''}${content}${leqno ? '' : cell}</mtr>`
       }).join('')
-      return `<mtr>${state?.options.leqno ? cell : ''}${content}${state?.options.leqno ? '' : cell}</mtr>`
-      }).join('')
-      return `<mrow>${fence(left)}<mtable${lines}${align}>${markup}</mtable>${fence(right)}</mrow>`
+      const table = `<mtable${lines}${align}${gridLayout}>${markup}</mtable>`
+      // Center the whole grid on the math axis beside surrounding inline atoms.
+      const centered = grid && style !== 0
+        ? `<mtable class="math-alignment-axis"><mtr><mtd>${table}</mtd></mtr></mtable>`
+        : table
+      return `<mrow>${fence(left)}${centered}${fence(right)}</mrow>`
     }
   }
 

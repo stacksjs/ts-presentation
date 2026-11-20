@@ -214,6 +214,43 @@ test('renders formatted equation tags and applies them to the correct alignment 
   expect(() => math(String.raw`a\tag{b}`, false)).toThrow('Equation tags require display math')
 })
 
+test('keeps AMS relation spacing, explicit pair counts, and tags aligned across short rows', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const source = String.raw`\def\pairs{2}\def\extra{.4em}
+    \begin{alignat}{\pairs} a&=b & c&+d \\[\extra]
+      ee&\color{blue}=f\tag{Q} \\
+      g&h\notag
+    \end{alignat}`
+  const html = math(source, true)
+  expect(html).toContain('columnalign="right left right left right"')
+  expect(html).toContain(thick + operator('=') + thick)
+  expect(html).toContain(medium + operator('+') + medium)
+  expect(html).toContain('style="color:blue">' + thick + operator('=') + thick)
+  expect(html).toContain('padding-bottom:max(0px,calc(0.125em + .4em))')
+  expect(html).not.toContain('padding-inline-start:1em')
+  const rows = [...html.matchAll(/<mtr>(.*?)<\/mtr>/g)].map(row => row[1])
+  expect(rows.map(row => row.match(/<mtd\b/g)?.length)).toEqual([5, 5, 5])
+  expect(rows[1]).toEndWith('<mtd class="math-equation-number"><mtext>(Q)</mtext></mtd>')
+  expect(rows[2]).toEndWith('<mtd class="math-equation-number"></mtd>')
+  expect(math(String.raw`\begin{aligned}a&=b&c&=d\end{aligned}`, false)).toContain('padding-inline-start:1em')
+  expect(math(String.raw`\begin{gathered}a=b\\c=d\end{gathered}`, false)).not.toContain('math-equation-number')
+})
+
+test('validates AMS environment modes and arguments, and accepts rules inside matrices', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  expect(() => math(String.raw`\begin{align*} a&=b\end{align*}`, false)).toThrow('align* requires display math')
+  expect(() => math(String.raw`\begin{equation} a&=b\end{equation}`, true)).toThrow('Too many columns in equation')
+  expect(() => math(String.raw`\begin{split} a&=b&=c\end{split}`, true)).toThrow('Too many columns in split')
+  expect(() => math(String.raw`\begin{alignat}{1e2} a&=b\end{alignat}`, true)).toThrow('Invalid alignment column count')
+  expect(() => math(String.raw`\begin{alignedat}{1} a&=b & c&=d\end{alignedat}`, false)).toThrow('Too many alignment columns')
+  expect(() => math(String.raw`\begin{pmatrix*}[lr] a & b\end{pmatrix*}`, false)).toThrow('Invalid matrix alignment')
+  const table = math(String.raw`\def\side{r}\begin{pmatrix*}[\side]\hline a&b\\\hdashline c\\\hline\end{pmatrix*}`, false)
+  expect(table).toContain('columnalign="right right"')
+  expect(table.match(/border-top:1px solid currentColor/g)).toHaveLength(2)
+  expect(table.match(/border-top:1px dashed currentColor/g)).toHaveLength(2)
+  expect(table.match(/border-bottom:1px solid currentColor/g)).toHaveLength(2)
+})
+
 test('sets spacing and fences for explicit TeX atom classes', () => {
   const math = createMathRenderer({ throwOnError: true })
   const markup = math(String.raw`a\mathbin{*}b\mathrel{:}c\mathpunct{!}\mathopen{[}d\mathclose{]}\mathord{+}\mathinner{\frac e f}`, false)
@@ -353,7 +390,8 @@ test('lays out AMS arrays with solid and dashed rules, row gaps, and scoped cell
   expect(html).toContain('padding-bottom:max(0px,calc(0.21em + 1ex))')
   expect(html).toContain('<mrow><mi>D</mi></mrow>')
   expect(html).toContain('<mtext>\\value</mtext>')
-  expect(html.match(/<mtr>/g)).toHaveLength(2)
+  const array = html.match(/<mtable data-equation-lines[^>]*>.*?<\/mtable>/)?.[0]
+  expect(array?.match(/<mtr>/g)).toHaveLength(2)
   expect(renderMath(String.raw`\begin{array}{c}a`)).toContain('math-unrendered')
   expect(renderMath(String.raw`\begin{array}{c}a\\[bogus]b\end{array}`)).toContain('math-unrendered')
 })
@@ -615,6 +653,53 @@ test('enforces KaTeX strict settings for comments, markup, text commands, spacin
 })
 
 const chrome = await findChrome()
+
+test.skipIf(!chrome)('aligns paired AMS cells and row numbers at the expected positions in Chromium', async () => {
+  const examples = [
+    String.raw`\begin{align} a&=b & c&=d \\ xyz&=p \end{align}`,
+    String.raw`\begin{alignat}{2} a&=b & c&=d \\ xyz&=p \end{alignat}`,
+  ]
+  const inline = renderMath(String.raw`x+\begin{aligned}a&=b\\xyz&=p\end{aligned}+y`)
+  const body = examples.map(source => `<div>${renderMath(source, true)}</div>`).join('') + `<p>${inline}</p>`
+  const css = await Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url)).text()
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response(`<!doctype html><meta charset="utf-8"><style>${css}</style><main style="font-size:36px">${body}</main>`, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    }),
+  })
+  const view = new Bun.WebView({ backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await view.navigate(server.url.href)
+    const geometry = await view.evaluate<{ groupGap: number, operatorGap: number, relations: number[], tags: number[] }[]>(`[...document.querySelectorAll('main > div .math-alignment-grid')].map(table => {
+      const rows = [...table.children]
+      const box = item => item.getBoundingClientRect()
+      const [lhs, rhs, nextLhs] = rows[0].children
+      return {
+        groupGap: box(nextLhs.querySelector('mi')).left - box(rhs.querySelector('mi')).right,
+        operatorGap: box(rhs.querySelector('mo')).left - box(lhs.querySelector('mi')).right,
+        relations: rows.map(row => box(row.children[1].querySelector('mo')).left),
+        tags: rows.map(row => box(row.querySelector('.math-equation-number')).left),
+      }
+    })`)
+    for (const layout of geometry) {
+      expect(layout.relations[0]).toBeCloseTo(layout.relations[1])
+      expect(layout.tags[0]).toBeCloseTo(layout.tags[1])
+      expect(layout.operatorGap).toBeCloseTo(10, 0)
+    }
+    expect(geometry[0].groupGap - geometry[1].groupGap).toBeCloseTo(36, 0)
+    const inlineOffset = await view.evaluate<number>(`(() => {
+      const math = document.querySelector('main > p math')
+      return math.querySelector('mi').getBoundingClientRect().top
+        - math.querySelector('.math-alignment-grid').getBoundingClientRect().top
+    })()`)
+    expect(inlineOffset).toBeGreaterThan(22)
+  }
+  finally {
+    view.close()
+    server.stop(true)
+  }
+}, 45_000)
 
 test.skipIf(!chrome)('wraps inline formulas in the player while preserving one accessible expression', async () => {
   const html = await renderDeck(parseDeck(String.raw`---

@@ -848,6 +848,27 @@ math .math-boxed { border: max(1px, var(--math-min-rule, 0px)) solid currentColo
 math .math-color-box { padding: 0.16em; }
 math .math-frame { border: max(1px, var(--math-min-rule, 0px)) solid currentColor; }
 math .math-vcenter > mtr > mtd { padding: 0; }
+math .math-alignment-axis > mtr > mtd { padding: 0; }
+@supports (grid-template-columns: subgrid) and (display: math) {
+  /* MathML table cells in Chromium ignore text-align for their contents. */
+  math .math-alignment-grid {
+    display: inline-grid;
+    grid-template-columns: repeat(var(--math-columns), max-content);
+  }
+  math .math-alignment-grid > mtr {
+    display: grid;
+    grid-template-columns: subgrid;
+    grid-column: 1 / -1;
+    align-items: baseline;
+  }
+  math .math-alignment-grid > mtr > mtd {
+    display: grid;
+    justify-items: var(--math-cell-align, start);
+    align-items: baseline;
+  }
+  math .math-alignment-grid > mtr > mtd > mrow,
+  math .math-alignment-grid > mtr > .math-equation-number { display: math; }
+}
 math .math-overlap-l { transform: translateX(-100%); }
 math .math-overlap-c { transform: translateX(-50%); }
 math .math-reflect { transform: scaleX(-1); }
