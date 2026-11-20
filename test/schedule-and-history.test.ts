@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test'
+import { expect, spyOn, test } from 'bun:test'
 import { renderChart } from '../packages/slidev/node/runtime/charts.ts'
 import { findChrome } from '../packages/slidev/node/runtime/chrome.ts'
 import { mermaid } from '../packages/slidev/node/runtime/diagram.ts'
@@ -86,7 +86,32 @@ test('uses strict input dates, validates dependencies and supports timezone offs
   expect(iso('2026-02-30 03:15 -0800')).toBeUndefined()
   expect(new Date(iso('2026-03-04 03:15 -0800')!).toISOString()).toBe('2026-03-04T11:15:00.000Z')
   expect(mermaid('gantt\nA :a, after b, 1d\nB :b, after a, 1d', 'cycle')).toBeUndefined()
-  expect(mermaid('gantt\nA :a, after missing, 2d', 'missing')).toBeUndefined()
+})
+
+test('diagnoses unknown imported Gantt dependencies and renders the remaining schedule', async () => {
+  const source = `gantt
+Review :review, after missing draft prior, 1d
+Window :window, 2026-03-01, until missing draft prior
+Fallback :fallback, after unknown, 1d
+Draft :draft, 2026-03-02, 1d
+Prior draft :prior, 2026-03-03, 3d`
+  const march = (day: number) => Date.UTC(2026, 2, day)
+  const warning = spyOn(console, 'warn').mockImplementation(() => {})
+  try {
+    expect(scheduleGantt(source, march(10) + 15_000)?.tasks.slice(0, 3).map(({ start, end }) => [start, end])).toEqual([
+      [march(6), march(7)], [march(1), march(2)], [march(10), march(11)],
+    ])
+    expect(warning.mock.calls.map(([message]) => message)).toEqual([
+      'Gantt task "Review" references unknown IDs in "after": missing',
+      'Gantt task "Window" references unknown IDs in "until": missing',
+      'Gantt task "Fallback" references unknown IDs in "after": unknown',
+    ])
+    const html = await renderDeck(parseDeck(['# Roadmap', '', '~~~mermaid', source, '~~~'].join('\n')))
+    expect(html).toContain('data-task-id="review" data-task-start="2026-03-06T00:00:00.000Z"')
+    expect(html).toContain('data-task-id="window" data-task-start="2026-03-01T00:00:00.000Z" data-task-end="2026-03-02T00:00:00.000Z"')
+    expect(html).toContain('data-task-id="fallback"')
+  }
+  finally { warning.mockRestore() }
 })
 
 test('renders seconds-only Gantt input and honors fractional calendar durations', () => {
@@ -226,6 +251,11 @@ test('supports directed GitGraph layout and checks cherry-pick merge parents', a
   expect(picked).toMatch(/stroke-dasharray="5 3" data-from-commit="release" data-to-commit="c7"/)
   expect(picked).toContain('data-parent-ids="maintenance" data-picked-id="release" data-picked-parent="c4"')
   expect(picked).toContain('cherry-pick:release|parent:c4')
+  const noTag = branched + '  cherry-pick id: "release" parent: "c4" tag: ""\n'
+  expect(buildGitHistory(noTag)?.commits.at(-1)?.tags).toEqual([])
+  const oneTag = mermaid(noTag.trimEnd() + ' tag: "backport"', 'custom-tag')
+  expect(oneTag).toContain('>backport</tspan>')
+  expect(oneTag).not.toContain('· backport')
   const input = `# Timelines\n\n\`\`\`mermaid\n${history.replace('LR:', 'BT:')}\`\`\``
   const html = await renderDeck(parseDeck(input))
   expect(html).toContain('viewBox="0 0 ')

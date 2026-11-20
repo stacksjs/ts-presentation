@@ -48,6 +48,7 @@ in a new ts-presentation project.
 | XY charts | Native YAML and imported `xychart` fences render bar and line series with category or numeric axes, orientation, legends, labels, and palette overrides |
 | Sankey diagrams | Weighted links from native YAML and imported CSV fences, with four alignments, gradient or solid links, and configurable node colors and labels |
 | Gantt styles and dates | Task labels in or beside bars, case-insensitive directives, task status palettes, fractional time input, calendar durations and UTC ticks, zero-duration fallback for invalid ends, and whole-day exclusions through `ts-charts` |
+| Gantt dependencies | Forward references across sections, latest `after` and earliest `until` matches, and warnings with a UTC reference-day fallback when every referenced task is missing |
 | GitGraph | Named Mermaid palettes, color overrides, diagram padding, commit and operation tooltips, custom symbols, and visible labels for commits and explicit merge IDs |
 | PlantUML sequence diagrams | Local `ts-charts` rendering for messages, participants, notes, and groups |
 | Presenter mode | Two synced browser windows, notes, timer, resizable layouts, next-frame preview, and reveal seeking |

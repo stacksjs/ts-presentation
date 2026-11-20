@@ -137,8 +137,13 @@ function parseGantt(source: string, now: number, interactionsEnabled = false, co
     sections.at(-1)!.tasks.push(task)
   }
   const parseDate = ganttDateParser(dateFormat, now)
+  const taskIds = new Set(sections.flatMap(section => section.tasks.map(task => task.id)))
   for (const section of sections) {
     for (const task of section.tasks) {
+      for (const kind of ['after', 'until'] as const) {
+        const unknown = task[kind]?.filter(id => !taskIds.has(id))
+        if (unknown?.length) console.warn(`Gantt task "${task.name}" references unknown IDs in "${kind}": ${unknown.join(', ')}`)
+      }
       // A literal suffix in dateFormat can make a date look like a duration.
       if (task.end !== undefined && parseDate(task.end) === undefined) {
         // Mermaid keeps the task at its start when its end is neither a date nor a duration.
@@ -152,7 +157,7 @@ function parseGantt(source: string, now: number, interactionsEnabled = false, co
   return { sections, title: chart.title, accessibleTitle: chart.accessibleTitle, description: chart.description, dateFormat,
     axisFormat: axisFormat || configuredAxisFormat || (dateFormat === 'D' ? '%d' : ''), tickInterval: ticks,
     weekday, weekend, topAxis, todayMarker, todayMarkerStyle, inclusiveEndDates, excludes: exclusions, includes: inclusions,
-    exclusionMode: 'whole-days', durationMode: 'calendar', now }
+    exclusionMode: 'whole-days', durationMode: 'calendar', missingDependencyFallback: 'today', now }
 }
 
 export function scheduleGantt(source: string, now: number = Date.now()): GanttSchedule | undefined {
