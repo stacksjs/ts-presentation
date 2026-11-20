@@ -1,5 +1,5 @@
 import { escapeHtml } from '../html.ts'
-import type { Border, IrBox, IrRun, IrText, Rect, Rgba, SlideIr } from './ir.ts'
+import type { Border, IrBox, IrImage, IrRun, IrText, Rect, Rgba, SlideIr } from './ir.ts'
 import { EMU_PER_PX, PT_PER_PX } from './ir.ts'
 
 export function xml(text: string): string {
@@ -120,15 +120,17 @@ function drawText(node: IrText, id: number, hyperlink: (href: string) => Hyperli
   return shape(id, 'Text', extents(node.rect.w + slack, node.rect.h, x, node.rect.y) + rectShape(0, node.rect) + fill() + line(), body)
 }
 
-export function embeddedPicture(id: number, relationship: string, rect: Rect, label: string, link?: HyperlinkRef): string {
+export function embeddedPicture(id: number, relationship: string, rect: Rect, label: string, link?: HyperlinkRef, crop?: IrImage['crop']): string {
   const title = xml(label)
   const click = drawHyperlink(link)
-  return `<p:pic><p:nvPicPr><p:cNvPr id="${id}" name="${title}" descr="${title}">${click}</p:cNvPr><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="${relationship}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>${transform(rect)}${rectShape(0, rect)}</p:spPr></p:pic>`
+  const fraction = (pixels: number, full: number) => Math.round(Math.max(0, Math.min(1, pixels / full)) * 100_000)
+  const source = crop ? `<a:srcRect l="${fraction(crop.x, crop.w)}" t="${fraction(crop.y, crop.h)}" r="${fraction(crop.w - crop.x - rect.w, crop.w)}" b="${fraction(crop.h - crop.y - rect.h, crop.h)}"/>` : ''
+  return `<p:pic><p:nvPicPr><p:cNvPr id="${id}" name="${title}" descr="${title}">${click}</p:cNvPr><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="${relationship}"/>${source}<a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>${transform(rect)}${rectShape(0, rect)}</p:spPr></p:pic>`
 }
 
 export function drawEditable(
   slide: SlideIr,
-  image: (png: string) => string,
+  image: (data: string, format?: IrImage['format']) => string,
   hyperlink: (href: string) => HyperlinkRef | undefined,
 ): { background: string, shapes: string, lastShapeId: number } {
   let id = 1
@@ -136,8 +138,10 @@ export function drawEditable(
   const shapes = slide.nodes.map((node) => {
     if (node.kind === 'box') return drawBox(node, next)
     if (node.kind === 'text') return drawText(node, next(), hyperlink)
-    const label = node.kind === 'image' ? node.alt ?? 'Image' : `Picture of ${node.reason}`
-    return embeddedPicture(next(), image(node.data), node.rect, label, node.kind === 'image' && node.link ? hyperlink(node.link) : undefined)
+    if (node.kind === 'image') {
+      return embeddedPicture(next(), image(node.data, node.format), node.rect, node.alt ?? 'Image', node.link ? hyperlink(node.link) : undefined, node.crop)
+    }
+    return embeddedPicture(next(), image(node.data), node.rect, `Picture of ${node.reason}`)
   }).join('')
   const background = slide.background ? `<p:bg><p:bgPr>${fill(slide.background)}<a:effectLst/></p:bgPr></p:bg>` : ''
   return { background, shapes, lastShapeId: id }

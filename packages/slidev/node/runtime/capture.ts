@@ -2,6 +2,8 @@ import { realpath } from 'node:fs/promises'
 import type { FrameLink, PowerPointFrame } from './powerpoint.ts'
 import type { SlideCanvas } from '../../../types/src/canvas.ts'
 import { asset } from './assets.ts'
+import { dataPicture, maxOriginalPictureBytes, originalPicture } from './editable/pictures.ts'
+import type { OriginalPicture } from './editable/pictures.ts'
 import { slideRange } from './selection.ts'
 
 interface CaptureOptions {
@@ -32,7 +34,31 @@ async function prepareImages(root: Element, visibleOnly = false): Promise<void> 
   }))
 }
 
-async function withExportBrowser<T>(options: CaptureOptions, run: (browser: Bun.WebView) => Promise<T>): Promise<T> {
+type PictureReader = (source: string) => Promise<OriginalPicture | undefined>
+
+function pictureReader(root: string, origin: string): PictureReader {
+  const previous = new Map<string, Promise<OriginalPicture | undefined>>()
+  async function read(source: string): Promise<OriginalPicture | undefined> {
+    if (source.startsWith('data:')) return dataPicture(source)
+    const url = URL.parse(source)
+    if (url?.origin !== origin) return
+    try {
+      const response = await asset(root, decodeURIComponent(url.pathname))
+      if (!response.ok || Number(response.headers.get('Content-Length')) > maxOriginalPictureBytes) return
+      return originalPicture(await response.bytes())
+    }
+    catch { return undefined }
+  }
+  return source => {
+    const cached = previous.get(source)
+    if (cached) return cached
+    const result = read(source)
+    previous.set(source, result)
+    return result
+  }
+}
+
+async function withExportBrowser<T>(options: CaptureOptions, run: (browser: Bun.WebView, readOriginal: PictureReader) => Promise<T>): Promise<T> {
   const { width, height } = options.canvas
   const root = await realpath(options.root)
   const preview = Bun.serve({
@@ -64,7 +90,7 @@ async function withExportBrowser<T>(options: CaptureOptions, run: (browser: Bun.
         width, height, deviceScaleFactor: options.scale, mobile: false,
       })
       await chrome.navigate(new URL('?capture=1&steps=1', preview.url).href)
-      return run(chrome)
+      return run(chrome, pictureReader(root, preview.url.origin))
     }
     return await Promise.race([
       capture(),
@@ -99,7 +125,7 @@ async function exportPositions(browser: Bun.WebView, options: CaptureOptions): P
 
 export async function captureFrames(options: CaptureOptions, onFrame: (frame: PowerPointFrame, index: number, count: number) => void | Promise<void>): Promise<void> {
   const captureEditable = options.editable ? (await import('./editable/capture.ts')).captureEditable : undefined
-  await withExportBrowser(options, async (chrome) => {
+  await withExportBrowser(options, async (chrome, readOriginal) => {
     const positions = await exportPositions(chrome, options)
     for (const [index, position] of positions.entries()) {
       const metadata = await chrome.evaluate<FrameDetails>(`(async () => {
@@ -140,7 +166,7 @@ export async function captureFrames(options: CaptureOptions, onFrame: (frame: Po
       if (captureEditable) {
         let editable: PowerPointFrame['editable']
         try {
-          const { content, warnings } = await captureEditable(chrome, options.canvas, position.slide, position.step, metadata.notes)
+          const { content, warnings } = await captureEditable(chrome, options.canvas, position.slide, position.step, metadata.notes, readOriginal)
           for (const warning of warnings) console.warn(`Slide ${position.slide}, step ${position.step}: ${warning}`)
           editable = content
         }

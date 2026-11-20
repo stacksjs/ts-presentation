@@ -21,8 +21,11 @@ Use `--with-clicks` for progressive PNG frames. The browser build keeps live
 code and interactive components available.
 
 `pptx-editable` creates editable text and boxes and embeds artwork such as
-SVG, equations, and video frames as separate pictures. Review any slide
-fallback messages and confirm the recipient has the fonts used by the deck.
+SVG, equations, and video frames as separate pictures. Deck-local static
+PNG and JPEG images can retain their original bytes and stay editable,
+including slide-edge crops. Images with browser-dependent styling use
+captured artwork. Review any slide fallback messages and confirm the
+recipient has the fonts used by the deck.
 
 Inspect exported slides at presentation size. Check math, fonts, notes,
 number of steps, and intended links. If an Office-compatible viewer is

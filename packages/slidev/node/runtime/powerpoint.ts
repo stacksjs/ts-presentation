@@ -2,6 +2,7 @@ import type { ZipPart } from './zip.ts'
 import type { SlideIr } from './editable/ir.ts'
 import { drawEditable, drawHyperlink, embeddedPicture, extents, xml } from './editable/drawing.ts'
 import type { HyperlinkRef } from './editable/drawing.ts'
+import type { PictureFormat } from './editable/pictures.ts'
 import type { SlidePosition } from '../../../client/runtime/navigation.ts'
 import { zipParts } from './zip.ts'
 
@@ -116,6 +117,7 @@ export function createPowerPoint(frames: readonly PowerPointFrame[], options: Po
 
   const firstFrame = new Map<number, number>()
   const revealFrames = new Map<string, number>()
+  const media: Record<PictureFormat, Map<string, string>> = { png: new Map(), jpeg: new Map() }
   for (const [index, frame] of frames.entries()) {
     const position = frame.position ?? { slide: index + 1, click: 0 }
     if (!firstFrame.has(position.slide)) firstFrame.set(position.slide, index + 1)
@@ -148,10 +150,14 @@ export function createPowerPoint(frames: readonly PowerPointFrame[], options: Po
       urls.set(href, link)
       return link
     }
-    const image = (bytes: Uint8Array<ArrayBuffer>) => {
+    const image = (bytes: Uint8Array<ArrayBuffer> | string, format: PictureFormat = 'png') => {
       const id = `rId${rels.length + 1}`
-      const name = `slide${slide}-${id}.png`
-      files.push({ name: `ppt/media/${name}`, data: bytes })
+      let name = typeof bytes === 'string' ? media[format].get(bytes) : undefined
+      if (!name) {
+        name = `slide${slide}-${id}.${format}`
+        files.push({ name: `ppt/media/${name}`, data: typeof bytes === 'string' ? Buffer.from(bytes, 'base64') : bytes })
+        if (typeof bytes === 'string') media[format].set(bytes, name)
+      }
       rels.push([id, 'image', `../media/${name}`])
       return id
     }
@@ -159,7 +165,7 @@ export function createPowerPoint(frames: readonly PowerPointFrame[], options: Po
     let shapes: string
     let shapeId = 2
     if (frame.editable) {
-      const drawing = drawEditable(frame.editable, png => image(Buffer.from(png, 'base64')), hyperlink)
+      const drawing = drawEditable(frame.editable, image, hyperlink)
       background = drawing.background
       shapes = drawing.shapes
       shapeId = drawing.lastShapeId
@@ -185,6 +191,7 @@ export function createPowerPoint(frames: readonly PowerPointFrame[], options: Po
   add('[Content_Types].xml', `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
     <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
     <Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/>
+    <Default Extension="jpeg" ContentType="image/jpeg"/>
     ${types.join('')}
   </Types>`)
   return zipParts(files)

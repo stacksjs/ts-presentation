@@ -1,10 +1,11 @@
 import type { SlideCanvas } from '../../../../types/src/canvas.ts'
 import type { Rect, SlideIr } from './ir.ts'
+import type { OriginalPicture } from './pictures.ts'
 import { clipToSlide, normalize } from './normalize.ts'
 import { collectSnapshot } from './walker.ts'
 
 const afterPaint = 'new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))'
-type Browser = Bun.WebView
+type Browser = Pick<Bun.WebView, 'evaluate' | 'cdp'>
 
 function evaluate<T, Options>(browser: Browser, callback: (options: Options) => T, options: Options): Promise<T> {
   return browser.evaluate<T>(`(${callback.toString()})(${JSON.stringify(options)})`)
@@ -96,7 +97,8 @@ export interface EditableFrame {
   warnings: string[]
 }
 
-export async function captureEditable(browser: Browser, canvas: SlideCanvas, slide: number, click: number, notes: string): Promise<EditableFrame> {
+export async function captureEditable(browser: Browser, canvas: SlideCanvas, slide: number, click: number, notes: string,
+  readOriginal?: (url: string) => Promise<OriginalPicture | undefined>): Promise<EditableFrame> {
   // IDs restart at each frame, including successive reveals of the same slide.
   const attribute = `data-presentation-export-${slide}-${click}`
   const snapshot = await evaluate(browser, collectSnapshot, {
@@ -113,9 +115,18 @@ export async function captureEditable(browser: Browser, canvas: SlideCanvas, sli
   if (snapshot.unplaceablePseudos.length) warnings.push('some CSS pseudo-elements could not be placed')
 
   const requests = new Map(rasterRequests.map(request => [request.sourceId, request]))
+  const originalSources = new Set(snapshot.slides[0]?.nodes.filter(node => node.preserveImageSource).map(node => node.id))
   try {
     for (const node of content.nodes) {
       if (node.kind !== 'raster' && node.kind !== 'image') continue
+      if (node.kind === 'image' && originalSources.has(node.sourceId)) {
+        const original = await readOriginal?.(node.data)
+        if (original) {
+          node.data = original.data
+          node.format = original.format
+          continue
+        }
+      }
       const request = requests.get(node.sourceId)
       const rect = clipToSlide(request?.clip ?? node.rect, { w: canvas.width, h: canvas.height })
       if (!rect) throw new Error('Artwork fell outside the canvas')

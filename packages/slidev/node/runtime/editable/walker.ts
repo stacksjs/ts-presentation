@@ -196,6 +196,30 @@ export function collectSnapshot(options: {
     return undefined
   }
 
+  function fillsPictureBox(image: HTMLImageElement, style: CSSStyleDeclaration, box: DOMRect, container: Element): boolean {
+    if (!image.complete || !image.naturalWidth || !image.naturalHeight || !box.width || !box.height) return false
+    if (style.objectFit !== 'fill') {
+      const fitsExactly = Math.abs(box.width - box.height * image.naturalWidth / image.naturalHeight) < 0.01
+      if (!fitsExactly || !['cover', 'contain'].includes(style.objectFit)) return false
+    }
+    if ([style.padding, style.borderWidth, style.borderRadius].some(value => value !== '0px')) return false
+    if (!['transparent', 'rgba(0, 0, 0, 0)'].includes(style.backgroundColor) || style.boxShadow !== 'none') return false
+    let parent: Element | null = image
+    while (parent && parent !== container) {
+      const paint = parent === image ? style : getComputedStyle(parent)
+      if (paint.maskImage !== 'none' || paint.rotate !== 'none'
+        || paint.scale !== 'none' || paint.clip !== 'auto' || paint.clipPath !== 'none') return false
+      if (parent !== image && (paint.overflowX !== 'visible' || paint.overflowY !== 'visible')) {
+        const limits = parent.getBoundingClientRect()
+        if (paint.borderRadius !== '0px' || paint.borderWidth !== '0px'
+          || (paint.overflowX !== 'visible' && (box.left < limits.left || box.right > limits.right))
+          || (paint.overflowY !== 'visible' && (box.top < limits.top || box.bottom > limits.bottom))) return false
+      }
+      parent = parent.parentElement
+    }
+    return parent === container
+  }
+
   /**
    * The text an ordinary list marker renders, which the DOM never exposes; ordered
    * lists need the ordinal counted over previous list-item siblings.
@@ -373,10 +397,10 @@ export function collectSnapshot(options: {
       if (el.localName === 'math' || el.classList.contains('katex'))
         record.isMath = true
       if (el.tagName.toUpperCase() === 'IMG') {
-        record.src = (el as HTMLImageElement).currentSrc || (el as HTMLImageElement).src
-        const alt = (el as HTMLImageElement).alt
-        if (alt)
-          record.alt = alt
+        const image = el as HTMLImageElement
+        record.src = image.currentSrc || image.src
+        if (image.alt) record.alt = image.alt
+        if (effectiveOpacity === 1 && fillsPictureBox(image, computed, box, container)) record.preserveImageSource = true
       }
       if (el.tagName.toUpperCase() === 'A') {
         const href = el.getAttribute('href')?.trim() ?? ''

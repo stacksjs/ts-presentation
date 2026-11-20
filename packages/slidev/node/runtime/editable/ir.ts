@@ -100,6 +100,8 @@ export interface RawNode {
   fragments?: Rect[]
   /** `IMG` only. */
   src?: string
+  /** The decoded source fills the measured box without CSS changes to its pixels. */
+  preserveImageSource?: boolean
   /** `IMG` only. */
   alt?: string
   /** `A` only, resolved absolute. */
@@ -222,8 +224,9 @@ export interface IrText extends IrBase {
 
 export interface IrImage extends IrBase {
   kind: 'image'
-  /** A `data:` URI. Always raster; SVG is routed to `IrRaster` instead. */
+  /** The source URL during measurement, then base64 image bytes after capture. */
   data: string
+  format?: 'png' | 'jpeg'
   alt?: string
   link?: string
   /**
@@ -253,7 +256,7 @@ export type RasterReason
 
 export interface IrRaster extends IrBase {
   kind: 'raster'
-  /** A PNG `data:` URI, filled in by the capture phase. */
+  /** Base64 PNG bytes, filled in by the capture phase. */
   data: string
   reason: RasterReason
   /** Capture with everything else on the page hidden. `locator.screenshot()` clips the page to the element's box rather than isolating the element, so overlapping content would land in the picture and be drawn twice. */
