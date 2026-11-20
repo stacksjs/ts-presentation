@@ -2120,18 +2120,25 @@ test.skipIf(!chrome)('fits equation tags and measures variable struts in the act
       expect(tall).toBeCloseTo((height + depth) * 0.75, 1)
     }
     expect(capped.height).toBeGreaterThan(asymmetric.height)
-    const resized = await browser.evaluate<number>(`(async () => {
+    const resized = await browser.evaluate<{ height: number, depth: number, total: number, ascent: number }>(`(async () => {
       const container = document.querySelector('#struts')
       const space = container.querySelector('[data-math-strut] > mspace')
+      const [glyph, ascender] = space.previousElementSibling.children
       container.style.fontSize = '42px'
       for (let attempt = 0; attempt < 30; attempt++) {
         await new Promise(requestAnimationFrame)
         const height = parseFloat(space.getAttribute('height'))
-        if (height > ${normal.height} * 1.25) return height
+        if (height > ${normal.height} * 1.25) return {
+          height,
+          depth: parseFloat(space.getAttribute('depth')),
+          total: parseFloat(getComputedStyle(glyph).height),
+          ascent: parseFloat(getComputedStyle(ascender).height),
+        }
       }
-      return 0
+      throw new Error('The strut did not grow with its math font')
     })()`)
-    expect(resized).toBeCloseTo(normal.height * 1.5, 0)
+    expect(resized.height).toBeCloseTo(resized.ascent + resized.total * 0.25, 2)
+    expect(resized.depth).toBeCloseTo(resized.total - resized.ascent + resized.total * 0.25, 2)
     const boxes = await browser.evaluate<Record<string, { raised: boolean, delta: number, order: string, short: boolean, within: boolean }>>(`(() => {
       return Object.fromEntries([...document.querySelectorAll('section')].map(section => {
         const raised = section.querySelector('.math-equation-number[style*="--math-tag-raise"]');
