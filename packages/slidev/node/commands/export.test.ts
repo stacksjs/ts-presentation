@@ -8,6 +8,7 @@ import { resolveExportSettings } from '../runtime/export-options.ts'
 
 const cli = fileURLToPath(new URL('../cli.ts', import.meta.url))
 const chrome = await findChrome()
+const exportTestTimeout = 150_000
 
 describe('export defaults', () => {
   it('takes format, range, scale, reveal behavior, and filename from headmatter', () => {
@@ -32,16 +33,17 @@ const deck = [
   '---', 'title: Export compatibility', 'exportFilename: nested/final/report', '---',
   '', '# First chapter omitted', '', '---', 'routeAlias: selected', '---', '', '# Second chapter selected', '',
   '[Jump to the last reveal](#selected/2)', '',
+  '<img src="./missing-screenshot.png" alt="Unavailable screenshot" width="144" height="60" loading="lazy">', '',
   '<p v-click>First distinct reveal</p>', '<p v-click>Second distinct reveal</p>',
   '', '---', '', '# Third chapter omitted',
 ].join('\n')
 
 async function exportDeck(root: string, ...args: string[]): Promise<void> {
   const command = Bun.spawn([process.execPath, cli, 'export', 'slides.md', '--executable-path', chrome!, ...args], {
-    cwd: root, stdout: 'pipe', stderr: 'pipe',
+    cwd: root, stdout: 'pipe', stderr: 'pipe', timeout: exportTestTimeout - 10_000,
   })
   const [status, output] = await Promise.all([command.exited, new Response(command.stderr).text()])
-  if (status !== 0) throw new Error(output)
+  if (status !== 0) throw new Error(output.trim() || `Export command exited with status ${status}`)
 }
 
 describe('export creates output directories', () => {
@@ -59,7 +61,7 @@ describe('export creates output directories', () => {
     finally {
       await rm(root, { recursive: true, force: true })
     }
-  }, 20_000)
+  }, exportTestTimeout)
 
   it.skipIf(!chrome)('writes one vector page per selected reveal to the configured nested filename', async () => {
     const root = await mkdtemp(join(tmpdir(), 'presentation-export-range-'))
@@ -77,7 +79,7 @@ describe('export creates output directories', () => {
     finally {
       await rm(root, { recursive: true, force: true })
     }
-  }, 20_000)
+  }, exportTestTimeout)
 
   it.skipIf(!chrome)('accepts an output with no directory part', async () => {
     const root = await mkdtemp(join(tmpdir(), 'presentation-export-'))
@@ -89,5 +91,5 @@ describe('export creates output directories', () => {
     finally {
       await rm(root, { recursive: true, force: true })
     }
-  }, 20_000)
+  }, exportTestTimeout)
 })

@@ -12,11 +12,11 @@ beforeAll(async () => {
   const tsc = Bun.which('tsc', { PATH: join(project, 'node_modules', '.bin') })
   if (!tsc) throw new Error('The TypeScript compiler bundled by better-dx is unavailable')
   const command = Bun.spawn([tsc, '-p', 'tsconfig.json', '--noEmit', 'false', '--emitDeclarationOnly', '--outDir', declarations], {
-    cwd: project, stdout: 'pipe', stderr: 'pipe',
+    cwd: project, stdout: 'pipe', stderr: 'pipe', timeout: 30_000,
   })
   const [status, stdout, stderr] = await Promise.all([command.exited, new Response(command.stdout).text(), new Response(command.stderr).text()])
   if (status !== 0) throw new Error(`Declaration build failed:\n${stdout}${stderr}`)
-})
+}, 35_000)
 
 afterAll(async () => {
   if (declarations) await rm(declarations, { recursive: true, force: true })

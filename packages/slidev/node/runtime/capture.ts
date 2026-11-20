@@ -20,6 +20,18 @@ interface FrameDetails {
   links: FrameLink[]
 }
 
+async function prepareImages(root: Element, visibleOnly = false): Promise<void> {
+  const images = [...root.querySelectorAll('img')].filter((image) => {
+    if (!visibleOnly) return true
+    if (image.closest('[hidden], [data-switch-hidden]')) return false
+    return getComputedStyle(image).visibility === 'visible' && image.getClientRects().length > 0
+  })
+  await Promise.allSettled(images.map((image) => {
+    image.loading = 'eager'
+    return image.decode()
+  }))
+}
+
 async function withExportBrowser<T>(options: CaptureOptions, run: (browser: Bun.WebView) => Promise<T>): Promise<T> {
   const { width, height } = options.canvas
   const root = await realpath(options.root)
@@ -97,7 +109,7 @@ export async function captureFrames(options: CaptureOptions, onFrame: (frame: Po
         if (active?.id !== 'slide-${position.slide}') throw new Error('Slide did not become active')
         await window.presentationMediaReady?.()
         await document.fonts.ready
-        await Promise.all([...active.querySelectorAll('img')].map(image => image.decode()))
+        await (${prepareImages.toString()})(active, true)
         const note = document.querySelector('#presenter-notes > section[data-has-notes]:not([hidden])')
         const noteSteps = note?.querySelectorAll('[data-note-step]${options.withClicks ? ':not([hidden])' : ''}') ?? []
         const notes = [...noteSteps].map(part => [...part.children].map(node => {
@@ -177,13 +189,12 @@ export async function capturePdf(options: CaptureOptions): Promise<Uint8Array<Ar
           if (id) link.hash = id
           else link.removeAttribute('href')
         }
-        for (const image of page.querySelectorAll('img')) image.loading = 'eager'
         pages.append(page)
       }
       stage.replaceChildren(pages)
       document.body.classList.add('printing-frames')
       await document.fonts.ready
-      await Promise.all([...stage.querySelectorAll('img')].map(image => image.decode().catch(() => {})))
+      await (${prepareImages.toString()})(stage)
     })(${JSON.stringify(positions)})`)
     const result = await chrome.cdp('Page.printToPDF', { printBackground: true, preferCSSPageSize: true }) as { data?: string }
     if (!result.data) throw new Error('Chrome PDF export returned no pages')
