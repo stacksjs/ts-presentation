@@ -16,6 +16,7 @@ import { diagramOptionsRecord, mergeDiagramOptions } from './diagram-options.ts'
 import { optionsForSvg } from './diagram-svg.ts'
 import { renderPlantUml } from './plantuml.ts'
 import type { DeckComponentRenderer } from './deck-components.ts'
+import { expandComarkComponents } from './comark-components.ts'
 import { drawingOverlay } from './drawing-store.ts'
 import { drawingEnabled, resolveDrawings } from '../../../types/src/drawings.ts'
 import type { DrawingClientConfig, SavedDrawing } from '../../../types/src/drawings.ts'
@@ -238,6 +239,8 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     },
   }
   const componentRenderers = activeSlides.map((slide, index) => options.components?.(slide.frontmatter ?? {}, index + 1))
+  const comarkSlides = activeSlides.map(({ frontmatter }) =>
+    (frontmatter?.comark ?? frontmatter?.mdc ?? deck.headmatter?.comark ?? deck.headmatter?.mdc ?? settings?.comark ?? settings?.mdc) === true)
   function effectiveLayout(slide: Slide): string {
     return slide.layout === 'default' && typeof slide.frontmatter?.layout !== 'string' ? defaults?.layout ?? slide.layout : slide.layout
   }
@@ -262,7 +265,8 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
         codeFences.set(marker, fence)
         return marker
       },
-      codeGroups: comark === undefined ? undefined : { nextId: () => `code-group-${++groups}`, comark },
+      comark,
+      codeGroups: comark === undefined ? undefined : { nextId: () => `code-group-${++groups}` },
     })
     const html = prepared.restore(Bun.markdown.html(prepared.source))
       .replace(rawFence, token => {
@@ -273,7 +277,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   }
   const html: Record<string, string>[] = []
   for (const [index, slide] of activeSlides.entries()) {
-    const comark = (slide.frontmatter?.comark ?? deck.headmatter?.comark ?? settings?.comark) === true
+    const comark = comarkSlides[index]
     const layout = layoutNames[index]
     let source = slide.content
     if (transformers?.markdown.length && transformOptions) {
@@ -288,7 +292,9 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     const slots: Record<string, string> = Object.create(null)
     const renderComponents = componentRenderers[index]
     for (const [name, content] of Object.entries(contents)) {
-      slots[name] = renderComponents ? await renderComponents(content, source => markdown(source, comark)) : markdown(content, comark)
+      slots[name] = renderComponents
+        ? await renderComponents(content, source => markdown(source, comark), comark)
+        : markdown(comark ? expandComarkComponents(content) : content, comark)
     }
     html.push(slots)
   }
@@ -299,7 +305,9 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     const override = frontmatter.title || frontmatter.name
     const heading = Object.values(html[index]).map(firstSlideHeading).find(Boolean)
     const fallbackTitle = !override && !slide.level && /^Slide \d+$/.test(slide.title)
-    const title = fallbackTitle && heading ? plainMarkdown(heading.html) || slide.title : slide.title
+    const title = !override && heading && (fallbackTitle || comarkSlides[index])
+      ? plainMarkdown(heading.html) || slide.title
+      : slide.title
     const level = typeof frontmatter.level === 'number' ? frontmatter.level
       : override ? undefined : heading?.level ?? slide.level
     const inline = override ? Bun.markdown.html(String(override).replace(/\s*\r?\n\s*/g, ' '), { tagFilter: true }).trim().replace(/^<p>|<\/p>$/g, '')
@@ -317,6 +325,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
       ...(fallbackTitle && !heading ? { untitled: true } : {}),
     }
   })
+  const title = comarkSlides[0] && deck.title === activeSlides[0]?.title ? routes[0]?.title ?? deck.title : deck.title
   const outline = { labels, tree: createTocTree(routes) }
   const destination = createSlideDestinations(routes)
   const layers = options.layers && Object.keys(options.layers).length ? options.layers : undefined
@@ -499,8 +508,8 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     })
     const deckCss = options.deckCssRevision ?? 'missing'
     const revisions = parts.map(slide => slide.revision)
-    const revision = snippetRevision(JSON.stringify([frame, deck.title, deckCss, revisions, parts.map(slide => slide.sourceRevision)]))
-    live = { revision, frame, title: deck.title, deckCss, slides: parts }
+    const revision = snippetRevision(JSON.stringify([frame, title, deckCss, revisions, parts.map(slide => slide.sourceRevision)]))
+    live = { revision, frame, title, deckCss, slides: parts }
     liveData = `<script id="presentation-live" type="application/json">${JSON.stringify({ revision, frame, deckCss, revisions })}</script>`
   }
   const document = await renderPresentationShell({
@@ -514,7 +523,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     liveAttribute: options.liveCompile
       ? ' data-live-compile="true"' + (mcpNavigation ? ' data-mcp-navigation="true"' : '')
       : '',
-    title: deck.title,
+    title,
     extensionStyles: fontMarkup + (extensions?.styles ? '<link rel="stylesheet" href="./extensions.css">' : ''),
     scopedStyles: [codeTheme, ...slides.map(slide => slide.css)].filter(Boolean).join('\n  '),
     extensionScript: extensions?.client ? '<script defer src="./extensions.js"></script>' : '',

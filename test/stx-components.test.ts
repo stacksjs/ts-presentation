@@ -90,6 +90,46 @@ test('projects scoped STX values into named Markdown slots while preserving lite
   expect(html).not.toContain('tp-component-')
 }))
 
+test('renders Comark components through STX with typed props and nested Markdown slots', async () => project(async (root) => {
+  const entry = join(root, 'slides.md')
+  await Promise.all([
+    Bun.write(entry, [
+      '---', 'comark: true', 'label: Confirmed', '---', '# Components {.introduction}', '',
+      'Status: :badge{:label="frontmatter.label"}.', '',
+      '::doc-card{.featured count="placeholder"}',
+      '```yaml [props]', 'class: primary', 'count: 42', 'option:', '  name: Bundled', '```',
+      '#default', 'Body **Markdown**.', '',
+      '  :::doc-card{:option=\'{"name":"Nested"}\' :count=2}', '  Nested *content*.', '  :::', '',
+      '#footer', 'Footer :status-badge[**Styled**].', '::', '',
+      '`:status-badge{label="code"}`', '', '    :status-badge{label="indented"}', '',
+      '`Example', ':status-badge{label="multiline"}`', '',
+      '```md', '::doc-card', '#footer', '::', '```', '',
+      '\\:status-badge{label="escaped"}', '', '<pre>:status-badge{label="raw"}</pre>',
+      '', '---', 'comark: false', '---', '', '# Disabled {.literal}', ':status-badge{label="literal"}',
+    ].join('\n')),
+    Bun.write(join(root, 'components', 'DocCard.stx'), '<template><section class="card {{ props.class }}"><h2>{{ props.option.name }} {{ props.count + 1 }}</h2><slot /><footer><slot name="footer" /></footer></section></template>'),
+    Bun.write(join(root, 'components', 'StatusBadge.stx'), '<span class="status">{{ props.label }}<slot /></span>'),
+    Bun.write(join(root, 'components', 'Badge.stx'), '<span class="status">{{ props.label }}</span>'),
+  ])
+  const deck = await createDeckCompiler(entry)()
+  expect(deck.html).toContain('<title>Components</title>')
+  expect(deck.html).toContain('<h1 class="introduction">Components</h1>')
+  expect(deck.html).toContain('Status: <span class="status">Confirmed</span>.')
+  expect(deck.html).toContain('<section class="card featured primary"><h2>Bundled 43</h2>')
+  expect(deck.html).toContain('Body <strong>Markdown</strong>.')
+  expect(deck.html).toContain('<h2>Nested 3</h2>')
+  expect(deck.html).toContain('Nested <em>content</em>.')
+  expect(deck.html).toContain('Footer <span class="status"><strong>Styled</strong></span>.')
+  expect(deck.html.match(/class="status"/g)).toHaveLength(2)
+  expect(deck.html).toContain('<code>:status-badge{label=&quot;code&quot;}</code>')
+  expect(deck.html).toContain('<code>Example :status-badge{label=&quot;multiline&quot;}</code>')
+  expect(deck.html).toContain('<pre>:status-badge{label="raw"}</pre>')
+  expect(deck.html).toContain('#footer')
+  expect(deck.html).toContain('<h1>Disabled {.literal}</h1>')
+  expect(deck.html).toContain(':status-badge{label=&quot;literal&quot;}')
+  expect(deck.html).not.toContain('<template #footer>')
+}))
+
 test('binds native HTML attributes in scoped Markdown slots', async () => project(async (root) => {
   const entry = join(root, 'slides.md')
   await Promise.all([

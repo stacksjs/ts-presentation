@@ -9,6 +9,7 @@ import { codeTabLabel, decoratedCode, parseCodeInfo } from './code-blocks.ts'
 import { escapeHtml } from './html.ts'
 import type { FenceOpening } from '../../../parser/src/markdown-fences.ts'
 import { isFenceClose, MarkdownFenceReader, readFenceOpening } from '../../../parser/src/markdown-fences.ts'
+import { createComarkAttributes, readComarkAttributes } from './comark.ts'
 
 const inlineCode = /^`+/
 const protectedHtml = /^<(pre|code|script|style)(?:\s[^>]*)?>[\s\S]*?<\/\1\s*>/i
@@ -78,7 +79,8 @@ interface MarkdownSyntax {
   renderMath?: (body: string, display: boolean) => string
   mathEnabled?: boolean
   registerFence?: (fence: MarkdownFence) => string | undefined
-  codeGroups?: { nextId: () => string, comark: boolean }
+  comark?: boolean
+  codeGroups?: { nextId: () => string }
 }
 
 export interface MarkdownFence {
@@ -113,7 +115,8 @@ function tabsMarkup(id: string, tabs: GroupFence[]): string {
 }
 
 export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): PreparedMarkdown {
-  if (!source.includes('$') && !source.includes('\\(') && !source.includes('\\[') && !source.includes('\\begin{') && !source.includes('{monaco') && !source.includes('{live') && !source.includes('mermaid') && !source.includes('v-click') && !source.includes('v-after') && !source.includes('```') && !source.includes('~~~')) {
+  const attrs = syntax.comark && source.includes('{') ? createComarkAttributes() : undefined
+  if (!attrs && !source.includes('$') && !source.includes('\\(') && !source.includes('\\[') && !source.includes('\\begin{') && !source.includes('{monaco') && !source.includes('{live') && !source.includes('mermaid') && !source.includes('v-click') && !source.includes('v-after') && !source.includes('```') && !source.includes('~~~')) {
     return { source, restore: html => html }
   }
 
@@ -130,8 +133,9 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
     return `<tp-math data-equation="${index}"></tp-math>`
   }
 
-  function inline(line: string): string {
+  function inline(line: string, allowAttributes: boolean): string {
     let result = ''
+    const brackets: { length: number, span: boolean }[] = []
     for (let at = 0; at < line.length;) {
       const char = line[at]
       if (char === '\\' && line[at + 1]) {
@@ -169,6 +173,28 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
           result += marker(line.slice(at + 1, end))
           at = end + 1
           continue
+        }
+      }
+      if (attrs && allowAttributes) {
+        if (char === '[') brackets.push({ length: result.length, span: line[at - 1] !== '!' && line[at - 1] !== ']' })
+        if (char === ']') {
+          const open = brackets.pop()
+          const block = open?.span && readComarkAttributes(line, at + 1)
+          if (block) {
+            const tag = attrs.register({ kind: 'span', values: block.values, literal: line.slice(at + 1, block.end), adjacent: true })
+            result = `${result.slice(0, open.length)}<${tag}>${result.slice(open.length + 1)}</${tag}>`
+            at = block.end
+            continue
+          }
+        }
+        if (char === '{' && line[at - 1] !== '{' && result.trim()) {
+          const block = readComarkAttributes(line, at)
+          if (block && line[block.end] !== '}') {
+            const tag = attrs.register({ kind: 'attach', values: block.values, literal: line.slice(at, block.end), adjacent: !/\s/.test(line[at - 1]) })
+            result += `<${tag}></${tag}>`
+            at = block.end
+            continue
+          }
         }
       }
       result += char
@@ -241,7 +267,7 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
     }
     if (syntax.codeGroups) {
       const component = /^ {0,3}<CodeGroup\s*>\s*$/.test(line)
-      const hasGroup = component || (syntax.codeGroups.comark && /^ {0,3}::code-group\s*$/.test(line))
+      const hasGroup = component || (syntax.comark && /^ {0,3}::code-group\s*$/.test(line))
       const group = hasGroup && readCodeGroup(lines, index, component ? /^ {0,3}<\/CodeGroup\s*>\s*$/ : /^ {0,3}::\s*$/)
       if (group) {
         const id = syntax.codeGroups.nextId()
@@ -302,7 +328,7 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
         continue
       }
     }
-    output.push(inline(line))
+    output.push(inline(line, !/^(?: {4}| *\t)/.test(content)))
   }
 
   return {
@@ -312,7 +338,7 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
         const blocks = new RegExp(`<pre><code class="language-${nestedMathFence}">(\\d+)\\n</code></pre>`, 'g')
         html = html.replace(blocks, (whole, index: string) => math[Number(index)] ?? whole)
       }
-      return html
+      return (attrs ? attrs.restore(html) : html)
         .replace(/<p>(<tp-math data-equation="\d+"><\/tp-math>)<\/p>/g, (whole, placeholder) => {
           const index = Number(/\d+/.exec(placeholder)?.[0])
           return /^<div class="equation-steps"|^<math [^>]* display="block"/.test(math[index] ?? '') ? placeholder : whole

@@ -23,6 +23,8 @@ This is a [red text]{style="color:red"}
 
 ## Inline Components
 
+Define custom components in `components/` as `.stx` files. For example, `InlineComponent.stx` can be used as:
+
 ```md
 :inline-component{prop="value"}
 ```
@@ -44,7 +46,7 @@ The **default** slot content
 ## Use Cases
 
 - Add inline styles without HTML
-- Use Vue components inline
+- Use STX components inline
 - Add attributes to images
 - Create complex component layouts
 

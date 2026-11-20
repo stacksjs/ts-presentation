@@ -5,9 +5,10 @@ import { MarkdownFenceReader } from '../../../parser/src/markdown-fences.ts'
 import { within } from './assets.ts'
 import { escapeHtml, readBoundValue, unescapeHtml } from './html.ts'
 import { htmlTag } from './slide-html.ts'
+import { expandComarkComponents } from './comark-components.ts'
 
 type ComponentPaths = Map<string, string>
-export type DeckComponentRenderer = (source: string, markdown: (source: string) => string) => Promise<string>
+export type DeckComponentRenderer = (source: string, markdown: (source: string) => string, comark?: boolean) => Promise<string>
 type Observe = (path: string) => Promise<string | undefined>
 
 function kebab(name: string): string {
@@ -299,7 +300,7 @@ export function createDeckComponentRenderer(
 
   const isComponent = ({ name }: Tag) => (/^[A-Z]/.test(name) || name.includes('-')) && paths.has(name) && !builtins.has(name.replaceAll('-', '').toLowerCase())
 
-  return async function render(source, markdown, depth = 0, project?: ProjectSlot): Promise<string> {
+  async function render(source: string, markdown: (source: string) => string, depth = 0, project?: ProjectSlot): Promise<string> {
     const ranges = depth < 48 && source.includes('<') ? findRanges(source, isComponent) : []
     if (!ranges.length) {
       const html = markdown(source)
@@ -368,4 +369,6 @@ export function createDeckComponentRenderer(
     const restore = (markup: string) => markup.replace(placeholders, placeholder => replacements.get(placeholder) ?? placeholder)
     return project ? project(paragraphs, restore) : restore(paragraphs)
   }
+
+  return (source, markdown, comark) => render(comark ? expandComarkComponents(source, name => paths.has(name)) : source, markdown)
 }

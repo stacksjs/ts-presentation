@@ -34,6 +34,7 @@ in a new ts-presentation project.
 | Snippets, line highlights, Magic Move | Local file and region imports, numbered click highlights, native token animations |
 | Syntax highlighting themes | `codeTheme` or a local `setup/code-highlighter.ts` selects a first-party palette |
 | Code groups and copying | Comark code tabs, synchronized presenter selection, source and live editor copying |
+| Comark attributes and components | Markdown classes, IDs, styles, and attributes, plus inline and block shorthand for STX components with named Markdown slots and fenced YAML props |
 | KaTeX | Native MathML with AMS binary and relation symbols, chemistry, ruled and compact arrays, commutative diagrams, sized and paired delimiters, prime and Unicode scripts, contextual spacing for explicit TeX atom classes and AMS operators, operator limits, modular and negated relations, mixed text and math, scoped font sizing, colored and raised boxes, phase and actuarial notation, zero-width overlaps, numbered alignment rows, scoped macros and lookahead, infix and generalized fractions, and click highlighting |
 | Display math in Markdown containers | Display formulas, bare AMS environments, and equation reveal ranges render inside lists and block quotes. Fenced and indented code stays literal |
 | mhchem notation | Native MathML hydrate dots, isotopes, charges, oxidation states, labelled reaction arrows, embedded TeX, and physical quantities with grouped digits, uncertainties, standalone powers, and nested unit fractions |

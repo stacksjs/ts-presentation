@@ -170,6 +170,7 @@ the deck and style slides with an optional `style.css`.
 | Math links and images | `\href`, `\url`, `\includegraphics`, and `\html*` attributes honor `math.trust` in deck frontmatter or the `trust` callback in `setup/katex.ts` |
 | Code walkthroughs | `ts [build.ts] {1\|2-3\|all}{lines:true}` for titles and click highlights, or `md magic-move` around nested fences to animate between frames |
 | Code groups | Enable `comark: true` and place titled fences between `::code-group` and `::` to create keyboard-accessible tabs |
+| Comark | Enable `comark: true` for Markdown attributes such as `# Title {.heading}` and `[text]{.highlight}`, inline `:badge` components, and `::card` blocks with Markdown slots and fenced YAML props. Custom components resolve to `.stx` files |
 | Source snippets | `<<< @/snippets/build.ts#example` for a named region. Use `{monaco-write}` with a whole JavaScript or TypeScript file to allow saving from the local dev editor |
 | Live code | Add `{live-run}` or `{monaco-run}` to a fence for a built-in or custom runner. Use `{live}` or `{monaco}` for editing |
 | Code diffs | Add `{monaco-diff}` or `{live-diff}` to a backtick fence and separate the original and modified code with a line containing `~~~`. Edit the modified version in the player or use `{readonly:true}` for a fixed comparison |

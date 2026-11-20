@@ -46,7 +46,7 @@ export function titleLabel(html: string): string {
   return html.replace(new RegExp(htmlTags), (tag, _closing, name) => name?.toLowerCase() === 'a' ? '' : tag)
 }
 
-function attributeValues(source: string): Map<string, Attribute> {
+export function attributeValues(source: string): Map<string, Attribute> {
   const attributes = new Map<string, Attribute>()
   const matches = source.matchAll(/\s+([^\s=\/'">]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g)
   for (const match of matches) {
@@ -77,11 +77,11 @@ export function createSlideDestinations(routes: readonly SlideRoute[]): (value: 
   }
 }
 
-function setAttribute(attributes: Map<string, Attribute>, name: string, value: string): void {
+export function setAttribute(attributes: Map<string, Attribute>, name: string, value: string): void {
   attributes.set(name, { value, source: ` ${name}="${escapeHtml(value)}"`, offset: -1 })
 }
 
-function serialized(attributes: Map<string, Attribute>): string {
+export function serialized(attributes: Map<string, Attribute>): string {
   return [...attributes.values()].map(attribute => attribute.source).join('')
 }
 
@@ -296,6 +296,34 @@ export function describeDrag(name: string, source: string): ReturnType<typeof dr
   return dragAttributes(name, attributeValues(source))
 }
 
+function arrowHead(id: string, color: string): string {
+  return `<marker id="${id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="${color}"/></marker>`
+}
+
+function arrowMarkup(source: string, id: string): string {
+  const attrs = attributeValues(source)
+  const coordinates = ['x1', 'y1', 'x2', 'y2'].map(key => Number(literalAttribute(attrs, key)))
+  if (!coordinates.every(value => Number.isFinite(value))) return ''
+  const [x1, y1, x2, y2] = coordinates
+  const width = Number(literalAttribute(attrs, 'width')) || 2
+  const color = escapeHtml(literalAttribute(attrs, 'color') || 'currentColor')
+  const both = literalAttribute(attrs, 'two-way') ?? literalAttribute(attrs, 'twoway')
+  const position = [x1, y1, x2 - x1, y2 - y1, 0] as const
+  const padding = Math.max(10, Math.abs(width) * 4)
+  const box = arrowGeometry([...position], padding)
+  const style = attrs.get('style')?.value
+  for (const key of ['x1', 'y1', 'x2', 'y2', 'width', 'color', 'two-way', 'twoway']) {
+    attrs.delete(key)
+    attrs.delete(`:${key}`)
+  }
+  setAttribute(attrs, 'style', `${dragStyle([...position], 'arrow', padding)}${style ? `;${style}` : ''}`)
+  setAttribute(attrs, 'viewBox', `0 0 ${box.width} ${box.height}`)
+  if (!attrs.has('role')) setAttribute(attrs, 'role', 'img')
+  if (!attrs.has('aria-label') && !attrs.has('aria-labelledby')) setAttribute(attrs, 'aria-label', 'Arrow')
+  const line = `<line x1="${box.x1}" y1="${box.y1}" x2="${box.x2}" y2="${box.y2}" stroke="${color}" stroke-width="${Math.abs(width)}" marker-end="url(#${id})"${both !== undefined && both !== 'false' ? ` marker-start="url(#${id})"` : ''}/>`
+  return `<svg${serialized(attrs)}><defs>${arrowHead(id, color)}</defs>${line}</svg>`
+}
+
 function dragMarkup(name: string, source: string, frontmatter: Record<string, unknown>, id: string): string | undefined {
   const attrs = attributeValues(source)
   const description = dragAttributes(name, attrs)
@@ -324,7 +352,7 @@ function dragMarkup(name: string, source: string, frontmatter: Record<string, un
   // Include the stroke and marker in the SVG bounds used by slide exports.
   const geometry = arrowGeometry(position, padding)
   setAttribute(attrs, 'data-drag-padding', String(padding))
-  const head = `<marker id="${id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="${color}"/></marker>`
+  const head = arrowHead(id, color)
   const points = `x1="${geometry.x1}" y1="${geometry.y1}" x2="${geometry.x2}" y2="${geometry.y2}"`
   const line = `<line data-drag-line ${points} stroke="${color}" stroke-width="${width}" marker-end="url(#${id})"${both ? ` marker-start="url(#${id})"` : ''}/>`
   const hit = `<line data-drag-hit ${points} stroke="transparent" stroke-width="${Math.max(width, 18)}"/>`
@@ -354,7 +382,7 @@ function tweetMarkup(source: string, theme: 'light' | 'dark'): string {
 
 /** Adapted from Slidev's Markdown link and scoped style transforms (MIT). */
 export function prepareSlideHtml(input: string, destination: (value: string) => SlideDestination | undefined, slide: number, frontmatter: Record<string, unknown> = {}, theme: 'light' | 'dark' = 'dark', outline?: SlideOutline): { html: string, css: string } {
-  if (!/<(?:style|(?:a|Link|Tweet|SlidevVideo|Youtube|Toc|TitleRenderer|SlideCurrentNo|SlidesTotal|RenderWhen|LightOrDark|AutoFitText|Transform)(?=[\s/>])|v-?drag)|\sv-drag\b|view-transition-/i.test(input)) return { html: input, css: '' }
+  if (!/<(?:style|(?:a|Arrow|Link|Tweet|SlidevVideo|Youtube|Toc|TitleRenderer|SlideCurrentNo|SlidesTotal|RenderWhen|LightOrDark|AutoFitText|Transform)(?=[\s/>])|v-?drag)|\sv-drag\b|view-transition-/i.test(input)) return { html: input, css: '' }
   const blocks: StyleBlock[] = []
   const viewRules = new Set<string>()
   const tags = new RegExp(htmlTags)
@@ -400,6 +428,9 @@ export function prepareSlideHtml(input: string, destination: (value: string) => 
       }
       else replacement = input.slice(token.index, close.lastIndex)
       tags.lastIndex = close.lastIndex
+    }
+    else if (name === 'arrow') {
+      replacement = closing ? '' : arrowMarkup(source, `slide-arrow-${slide}-${++arrowCount}`)
     }
     else if (rawName === 'Tweet') {
       replacement = closing ? '' : tweetMarkup(source, theme)

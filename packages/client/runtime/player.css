@@ -39,6 +39,7 @@ button, select { font: inherit; }
 .presentation-layer[data-presentation-layer="global-top"] { z-index: 9; }
 
 .slide h1 { margin-top: 0; line-height: 1.1; }
+.slide .inline-block { display: inline-block; }
 .slidev-auto-fit-text { display: block; min-inline-size: 0; overflow: auto; }
 .slidev-auto-fit-text-inner { display: inline-block; inline-size: max-content; white-space: nowrap; vertical-align: top; }
 .slidev-auto-fit-text-inner[data-fit-wrapped] { max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; }

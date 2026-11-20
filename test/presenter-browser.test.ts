@@ -471,12 +471,12 @@ test.skipIf(!chrome)('applies Slidev page transitions across the audience and pr
   try {
     await Promise.all([
       Bun.write(source, [
-        '---', 'transition: slide-left', '---', '# First', '<p v-click>Reveal</p>',
+        '---', 'transition: slide-left', 'comark: true', '---', '# First', '<p v-click>Reveal</p>',
         '---', 'transition: forward | backward', '---', '# Second',
         '---', 'transition:', '  name: authored', '  enterFromClass: start-hidden', '  enterActiveClass: animate-opacity',
         '  leaveToClass: start-hidden', '  leaveActiveClass: animate-opacity', '---', '# Third',
-        '---', 'transition: view-transition', '---', '<h1 class="view-transition-title">Fourth</h1>',
-        '---', 'transition: null', '---', '<h1 class="view-transition-title">Fifth</h1>',
+        '---', 'transition: view-transition', '---', '# Fourth {.inline-block.view-transition-title}',
+        '---', 'transition: null', '---', '# Fifth {.inline-block.view-transition-title}',
         '---', 'transition: fade-out', '---', '# Sixth',
         '---', 'transition: slide-up', '---', '# Seventh',
         '---', '', '# Last',
@@ -517,6 +517,7 @@ test.skipIf(!chrome)('applies Slidev page transitions across the audience and pr
     expect(await read('window.presentationNavigation.go(3); window.presentationNavigation.go(4)')).toMatchObject({ name: 'authored', page: 4 })
     expect(await view.evaluate('document.querySelector("#slide-4").classList.contains("animate-opacity")')).toBe(true)
     expect(await view.evaluate('getComputedStyle(document.querySelector("#slide-4 h1")).viewTransitionName')).toBe('title')
+    expect(await view.evaluate('getComputedStyle(document.querySelector("#slide-4 h1")).display')).toBe('inline-block')
 
     expect(await view.evaluate(`(async () => {
       const start = document.startViewTransition.bind(document)
