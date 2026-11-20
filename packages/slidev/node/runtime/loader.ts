@@ -6,6 +6,7 @@ import type { Deck, RenderOptions, Slide } from './index.ts'
 import type { ExtensionAssets } from './extensions.ts'
 import type { SlideCanvas } from '../../../types/src/canvas.ts'
 import type { LiveDeck } from '../../../types/src/dev-protocol.ts'
+import type { TransformerSlideSource } from '../../../types/src/transform.ts'
 import { loadAuthoringSetup } from './authoring-setup.ts'
 import { importDeckModule } from './deck-modules.ts'
 import { within } from './assets.ts'
@@ -83,6 +84,7 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
     const sourceDocuments = new Map<string, ReturnType<typeof markdownDocument>>()
     const writableSlides = new Map<string, WritableSlide>()
     const sourceBindings = new WeakMap<Slide, { token: string, revision: string }>()
+    const transformerSources = new WeakMap<Slide, TransformerSlideSource>()
     const directory = await realpath(root)
     async function observe(path: string): Promise<string> {
       const revision = await fileRevision(path)
@@ -193,6 +195,7 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
         return token
       }, allowedRoots)
       const result = content === slide.content ? slide : { ...slide, content }
+      transformerSources.set(result, { filepath: origin.path, index: origin.index - 1, content: origin.slide.content })
       const editable = doc && bindSlideSource(doc, origin.slide, origin.index)
       if (editable) {
         writableSlides.set(editable.token, editable)
@@ -232,6 +235,7 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
     const { html, routes, routing, live } = await renderPresentation(deck, {
       base: options.base, routerMode: options.routerMode, liveCompile: options.liveCompile, mcpNavigation: options.mcpNavigation, mode, extensions, setup, writableSnippets, savedDrawings, saveDrawings,
       deckCssRevision: deckCss && snippetRevision(deckCss), sourceBindings, layers, compileExample: liveCode.authored,
+      entry: filepath, transformerSources,
       components: components.size ? (frontmatter, number) => createDeckComponentRenderer(components, filepath, number, frontmatter, observeOptional) : undefined,
       async resolveFileLayout(name, registered) {
         if (!/^[\w-]+$/.test(name)) return

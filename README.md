@@ -91,6 +91,7 @@ the deck and style slides with an optional `style.css`.
 | Draggable elements | Use `v-drag`, `<v-drag>`, or `<v-drag-arrow>`. Double-click to move, resize, or rotate. Dev saves positions to the Markdown |
 | Local slides and ranges | `src: ./chapter.md#2-4` selects authored slides before nested imports expand. A leading slash resolves from the deck directory |
 | Markdown preparser | `setup/preparser.ts` can transform raw lines, per-slide Markdown, frontmatter, and speaker notes before rendering |
+| Markdown transformers | `setup/transformers.ts` rewrites individual slides and registers custom fenced-code renderers |
 | Slide editor | Edit the Markdown of the current slide and preview file changes in dev |
 | Navigation | `routeAlias: review`, then links such as `#review` or `#review/2`. Use `clicksStart` and `clicks` to set reveal bounds |
 | Keyboard shortcuts | `setup/shortcuts.ts` can add key combinations or change the default bindings in dev and static builds |
@@ -179,6 +180,27 @@ execution, `{autorun:'once'}` for a single automatic run, or
 uses manual execution by default and accepts the same options.
 Use `monaco: false` in frontmatter for static code blocks, or set it to
 `dev` or `build` to enable editors in that mode.
+
+Use `setup/transformers.ts` to migrate Slidev Markdown and codeblock hooks.
+
+```ts
+import { defineTransformersSetup } from 'ts-presentation'
+
+export default defineTransformersSetup(() => ({
+  pre: [({ s }) => { s.replaceAll('[[release]]', '**Release**') }],
+  codeblocks: [async ({ info, renderHighlighted }) => {
+    if (info !== 'example') return
+    return `<figure class="example">${await renderHighlighted({ info: 'ts' })}</figure>`
+  }],
+}))
+```
+
+Each Markdown hook reads the committed input from `s.original` and edits it
+with methods such as `replaceAll`, `update`, and `append`. The compiler
+commits edits between hooks. Codeblock hooks receive the fence's full info
+string and length, along with its source and slide context. Returning HTML or
+a deck STX component handles the fence. Return `undefined` to continue to the
+built-in renderers.
 
 JavaScript and TypeScript runner examples can import local modules. Place
 shared helpers under `snippets/` beside the deck. For example, this runnable

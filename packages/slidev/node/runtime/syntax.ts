@@ -8,6 +8,7 @@ import { codeTabLabel, decoratedCode, parseCodeInfo } from './code-blocks.ts'
 import { escapeHtml } from './html.ts'
 
 const fenceStart = /^ {0,3}(`{3,}|~{3,})(.*)$/
+const quotePrefix = /^(?: {0,3}>[ \t]?)+/
 const inlineCode = /^`+/
 const protectedHtml = /^<(pre|code|script|style)(?:\s[^>]*)?>[\s\S]*?<\/\1\s*>/i
 const htmlTag = /^<(?:[^>"']|"[^"]*"|'[^']*')+>/
@@ -78,9 +79,16 @@ interface PreparedMarkdown {
 interface MarkdownSyntax {
   renderMath?: (body: string, display: boolean) => string
   mathEnabled?: boolean
-  registerDiagram?: (type: 'mermaid' | 'plantuml', options: Record<string, FenceScalar>) => string
-  registerCode?: (info: CodeBlockInfo) => string
+  registerFence?: (fence: MarkdownFence) => string | undefined
+  nestedFences?: boolean
   codeGroups?: { nextId: () => string, comark: boolean }
+}
+
+export interface MarkdownFence {
+  info: string
+  length: number
+  code?: CodeBlockInfo
+  diagram?: { type: 'mermaid' | 'plantuml', options: Record<string, FenceScalar> }
 }
 
 interface GroupFence { opening: RegExpExecArray, start: number, end: number, label: string }
@@ -178,23 +186,34 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
     const prefix = line.slice(0, line.indexOf(marker)) + marker
     const [, type, diagramInfo] = /^\s*(mermaid|plantuml)\s+(\{.*\})\s*$/i.exec(info) ?? []
     const diagram = diagramInfo && readFenceOptions(diagramInfo)
-    if (diagram && syntax.registerDiagram) return prefix + syntax.registerDiagram(type.toLowerCase() as 'mermaid' | 'plantuml', diagram)
-    const decoration = decoratedCode(info)
-    return decoration && syntax.registerCode ? prefix + syntax.registerCode(decoration) : line
+    const registered = syntax.registerFence?.({
+      info,
+      length: marker.length,
+      code: diagram ? undefined : decoratedCode(info),
+      diagram: diagram ? { type: type.toLowerCase() as 'mermaid' | 'plantuml', options: diagram } : undefined,
+    })
+    return registered ? prefix + registered : line
   }
   let fence = ''
+  let fenceQuotes = 0
   let htmlCode = ''
   let comment = false
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index]
-    const opening = fenceStart.exec(line)
+    const quote = syntax.nestedFences ? quotePrefix.exec(line)?.[0] ?? '' : ''
+    const depth = quote ? quote.split('>').length - 1 : 0
+    if (fenceQuotes > depth) { fence = ''; fenceQuotes = 0 }
+    const opening = fenceStart.exec(line.slice(quote.length))
     if (!fence && !htmlCode && (comment || /^ {0,3}<!--/.test(line))) {
       comment = !line.includes('-->')
       output.push(line)
       continue
     }
     if (fence) {
-      if (opening && opening[1][0] === fence[0] && opening[1].length >= fence.length && !opening[2].trim()) fence = ''
+      if (opening && depth === fenceQuotes && opening[1][0] === fence[0] && opening[1].length >= fence.length && !opening[2].trim()) {
+        fence = ''
+        fenceQuotes = 0
+      }
       output.push(line)
       continue
     }
@@ -205,6 +224,7 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
     }
     if (opening) {
       fence = opening[1]
+      fenceQuotes = depth
       output.push(renderFenceStart(line, opening))
       continue
     }

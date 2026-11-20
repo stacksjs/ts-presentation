@@ -1,13 +1,13 @@
 import { getCachedSignalsRuntime } from '@stacksjs/stx'
+import { dirname } from 'node:path'
 import { deckFontMarkup } from './fonts.ts'
 import { applyNotesAutoRuby } from './notes.ts'
 import { hasBuiltinLayoutSlots, renderBuiltinLayout, renderPresentationShell } from '../../../client/index.ts'
-import type { AuthoringSetup, MermaidOptions } from './authoring-setup.ts'
+import type { AuthoringSetup } from './authoring-setup.ts'
 import type { LoadedExtensions, PresentationAddon, PresentationLayout } from './extensions.ts'
 import { resolveCanvas } from '../../../types/src/canvas.ts'
 import type { LiveDeck } from '../../../types/src/dev-protocol.ts'
 import { renderChart } from './charts.ts'
-import type { CodeBlockInfo } from './code-blocks.ts'
 import { codeBlock, codeFrame, createCodeHighlighter, codeThemeStyles, magicFrames, parseCodeInfo } from './code-blocks.ts'
 import { codeDiffBlock } from './code-diff.ts'
 import { renderMermaid } from './diagram.ts'
@@ -32,6 +32,9 @@ import type { Deck, PreparserContext, Slide } from '../../../parser/src/deck.ts'
 import { plainMarkdown } from '../../../parser/src/plain-markdown.ts'
 import { createSlideDestinations, firstSlideHeading, prepareSlideHtml, titleLabel } from './slide-html.ts'
 import { prepareMarkdown, renderAlerts, splitSlots } from './syntax.ts'
+import type { MarkdownFence } from './syntax.ts'
+import type { CodeblockTransformContext, TransformerOptions, TransformerSlideSource } from '../../../types/src/transform.ts'
+import { SlideMarkdownEdits } from './markdown-edits.ts'
 import { prefixMarkupUrls } from './base-assets.ts'
 import type { WritableSnippet } from './snippet-write.ts'
 import { snippetRevision } from './snippet-write.ts'
@@ -46,11 +49,21 @@ export type { CodeHighlightOptions, KatexOptions, KatexTrustContext, MermaidOpti
 export type { PresentationNavigation, SlideRoute } from '../../../client/runtime/navigation.ts'
 export type { LayoutContext, PresentationAddon, PresentationLayout, PresentationTheme } from './extensions.ts'
 export type { DrawingOptions } from '../../../types/src/drawings.ts'
+export * from '../../../types/src/transform.ts'
 
 export { definePreparserSetup, extractImagesUsage, parseDeck, parseDeckAsync } from '../../../parser/src/deck.ts'
 export type { Deck, PreparserContext, PreparserExtension, PreparserSetup, Slide } from '../../../parser/src/deck.ts'
 
 const escapedCode = /<pre><code(?: class="language-([\w+#.-]+)")?>([\s\S]*?)<\/code><\/pre>/g
+
+function fenceLanguage(info: string): string {
+  return /^\S+/.exec(info.trim())?.[0] ?? ''
+}
+
+function plainCode(code: string, language: string): string {
+  const attribute = language ? ` class="language-${escapeHtml(language)}"` : ''
+  return `<pre><code${attribute}>${escapeHtml(code)}</code></pre>`
+}
 
 export interface RenderOptions {
   base?: string
@@ -64,6 +77,8 @@ export interface RenderOptions {
   components?: (frontmatter: Record<string, unknown>, slideNumber: number) => DeckComponentRenderer
   resolveFileLayout?: (name: string, registered?: PresentationLayout) => Promise<PresentationLayout | undefined>
   setup?: AuthoringSetup
+  entry?: string
+  transformerSources?: WeakMap<Slide, TransformerSlideSource>
   writableSnippets?: ReadonlyMap<string, WritableSnippet>
   savedDrawings?: ReadonlyMap<number, SavedDrawing>
   saveDrawings?: boolean
@@ -127,8 +142,9 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     ...configuration?.mermaid,
     ...(mermaidConfig && typeof mermaidConfig === 'object' && !Array.isArray(mermaidConfig) ? mermaidConfig : {}),
   }
-  const diagramFences = new Map<string, { type: 'mermaid' | 'plantuml', options: MermaidOptions }>()
-  const codeFences = new Map<string, CodeBlockInfo>()
+  const codeFences = new Map<string, MarkdownFence>()
+  const fencePrefix = `tp-fence-${Bun.randomUUIDv7().replaceAll('-', '')}-`
+  const rawFence = new RegExp(`(?<!language-)\\b${fencePrefix}\\d+\\b`, 'g')
   const highlight = createCodeHighlighter()
   const fontMarkup = deckFontMarkup(options.extensions?.theme.defaults?.fonts, nested?.fonts, deck.headmatter?.fonts)
   const color = deck.headmatter?.colorSchema ?? nested?.colorSchema
@@ -144,6 +160,8 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     for (const transform of transforms) result = await transform(result, index)
     const source = options.sourceBindings?.get(slide)
     if (source) options.sourceBindings?.set(result, source)
+    const origin = options.transformerSources?.get(slide)
+    if (origin) options.transformerSources?.set(result, origin)
     return result
   })) : deck.slides
   const activeSlides = adapted.filter(slide => slide.frontmatter?.hide !== true && slide.frontmatter?.disabled !== true)
@@ -151,6 +169,20 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   const layoutHooks = Object.assign(Object.create(null), ...activeExtensions.map(addon => addon.layouts ?? {})) as Record<string, PresentationLayout | undefined>
   const codeHooks = activeExtensions.flatMap(addon => addon.renderCode ? [addon.renderCode] : [])
   const settings = deck.headmatter?.config as Record<string, unknown> | undefined
+  const transformers = configuration?.transformers
+  const transformOptions: TransformerOptions | undefined = transformers && {
+    mode: options.mode ?? (options.liveCompile ? 'dev' : 'build'),
+    entry: options.entry,
+    userRoot: options.entry && dirname(options.entry),
+    config: { ...defaults, ...settings, ...deck.headmatter },
+    data: {
+      headmatter: deck.headmatter ?? {},
+      slides: activeSlides.map((slide, index) => ({
+        ...slide, index, frontmatter: slide.frontmatter ?? {}, note: slide.notes, source: options.transformerSources?.get(slide),
+      })),
+    },
+  }
+  const componentRenderers = activeSlides.map((slide, index) => options.components?.(slide.frontmatter ?? {}, index + 1))
   function effectiveLayout(slide: Slide): string {
     return slide.layout === 'default' && typeof slide.frontmatter?.layout !== 'string' ? defaults?.layout ?? slide.layout : slide.layout
   }
@@ -164,31 +196,42 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   }
   let groups = 0
   function markdown(content: string, comark?: boolean): string {
+    const transformFences = comark !== undefined && !!transformers?.codeblocks.length
     const prepared = prepareMarkdown(content, {
       renderMath,
       mathEnabled: (deck.headmatter?.math ?? deck.headmatter?.katex) !== false,
-      registerDiagram(type, options) {
-        const marker = `tp-diagram-${diagramFences.size}`
-        diagramFences.set(marker, { type, options })
-        return marker
-      },
-      registerCode(info) {
-        const marker = `tp-code-${codeFences.size}`
-        codeFences.set(marker, info)
+      nestedFences: transformFences,
+      registerFence(fence) {
+        if (!transformFences && !fence.diagram && !fence.code) return
+        const marker = fencePrefix + codeFences.size
+        codeFences.set(marker, fence)
         return marker
       },
       codeGroups: comark === undefined ? undefined : { nextId: () => `code-group-${++groups}`, comark },
     })
     const html = prepared.restore(Bun.markdown.html(prepared.source))
+      .replace(rawFence, token => {
+        const fence = codeFences.get(token)
+        return fence ? escapeHtml(fence.info) : token
+      })
     return content.includes('[!') ? renderAlerts(html) : html
   }
   const html: Record<string, string>[] = []
   for (const [index, slide] of activeSlides.entries()) {
     const comark = (slide.frontmatter?.comark ?? deck.headmatter?.comark ?? settings?.comark) === true
     const layout = layoutNames[index]
-    const contents = layoutHooks[layout] || hasBuiltinLayoutSlots(layout) ? splitSlots(slide.content) : { default: slide.content }
+    let source = slide.content
+    if (transformers?.markdown.length && transformOptions) {
+      const context = { s: new SlideMarkdownEdits(source), slide: transformOptions.data.slides[index], options: transformOptions }
+      for (const transform of transformers.markdown) {
+        await transform(context)
+        if (context.s.hasChanged()) context.s.commit()
+      }
+      source = context.s.toString()
+    }
+    const contents = layoutHooks[layout] || hasBuiltinLayoutSlots(layout) ? splitSlots(source) : { default: source }
     const slots: Record<string, string> = Object.create(null)
-    const renderComponents = options.components?.(slide.frontmatter ?? {}, index + 1)
+    const renderComponents = componentRenderers[index]
     for (const [name, content] of Object.entries(contents)) {
       slots[name] = renderComponents ? await renderComponents(content, source => markdown(source, comark)) : markdown(content, comark)
     }
@@ -228,10 +271,37 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     const editorEnabled = monaco !== false && (monaco !== 'dev' && monaco !== 'build' || monaco === editorMode)
     const renderCode = async (block: string, language = 'text', code: string) => {
       const decoded = unescapeHtml(code)
-      const diagramProps = diagramFences.get(language)
-      const info = codeFences.get(language)
-      if (info) language = info.language
-      if (diagramProps) language = diagramProps.type
+      const fence = codeFences.get(language)
+      const diagramProps = fence?.diagram
+      const info = fence?.code
+      if (fence) {
+        const originalLanguage = fenceLanguage(fence.info)
+        block = plainCode(decoded, originalLanguage)
+        language = diagramProps?.type ?? info?.language ?? (originalLanguage || 'text')
+      }
+      const diagramIndex = language === 'charts' || language === 'ts-charts' || language === 'plantuml' || language === 'mermaid'
+        ? diagram++
+        : undefined
+      if (fence && transformers?.codeblocks.length && transformOptions) {
+        const context: CodeblockTransformContext = {
+          info: fence.info.trim(), code: decoded, fence: fence.length,
+          slide: transformOptions.data.slides[index], options: transformOptions,
+          async renderHighlighted(override) {
+            const source = override?.code ?? decoded
+            const label = override?.info ?? fence.info
+            const selected = parseCodeInfo(label)?.language ?? fenceLanguage(label)
+            const tokens = selected && await highlight(source, selected)
+            return tokens ? `<pre><code class="language-${escapeHtml(selected)}">${tokens.join('\n')}</code></pre>` : plainCode(source, selected)
+          },
+        }
+        for (const transform of transformers.codeblocks) {
+          const result = await transform(context)
+          if (result != null) {
+            const render = componentRenderers[index]
+            return render ? render(result, source => source) : result
+          }
+        }
+      }
       for (const hook of codeHooks) {
         const custom = hook(decoded, language, slide)
         if (custom !== undefined) return custom
@@ -247,15 +317,15 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
           info?.runnerOptions, info?.runnerTiming, options.compileExample)
       }
       if (language === 'charts' || language === 'ts-charts') {
-        return renderChart(decoded, `chart-${index}-${diagram++}`) ?? block
+        return renderChart(decoded, `chart-${index}-${diagramIndex}`) ?? block
       }
       if (language === 'plantuml') {
-        const svg = renderPlantUml(decoded, `plantuml-${index}-${diagram++}`)
-        return svg ? optionsForSvg(svg, diagramProps?.options ?? {}) : block.replace(/language-tp-diagram-\d+/, 'language-plantuml')
+        const svg = renderPlantUml(decoded, `plantuml-${index}-${diagramIndex}`)
+        return svg ? optionsForSvg(svg, diagramProps?.options ?? {}) : block
       }
       if (language === 'mermaid') {
-        const svg = mermaidConfig === false ? undefined : await renderMermaid(decoded, `arrow-${index}-${diagram++}`, diagramOptions, diagramProps?.options, configuration?.diagramRenderer)
-        return svg || (diagramProps ? block.replace(/language-tp-diagram-\d+/, 'language-mermaid') : block)
+        const svg = mermaidConfig === false ? undefined : await renderMermaid(decoded, `arrow-${index}-${diagramIndex}`, diagramOptions, diagramProps?.options, configuration?.diagramRenderer)
+        return svg || block
       }
       if (info?.magic) {
         const frames = magicFrames(decoded)
@@ -263,14 +333,14 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
           ...frame,
           info: { ...frame.info, title: frame.info.title ?? info.title, lines: frame.info.lines ?? info.lines, maxHeight: frame.info.maxHeight ?? info.maxHeight },
         }, await highlight(frame.source, frame.info.language), lineNumbers))), true)
-        return block.replace(/language-tp-code-\d+/, 'language-md')
+        return plainCode(decoded, 'md')
       }
       const lines = language === 'text' && !info && !lineNumbers ? undefined : await highlight(decoded, language)
       if (info || lineNumbers) {
         const settings = info ?? parseCodeInfo(language)
         if (settings) return codeBlock(settings, [codeFrame({ source: decoded, info: settings }, lines, lineNumbers)])
       }
-      return lines ? `<pre><code class="language-${language}">${lines.join('\n')}</code></pre>` : block
+      return lines ? `<pre><code class="language-${escapeHtml(language)}">${lines.join('\n')}</code></pre>` : block
     }
     const slots = Object.fromEntries(await Promise.all(Object.entries(html[index]).map(async ([name, markup]) => {
       const blocks = [...markup.matchAll(escapedCode)]

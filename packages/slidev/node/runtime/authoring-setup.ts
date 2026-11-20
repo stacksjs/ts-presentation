@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import { importDeckModule } from './deck-modules.ts'
 import type { ObserveDeckFile } from './deck-modules.ts'
 import type { MathMacros } from './math.ts'
+import type { CodeblockTransformer, MarkdownTransformer, TransformersSetupReturn } from '../../../types/src/transform.ts'
 
 // Setup names and helper signatures follow Slidev's packages/types/src/setups (MIT).
 export type KatexTrustContext =
@@ -46,6 +47,7 @@ export interface AuthoringSetup {
   katex?: KatexOptions
   mermaid?: MermaidOptions
   diagramRenderer?: MermaidRenderer
+  transformers?: { markdown: readonly MarkdownTransformer[], codeblocks: readonly CodeblockTransformer[] }
 }
 
 export function defineCodeHighlightSetup(setup: CodeHighlightSetup): CodeHighlightSetup { return setup }
@@ -63,19 +65,40 @@ export async function loadAuthoringSetup(root: string, observe: ObserveDeckFile,
     return await setup() as T | undefined
   }
   const setup: AuthoringSetup = {}
+  const transformers: TransformersSetupReturn[] = []
   for (const directory of [...new Set([...roots.filter(value => value !== root), root])]) {
-    const [katex, mermaid, diagramRenderer, shiki, nativeHighlight] = await Promise.all([
+    const [katex, mermaid, diagramRenderer, shiki, nativeHighlight, transform] = await Promise.all([
       read<KatexOptions>(directory, 'katex'),
       read<MermaidOptions>(directory, 'mermaid'),
       read<MermaidRenderer>(directory, 'mermaid-renderer'),
       read<CodeHighlightOptions>(directory, 'shiki'),
       read<CodeHighlightOptions>(directory, 'code-highlighter'),
+      read<TransformersSetupReturn>(directory, 'transformers'),
     ])
     if (diagramRenderer !== undefined && typeof diagramRenderer !== 'function') throw new Error('setup/mermaid-renderer.ts must return a renderer function')
     if (katex) setup.katex = { ...setup.katex, ...katex, macros: { ...setup.katex?.macros, ...katex.macros } }
     if (mermaid) setup.mermaid = { ...setup.mermaid, ...mermaid }
     if (diagramRenderer) setup.diagramRenderer = diagramRenderer
     if (shiki || nativeHighlight) setup.codeHighlight = { ...setup.codeHighlight, ...shiki, ...nativeHighlight }
+    if (transform) {
+      for (const key of ['pre', 'preCodeblock', 'postCodeblock', 'post', 'codeblocks'] as const) {
+        const entries = transform[key]
+        if (entries !== undefined && (!Array.isArray(entries) || entries.some(entry => entry !== false && typeof entry !== 'function')))
+          throw new Error(`setup/transformers.ts must provide an array of hooks for ${key}`)
+      }
+      transformers.push(transform)
+    }
+  }
+  if (transformers.length) {
+    const reverse = [...transformers].reverse()
+    const markdown = [
+      ...reverse.flatMap(transform => transform.pre ?? []),
+      ...reverse.flatMap(transform => transform.preCodeblock ?? []),
+      ...transformers.flatMap(transform => transform.postCodeblock ?? []),
+      ...transformers.flatMap(transform => transform.post ?? []),
+    ].filter((hook): hook is MarkdownTransformer => hook !== false)
+    const codeblocks = transformers.flatMap(transform => transform.codeblocks ?? []).filter((hook): hook is CodeblockTransformer => hook !== false)
+    setup.transformers = { markdown, codeblocks }
   }
   return setup
 }
