@@ -311,9 +311,14 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba, 
     return leftSub || leftSup ? wrap('sPre', wrap('sub', leftSub) + wrap('sup', leftSup) + wrap('e', body)) : body
   }
   function equationArray(table: RawMathElement, environment: string): string | undefined {
-    if (!/^(?:align(?:ed|at|edat)?|flalign|xx?alignat|gather(?:ed)?|split)[*]?$/.test(environment)
-      || !only(table, 'class', 'style', 'columnalign', 'data-equation-lines', 'data-math-array', 'data-equation-environment', 'data-equation-tags', 'data-equation-flush')) return
-    const aligned = !environment.startsWith('gather')
+    if (!/^(?:align(?:ed|at|edat)?|flalign|xx?alignat|gather(?:ed)?|[lr]gathered|split)[*]?$/.test(environment)
+      || !only(table, 'class', 'style', 'columnalign', 'align', 'data-equation-lines', 'data-math-array', 'data-equation-environment', 'data-equation-tags', 'data-equation-flush')) return
+    const baseline = table.attributes.align
+    if (baseline !== undefined && (!/^(?:aligned(?:at)?|[lr]?gathered)$/.test(environment)
+      || !/^baseline -?1$/.test(baseline))) return
+    const aligned = !/gather/.test(environment)
+    const flushLeft = environment === 'lgathered'
+    const flushRight = environment === 'rgathered'
     let rows = ''
     for (const row of table.children) {
       const arrow = row.attributes['data-equation-arrow']
@@ -325,7 +330,7 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba, 
       const previous = opacity
       opacity *= rowOpacity
       try {
-        let expression = ''
+        let expression = flushLeft ? run('&') : ''
         for (const [index, cell] of row.children.entries()) {
           const styles = (cell.attributes.style ?? '').split(';').filter(Boolean)
           if (cell.name !== 'mtd' || cell.text.trim() || !only(cell, 'style')
@@ -337,11 +342,12 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba, 
           if (styles.includes('padding-inline-start:1em')) expression += run('\u2003')
           expression += content
         }
-        rows += wrap('e', expression)
+        rows += wrap('e', expression + (flushRight ? run('&') : ''))
       }
       finally { opacity = previous }
     }
-    if (rows) return wrap('eqArr', rows)
+    const properties = baseline ? wrap('eqArrPr', setting('baseJc', baseline === 'baseline 1' ? 'top' : 'bot')) : ''
+    if (rows) return wrap('eqArr', properties + rows)
   }
   function tableRows(table: RawMathElement, cellStyles?: ReadonlySet<string>): string[][] | undefined {
     if (table.name !== 'mtable' || table.text.trim()) return
@@ -540,6 +546,8 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba, 
         return inFont(defaultMathFont, () => sequence(children))
       if (attributes.class && only(node, 'class')) {
         if (attributes.class === 'math-chemistry') return sequence(children)
+        if (attributes.class === 'math-alignment-bottom' && children.length === 1
+          && children[0].name === 'mtable' && children[0].attributes.align === 'baseline -1') return convert(children[0])
         if (children.length === 1 && (attributes.class === 'math-overline' || attributes.class === 'math-underline')) {
           const body = convert(children[0])
           if (body === undefined) return

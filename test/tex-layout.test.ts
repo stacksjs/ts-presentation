@@ -1203,6 +1203,26 @@ test('keeps AMS relation spacing, explicit pair counts, and tags aligned across 
   expect(math(String.raw`\begin{gathered}a=b\\c=d\end{gathered}`, false)).not.toContain('math-equation-number')
 })
 
+test('parses inner AMS baselines and Mathtools gathered alignments', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const top = math(String.raw`\def\pos{t}A\begin{alignedat}[\pos]{1}x&=y\\z&=w\end{alignedat}A`, false).split('<annotation')[0]
+  expect(top).toContain('data-equation-environment="alignedat" align="baseline 1"')
+  expect(top).not.toContain('math-alignment-axis')
+  expect(top).not.toContain('<mo stretchy="false">[</mo>')
+  const bottom = math(String.raw`A\begin{gathered}[b]x=y\\z=w\end{gathered}A`, false).split('<annotation')[0]
+  expect(bottom).toContain('class="math-alignment-bottom"')
+  expect(bottom).toContain('data-equation-environment="gathered" align="baseline -1"')
+  for (const [prefix, direction] of [['l', 'left'], ['r', 'right']]) {
+    const name = `${prefix}gathered`
+    const gathered = math(String.raw`A\begin{${name}}[c]x=y\\z=w\end{${name}}A`, true).split('<annotation')[0]
+    expect(gathered).toContain(`columnalign="${direction}"`)
+    expect(gathered).toContain('class="math-alignment-axis"')
+    expect(gathered).not.toContain('math-equation-number')
+    expect(() => math(String.raw`\begin{${name}}x&=y\end{${name}}`, false)).toThrow('Too many columns')
+  }
+  expect(() => math(String.raw`\begin{aligned}[left]a&=b\end{aligned}`, false)).toThrow('Invalid inner alignment position')
+})
+
 test('validates AMS environment modes and arguments, and accepts rules inside matrices', () => {
   const math = createMathRenderer({ throwOnError: true })
   expect(() => math(String.raw`\begin{align*} a&=b\end{align*}`, false)).toThrow('align* requires display math')
@@ -1722,7 +1742,9 @@ test('uses the strict display break policy while keeping inline and AMS line bre
   const source = String.raw`a + \\[1em] b\newline c`
   expect(math(source, true)).toContain('<mrow><mi>a</mi><mo>+</mo><mi>b</mi><mi>c</mi></mrow>')
   expect(math(source, false)).toContain('<mtable>')
-  expect(math(String.raw`\begin{aligned}a&=b\\[.5em]c&=d\end{aligned}`, true).match(/<mtr>/g)).toHaveLength(2)
+  const alignment = math(String.raw`\begin{aligned}a&=b\\[.5em]c&=d\end{aligned}`, true)
+  const rows = /<mtable[^>]*data-equation-environment="aligned"[^>]*>(.*?)<\/mtable>/.exec(alignment)?.[1]
+  expect(rows?.match(/<mtr>/g)).toHaveLength(2)
   expect(calls.map(call => call.code)).toEqual(['newLineInDisplayMode', 'newLineInDisplayMode'])
   expect(calls[0].message).toContain('LaTeX display math')
   expect(createMathRenderer({ strict: true })(source, true)).not.toContain('<mtable')
@@ -1887,6 +1909,66 @@ test.skipIf(!chrome)('aligns cases columns and indents continuation lines in Chr
     await server.stop(true)
   }
 })
+
+test.skipIf(!chrome)('places inner alignment baselines and gathered row edges in Chromium', async () => {
+  const cases = [
+    { env: 'alignedat', pos: 't', rows: String.raw`{1}A&=v\\A&=u` },
+    { env: 'aligned', pos: 'c', rows: String.raw`A&=v\\A&=u` },
+    { env: 'aligned', pos: 'b', rows: String.raw`A&=v\\A&=u` },
+    { env: 'gathered', pos: 't', rows: String.raw`A\\A+A+A` },
+    { env: 'lgathered', pos: 'c', rows: String.raw`A\\A+A+A` },
+    { env: 'rgathered', pos: 'b', rows: String.raw`A\\A+A+A` },
+  ]
+  const css = Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url))
+  const body = cases.map(({ env, pos, rows }, index) =>
+    `<div>${renderMath(String.raw`A\begin{${env}}[${pos}]${rows}\end{${env}}A`, index % 2 === 0)}</div>`).join('')
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: request => new URL(request.url).pathname === '/player.css'
+      ? new Response(css)
+      : new Response(`<!doctype html><meta charset="UTF-8"><link rel="stylesheet" href="/player.css"><main class="slide" style="font-size:28px">${body}</main>`, {
+          headers: { 'Content-Type': 'text/html; charset=utf-8' },
+        }),
+  })
+  const view = new Bun.WebView({ width: 780, height: 640, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await view.navigate(server.url.href)
+    const placements = await view.evaluate<Array<{ y: number, left: number, right: number }[]>>(`[...document.querySelectorAll('main > div')].map(example => {
+      const reference = example.querySelector('semantics > mrow > mi').getBoundingClientRect()
+      const table = example.querySelector('mtable[data-equation-environment]')
+      return [...table.children].map(row => {
+        const cell = row.firstElementChild.querySelector('mrow')
+        const letter = cell.querySelector('mi').getBoundingClientRect()
+        const box = cell.getBoundingClientRect()
+        return { y: letter.y - reference.y, left: box.left, right: box.right }
+      })
+    })`)
+    for (const [index, [first, last]] of placements.entries()) {
+      if (cases[index].pos === 't') {
+        expect(first.y).toBeCloseTo(0)
+        expect(last.y).toBeGreaterThan(10)
+      }
+      else if (cases[index].pos === 'b') {
+        expect(first.y).toBeLessThan(-10)
+        expect(last.y).toBeCloseTo(0)
+      }
+      else {
+        expect(first.y).toBeLessThan(-5)
+        expect(last.y).toBeGreaterThan(5)
+      }
+    }
+    const [shortLeft, longLeft] = placements[4]
+    const [shortRight, longRight] = placements[5]
+    expect(shortLeft.left).toBeCloseTo(longLeft.left)
+    expect(shortLeft.right).toBeLessThan(longLeft.right)
+    expect(shortRight.right).toBeCloseTo(longRight.right)
+    expect(shortRight.left).toBeGreaterThan(longRight.left)
+  }
+  finally {
+    view.close()
+    server.stop(true)
+  }
+}, 45000)
 
 test.skipIf(!chrome)('aligns Mathtools multlined baselines and rows in Chromium', async () => {
   const mark = String.raw`\rule{1px}{1px}`

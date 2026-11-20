@@ -1128,7 +1128,7 @@ math .math-equation-number[data-equation-tag-shifted] > :first-child {
     flex-direction: column;
     math-style: normal;
   }
-  math .math-multlined-bottom {
+  math :is(.math-multlined-bottom, .math-alignment-bottom) {
     display: inline-flex;
     align-items: last baseline;
   }

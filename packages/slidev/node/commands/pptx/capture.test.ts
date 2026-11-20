@@ -409,6 +409,49 @@ $$`)
   }
 }, 45_000)
 
+it.skipIf(!chrome)('exports inner AMS baselines and flush gathered rows as editable PowerPoint equations', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-inner-alignment-'))
+  const canvas = { width: 960, height: 540 }
+  try {
+    const entry = join(root, 'slides.md')
+    await Bun.write(entry, String.raw`# Inner alignments
+
+$$
+X+\begin{alignedat}[t]{1} f&=a\\g&=b\end{alignedat}+Y
+$$
+
+$$
+X+\begin{lgathered}[b] c\\d+e\end{lgathered}+Y
+$$
+
+$$
+X+\begin{rgathered} h\\i+j\end{rgathered}+Y
+$$`)
+    const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
+    const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
+    const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
+    if (status) throw new Error(stderr)
+    const frames: PowerPointFrame[] = []
+    await captureFrames({ root: join(root, 'dist'), executable: chrome!, scale: 1, canvas, editable: true, withClicks: false }, frame => { frames.push(frame) })
+    expect(frames).toHaveLength(1)
+    const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Inner alignments' }))
+    const slide = parts.get('ppt/slides/slide1.xml')?.toString() ?? ''
+    const arrays = [...slide.matchAll(/<m:eqArr>(.*?)<\/m:eqArr>/g)].map(([, array]) => array)
+    expect(arrays).toHaveLength(3)
+    const [top, left, right] = arrays
+    expect(top).toStartWith('<m:eqArrPr><m:baseJc m:val="top"/></m:eqArrPr>')
+    expect(top).toMatch(/>f<\/m:t><\/m:r>.*?>&amp;<\/m:t>.*?>=<\/m:t>/)
+    expect(left).toStartWith('<m:eqArrPr><m:baseJc m:val="bot"/></m:eqArrPr>')
+    expect(left).toMatch(/<m:e><m:r>.*?>&amp;<\/m:t><\/m:r><m:r>.*?>c<\/m:t>/)
+    expect(right).toMatch(/<m:e><m:r>.*?>h<\/m:t><\/m:r><m:r>.*?>&amp;<\/m:t><\/m:r><\/m:e>/)
+    expect(right).not.toContain('<m:eqArrPr>')
+    expect(slide.match(/<a14:m>/g)).toHaveLength(3)
+  }
+  finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}, 45_000)
+
 it.skipIf(!chrome)('exports AMS full-width alignments with editable columns and tags', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-flalign-'))
   const canvas = { width: 960, height: 540 }

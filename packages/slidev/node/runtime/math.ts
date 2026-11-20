@@ -2692,8 +2692,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
       tagState.label = nextTag(display && environment === 'equation')
       return xml`<mrow>${content}</mrow>`
     }
-    if (!spreadEnvironment && !/^(?:[pbBvV]?matrix[*]?|smallmatrix|d?r?cases\*?|align(?:ed|edat|at[*]?|[*])?|gather(?:ed|[*])?|split|d?array|subarray)$/.test(environment))
+    const inner = /^(?:aligned(?:at)?|[lr]?gathered)$/.test(environment)
+    if (!inner && !spreadEnvironment && !/^(?:[pbBvV]?matrix[*]?|smallmatrix|d?r?cases\*?|align(?:at)?[*]?|gather[*]?|split|d?array|subarray)$/.test(environment))
       throw new MathParseError(`Unsupported math environment: ${environment}`)
+    const positionTokens = inner ? rawBracket() : undefined
+    const position = positionTokens === undefined ? 'c' : expandDefinition(positionTokens).join('').trim()
+    if (!/^[tcb]$/.test(position)) throw new MathParseError('Invalid inner alignment position')
     const subarray = environment === 'subarray'
     const smallMatrix = environment === 'smallmatrix'
     const columnArray = subarray || /^(?:d?array)$/.test(environment)
@@ -2709,7 +2713,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (subarray && !/^[lc]?$/.test(columns.trim())) throw new MathParseError('Invalid subarray alignment')
     const compact = subarray || smallMatrix
     const aligned = spreadEnvironment || environment.startsWith('align') || environment === 'split'
-    const gathered = environment.startsWith('gather')
+    const gathered = /^(?:gather[*]?|[lr]?gathered)$/.test(environment)
+    const gatherAlignment = environment === 'lgathered' ? 'left' : environment === 'rgathered' ? 'right' : ''
     const cases = environment.endsWith('cases') || environment.endsWith('cases*')
     const proseCases = cases && environment.endsWith('*')
     const ordinaryCellStyle = environment.startsWith('d') || aligned || gathered ? 0 : 1
@@ -2880,26 +2885,26 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const spread = spreadEnvironment && columnCount > 2 ? environment.startsWith('xalignat') ? 'balanced' : 'full' : ''
     if (spread === 'full') fullWidthAlignment = true
     const displayRows = (tags || hasIntertext || hasArrows || hasContinuations || spread) && rowTags && display && depth === 1
-    const grid = aligned || cases || alignment.length > 0 || displayRows
+    const grid = aligned || cases || alignment.length > 0 || displayRows || gatherAlignment !== '' || position !== 'c'
     const rowRules = rows.reduce((count, entry) => count + entry.before.length, rules.length)
     const columnRules = layout.columns.reduce((count, column) => count + column.before.length, layout.after.length)
     const rectangular = grid || columnArray || tags || rowRules > 0 || rows.some(row => row.columns > row.cells.length)
     if (rectangular && columnCount * Math.max(1, rows.length) > 6000) throw new MathParseError('Math array has too many cells')
     if (rowRules * columnCount + columnRules * rows.length > 24000)
       throw new MathParseError('Math array has too many rules')
-    const alignmentAt = (index: number) => aligned ? (index % 2 ? 'left' : 'right') : alignment[index] ?? alignment.at(-1) ?? (cases ? 'left' : '')
+    const alignmentAt = (index: number) => aligned ? (index % 2 ? 'left' : 'right') : alignment[index] ?? alignment.at(-1) ?? (cases ? 'left' : gatherAlignment)
     const columnAlignment = Array.from({ length: columnCount }, (_, index) => alignmentAt(index) || 'center')
     if (tags) {
       if (leqno) columnAlignment.unshift('left')
       else columnAlignment.push('right')
     }
-    const align = aligned || cases || alignment.length || tags ? ` columnalign="${columnAlignment.join(' ')}"` : ''
+    const align = aligned || cases || alignment.length || tags || gatherAlignment ? ` columnalign="${columnAlignment.join(' ')}"` : ''
     const moreRowSpace = aligned || gathered || cases
     const pad = compact ? '0.06' : ((moreRowSpace ? 0.125 : 0.14) * stretch).toFixed(4).replace(/0+$/, '').replace(/\.$/, '')
     const lines = compact ? '' : ' data-equation-lines'
     const classes = [compact && 'math-compact-array', grid && 'math-alignment-grid', displayRows && 'math-display-grid'].filter(Boolean).join(' ')
     const layoutClass = classes ? ` class="${classes}"` : ''
-    const amsAlignment = (aligned || environment.startsWith('gather')) ? ` data-equation-environment="${environment}"` : ''
+    const amsAlignment = (aligned || gathered) ? ` data-equation-environment="${environment}"` : ''
     const rowSpacing = amsAlignment && (hasIntertext || (hasArrows && displayRows) || hasContinuations || stretch !== 1 || rows.some(row => row.gap !== undefined)) ? ' data-equation-row-spacing' : ''
     const tagPlacement = tags ? ` data-equation-tags="${leqno ? 'left' : 'right'}"` : ''
     const spreadLayout = spread ? ` data-equation-spread="${spread}"` : ''
@@ -2933,7 +2938,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
           if (align) styling.push(`text-align:${align}`)
           if (grid && align !== 'left')
             styling.push(`--math-cell-align:${align === 'right' ? 'end' : 'center'}`)
-          if (aligned || cases || displayRows) {
+          if (aligned || cases || displayRows || inner && gathered && grid) {
             styling.push('padding-inline:0')
             if (spread) styling.push(`grid-column:${index + 2 + Math.floor(index / 2)}`)
             else if ((aligned && !paired && index > 0 && index % 2 === 0) || (cases && index > 0))
@@ -2971,15 +2976,18 @@ export function renderMath(source: string, display = false, configured: MathMacr
         const continuation = entry.flushAbove || entry.flushBelow ? ' data-equation-continuation' : ''
         return `${prose(rowIndex)}<mtr${arrow}${continuation}>${leqno ? cell : ''}${content}${leqno ? '' : cell}</mtr>`
       }).join('') + prose(rows.length)
-      const matrix = `<mtable${lines} data-math-array${align}${layoutClass}${gridLayout}${amsAlignment}${rowSpacing}>${markup}</mtable>`
+      const baseline = position === 't' ? ' align="baseline 1"' : position === 'b' ? ' align="baseline -1"' : ''
+      const matrix = `<mtable${lines} data-math-array${align}${layoutClass}${gridLayout}${amsAlignment}${rowSpacing}${baseline}>${markup}</mtable>`
       const table = compact ? mathSize(tableCellStyle, matrix) : matrix
       if (displayRows) return table
-      // Center the whole grid on the math axis beside surrounding inline atoms.
-      const centered = grid && (cases || style !== 0)
-        ? `<mtable class="math-alignment-axis"><mtr><mtd>${table}</mtd></mtr></mtable>`
-        : table
+      // An inline grid's natural baseline comes from its first row. Use a
+      // MathML table or the grid's last baseline for the other placements.
+      const placement = position === 'b' ? `<mrow class="math-alignment-bottom">${table}</mrow>`
+        : position === 'c' && grid && (inner || cases || style !== 0)
+          ? `<mtable class="math-alignment-axis"><mtr><mtd>${table}</mtd></mtr></mtable>`
+          : table
       const caseBrace = cases ? ` data-math-cases="${left ? 'left' : 'right'}"` : ''
-      return `<mrow${caseBrace}>${fence(left)}${centered}${fence(right)}</mrow>`
+      return `<mrow${caseBrace}>${fence(left)}${placement}${fence(right)}</mrow>`
     }
   }
 
