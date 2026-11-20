@@ -27,14 +27,37 @@ test('schedules Gantt task dependencies and excludes nonworking days', () => {
   const schedule = scheduleGantt(project)
   expect(schedule?.sections).toEqual(['', 'Build', 'Review'])
   const tasks = schedule?.tasks.map(task => [task.id, new Date(task.start).toISOString().slice(0, 10), new Date(task.end).toISOString().slice(0, 10)])
-  expect(tasks).toEqual([['first', '2026-03-06', '2026-03-07'], ['fixes', '2026-03-07', '2026-03-11'],
-    ['window', '2026-03-07', '2026-03-13'], ['ship', '2026-03-13', '2026-03-13']])
+  expect(tasks).toEqual([['first', '2026-03-06', '2026-03-09'], ['fixes', '2026-03-09', '2026-03-11'],
+    ['window', '2026-03-09', '2026-03-13'], ['ship', '2026-03-13', '2026-03-13']])
   const svg = mermaid(project, 'release-gantt')
   expect(svg).toContain('aria-label="Release plan"')
   expect(svg).toContain('diagram-gantt-milestone-shape')
   expect(svg?.match(/class="diagram-gantt-excluded"/g)).toHaveLength(2)
-  expect(svg).toContain('data-task-id="fixes" data-task-start="2026-03-07T00:00:00.000Z"')
+  expect(svg).toContain('data-task-id="fixes" data-task-start="2026-03-09T00:00:00.000Z"')
+  expect(svg).toContain('data-task-bar-end="2026-03-07T00:00:00.000Z"')
   expect(svg).not.toContain('diagram-gantt-today')
+})
+
+test('honors the custom work week, split holidays, and inclusion overrides in Gantt imports', () => {
+  const source = `gantt
+dateFormat DD-MM-YYYY
+weekend friday
+excludes weekends
+excludes 08-03-2026 %% Team holiday
+includes 07-03-2026
+Draft :draft, 05-03-2026, 1d
+Review :review, after draft, 2d
+Deadline :deadline, 05-03-2026, 08-03-2026
+Follow-up window :window, after draft, until followup
+Follow-up :milestone, followup, 10-03-2026, 0d`
+  const march = (day: number) => Date.UTC(2026, 2, day)
+  expect(scheduleGantt(source)?.tasks.map(({ id, start, end, barEnd }) => [id, start, end, barEnd])).toEqual([
+    ['draft', march(5), march(7), march(6)],
+    ['review', march(7), march(10), undefined],
+    ['deadline', march(5), march(8), undefined],
+    ['window', march(7), march(10), undefined],
+    ['followup', march(10), march(10), undefined],
+  ])
 })
 
 test('uses strict input dates, validates dependencies and supports timezone offsets', () => {
@@ -55,8 +78,8 @@ Ship :after review, 1d
 click task2 href "#notes"`
   const schedule = scheduleGantt(source)!
   expect(schedule.tasks.map(task => [task.id, task.start, task.end])).toEqual([
-    ['task1', Date.UTC(2026, 2, 6), Date.UTC(2026, 2, 7)],
-    ['review', Date.UTC(2026, 2, 7), Date.UTC(2026, 2, 9)],
+    ['task1', Date.UTC(2026, 2, 6), Date.UTC(2026, 2, 8)],
+    ['review', Date.UTC(2026, 2, 8), Date.UTC(2026, 2, 9)],
     ['task2', Date.UTC(2026, 2, 9), Date.UTC(2026, 2, 10)],
   ])
   expect(mermaid(source, 'gantt', { securityLevel: 'loose' })).toMatch(/href="#notes"[^>]*><g[^>]*data-task-id="task2"/)

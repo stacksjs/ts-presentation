@@ -206,6 +206,10 @@ speaker notes. Each hook can be asynchronous.
   dependencies, milestones, today-marker styling, and chart spacing. Enable
   imported `href` and `call` interactions with `securityLevel: loose` in diagram
   settings. An empty callback argument list passes the task ID.
+  Weekends and holidays extend duration-based tasks. A trailing run of excluded
+  days leaves a gap between the bar and the next dependent task. Use
+  `weekend friday` for Friday and Saturday weekends and `includes` to restore
+  individual dates.
   Imported GitGraph diagrams support branch ordering, checkout, merges, tags,
   cherry-picking, horizontal or vertical lanes, `rotateCommitLabel`, and the
   diagram's branch, commit, and tag theme variables.

@@ -139,7 +139,7 @@ function parseGantt(source: string, interactionsEnabled = false): GanttChartOpti
         if (task.id) Object.assign(task, interactions.get(task.id))
   }
   return { sections, title: chart.title, accessibleTitle: chart.accessibleTitle, description: chart.description, dateFormat, axisFormat, tickInterval: ticks,
-    weekday, weekend, topAxis, todayMarker, todayMarkerStyle, inclusiveEndDates, excludes: exclusions, includes: inclusions }
+    weekday, weekend, topAxis, todayMarker, todayMarkerStyle, inclusiveEndDates, excludes: exclusions, includes: inclusions, exclusionMode: 'whole-days' }
 }
 
 export function scheduleGantt(source: string, now: number = Date.now()): GanttSchedule | undefined {
