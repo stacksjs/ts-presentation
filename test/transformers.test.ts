@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createDeckCompiler } from '../packages/slidev/node/runtime/loader.ts'
+import { parseDeck } from '../packages/slidev/node/runtime/index.ts'
 import { SlideMarkdownEdits } from '../packages/slidev/node/runtime/markdown-edits.ts'
 
 test('applies Markdown replacements at committed offsets and keeps insertions on their original side', () => {
@@ -85,6 +86,51 @@ test('loads Slidev-style Markdown and codeblock transformers with ordered hooks 
     expect(updated.html).toContain('changed deck-pre')
     expect(updated.live?.revision).not.toBe(first.live?.revision)
     expect(updated.live?.frame).toBe(first.live?.frame)
+  }
+  finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test('keeps nested fence metadata, literal code and slide boundaries through the STX render pipeline', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'presentation-nested-fences-'))
+  const entry = join(directory, 'slides.md')
+  try {
+    const source = [
+      '---', 'layout: two-cols', '---', '',
+      '- ~~~~snippet label=list',
+      '  # Code heading', '  ![mock](/ignored.png)', '  <Badge label="Literal" /> $x$', '  <<< absent.ts', '  ~~~', '  ~~~~~', '',
+      '17. Numbered item', '',
+      '\t> ````snippet\tlabel=quote', '\t> second', '\t> ````', '',
+      '# Real heading', '', '<Badge label="After fence" />', '', '::right::', '', '<Badge label="Rendered" />', '',
+      '- Continue', '', '  ~~~snippet label=implicit', '  third', '',
+      '---', '', '# Next slide', '', 'Outside math $y$.',
+    ].join('\n')
+    const deck = parseDeck(source)
+    expect(deck.slides.map(({ title, images }) => [title, images])).toEqual([
+      ['Real heading', []], ['Next slide', []],
+    ])
+    await Promise.all([
+      Bun.write(entry, source),
+      Bun.write(join(directory, 'components/Badge.stx'), '<strong class="badge">{{ props.label }}</strong>'),
+      Bun.write(join(directory, 'setup/transformers.ts'), `export default () => ({
+        codeblocks: [({info, fence, code}) => {
+          if (!info.startsWith('snippet')) return
+          const label = info.split(/\\s+/)[1].slice('label='.length)
+          return '<figure data-nested="' + label + ':' + fence + '">' + Bun.escapeHTML(code.trim()) + '</figure>'
+        }]
+      })`),
+    ])
+    const { html } = await createDeckCompiler(entry)()
+    expect(html).toMatch(/<li>\s*<figure data-nested="list:4"># Code heading/)
+    expect(html).toContain('&lt;Badge label=&quot;Literal&quot; /&gt; $x$\n&lt;&lt;&lt; absent.ts\n~~~</figure>')
+    expect(html).toMatch(/<blockquote>\s*<figure data-nested="quote:4">second<\/figure>/)
+    expect(html).toContain('<strong class="badge">After fence</strong>')
+    expect(html).toContain('<div class="col-right"><p><strong class="badge">Rendered</strong></p>')
+    expect(html).toContain('<figure data-nested="implicit:3">third</figure>')
+    expect(html).toContain('aria-label="Next slide"')
+    expect(html).toContain('<mi>y</mi>')
+    expect(html).not.toContain('tp-fence-')
   }
   finally {
     await rm(directory, { recursive: true, force: true })

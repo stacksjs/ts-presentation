@@ -200,7 +200,6 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     const prepared = prepareMarkdown(content, {
       renderMath,
       mathEnabled: (deck.headmatter?.math ?? deck.headmatter?.katex) !== false,
-      nestedFences: transformFences,
       registerFence(fence) {
         if (!transformFences && !fence.diagram && !fence.code) return
         const marker = fencePrefix + codeFences.size

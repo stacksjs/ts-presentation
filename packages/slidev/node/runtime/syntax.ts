@@ -6,9 +6,9 @@ import { readFenceOptions } from './fence-options.ts'
 import type { CodeBlockInfo } from './code-blocks.ts'
 import { codeTabLabel, decoratedCode, parseCodeInfo } from './code-blocks.ts'
 import { escapeHtml } from './html.ts'
+import type { FenceOpening } from '../../../parser/src/markdown-fences.ts'
+import { isFenceClose, MarkdownFenceReader, readFenceOpening } from '../../../parser/src/markdown-fences.ts'
 
-const fenceStart = /^ {0,3}(`{3,}|~{3,})(.*)$/
-const quotePrefix = /^(?: {0,3}>[ \t]?)+/
 const inlineCode = /^`+/
 const protectedHtml = /^<(pre|code|script|style)(?:\s[^>]*)?>[\s\S]*?<\/\1\s*>/i
 const htmlTag = /^<(?:[^>"']|"[^"]*"|'[^']*')+>/
@@ -43,26 +43,23 @@ export function splitSlots(source: string): Record<string, string> {
   const slots: Record<string, string> = Object.create(null)
   let name = 'default'
   let lines: string[] = []
-  let fence = ''
+  const fences = new MarkdownFenceReader()
   let raw = ''
   function save(): void {
     slots[name] = name in slots ? `${slots[name]}\n\n${lines.join('\n')}` : lines.join('\n')
   }
   for (const line of source.split('\n')) {
-    const marker = fenceStart.exec(line)
-    if (!raw && marker) {
-      if (!fence) fence = marker[1]
-      else if (marker[1][0] === fence[0] && marker[1].length >= fence.length && !marker[2].trim()) fence = ''
-    }
-    if (!fence && !raw) {
+    const fenced = !raw && fences.read(line)
+    if (!fenced && !raw) {
       if (/^ {0,3}<!--/.test(line)) raw = 'comment'
       else raw = /^ {0,3}<(pre|code|script|style|textarea)(?:[\s>])/i.exec(line)?.[1].toLowerCase() ?? ''
     }
-    const slot = !fence && !raw && slotMarker.exec(line)
+    const slot = !fenced && !raw && slotMarker.exec(line)
     if (slot) {
       save()
       name = slot[1]
       lines = []
+      fences.reset()
     }
     else lines.push(line)
     if (raw === 'comment' ? line.includes('-->') : raw && new RegExp(`</${raw}\\s*>`, 'i').test(line)) raw = ''
@@ -80,7 +77,6 @@ interface MarkdownSyntax {
   renderMath?: (body: string, display: boolean) => string
   mathEnabled?: boolean
   registerFence?: (fence: MarkdownFence) => string | undefined
-  nestedFences?: boolean
   codeGroups?: { nextId: () => string, comark: boolean }
 }
 
@@ -91,21 +87,19 @@ export interface MarkdownFence {
   diagram?: { type: 'mermaid' | 'plantuml', options: Record<string, FenceScalar> }
 }
 
-interface GroupFence { opening: RegExpExecArray, start: number, end: number, label: string }
+interface GroupFence { opening: FenceOpening, start: number, end: number, label: string }
 
 function readCodeGroup(lines: string[], start: number, terminator: RegExp): { end: number, tabs: GroupFence[] } | undefined {
   const tabs: GroupFence[] = []
   for (let at = start + 1; at < lines.length; at++) {
     if (!lines[at].trim()) continue
     if (terminator.test(lines[at])) return tabs.length ? { end: at, tabs } : undefined
-    const opening = fenceStart.exec(lines[at])
-    const info = opening && parseCodeInfo(opening[2])
+    const opening = readFenceOpening(lines[at])
+    const info = opening && parseCodeInfo(opening.info)
     if (!opening || !info || tabs.length >= 100) return
     const start = at
-    const marker = opening[1]
     for (at++; at < lines.length; at++) {
-      const close = fenceStart.exec(lines[at])
-      if (close && close[1][0] === marker[0] && close[1].length >= marker.length && !close[2].trim()) break
+      if (isFenceClose(lines[at], opening.marker)) break
     }
     if (at === lines.length) return
     tabs.push({ opening, start, end: at, label: codeTabLabel(info) })
@@ -181,9 +175,8 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
 
   const lines = source.split('\n')
   const output: string[] = []
-  function renderFenceStart(line: string, opening: RegExpExecArray): string {
-    const [, marker, info] = opening
-    const prefix = line.slice(0, line.indexOf(marker)) + marker
+  function renderFenceStart(line: string, opening: FenceOpening): string {
+    const { marker, info, infoStart } = opening
     const [, type, diagramInfo] = /^\s*(mermaid|plantuml)\s+(\{.*\})\s*$/i.exec(info) ?? []
     const diagram = diagramInfo && readFenceOptions(diagramInfo)
     const registered = syntax.registerFence?.({
@@ -192,28 +185,15 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
       code: diagram ? undefined : decoratedCode(info),
       diagram: diagram ? { type: type.toLowerCase() as 'mermaid' | 'plantuml', options: diagram } : undefined,
     })
-    return registered ? prefix + registered : line
+    return registered ? line.slice(0, infoStart) + registered : line
   }
-  let fence = ''
-  let fenceQuotes = 0
+  const fences = new MarkdownFenceReader()
   let htmlCode = ''
   let comment = false
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index]
-    const quote = syntax.nestedFences ? quotePrefix.exec(line)?.[0] ?? '' : ''
-    const depth = quote ? quote.split('>').length - 1 : 0
-    if (fenceQuotes > depth) { fence = ''; fenceQuotes = 0 }
-    const opening = fenceStart.exec(line.slice(quote.length))
-    if (!fence && !htmlCode && (comment || /^ {0,3}<!--/.test(line))) {
+    if (comment) {
       comment = !line.includes('-->')
-      output.push(line)
-      continue
-    }
-    if (fence) {
-      if (opening && depth === fenceQuotes && opening[1][0] === fence[0] && opening[1].length >= fence.length && !opening[2].trim()) {
-        fence = ''
-        fenceQuotes = 0
-      }
       output.push(line)
       continue
     }
@@ -222,10 +202,14 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
       output.push(line)
       continue
     }
-    if (opening) {
-      fence = opening[1]
-      fenceQuotes = depth
-      output.push(renderFenceStart(line, opening))
+    const fenced = fences.read(line)
+    if (fenced) {
+      output.push(fenced.kind === 'opening' ? renderFenceStart(line, fenced.opening) : line)
+      continue
+    }
+    if (/^ {0,3}<!--/.test(line)) {
+      comment = !line.includes('-->')
+      output.push(line)
       continue
     }
     if (syntax.codeGroups) {
@@ -256,7 +240,7 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
       let end = index
       while (!lines[end].trimEnd().endsWith(closing)) {
         const next = lines[++end]
-        if (next === undefined || fenceStart.test(next) || bareDisplay.test(next) || /^ {0,3}<!--/.test(next)) {
+        if (next === undefined || readFenceOpening(next) || bareDisplay.test(next) || /^ {0,3}<!--/.test(next)) {
           end = -1
           break
         }
@@ -277,8 +261,8 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
       const options = parseEquationOptions(display[2])
       const ends = (value: string) => value.trimEnd().endsWith(delimiter)
       let close = index + 1
-      while (close < lines.length && !fenceStart.test(lines[close]) && !ends(lines[close])) close++
-      if (close < lines.length && ends(lines[close]) && !fenceStart.test(lines[close])) {
+      while (close < lines.length && !readFenceOpening(lines[close]) && !ends(lines[close])) close++
+      if (close < lines.length && ends(lines[close]) && !readFenceOpening(lines[close])) {
         const last = lines[close].trimEnd().slice(0, -2)
         const body = [options ? '' : display[2], ...lines.slice(index + 1, close), last].join('\n').trim()
         if (body) {

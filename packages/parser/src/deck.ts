@@ -1,4 +1,5 @@
 import { plainMarkdown } from './plain-markdown.ts'
+import { isFenceClose, MarkdownFenceReader, readFenceOpening } from './markdown-fences.ts'
 // Adapted from Slidev's MIT-licensed Markdown parser. See licenses/Slidev-MIT.txt.
 export interface Slide {
   title: string
@@ -37,12 +38,10 @@ export type PreparserSetup = (context: PreparserContext) => MaybePromise<Prepars
 
 export function definePreparserSetup(setup: PreparserSetup): PreparserSetup { return setup }
 
-const codeFence = /^ {0,3}(`{3,}|~{3,})(.*)$/
 const keyStart = /^(?:["'][^"']+["']|[\w-]+)\s*:(?:\s|$)/
 const imageExtension = /\.(?:png|jpe?g|gif|svg|webp|avif|ico|bmp|tiff?)(?:[?#].*)?$/i
 
 interface MarkdownScan {
-  fence: string
   commentStart: number
   lastComment?: { start: number, end: number }
 }
@@ -51,24 +50,8 @@ function splitLines(markdown: string): string[] {
   return markdown.replace(/^\uFEFF/, '').split(/\r?\n/)
 }
 
-function fenceEnds(line: string, marker: string): boolean {
-  const next = codeFence.exec(line)
-  return !!next && next[1][0] === marker[0] && next[1].length >= marker.length && !next[2].trim()
-}
-
 function scanLine(line: string, offset: number, scan: MarkdownScan): string {
-  if (scan.fence) {
-    if (fenceEnds(line, scan.fence)) scan.fence = ''
-    return ''
-  }
-  if (scan.commentStart === -1) {
-    const opening = codeFence.exec(line)
-    if (opening) {
-      scan.fence = opening[1]
-      return ''
-    }
-    if (!line.includes('<!--')) return line
-  }
+  if (scan.commentStart === -1 && !line.includes('<!--')) return line
   let visible = ''
   let cursor = 0
   while (cursor < line.length) {
@@ -91,9 +74,10 @@ function scanLine(line: string, offset: number, scan: MarkdownScan): string {
 }
 
 function visibleMarkdown(content: string): string {
-  if (!/<!--|^ {0,3}(?:`{3,}|~{3,})/m.test(content)) return content
-  const scan: MarkdownScan = { fence: '', commentStart: -1 }
-  return content.split('\n').map(line => scanLine(line, 0, scan)).join('\n')
+  if (!/<!--|\x60{3,}|~{3,}/.test(content)) return content
+  const fences = new MarkdownFenceReader()
+  const scan: MarkdownScan = { commentStart: -1 }
+  return content.split('\n').map(line => scan.commentStart === -1 && fences.read(line) ? '' : scanLine(line, 0, scan)).join('\n')
 }
 
 function imageReferences(visible: string, frontmatter: Frontmatter): string[] {
@@ -152,10 +136,10 @@ function dashedMatter(lines: string[], index: number): Matter | undefined {
 }
 
 function fencedMatter(lines: string[], index: number): Matter | undefined {
-  const opening = codeFence.exec(lines[index] ?? '')
-  if (!opening || !/^ya?ml$/i.test(opening[2].trim())) return
+  const opening = readFenceOpening(lines[index] ?? '')
+  if (!opening || !/^ya?ml$/i.test(opening.info.trim())) return
   let end = index + 1
-  while (end < lines.length && !fenceEnds(lines[end], opening[1])) end++
+  while (end < lines.length && !isFenceClose(lines[end], opening.marker)) end++
   if (end < lines.length) return yamlMatter(lines, index, end)
 }
 
@@ -190,7 +174,8 @@ export function slideSourceOf(slide: Slide): SlideSource | undefined {
 
 function splitSlides(lines: string[]): SlideDraft[] {
   const drafts: SlideDraft[] = []
-  const scan: MarkdownScan = { fence: '', commentStart: -1 }
+  const fences = new MarkdownFenceReader()
+  const scan: MarkdownScan = { commentStart: -1 }
   let start = 0
   let matter: Matter | undefined
   let visible: string[] | undefined
@@ -215,12 +200,14 @@ function splitSlides(lines: string[]): SlideDraft[] {
 
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index]
-    if (!scan.fence && scan.commentStart === -1 && line.startsWith('---')) {
+    const fenced = scan.commentStart === -1 && !!fences.read(line)
+    if (!fenced && scan.commentStart === -1 && line.startsWith('---')) {
       append(index)
       matter = dashedMatter(lines, index)
       if (matter) index = matter.end
       start = index + 1
       scan.lastComment = undefined
+      fences.reset()
       visible = undefined
       offset = 0
       hasContent = false
@@ -231,11 +218,12 @@ function splitSlides(lines: string[]): SlideDraft[] {
         index = matter.end
         start = index + 1
         offset = 0
+        fences.reset()
         continue
       }
       hasContent = true
     }
-    const text = scanLine(line, offset, scan)
+    const text = fenced ? '' : scanLine(line, offset, scan)
     if (text !== line) visible ??= lines.slice(start, index)
     visible?.push(text)
     offset += line.length + 1

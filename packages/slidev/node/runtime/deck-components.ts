@@ -1,6 +1,7 @@
 import { defaultConfig, renderComponentWithSlot } from '@stacksjs/stx'
 import { readdir, realpath } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
+import { MarkdownFenceReader } from '../../../parser/src/markdown-fences.ts'
 import { within } from './assets.ts'
 import { escapeHtml, readBoundValue, unescapeHtml } from './html.ts'
 import { htmlTag } from './slide-html.ts'
@@ -58,24 +59,49 @@ const builtins = new Set([
   'toc', 'totals', 'transform', 'tweet', 'vafter', 'vclick', 'vclickgap', 'vclickhide', 'vclicks', 'vswitch', 'youtube',
 ])
 
+function* fencedRanges(source: string): Generator<{ start: number, end: number }> {
+  if (!/\x60{3,}|~{3,}/.test(source)) return
+  const fences = new MarkdownFenceReader()
+  let start: number | undefined
+  let rawEnd: RegExp | undefined
+  let offset = 0
+  for (const line of source.split('\n')) {
+    if (!rawEnd && fences.read(line)) start ??= offset
+    else {
+      if (start !== undefined) yield { start, end: offset }
+      start = undefined
+      if (!rawEnd) {
+        const tag = /^ {0,3}<(pre|code|script|style|textarea)(?:[\s>])/i.exec(line)?.[1]
+        if (/^ {0,3}<!--/.test(line)) rawEnd = /-->/
+        else if (tag) rawEnd = new RegExp(`</${tag}\\s*>`, 'i')
+      }
+      if (rawEnd?.test(line)) rawEnd = undefined
+    }
+    offset += line.length + 1
+  }
+  if (start !== undefined) yield { start, end: source.length }
+}
+
 function* scanTags(source: string): Generator<Tag> {
-  const nonTags = /^ {0,3}(`{3,}|~{3,})[^\r\n]*|<!--[\s\S]*?(?:-->|$)|`+/
+  const nonTags = /<!--[\s\S]*?(?:-->|$)|`+/
   const tokens = new RegExp(`${nonTags.source}|${htmlTag.source}`, 'gim')
+  const ranges = fencedRanges(source)
+  let range = ranges.next().value
   for (let token = tokens.exec(source); token; token = tokens.exec(source)) {
-    const [markup, fence, closing, name, attributes] = token
-    if (fence) {
-      const end = new RegExp(`^ {0,3}${fence[0]}{${fence.length},}[^\\S\\r\\n]*\\r?$`, 'gm')
-      end.lastIndex = tokens.lastIndex
-      tokens.lastIndex = end.exec(source) ? end.lastIndex : source.length
+    while (range && range.end <= token.index) range = ranges.next().value
+    if (range && range.start <= token.index) {
+      tokens.lastIndex = range.end
       continue
     }
+    const [markup, closing, name, attributes] = token
     let backslashes = 0
     for (let cursor = token.index - 1; source[cursor] === '\\'; cursor--) backslashes++
     if (backslashes % 2) continue
     if (markup[0] === '`') {
       const end = new RegExp(`(?<!\`)${markup}(?!\`)`, 'g')
       end.lastIndex = tokens.lastIndex
-      if (end.exec(source)) tokens.lastIndex = end.lastIndex
+      const close = end.exec(source)
+      if (close && (!range || close.index < range.start)) tokens.lastIndex = end.lastIndex
       continue
     }
     if (!name) continue

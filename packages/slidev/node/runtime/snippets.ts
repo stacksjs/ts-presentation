@@ -1,5 +1,6 @@
 import { realpath } from 'node:fs/promises'
 import { dirname, extname, resolve } from 'node:path'
+import { MarkdownFenceReader } from '../../../parser/src/markdown-fences.ts'
 import { within } from './assets.ts'
 
 interface Snippet {
@@ -12,7 +13,7 @@ interface Snippet {
 }
 
 const directive = /^([ \t]*(?:>\s*)*)<<<[ \t]*(?:"([^"]+)"|'([^']+)'|([^\s{]+))(.*)$/
-const fence = /^([ \t]*(?:>\s*)*)(`{3,}|~{3,})(.*)$/
+const frameFence = /^[ \t]*(?:>\s*)*(`{3,}|~{3,})(.*)$/
 const regionMarker = /^\s*(?:(?:\/\/|<!--|\/\*|--|::|@?REM|\(\*)\s*#?|#(?:pragma\s+)?)\s*(end\s*)?region\b\s*(.*?)(?:\s*(?:-->|\*\/|\*\)))?\s*$/i
 
 function extractRegion(source: string, name: string): string {
@@ -76,6 +77,7 @@ export async function expandSnippets(
 ): Promise<string> {
   if (!source.includes('<<<')) return source
   const rows: string[] = []
+  const fences = new MarkdownFenceReader()
   let outer = ''
   let inner = ''
   let magic = false
@@ -83,27 +85,34 @@ export async function expandSnippets(
   let comment = false
   for (const row of source.split('\n')) {
     const line = row.trimStart()
-    const opening = fence.exec(row)
     if (rawHtml || comment) {
       rows.push(row)
       if (rawHtml && new RegExp(`</${rawHtml}(?:\\s|>)`, 'i').test(row)) rawHtml = ''
       if (comment && row.includes('-->')) comment = false
       continue
     }
-    if (opening) {
-      const [, , marker, info] = opening
-      if (!outer) {
-        outer = marker
-        magic = /^(?:md|markdown)\s+magic-move\b/.test(info.trim())
-      }
-      else if (inner) {
-        if (inner[0] === marker[0] && marker.length >= inner.length && !info.trim()) inner = ''
-      }
-      else if (outer[0] === marker[0] && marker.length >= outer.length && !info.trim()) {
-        outer = ''
-        magic = false
-      }
-      else if (magic) inner = marker
+    const fenced = fences.read(row)
+    if (!fenced || fenced.kind === 'closing') {
+      outer = ''
+      inner = ''
+      magic = false
+    }
+    if (fenced?.kind === 'opening') {
+      outer = fenced.opening.marker
+      magic = /^(?:md|markdown)\s+magic-move\b/.test(fenced.opening.info.trim())
+      inner = ''
+      rows.push(row)
+      continue
+    }
+    if (fenced?.kind === 'closing' || (fenced && !magic)) {
+      rows.push(row)
+      continue
+    }
+    const frame = magic && frameFence.exec(row)
+    if (frame) {
+      const [, marker, info] = frame
+      if (!inner) inner = marker
+      else if (marker.startsWith(inner) && !info.trim()) inner = ''
       rows.push(row)
       continue
     }
