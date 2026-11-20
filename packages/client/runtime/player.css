@@ -723,9 +723,9 @@ v-switch { display: block; }
 .slide-diagram .diagram-pie-percent { fill: #192333; font-weight: 700; }
 .slide-diagram .diagram-gantt-band { fill: var(--diagram-callout, #273a49); opacity: 0.5; }
 .slide-diagram .diagram-gantt-excluded { fill: var(--diagram-stroke, #7893aa); opacity: 0.13; }
-.slide-diagram .diagram-gantt-grid { stroke: var(--diagram-stroke, #7893aa); opacity: 0.4; }
+.slide-diagram :is(.diagram-gantt-grid, .diagram-gantt-axis-line) { stroke: var(--diagram-stroke, #7893aa); opacity: 0.4; }
 .slide-diagram :is(.diagram-gantt-section-label, .diagram-git-branch-label) { font-weight: 650; }
-.slide-diagram :is(.diagram-gantt-tick, .diagram-git-label, .diagram-git-tag) { font-size: 12px; }
+.slide-diagram :is(.diagram-git-label, .diagram-git-tag) { font-size: 12px; }
 .slide-diagram :is(.diagram-gantt-bar, .diagram-gantt-milestone-shape) { fill: #689ad1; }
 .slide-diagram .diagram-gantt-done .diagram-gantt-bar { fill: #6cb39e; }
 .slide-diagram .diagram-gantt-active .diagram-gantt-bar { stroke: var(--diagram-ink, #f9f2ed); stroke-width: 2; }

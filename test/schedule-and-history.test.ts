@@ -663,7 +663,7 @@ section Ship
   expect(svg).toMatch(/class="diagram-gantt-section-label"[^>]*style="font-size:20px;"/)
   expect(svg).toContain('style="fill:#4a6072;opacity:0.2"')
   expect(svg).toContain('style="fill:#a06528;opacity:0.2"')
-  expect(svg).toMatch(/class="diagram-gantt-grid"[^>]*d="M[\d.]+ 14V/)
+  expect(svg).toMatch(/<line class="diagram-gantt-grid"[^>]*y1="14"/)
   const height = (html: string) => Number(/viewBox="0 0 460 ([\d.]+)/.exec(html)?.[1])
   expect(height(svg)).toBeLessThan(height(mermaid(source.replace('    displayMode: compact\n', ''), 'ordinary-gantt')!))
 })
@@ -1155,6 +1155,64 @@ test.skipIf(!chrome)('keeps full Gantt labels inside the chart without compact r
       expect(chart.fits).toBe(true)
       expect(chart.separate).toBe(true)
     }
+  }
+  finally {
+    browser.close()
+    await server.stop(true)
+  }
+}, 45_000)
+
+test.skipIf(!chrome)('keeps dense Gantt axes readable and applies imported grid styling in Chromium', async () => {
+  const source = `gantt
+topAxis
+tickInterval 1day
+todayMarker off
+Release :release, 2025-12-26, 2026-01-05`
+  const gantt = { useWidth: 340, useMaxWidth: false }
+  const styled = mermaid(source, 'styled-axis', {
+    gantt, theme: 'forest',
+    themeCSS: `
+      .grid path.domain { stroke-width: 0; }
+      .grid .tick line { stroke: #005577; }
+      .grid .tick text { fill: #772211; }
+    `,
+  })
+  const plain = mermaid(source, 'default-axis', { gantt, theme: 'forest' })
+  const css = await Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url)).text()
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response(`<!doctype html><meta charset="utf-8"><style>${css}</style>${styled}${plain}`, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    }),
+  })
+  const browser = new Bun.WebView({ backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await browser.navigate(server.url.href)
+    const axes = await browser.evaluate<{ ticks: number, labels: string[], fit: boolean, paint: string[] }[]>(`[...document.querySelectorAll('.diagram-gantt-axis')].map(axis => {
+      const captions = [...axis.querySelectorAll('text')]
+      const boxes = captions.map(caption => caption.getBBox())
+      const width = axis.ownerSVGElement.viewBox.baseVal.width
+      return {
+        ticks: axis.querySelectorAll('line').length,
+        labels: captions.map(caption => caption.textContent),
+        fit: boxes.every((box, i) => box.x >= 0 && box.x + box.width <= width &&
+          (!i || boxes[i - 1].x + boxes[i - 1].width <= box.x)),
+        paint: [getComputedStyle(axis.querySelector('path')).strokeWidth,
+          getComputedStyle(axis.querySelector('line')).stroke, getComputedStyle(captions[0]).fill],
+      }
+    })`)
+    expect(axes).toHaveLength(4)
+    for (const axis of axes) {
+      expect(axis.ticks).toBe(11)
+      expect(axis.labels.length).toBeLessThan(axis.ticks)
+      expect(axis.labels[0]).toBe('2025-12-26')
+      expect(axis.labels.at(-1)).toBe('2026-01-05')
+      expect(axis.fit).toBe(true)
+    }
+    expect(axes[0]).toEqual(axes[1])
+    expect(axes[0].paint).toEqual(['0px', 'rgb(0, 85, 119)', 'rgb(119, 34, 17)'])
+    expect(axes[2].paint[0]).toBe('1px')
+    expect(axes[2].paint[1]).not.toBe(axes[0].paint[1])
   }
   finally {
     browser.close()

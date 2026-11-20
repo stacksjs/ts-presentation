@@ -1,6 +1,9 @@
 const ganttShape = ':is(.diagram-gantt-bar,.diagram-gantt-milestone-shape,.diagram-gantt-reference)'
 const ganttText = ':is(.diagram-gantt-label,.diagram-gantt-reference-label)'
 const ganttSelectors: Readonly<Record<string, string>> = {
+  grid: '.diagram-gantt-axis',
+  tick: '.diagram-gantt-tick-group',
+  domain: '.diagram-gantt-axis-line',
   task: ganttShape,
   taskText: '.diagram-gantt-label[text-anchor="middle"]',
   taskTextOutsideLeft: '.diagram-gantt-label[text-anchor="end"]',
