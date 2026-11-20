@@ -331,7 +331,8 @@ test('builds GitGraph branch history with merge parents, tags, and cherry-picks'
   expect(graph?.commits[4].tags).toEqual(['v1.0', 'stable'])
   const svg = mermaid(history, 'release-history', { gitGraph: { showCommitLabel: false } })
   expect(svg).toContain('data-commit-id="release" data-parent-ids="c4, work; review"')
-  expect(svg).toContain('v1.0 · stable')
+  expect(svg).toContain('>v1.0</tspan>')
+  expect(svg).toContain('>stable</tspan>')
   expect(svg).not.toContain('class="diagram-git-label"')
 })
 
@@ -836,16 +837,17 @@ test('imports Gantt callback commands and applies security settings', () => {
 
 const chrome = await findChrome()
 
-test.skipIf(!chrome)('fits complete imported GitGraph labels in every orientation in Chromium', async () => {
+test.skipIf(!chrome)('fits complete GitGraph labels and separate tag stacks in every orientation in Chromium', async () => {
   const branch = 'feature/review-release-candidate-across-all-supported-platforms'
   const commit = 'reviewed-and-approved-release-candidate-for-production'
   const tag = 'release-candidate-build-with-integration-verification'
   const graphs = ['LR', 'TB', 'BT'].flatMap(direction => [true, false].map((rotateCommitLabel) => {
     const source = [
       `gitGraph ${direction}:`,
-      'commit id:"root"',
+      'commit id:"root" tag:"preview" tag:"signed<br>and tested" tag:"verified"',
+      'commit id:"second" tag:"nightly"',
       `branch "${branch}"`,
-      `commit id:"${commit}" tag:"${tag}"`,
+      `commit id:"${commit}" tag:"${tag}" tag:"stable"`,
     ].join('\n')
     return mermaid(source, `long-${direction}-${rotateCommitLabel}`, {
       theme: 'forest', gitGraph: { rotateCommitLabel, useMaxWidth: false },
@@ -862,22 +864,26 @@ test.skipIf(!chrome)('fits complete imported GitGraph labels in every orientatio
   const browser = new Bun.WebView({ width: 1100, height: 780, backend: { type: 'chrome', path: chrome!, url: false } })
   try {
     await browser.navigate(server.url.href)
-    const boxes = await browser.evaluate<{ labels: string[], fits: boolean }[]>(`[...document.querySelectorAll('svg')].map(svg => {
+    const boxes = await browser.evaluate<{ labels: string[], fits: boolean, separate: boolean }[]>(`[...document.querySelectorAll('svg')].map(svg => {
       const bounds = svg.getBoundingClientRect()
       const labels = [...svg.querySelectorAll('.diagram-git-branch-label, .diagram-git-label, .diagram-git-tag')]
+      const tags = [...svg.querySelectorAll('.diagram-git-tag-box')].map(node => node.getBoundingClientRect())
       return {
         labels: labels.map(node => node.textContent),
-        fits: labels.every(node => {
+        fits: [...labels, ...svg.querySelectorAll('.diagram-git-tag-box')].every(node => {
           const rect = node.getBoundingClientRect()
           return rect.left >= bounds.left - 1 && rect.right <= bounds.right + 1 &&
             rect.top >= bounds.top - 1 && rect.bottom <= bounds.bottom + 1
         }),
+        separate: tags.length === 6 && tags.every((box, index) => tags.slice(index + 1).every(other =>
+          box.bottom <= other.top || other.bottom <= box.top || box.right <= other.left || other.right <= box.left)),
       }
     })`)
     expect(boxes).toHaveLength(6)
     for (const graph of boxes) {
-      expect(graph.labels).toEqual(['main', branch, 'root', commit, tag])
+      expect(graph.labels).toEqual(['main', branch, 'root', 'verified', 'signedand tested', 'preview', 'second', 'nightly', commit, 'stable', tag])
       expect(graph.fits).toBe(true)
+      expect(graph.separate).toBe(true)
     }
   }
   finally {

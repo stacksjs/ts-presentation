@@ -164,6 +164,7 @@ export function gitGraph(source: string, idPrefix: string, options: MermaidOptio
   const svg = gitGraphChart({
     ...chart, idPrefix, title: chart.title || (typeof options.title === 'string' ? options.title : ''),
     truncateLabels: false,
+    tagLayout: 'stacked',
     colors,
     branchLabelColors: palette('gitBranchLabel', preset?.branchText, color('branchLabelColor')),
     branchLabelBackgrounds: preset ? colors : labelBackground ? colors.map(color => color ?? labelBackground) : undefined,
