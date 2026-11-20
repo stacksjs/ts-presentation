@@ -423,9 +423,9 @@ and presenter previews with the project’s local Bun CLI. See the
 
 Run `bun test --timeout 45000` from the project root to run the adapted
 Slidev tests and native regression suite. GitHub Actions runs the same suite
-with Chrome for browser and export coverage. See the
-[Slidev test ports](skills/stacks-presentations/references/slidev-tests.md)
-for the source-to-port mapping. The Bun runtime
+with Chrome for browser and export coverage and checks that every port in the
+[Slidev test inventory](skills/stacks-presentations/references/slidev-tests.md)
+ran without skips. The Bun runtime
 uses the published [`@stacksjs/stx` package](https://github.com/stacksjs/stx) for the
 shell, built-in layouts, and custom templates. Bun installs it from the registry.
 Some copied components, Vite integrations, and advanced VS Code tooling still

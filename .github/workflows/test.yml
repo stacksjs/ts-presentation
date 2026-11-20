@@ -34,4 +34,7 @@ jobs:
           echo "CHROME_BIN=$chrome" >> "$GITHUB_ENV"
       - run: bun run lint
       - run: bun run typecheck
-      - run: bun test --timeout 45000
+      - name: Run all Bun tests
+        run: bun test --timeout 45000 --reporter junit --reporter-outfile "$RUNNER_TEMP/bun-test.xml"
+      - name: Verify every Slidev test port ran
+        run: bun test/verify-slidev-report.ts "$RUNNER_TEMP/bun-test.xml"

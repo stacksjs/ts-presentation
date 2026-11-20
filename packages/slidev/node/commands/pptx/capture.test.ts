@@ -1497,6 +1497,13 @@ it.skipIf(!chrome)('restores the slide after a failed clip and reports a missing
     calls.length = 0
     expect(await captureEditable(browser, canvas, 1, 0, '')).toEqual({ warnings: ['Picture element could not be isolated'] })
     expect(calls).toEqual(['Emulation.setDefaultBackgroundColorOverride'])
+
+    missing = false
+    calls.length = 0
+    const textOnly = await captureEditable(browser, canvas, 1, 0, '')
+    expect(textOnly.warnings).toEqual([])
+    expect(textOnly.content?.nodes.some(node => node.kind === 'text')).toBe(true)
+    expect(calls).toEqual([])
   }
   finally {
     view.close()
@@ -1508,7 +1515,7 @@ it.skipIf(!chrome)('captures cropped PNG artwork at the end of a deck beyond a n
   const editableSlide = [
     '# Late slide',
     '',
-    '<svg style="display:block;position:absolute;left:-20px;top:150px;width:100px;height:60px" viewBox="0 0 100 60">',
+    '<svg style="display:block;position:absolute;left:-20px;top:500px;width:100px;height:60px" viewBox="0 0 100 60">',
     '<rect width="100" height="60" fill="red"/>',
     '</svg>',
     '',
@@ -1516,9 +1523,13 @@ it.skipIf(!chrome)('captures cropped PNG artwork at the end of a deck beyond a n
     '',
     '<p v-click>Late reveal</p>',
   ].join('\n')
+  let view: Bun.WebView | undefined
   try {
     const entry = join(root, 'slides.md')
-    await Bun.write(entry, Array.from({ length: 42 }, (_, index) => index === 41 ? editableSlide : `# Slide ${index + 1}`).join('\n\n---\n\n'))
+    const slides = Array.from({ length: 42 }, (_, index) => `# Slide ${index + 1}`)
+    slides[0] = editableSlide.replace('Late slide', 'First slide').replace('fill="red"', 'fill="green"')
+    slides[41] = editableSlide
+    await Bun.write(entry, slides.join('\n\n---\n\n'))
     const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
     const build = Bun.spawnSync([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'pipe' })
     if (build.exitCode !== 0) throw new Error(build.stderr.toString())
@@ -1528,16 +1539,26 @@ it.skipIf(!chrome)('captures cropped PNG artwork at the end of a deck beyond a n
       frame => { frames.push(frame) })
     expect(frames.map(frame => frame.position)).toEqual([{ slide: 42, click: 0 }, { slide: 42, click: 1 }])
     const pictures = frames.map(frame => frame.editable?.nodes.filter((node): node is IrRaster => node.kind === 'raster'))
+    view = new Bun.WebView({ width: 160, height: 120, backend: { type: 'chrome', path: chrome!, url: false } })
+    await view.navigate('about:blank')
     for (const rasters of pictures) {
       expect(rasters).toHaveLength(1)
       const raster = rasters![0]
-      expect(raster.rect).toMatchObject({ x: 0, w: 80, h: 60 })
+      expect(raster.rect).toMatchObject({ x: 0, y: 500, w: 80, h: 40 })
       const png = Buffer.from(raster.data!, 'base64')
       expect(png.subarray(1, 4).toString()).toBe('PNG')
-      expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([80, 60])
+      expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([80, 40])
+      expect(await view.evaluate(`(async () => {
+        const response = await fetch(${JSON.stringify('data:image/png;base64,' + raster.data)})
+        const bitmap = await createImageBitmap(await response.blob())
+        const context = new OffscreenCanvas(80, 40).getContext('2d')
+        context.drawImage(bitmap, 0, 0)
+        return [...context.getImageData(40, 20, 1, 1).data]
+      })()`)).toEqual([255, 0, 0, 255])
     }
   }
   finally {
+    view?.close()
     await rm(root, { recursive: true, force: true })
   }
 }, 20_000)
