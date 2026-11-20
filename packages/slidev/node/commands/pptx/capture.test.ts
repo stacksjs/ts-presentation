@@ -83,6 +83,53 @@ x=1\tag{Rate $k^2$}\label{rate}
   }
 }, 45_000)
 
+it.skipIf(!chrome)('exports only selected Mathtools equation numbers across reveals', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-referenced-tags-'))
+  const canvas = { width: 960, height: 540 }
+  try {
+    const entry = join(root, 'slides.md')
+    await Bun.write(entry, String.raw`# References
+
+See \eqref{visible}.
+\noeqref{pinned}
+
+---
+
+# Calculation
+
+\mathtoolsset{showonlyrefs}
+
+$$ {1|2|3|all}
+\begin{align}
+A&=X\label{unreferenced}\\
+B&=Y\label{pinned}\\
+C&=Z\label{visible}
+\end{align}
+$$`)
+    const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
+    const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
+    const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
+    if (status) throw new Error(stderr)
+    const frames: PowerPointFrame[] = []
+    await captureFrames({ root: join(root, 'dist'), executable: chrome!, scale: 1, canvas, range: '2', editable: true, withClicks: true }, frame => { frames.push(frame) })
+    expect(frames.map(frame => frame.position?.click)).toEqual([0, 1, 2, 3])
+    for (const [step, frame] of frames.entries()) {
+      const body = frame.editable?.nodes.find((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math')?.equation
+      expect(body).toBeDefined()
+      const tags = body?.tags ?? []
+      expect(tags.map(tag => /\(\d+\)/.exec(tag.expression)?.[0])).toEqual(['(1)', '(2)'])
+      expect(tags.map(tag => tag.expression.includes('<a:alpha val="24000"/>'))).toEqual([step === 0 || step === 2, step < 2])
+    }
+    const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Reference-driven tags' }))
+    const last = parts.get('ppt/slides/slide4.xml')?.toString() ?? ''
+    expect(last.match(/name="Equation tag"/g)).toHaveLength(2)
+    for (const tag of ['(1)', '(2)']) expect(last).toContain(`>${tag}</m:t>`)
+  }
+  finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}, 45_000)
+
 it.skipIf(!chrome)('keeps AMS subequation letters and reveal opacity editable in a PowerPoint range', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-subequations-'))
   const canvas = { width: 960, height: 540 }

@@ -529,7 +529,7 @@ interface ArrayRow { cells: ArrayCell[], columns: number, label?: Markup, before
 interface MathLine { content: Markup, gap?: string }
 interface MultlineRow extends MathLine { align?: 'left' | 'right', inset?: string }
 type MultlinedPosition = 't' | 'c' | 'b'
-interface EquationTag { label?: Markup, key?: string, starred?: boolean, suppressed: boolean, raise?: string }
+interface EquationTag { label?: Markup, key?: string, starred?: boolean, suppressed: boolean, raise?: string, finalized?: boolean }
 
 function equationNumberCell(label: Markup | undefined, position?: 'start' | 'end', raise?: string, padding: readonly string[] = []): string {
   const styles = [
@@ -947,7 +947,10 @@ const intertextCommands: ReadonlyMap<string, IntertextKind> = new Map([
   ['\\intertext', 'normal'],
   ['\\shortintertext', 'short'],
 ])
-const originalIntertextOptions = new Set(['original-intertext', 'original-shortintertext'])
+const mathtoolsBooleanOptions = new Set([
+  'original-intertext', 'original-shortintertext', 'showonlyrefs', 'showmanualtags',
+])
+const equationReferences = new Set(['\\ref', '\\eqref', '\\refeq', '\\noeqref'])
 const mathtoolsSpacingOptions = new Set([
   'above-intertext-sep', 'below-intertext-sep', 'above-shortintertext-sep', 'below-shortintertext-sep',
   'shortvdotsadjustabove', 'shortvdotsadjustbelow',
@@ -975,7 +978,7 @@ const sharedFunctions = new Set([
   ...Object.keys(textFonts), ...typesettingNames, ...textBoxes, ...verticalBoxCommands, ...spacingCommands,
   'begingroup', 'endgroup', 'relax', 'newline', 'cr', 'color', 'textcolor',
   'sout', 'underline', 'underbar', 'textcircled', 'llap', 'clap', 'rlap', '@char',
-  'tag', 'raisetag', 'label', 'ref', 'eqref', 'notag', 'nonumber', 'nobreak', 'hline', 'hdashline',
+  'tag', 'raisetag', 'label', 'ref', 'eqref', 'refeq', 'noeqref', 'notag', 'nonumber', 'nobreak', 'hline', 'hdashline',
 ])
 const fractionFences: Record<string, [string, string]> = {
   '\\choose': ['(', ')'],
@@ -1110,9 +1113,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
   let delimiterDepth = 0
   let currentColor = ''
   let equationNumber = 0
+  let filteredNumbering = false
   let equationJot: string | undefined
-  let mathtoolsSpacing: ReadonlyMap<string, string> | undefined
-  let nextSubequationNumber: ((key?: string) => string) | undefined
+  let mathtoolsOptions: ReadonlyMap<string, string> | undefined
+  let nextSubequationNumber: ((key?: string, onlyReferenced?: boolean) => string) | undefined
   let fullWidthAlignment = false
   let fontScale = 1
   let textItalic = false
@@ -1164,7 +1168,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const previousItalic = textItalic
     const previousMonospace = textMonospace
     const previousJot = equationJot
-    const previousMathtoolsSpacing = mathtoolsSpacing
+    const previousMathtoolsOptions = mathtoolsOptions
     scopes.push({ undo: new Map() })
     try { return render() }
     finally {
@@ -1172,7 +1176,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       textItalic = previousItalic
       textMonospace = previousMonospace
       equationJot = previousJot
-      mathtoolsSpacing = previousMathtoolsSpacing
+      mathtoolsOptions = previousMathtoolsOptions
       while (scopes.length > before) restoreScope()
     }
   }
@@ -2293,7 +2297,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
           flush()
           parts.push(overlap(token[1], textArgument()))
         }
-        else if (token === '\\ref' || token === '\\eqref') {
+        else if (equationReferences.has(token)) {
           flush()
           parts.push(equationReference(token))
         }
@@ -2361,15 +2365,22 @@ export function renderMath(source: string, display = false, configured: MathMacr
 
   function nextTag(automatic: boolean): Markup | undefined {
     const { key, label, starred } = tagState
+    if (tagState.finalized) return label
     tagState.key = undefined
+    const onlyReferenced = mathtoolsOptions?.get('showonlyrefs') === 'true'
     if (label !== undefined) {
-      return key ? referenceMarkup().label?.(key, { markup: renderMarkup(label, 1), starred: starred === true }) ?? label : label
+      const optional = onlyReferenced && mathtoolsOptions?.get('showmanualtags') !== 'true'
+      if (!key) return optional ? undefined : label
+      const definition = referenceMarkup().label?.(key, { markup: renderMarkup(label, 1), starred: starred === true }, optional)
+      return definition ?? (optional ? undefined : label)
     }
     if (automatic && !tagState.suppressed) {
-      if (nextSubequationNumber) return nextSubequationNumber(key)
+      if (nextSubequationNumber) return nextSubequationNumber(key, onlyReferenced)
       equationNumber++
-      return (key ? referenceMarkup() : references)?.number?.(equationNumber, key)
-        ?? numberMarkup?.(equationNumber) ?? tag('mtext', `(${equationNumber})`)
+      filteredNumbering ||= onlyReferenced
+      const registry = key || filteredNumbering ? referenceMarkup() : references
+      return registry?.number?.(equationNumber, key, onlyReferenced)
+        ?? (onlyReferenced ? undefined : numberMarkup?.(equationNumber) ?? tag('mtext', `(${equationNumber})`))
     }
   }
 
@@ -2378,9 +2389,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
   }
 
   function equationReference(token: string): string {
+    if (token === '\\noeqref')
+      return equationKey().split(',').map(key => key.trim()).filter(Boolean).map(key => referenceMarkup().pin(key)).join('')
     const starred = peek() === '*'
     if (starred) take()
-    return referenceMarkup().reference(equationKey(), token === '\\eqref', !starred && linkDepth === 0)
+    const kind = token === '\\eqref' ? 'eqref' : token === '\\refeq' ? 'refeq' : 'ref'
+    return referenceMarkup().reference(equationKey(), kind, !starred && linkDepth === 0)
   }
 
   function equationDirective(token: string): boolean {
@@ -2773,6 +2787,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       if (peek() === '&') throw new MathParseError('Too many columns in equation')
       if (take() !== '\\end' || literalGroup() !== environment) throw unclosed()
       tagState.label = nextTag(display && environment === 'equation')
+      tagState.finalized = true
       return xml`<mrow>${content}</mrow>`
     }
     const inner = /^(?:aligned(?:at)?|[lr]?gathered)$/.test(environment)
@@ -3030,7 +3045,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const gridLayout = displayRows
       ? ` style="${gridTracks}"${tagPlacement}${spreadLayout}${options?.fleqn && spread !== 'full' ? ' data-equation-flush' : ''}`
       : grid ? ` style="--math-columns:${columnAlignment.length}"` : ''
-    const spacingOptions = mathtoolsSpacing
+    const spacingOptions = mathtoolsOptions
     const dotAbove = spacingOptions?.get('shortvdotsadjustabove')
     const dotBelow = spacingOptions?.get('shortvdotsadjustbelow')
     // Keep the default compact geometry. A larger trim subtracts space relative
@@ -3168,15 +3183,16 @@ export function renderMath(source: string, display = false, configured: MathMacr
     let key: string | undefined
     let marker = ''
     const blocks: string[] = []
+    const pins: string[] = []
     const begin = () => {
       const parent = ++equationNumber
       const numbering = referenceMarkup().group?.(parent, key)
       let member = 0
       marker = numbering?.marker ?? ''
-      nextSubequationNumber = (key) => {
+      nextSubequationNumber = (key, onlyReferenced) => {
         if (member === 26) throw new MathParseError('Too many numbered subequations')
         const suffix = String.fromCharCode(97 + member++)
-        return numbering?.member(suffix, key) ?? tag('mtext', `(${parent}${suffix})`)
+        return numbering?.member(suffix, key, onlyReferenced) ?? (onlyReferenced ? '' : tag('mtext', `(${parent}${suffix})`))
       }
     }
     try {
@@ -3186,6 +3202,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
           const start = cursor
           const token = take()
           if (token === '\\relax' || declareMacro(token)) continue
+          if (token === '\\noeqref') {
+            pins.push(equationReference(token))
+            continue
+          }
           if (numbered && token === '\\label' && !blocks.length) {
             const label = equationKey()
             key ??= label || undefined
@@ -3195,7 +3215,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
             if (literalGroup() !== environment) break
             if (!level && peek()) throw new MathParseError(`${environment} must occupy the display`)
             if (numbered && !nextSubequationNumber) begin()
-            return `<div class="math-${environment}">${marker}${blocks.join('')}</div>`
+            return `<div class="math-${environment}">${marker}${pins.join('')}${blocks.join('')}</div>`
           }
           if (numbered && !nextSubequationNumber) begin()
           const child = token === '\\begin' ? literalGroup() : undefined
@@ -3241,15 +3261,15 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return String.fromCodePoint(code)
   }
 
-  function setMathtoolsSpacing(): void {
-    const selected = new Map(mathtoolsSpacing)
+  function setMathtoolsOptions(): void {
+    const selected = new Map(mathtoolsOptions)
     for (const assignment of expandDefinition(rawGroup()).join('').split(',')) {
       if (!assignment.trim()) continue
       const equals = assignment.indexOf('=')
       const name = (equals < 0 ? assignment : assignment.slice(0, equals)).trim()
       const key = name.replace(/^(above|below)(?:shortintertextdim|-short-intertext-(?:dim|sep))$/, '$1-shortintertext-sep')
       const value = equals < 0 ? undefined : assignment.slice(equals + 1).trim().replace(/^\{([^{}]*)\}$/, '$1').trim()
-      if (originalIntertextOptions.has(key)) {
+      if (mathtoolsBooleanOptions.has(key)) {
         if (value !== undefined && value !== 'true' && value !== 'false')
           throw new MathParseError(`Expected true or false for Mathtools option ${name}`)
         selected.set(key, value ?? 'true')
@@ -3268,7 +3288,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       if (size === undefined) throw new MathParseError(`Invalid math dimension for Mathtools option ${name}`)
       selected.set(key, size)
     }
-    mathtoolsSpacing = selected
+    mathtoolsOptions = selected
   }
 
   function declareMacro(token: string): boolean {
@@ -3283,7 +3303,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       throw new MathParseError('Invalid token after math macro prefix')
     const name = token.slice(1)
     if (name === 'mathtoolsset') {
-      setMathtoolsSpacing()
+      setMathtoolsOptions()
       return true
     }
     if (name === 'setlength') {
@@ -3437,7 +3457,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (verbatim !== undefined) return { markup: verbatim }
 
     if (declareMacro(token) || equationDirective(token)) return { markup: '' }
-    if (token === '\\ref' || token === '\\eqref') return { markup: equationReference(token) }
+    if (equationReferences.has(token)) return { markup: equationReference(token) }
     const name = token.slice(1)
     if (token === arrowBetweenLines) throw new MathParseError(`${token} requires an align, alignat, aligned, or alignedat environment`)
     if (token === flushSpaceAbove || token === flushSpaceBelow) throw new MathParseError(`${token} requires an alignment environment`)
@@ -3682,8 +3702,14 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const environment = first === '\\begin' ? (take(), literalGroup()) : undefined
     const group = environment === 'subequations' || environment === 'spreadlines'
     if (!group) cursor = start
-    const content = group ? displayGroup(environment) : formulaMarkup(`<mrow>${renderMarkup(row([], false, true), display ? 0 : 1)}</mrow>`, source)
-    return localReferences ? localReferences.resolve(localReferences.numberSlide(content, 1)) : content
+    let content: string
+    if (group) content = displayGroup(environment)
+    else {
+      const body = renderMarkup(row([], false, true), display ? 0 : 1)
+      const pinsOnly = first === '\\noeqref' && /^(?:<mrow data-pending-equation-pin="[^"]+"><\/mrow>)*$/.test(body)
+      content = pinsOnly ? body : formulaMarkup(`<mrow>${body}</mrow>`, source)
+    }
+    return localReferences ? localReferences.resolve(localReferences.numberSlides([content])[0]) : content
   }
   catch (error) {
     if (!(error instanceof MathParseError)) throw error

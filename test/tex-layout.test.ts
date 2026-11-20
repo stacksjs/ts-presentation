@@ -1168,6 +1168,101 @@ test('resolves TeX equation references across slides, laid-out columns, and spea
   expect(repeated.live!.revision).toBe(first.live!.revision)
 })
 
+test('numbers referenced equations in rendered order and honors manual tags and explicit pins', async () => {
+  const source = String.raw`# References
+
+See \eqref{kept}, \refeq{star}, and \ref{plain}.
+\noeqref{pin, child}
+
+~~~tex
+\eqref{fenced}
+~~~
+
+---
+
+# Referenced numbering
+
+\mathtoolsset{showonlyrefs}
+\begin{align}
+  a&=1\label{plain}\\
+  b&=2\label{kept}\\
+  c&=3\label{fenced}\\
+  d&=4\label{pin}\\
+  e&=5\tag*{Star}\label{star}\\
+  f&=6\tag{Hidden tag}\label{manual}\\
+  g&=7\tag{Hidden chain \eqref{plain}}\label{chain}\\
+  h&=8\label{speaker}
+\end{align}
+
+\begin{subequations}\label{parent}
+\begin{align}
+  j&=9\label{hidden-child}\\
+  k&=10\label{child}
+\end{align}
+\end{subequations}
+
+\mathtoolsset{showmanualtags}
+\begin{equation*}m=11\tag{Manual}\end{equation*}
+
+<!--
+Speaker note \eqref{speaker} and \eqref{child}.
+-->
+
+---
+
+# Later
+
+\begin{equation}n=12\end{equation}
+
+Ref. \ref{parent} and \eqref{child}.`
+  const deck = parseDeck(source)
+  const rendered = await renderPresentation(deck, { liveCompile: true })
+  const [refs, numbered, later] = rendered.live!.slides
+  const tags = (html: string) => [...html.matchAll(/<mtd class="math-equation-number"[^>]*>([\s\S]*?)<\/mtd>/g)].map(match => match[1])
+  expect(tags(numbered.html).filter(Boolean)).toEqual([
+    '<mtext>(1)</mtext>', '<mtext>(2)</mtext>', '<mtext>Star</mtext>', '<mtext>(3a)</mtext>', '<mtext>(Manual)</mtext>',
+  ])
+  expect(refs.html).toContain('data-slide-link="2"><math><mrow><mtext>(1)</mtext>')
+  expect(refs.html).toContain('data-slide-link="2"><math><mrow style="font-style:normal"><mtext>Star</mtext>')
+  expect(refs.html).toContain('<mtext>??</mtext>')
+  expect(refs.html).not.toContain('<p></p>')
+  expect(later.html).toContain('data-slide-link="2"><math><mrow><mtext>3</mtext>')
+  expect(later.html).toContain('data-slide-link="2"><math><mrow><mtext>(3a)</mtext>')
+  expect(tags(later.html)).toEqual(['<mtext>(4)</mtext>'])
+  expect(numbered.notes).toContain('<mtext>(??)</mtext>')
+  expect(numbered.notes).toContain('<mtext>(3a)</mtext>')
+  expect(rendered.html).not.toContain('data-pending-equation-')
+  const exported = await renderPresentation(deck, { withoutNotes: true, liveCompile: true })
+  expect(exported.live!.slides.map(slide => tags(slide.html))).toEqual([refs, numbered, later].map(slide => tags(slide.html)))
+
+  const renamed = await renderPresentation(parseDeck(source.replace('\\eqref{kept}', '\\eqref{plain}')), { liveCompile: true })
+  expect(renamed.live!.slides[1].revision).not.toBe(numbered.revision)
+  expect(renamed.live!.slides[1].html).toMatch(/<mi>a<\/mi>[^]*?<mtd class="math-equation-number"><mtext>\(1\)/)
+})
+
+test('scopes reference-only numbering across display groups and discovers references in selected tags', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const source = String.raw`\begin{spreadlines}{0pt}
+\noeqref{pick}
+\mathtoolsset{showonlyrefs}
+\begin{equation}a=1\label{omitted}\end{equation}
+\begin{equation}b=2\label{pick}\tag{See \eqref{indirect}}\end{equation}
+\begin{equation}c=3\label{indirect}\end{equation}
+\begin{subequations}\label{parent}
+\begin{equation}d=4\end{equation}
+\end{subequations}
+\mathtoolsset{showonlyrefs=false}
+\begin{equation}e=5\end{equation}
+\end{spreadlines}`
+  const html = math(source, true).replace(/<annotation[^>]*>.*?<\/annotation>/gs, '')
+  expect(html).toContain('<mtext>(See\u00A0</mtext><mrow><mtext>(1)</mtext></mrow><mtext>)</mtext>')
+  expect(html.match(/<mtext>\(1\)<\/mtext>/g)).toHaveLength(2)
+  expect(html).toContain('<mtext>(3)</mtext>')
+  expect(html).not.toContain('(2a)')
+  expect(html).not.toContain('data-pending-equation-')
+  expect(() => math(String.raw`\mathtoolsset{showmanualtags=maybe}x`, true)).toThrow('Expected true or false')
+})
+
 test('resolves local and chained equation references with bounded cycle handling', () => {
   const math = createMathRenderer({ throwOnError: true })
   const formula = String.raw`\begin{align}

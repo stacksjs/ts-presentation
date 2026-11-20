@@ -190,7 +190,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   const codeFences = new Map<string, MarkdownFence>()
   const renderToken = Bun.randomUUIDv7().replaceAll('-', '')
   const equations = createEquationReferences(renderToken, true)
-  const noteReferences = { reference: equations.markup.reference }
+  const noteReferences = { reference: equations.markup.reference, pin: equations.markup.pin }
   const fencePrefix = `tp-fence-${renderToken}-`
   const rawFence = new RegExp(`(?<!language-)\\b${fencePrefix}\\d+\\b`, 'g')
   const selectedCodeTheme = deck.headmatter?.codeTheme ?? configuration?.codeHighlight?.theme
@@ -459,8 +459,8 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
 
   // Layouts can reorder slots or omit their content. Count the equations in
   // final slide order so audience, presenter and exported ranges agree.
-  for (const [index, slide] of slides.entries()) slide.html = equations.numberSlide(slide.html, index + 1)
-  for (const slide of slides) slide.html = baseMarkup(equations.resolve(slide.html))
+  const numberedSlides = equations.numberSlides(slides.map(slide => slide.html))
+  for (const [index, slide] of slides.entries()) slide.html = baseMarkup(equations.resolve(numberedSlides[index]))
   const choices = routes.map(({ no, title }) => `<option value="${no}">${no}. ${escapeHtml(title)}</option>`)
   const ruby = deck.headmatter?.notesAutoRuby
   const annotations = ruby && typeof ruby === 'object' && !Array.isArray(ruby)

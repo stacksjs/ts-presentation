@@ -119,7 +119,7 @@ function tabsMarkup(id: string, tabs: GroupFence[]): string {
 
 export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): PreparedMarkdown {
   const attrs = syntax.comark && source.includes('{') ? createComarkAttributes() : undefined
-  if (!attrs && !source.includes('$') && !source.includes('\\(') && !source.includes('\\[') && !source.includes('\\begin{') && !source.includes('\\mathtoolsset') && !source.includes('\\ref') && !source.includes('\\eqref') && !source.includes('{monaco') && !source.includes('{live') && !source.includes('mermaid') && !source.includes('v-click') && !source.includes('v-after') && !source.includes('```') && !source.includes('~~~')) {
+  if (!attrs && !source.includes('$') && !source.includes('\\(') && !source.includes('\\[') && !source.includes('\\begin{') && !source.includes('\\mathtoolsset') && !source.includes('\\ref') && !source.includes('\\eqref') && !source.includes('\\noeqref') && !source.includes('{monaco') && !source.includes('{live') && !source.includes('mermaid') && !source.includes('v-click') && !source.includes('v-after') && !source.includes('```') && !source.includes('~~~')) {
     return { source, restore: html => html }
   }
 
@@ -145,8 +145,8 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
     for (let at = 0; at < line.length;) {
       const char = line[at]
       if (char === '\\' && line[at + 1]) {
-        if (syntax.mathEnabled !== false && (line[at + 1] === 'e' || line[at + 1] === 'r')) {
-          const reference = /^\\(?:eq)?ref\*?[ \t]*\{[^{}]+\}/.exec(line.slice(at))?.[0]
+        if (syntax.mathEnabled !== false && (line[at + 1] === 'e' || line[at + 1] === 'r' || line[at + 1] === 'n')) {
+          const reference = /^\\(?:(?:refeq|eqref|ref)\*?|noeqref)[ \t]*\{[^{}]+\}/.exec(line.slice(at))?.[0]
           if (reference) {
             result += marker(reference)
             at += reference.length
@@ -378,7 +378,7 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
       return (attrs ? attrs.restore(html) : html)
         .replace(/<p>(<tp-math data-equation="\d+"><\/tp-math>)<\/p>/g, (whole, placeholder) => {
           const index = Number(/\d+/.exec(placeholder)?.[0])
-          return /^<div class="(?:equation-steps|math-subequations|math-spreadlines)"|^<math [^>]* display="block"/.test(math[index] ?? '') ? placeholder : whole
+          return /^<(?:div class="(?:equation-steps|math-subequations|math-spreadlines)"|math [^>]* display="block"|mrow data-pending-equation-pin=)/.test(math[index] ?? '') ? placeholder : whole
         })
         .replace(/<tp-math data-equation="(\d+)"><\/tp-math>/g, (whole, index: string) => math[Number(index)] ?? whole)
     },
