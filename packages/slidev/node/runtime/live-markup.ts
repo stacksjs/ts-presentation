@@ -43,7 +43,10 @@ export async function liveBlock(source: string, language: string, info: CodeBloc
   const mode = height === 'initial' || height === 'auto' ? height : 'fixed'
   const count = source.split('\n').length
   const size = mode === 'fixed' ? `--live-code-height:${height}` : `--live-code-rows:${count}`
+  const wrap = editorOptions?.wordWrap
+  const wrapping = wrap && wrap !== 'off'
   const styles = [size, maxHeight && `--live-code-max-height:${maxHeight}`,
+    wrapping && wrap !== 'on' && `--live-code-wrap-column:${editorOptions?.wordWrapColumn ?? 80}`,
     numbering !== 'off' && `--live-code-digits:${String(start + count - 1).length}`].filter(Boolean).join(';')
   const gutter = numbering === 'off' ? ''
     : `<div class="live-code-gutter" aria-hidden="true"><div data-live-gutter>${liveLineNumbers(count, start, numbering)}</div></div>`
@@ -55,10 +58,10 @@ export async function liveBlock(source: string, language: string, info: CodeBloc
       ${runnable && native === 'ts' && !readonly ? '<button type="button" data-live-convert hidden>Edit as JavaScript</button>' : ''}
       ${runnable ? '<button type="button" data-live-run>Run</button>' : ''}
     </div>
-    <div class="live-code-editor" data-live-height="${mode}" data-live-start="${start}"${gutter ? ` data-live-numbering="${numbering}"` : ''} style="${styles}">
+    <div class="live-code-editor" data-live-height="${mode}" data-live-start="${start}"${gutter ? ` data-live-numbering="${numbering}"` : ''}${wrapping ? ` data-live-wrap="${wrap}"` : ''} style="${styles}">
       <div class="live-code-highlight" aria-hidden="true"><div></div></div>
       ${diagnostics ? '<div class="live-code-marks" aria-hidden="true" hidden><div></div></div>' : ''}
-      ${gutter}<textarea aria-label="${readonly ? '' : 'Edit '}${label} example" wrap="off" spellcheck="false" autocapitalize="off"${readonly ? ' readonly' : ''}>
+      ${gutter}<textarea aria-label="${readonly ? '' : 'Edit '}${label} example" wrap="${wrapping ? 'soft' : 'off'}" spellcheck="false" autocapitalize="off"${readonly ? ' readonly' : ''}>
 ${escapeHtml(source)}</textarea>
     </div>
     ${diagnostics ? '<ul class="live-code-diagnostics" aria-live="polite"></ul>' : ''}

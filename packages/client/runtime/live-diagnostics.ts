@@ -1,5 +1,6 @@
 import { nativeCodeLanguage } from '../../types/src/code-runner.ts'
 import type { LiveDiagnostic } from '../../types/src/live-diagnostic.ts'
+import { liveEditorRowTop } from './live-editor.ts'
 
 let editorCount = 0
 
@@ -41,7 +42,7 @@ export function setupLiveDiagnostics(block: HTMLElement, editor: HTMLTextAreaEle
         editor.focus({ preventScroll: true })
         editor.setSelectionRange(range.start, range.end)
         const lineHeight = Number.parseFloat(getComputedStyle(editor).lineHeight)
-        const top = (line - 1) * lineHeight
+        const top = liveEditorRowTop(editor, line, column, lineHeight)
         if (top < editor.scrollTop || top + lineHeight + 20 > editor.scrollTop + editor.clientHeight)
           editor.scrollTop = top
       })

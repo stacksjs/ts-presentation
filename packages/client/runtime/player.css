@@ -1046,13 +1046,15 @@ math .math-xcancel > .math-cancel-track {
 }
 .live-code-editor {
   position: relative;
+  --live-code-padding-start: 12px;
   font: 400 15px/1.5 var(--presentation-font-mono, ui-monospace, monospace);
   color: #e9f0f8;
   background: #13202f;
 }
 .live-code-editor textarea,
-.live-code-editor :is(.live-code-highlight, .live-code-marks) > div {
+.live-code-editor :is(.live-code-highlight, .live-code-marks, .live-code-measure) > div {
   padding: 10px 12px;
+  padding-inline-start: var(--live-code-padding-start);
   font: inherit;
   font-variant-ligatures: none;
   font-kerning: none;
@@ -1081,6 +1083,36 @@ math .math-xcancel > .math-cancel-track {
 }
 .live-code-highlight { display: none; }
 .live-code-editor :is(.live-code-highlight, .live-code-marks) > div { white-space: pre; }
+.live-code-editor[data-live-wrap] {
+  --live-code-column-width: calc(var(--live-code-wrap-column, 80) * 1ch + var(--live-code-padding-start) + 12px + var(--live-code-wrap-scrollbar, 0px));
+}
+.live-code-editor[data-live-wrap="wordWrapColumn"] { overflow-x: auto; }
+.live-code-editor[data-live-wrap="wordWrapColumn"] textarea { width: var(--live-code-column-width); }
+.live-code-editor[data-live-wrap="bounded"] textarea { width: min(100%, var(--live-code-column-width)); }
+.live-code-editor[data-live-wrap] textarea { scrollbar-gutter: stable; }
+.live-code-editor[data-live-wrap] textarea,
+.live-code-editor[data-live-wrap] :is(.live-code-highlight, .live-code-marks, .live-code-measure) > div {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.live-code-editor[data-live-wrap] :is(.live-code-highlight, .live-code-marks) {
+  inset-inline-end: auto;
+  width: var(--live-code-wrap-viewport, 100%);
+}
+.live-code-measure {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+}
+.live-code-editor .live-code-measure > div {
+  position: relative;
+  width: var(--live-code-wrap-viewport, 100%);
+  padding-block: 0;
+}
 .live-code-marks { color: transparent; }
 .live-code-marks span {
   text-decoration: underline wavy #ff7b91;
@@ -1122,10 +1154,7 @@ math .math-xcancel > .math-cancel-track {
 }
 .live-code-editor[data-live-numbering] {
   --live-code-gutter-width: calc(var(--live-code-digits) * 1ch + 17px);
-}
-.live-code-editor[data-live-numbering] textarea,
-.live-code-editor[data-live-numbering] :is(.live-code-highlight, .live-code-marks) > div {
-  padding-inline-start: calc(var(--live-code-gutter-width) + 12px);
+  --live-code-padding-start: calc(var(--live-code-gutter-width) + 12px);
 }
 .live-code-gutter {
   position: absolute;

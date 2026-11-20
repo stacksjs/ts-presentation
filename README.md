@@ -292,6 +292,9 @@ Live editors inherit the deck's `lineNumbers` setting. Use
 Set `{height:'auto'}` to grow as you type, `{height:'140px'}` for a fixed
 height, or `{height:'initial'}` to size from the original code. Use
 `{readonly:true}` to lock the code while keeping Run available.
+Use `{editorOptions:{wordWrap:'on'}}` to wrap long lines to the editor width.
+Set `wordWrap:'wordWrapColumn'` to wrap at `wordWrapColumn`, or use
+`wordWrap:'bounded'` to wrap at the lesser of the column and editor width.
 Use `monaco: false` in frontmatter for static code blocks, or set it to
 `dev` or `build` to enable editors in that mode.
 

@@ -59,6 +59,18 @@ test.skipIf(!chrome)('highlights and sizes live editors, synchronizes their gutt
       '~~~probe {live}', 'advance 1', '~~~',
       '', '---', '', '# Convertible example', '',
       '~~~ts {live-run}', 'const typed: number = 2', 'console.log(typed)', '~~~',
+      '', '---', '', '# Wrapped editor', '',
+      '~~~js {monaco} {height:"auto", startLine:7, editorOptions:{wordWrap:"wordWrapColumn", wordWrapColumn:24}}',
+      'const label = "' + 'break me '.repeat(10) + '"', 'const next = 2', '~~~',
+      '', '---', '', '# Wrapped diagnostics', '',
+      '~~~js {monaco} {height:"80px", editorOptions:{wordWrap:"bounded", wordWrapColumn:24}}',
+      'const value = "' + 'wrap me '.repeat(24) + '" + )', '~~~',
+      '', '---', '', '# Variable viewport', '',
+      '~~~js {live} {height:"auto", editorOptions:{wordWrap:"on"}}',
+      '// ' + 'a wide comment '.repeat(14), 'const end = true', '~~~',
+      '', '---', '', '# Wide column', '',
+      '~~~js {monaco} {height:"90px", editorOptions:{wordWrap:"wordWrapColumn", wordWrapColumn:160}}',
+      '// ' + 'a wide comment '.repeat(24), 'const end = true', '~~~',
     ].join('\n'))
     await mkdir(join(root, 'setup'))
     await Bun.write(join(root, 'setup', 'shiki.ts'), String.raw`
@@ -153,6 +165,68 @@ test.skipIf(!chrome)('highlights and sizes live editors, synchronizes their gutt
       const converted = [!editable.value.includes(': number'), highlighted.textContent === editable.value]
       block.querySelector('[data-live-reset]').click()
       return [...converted, editable.value.includes(': number'), highlighted.textContent === editable.value]
+    })()`)).toEqual([true, true, true, true])
+    const wrap = await browser.evaluate<{ flags: boolean[], lines: string[], added: number, alignment: number[] }>(`(async () => {
+      window.presentationNavigation.go(7)
+      await new Promise(requestAnimationFrame)
+      await new Promise(requestAnimationFrame)
+      const block = document.querySelector('#slide-7 .live-code-editor')
+      const editor = block.querySelector('textarea')
+      const layer = block.querySelector('.live-code-highlight > div')
+      const rows = block.querySelector('.live-code-measure > div')
+      const gutter = block.querySelector('[data-live-gutter]')
+      const height = () => parseFloat(getComputedStyle(editor).height)
+      const initial = height()
+      const lines = gutter.textContent.split('\\n')
+      const next = [...layer.querySelectorAll('.tok-keyword')].at(-1)
+      const nativeTop = rows.children[1].getBoundingClientRect().top - rows.children[0].getBoundingClientRect().top
+      const highlightTop = next.getBoundingClientRect().top - layer.querySelector('.tok-keyword').getBoundingClientRect().top
+      const expectedGutter = lines.indexOf('8') * parseFloat(getComputedStyle(gutter).lineHeight)
+      const actualGutter = rows.children[1].offsetTop
+      const flags = [editor.wrap === 'soft', editor.scrollWidth === editor.clientWidth,
+        layer.textContent === editor.value, initial + 1 >= editor.scrollHeight]
+      editor.value += '\\n// ' + 'a very long new comment '.repeat(4)
+      editor.dispatchEvent(new Event('input', { bubbles: true }))
+      return { flags, lines, added: height() - initial, alignment: [nativeTop - highlightTop, expectedGutter - actualGutter] }
+    })()`)
+    expect(wrap.flags).toEqual([true, true, true, true])
+    expect(wrap.lines[0]).toBe('7')
+    expect(wrap.lines.at(-1)).toBe('8')
+    expect(wrap.lines.length).toBeGreaterThan(3)
+    expect(wrap.lines.slice(1, -1).every(value => !value)).toBe(true)
+    expect(wrap.added).toBeGreaterThan(22.5)
+    for (const offset of wrap.alignment) expect(Math.abs(offset)).toBeLessThan(1)
+    expect(await browser.evaluate(`(async () => {
+      window.presentationNavigation.go(8)
+      await new Promise(requestAnimationFrame)
+      await new Promise(requestAnimationFrame)
+      const block = document.querySelector('#slide-8 .live-code')
+      const editor = block.querySelector('textarea')
+      const marker = block.querySelector('.live-code-diagnostics button')
+      marker.click()
+      editor.dispatchEvent(new Event('scroll'))
+      const marks = block.querySelector('.live-code-marks')
+      const underline = marks.querySelector('span').getBoundingClientRect()
+      const viewport = editor.getBoundingClientRect()
+      return [marker.textContent.startsWith('Line 1,'), editor.scrollTop > 100,
+        editor.value.slice(editor.selectionStart, editor.selectionEnd), underline.top >= viewport.top, underline.bottom <= viewport.bottom]
+    })()`)).toEqual([true, true, ')', true, true])
+    expect(await browser.evaluate(`(async () => {
+      const wait = async () => { await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame) }
+      window.presentationNavigation.go(9)
+      await wait()
+      const viewport = document.querySelector('#slide-9 .live-code-editor')
+      const editor = viewport.querySelector('textarea')
+      const height = parseFloat(getComputedStyle(editor).height)
+      viewport.style.width = '300px'
+      await wait()
+      const narrowed = parseFloat(getComputedStyle(editor).height) > height
+      window.presentationNavigation.go(10)
+      await wait()
+      const wide = document.querySelector('#slide-10 .live-code-editor')
+      wide.scrollLeft = 150
+      const child = wide.querySelector('textarea')
+      return [narrowed, wide.scrollWidth > wide.clientWidth, wide.scrollLeft > 0, child.scrollLeft === 0]
     })()`)).toEqual([true, true, true, true])
     expect(await browser.evaluate(`(() => {
       window.presentationNavigation.go(3)

@@ -3,7 +3,7 @@ import type { Grammar } from 'ts-syntax-highlighter'
 import { clickSpan } from '../../../client/runtime/clicks.ts'
 import { codeTokenMarkup } from '../../../client/runtime/code-tokens.ts'
 import { parseEquationOptions } from '../../../client/runtime/equation-steps.ts'
-import type { LiveLineNumberMode } from '../../../client/runtime/live-editor.ts'
+import type { LiveLineNumberMode, LiveWordWrap } from '../../../client/runtime/live-editor.ts'
 import { readFenceOptions } from './fence-options.ts'
 import { escapeHtml } from './html.ts'
 import { createCodeLanguageResolver } from './code-languages.ts'
@@ -24,7 +24,13 @@ export interface CodeBlockInfo {
   magic: boolean
   runner?: 'run' | 'edit' | 'diff'
   diffOptions?: { readonly: boolean, height?: string }
-  editorOptions?: { readonly: boolean, height?: string, lineNumbers?: LiveLineNumberMode }
+  editorOptions?: {
+    readonly: boolean
+    height?: string
+    lineNumbers?: LiveLineNumberMode
+    wordWrap?: LiveWordWrap
+    wordWrapColumn?: number
+  }
   runnerOptions?: Record<string, unknown>
   runnerTiming?: RunnerTiming
   writeToken?: string
@@ -108,8 +114,14 @@ export function parseCodeInfo(input: string): CodeBlockInfo | undefined {
   const maxHeight = typeof configuredHeight === 'string' && /^\d+(?:\.\d+)?(?:px|em|rem|vh|%)$/.test(configuredHeight) ? configuredHeight : undefined
   const configuredSize = typeof props.height === 'number' ? `${props.height}px` : props.height
   const height = typeof configuredSize === 'string' && /^(?:initial|auto|\d+(?:\.\d+)?(?:px|em|rem|vh|%))$/.test(configuredSize) ? configuredSize : undefined
-  const lineNumbers = props.lineNumbers
+  const editor = props.editorOptions && typeof props.editorOptions === 'object'
+    ? props.editorOptions as Record<string, unknown> : {}
+  const lineNumbers = editor.lineNumbers ?? props.lineNumbers
   const numberMode = lineNumbers === 'on' || lineNumbers === 'off' || lineNumbers === 'relative' || lineNumbers === 'interval' ? lineNumbers : undefined
+  const wrap = editor.wordWrap ?? props.wordWrap
+  const wordWrap = wrap === 'on' || wrap === 'off' || wrap === 'wordWrapColumn' || wrap === 'bounded' ? wrap : undefined
+  const column = editor.wordWrapColumn ?? props.wordWrapColumn
+  const wordWrapColumn = typeof column === 'number' && Number.isSafeInteger(column) && column > 0 ? column : undefined
   const writeToken = typeof props.tpSnippet === 'string' && /^[a-f0-9]{64}$/.test(props.tpSnippet) ? props.tpSnippet : undefined
   const autorun = props.autorun === 'once' ? 'once' : props.autorun === true || (props.autorun === undefined && automatic) ? true : undefined
   return {
@@ -119,7 +131,9 @@ export function parseCodeInfo(input: string): CodeBlockInfo | undefined {
       ? props.runnerOptions as Record<string, unknown>
       : undefined }),
     ...(runner === 'diff' && { diffOptions: { readonly: props.readonly === true, height: height === 'initial' ? undefined : height } }),
-    ...((runner === 'edit' || runner === 'run' || writeToken !== undefined) && { editorOptions: { readonly: props.readonly === true, height, lineNumbers: numberMode } }),
+    ...((runner === 'edit' || runner === 'run' || writeToken !== undefined) && {
+      editorOptions: { readonly: (editor.readOnly ?? props.readonly) === true, height, lineNumbers: numberMode, wordWrap, wordWrapColumn },
+    }),
     ...(runner === 'run' && { runnerTiming: { autorun, outputAt: runnerOutputAt(props.showOutputAt) } }),
     writeToken,
   }
