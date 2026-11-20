@@ -20,6 +20,8 @@ import { setupOverviewGrid } from './overview.ts'
 import { setupPresenter } from './presenter.ts'
 import { collectReveals, prepareSwitchPrint, showReveals } from './reveals.ts'
 import { setupSideEditor } from './side-editor.ts'
+import type { NavOperations, ShortcutOptions } from '../../types/src/shortcuts.ts'
+import { registerShortcuts } from './shortcuts.ts'
 
 const canvasWidth = Number(document.documentElement.dataset.slideWidth) || defaultCanvas.width
 const canvasHeight = Number(document.documentElement.dataset.slideHeight) || defaultCanvas.height
@@ -272,7 +274,7 @@ function readLocation(): void {
   show(target.slide, click, false)
 }
 
-window.presentationNavigation = createNavigationContext(routes, slideMode,
+const navigation = window.presentationNavigation = createNavigationContext(routes, slideMode,
   position, bounds, {
     go(slide, step) {
       const number = typeof slide === 'number' ? slide : aliases.get(slide) ?? Number(slide)
@@ -506,68 +508,11 @@ window.addEventListener('hashchange', readLocation)
 window.addEventListener('popstate', readLocation)
 if (!overviewGrid && !isEntry && !isNotes) new ResizeObserver(resize).observe(stage)
 
-window.addEventListener('keydown', (event) => {
-  if (isOverview && window.parent !== window && event.key === 'Escape') {
+if (isOverview && window.parent !== window) window.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
     window.parent.postMessage({ presentationOverviewClose: true }, messageOrigin)
     event.preventDefault()
-    return
   }
-  if (isCapture || isPreview || event.altKey || event.metaKey || event.ctrlKey || event.defaultPrevented || overview.open || imageView.open) return
-  const field = event.target instanceof HTMLElement && event.target.closest('input, select, textarea, [contenteditable]')
-  const activated = (event.key === ' ' || event.key === 'Enter') && event.target instanceof Element && event.target.closest('button, a, summary, [role=button]')
-  if (field || activated) return
-
-  switch (event.key) {
-    case 'ArrowLeft':
-    case 'PageUp':
-      previousStep()
-      break
-    case ' ':
-    case 'ArrowRight':
-    case 'PageDown':
-      nextStep()
-      break
-    case 'ArrowUp':
-      previousSlide()
-      break
-    case 'ArrowDown':
-      nextSlide()
-      break
-    case 'Home':
-      show(1)
-      break
-    case 'End':
-      show(articles.length)
-      break
-    case 'p':
-    case 'P':
-      openPresenter()
-      break
-    case 'f':
-    case 'F':
-      void toggleFullscreen()
-      break
-    case 'o':
-    case 'O':
-      openOverview()
-      break
-    case 'e':
-    case 'E':
-      if (!sideEditor || document.body.classList.contains('presenting')) return
-      sideEditor.toggle()
-      break
-    case 'd':
-    case 'D':
-      if (!drawing?.toggle()) return
-      break
-    case 'c':
-    case 'C':
-      if (!drawing?.clear()) return
-      break
-    default:
-      return
-  }
-  event.preventDefault()
 })
 
 const mountCopy = !isCapture && !isPreview ? setupCodeCopy(stage) : undefined
@@ -707,6 +652,49 @@ if (isLive) {
     go: (page, clicks) => show(page, clicks, true, false),
   } : undefined)
   if (updates && !isPreview && !isPresenter) sideEditor = setupSideEditor({ slide: () => current, ...updates })
+}
+
+if (!isCapture && !isPreview && !isEntry) {
+  const nav: NavOperations = {
+    next: nextStep,
+    prev: previousStep,
+    nextSlide,
+    prevSlide: previousSlide,
+    go: navigation.go,
+    goFirst: () => show(1),
+    goLast: () => show(articles.length),
+    toggleDark: conditions.toggleDark,
+    toggleOverview: () => overview.open ? overview.close() : openOverview(),
+    toggleDrawing: () => drawing?.toggle(),
+    escapeOverview: () => overview.close(),
+    showGotoDialog: () => goto.focus(),
+  }
+  let shortcuts: ShortcutOptions[] = [
+    { name: 'next_space', key: 'space', fn: nav.next, autoRepeat: true },
+    { name: 'prev_space', key: 'Shift+space', fn: nav.prev, autoRepeat: true },
+    { name: 'next_right', key: 'right', fn: nav.next, autoRepeat: true },
+    { name: 'prev_left', key: 'left', fn: nav.prev, autoRepeat: true },
+    { name: 'next_page_key', key: ['PageDown', 'Shift+PageDown'], fn: nav.next, autoRepeat: true },
+    { name: 'prev_page_key', key: ['PageUp', 'Shift+PageUp'], fn: nav.prev, autoRepeat: true },
+    { name: 'next_down', key: ['down', 'Shift+down'], fn: nav.nextSlide, autoRepeat: true },
+    { name: 'prev_up', key: ['up', 'Shift+up'], fn: nav.prevSlide, autoRepeat: true },
+    { name: 'next_shift', key: 'Shift+right', fn: nav.nextSlide, autoRepeat: true },
+    { name: 'prev_shift', key: 'Shift+left', fn: nav.prevSlide, autoRepeat: true },
+    { name: 'first_slide', key: ['Home', 'Shift+Home'], fn: nav.goFirst, autoRepeat: true },
+    { name: 'last_slide', key: ['End', 'Shift+End'], fn: nav.goLast, autoRepeat: true },
+    { name: 'toggle_overview', key: ['o', 'Shift+o', '`'], fn: nav.toggleOverview },
+    { name: 'goto', key: ['g', 'Shift+g'], fn: nav.showGotoDialog },
+    { name: 'presenter', key: ['p', 'Shift+p'], fn: openPresenter },
+    { name: 'fullscreen', key: ['f', 'Shift+f'], fn: toggleFullscreen },
+    { name: 'side_editor', key: ['e', 'Shift+e'], fn: () => {
+      if (!sideEditor || document.body.classList.contains('presenting')) return false
+      sideEditor.toggle()
+    } },
+    { name: 'toggle_drawing', key: ['d', 'Shift+d'], fn: () => drawing?.toggle() ?? false },
+    { name: 'clear_drawing', key: ['c', 'Shift+c'], fn: () => drawing?.clear() ?? false },
+  ]
+  for (const setup of window.presentationShortcutSetups ?? []) shortcuts = setup(nav, shortcuts)
+  registerShortcuts(shortcuts, () => !overview.open && !imageView.open)
 }
 
 const recordButton = control.querySelector<HTMLButtonElement>('#record-button')!

@@ -35,6 +35,8 @@ import type { WritableSnippet } from './snippet-write.ts'
 import { snippetRevision } from './snippet-write.ts'
 
 export { defineAddon, defineStxLayout, defineTheme } from './extensions.ts'
+export { defineShortcutsSetup } from '../../../types/src/shortcuts.ts'
+export type { NavOperations, ShortcutOptions, ShortcutsSetup } from '../../../types/src/shortcuts.ts'
 export { defineCodeHighlightSetup, defineShikiSetup, defineKatexSetup, defineMermaidRendererSetup, defineMermaidSetup } from './authoring-setup.ts'
 export type { CodeHighlightOptions, KatexOptions, KatexTrustContext, MermaidOptions, MermaidRenderer } from './authoring-setup.ts'
 export type { PresentationNavigation, SlideRoute } from '../../../client/runtime/navigation.ts'

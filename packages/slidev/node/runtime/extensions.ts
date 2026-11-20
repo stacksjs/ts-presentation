@@ -6,6 +6,7 @@ import type { FontOptions } from '../../../types/src/frontmatter.ts'
 import type { DrawingOptions } from '../../../types/src/drawings.ts'
 import type { Deck, Slide } from './index.ts'
 import { importDeckModule } from './deck-modules.ts'
+import { bundleExtensionClient } from './extension-client.ts'
 import { within } from './assets.ts'
 import { resolveExtension } from './extension-resolver.ts'
 
@@ -146,15 +147,7 @@ export async function loadExtensions(
     if (data.client) {
       const path = moduleAsset(entry, data.client)
       await observe(path)
-      const client = await Bun.build({ entrypoints: [path], root: dirname(path), target: 'browser', format: 'iife', minify: true, metafile: true })
-      if (!client.success) throw new AggregateError(client.logs, `Could not build ${data.name}'s client module`)
-      const script = client.outputs.find(output => output.path.endsWith('.js'))
-      if (!script || client.outputs.length !== 1) throw new Error(`Use ${data.name}'s styleFile and assets fields for non-JavaScript files`)
-      scripts.push(await script.text())
-      for (const input of Object.keys(client.metafile?.inputs ?? {})) {
-        const inputPath = resolve(dirname(path), input)
-        if (await Bun.file(inputPath).exists()) await observe(inputPath)
-      }
+      scripts.push(await bundleExtensionClient(path, dirname(path), observe, `${data.name}'s client module`))
     }
     if (data.assets) {
       const assetDirectory = await realpath(moduleAsset(entry, data.assets))

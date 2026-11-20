@@ -16,6 +16,7 @@ import { drawingEnabled, resolveDrawings } from '../../../types/src/drawings.ts'
 import { bindDragSources } from './drag-source.ts'
 import type { WritableDrag } from './drag-source.ts'
 import { defineStxLayout, loadExtensions } from './extensions.ts'
+import { loadShortcutClient } from './extension-client.ts'
 import { createDeckComponentRenderer, loadDeckComponents } from './deck-components.ts'
 import { loadDeckLayers } from './layers.ts'
 import { findWorkspaceRoot } from './extension-resolver.ts'
@@ -196,7 +197,11 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
       }
       return result
     }))
-    const setup = await loadAuthoringSetup(directory, observe, observeOptional, roots)
+    const [setup, shortcutClient] = await Promise.all([
+      loadAuthoringSetup(directory, observe, observeOptional, roots),
+      loadShortcutClient(directory, roots, observe, observeOptional),
+    ])
+    extensions.client = [extensions.client, shortcutClient].filter(Boolean).join('\n;\n')
     if (extensions.references && deck.headmatter) {
       deck.headmatter = {
         ...deck.headmatter,

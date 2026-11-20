@@ -162,7 +162,18 @@ test.skipIf(!chrome)('keeps keyboard navigation and the presenter window under t
   let view: Bun.WebView | undefined
   let site: ReturnType<typeof Bun.serve> | undefined
   try {
-    await Bun.write(source, fixture)
+    await Bun.write(source, fixture.replace('# Intro', '# Intro\n\n<input id="keyboard-input" aria-label="Keyboard input">'))
+    await Bun.write(resolve(root, 'setup/shortcuts.ts'), `
+import { defineShortcutsSetup } from 'ts-presentation'
+export default defineShortcutsSetup((nav, base) => [
+  ...base,
+  { key: 'Alt+j', fn: nav.goLast },
+  { key: 'Enter', fn: nav.next, autoRepeat: true },
+  { key: 'Backspace', fn: nav.prev },
+  { key: 'Ctrl+d', fn: nav.toggleDark },
+  { key: 'End', fn: nav.goFirst },
+])
+`)
     const build = cli('build', source, '--out', output)
     const [status, errors] = await Promise.all([build.exited, new Response(build.stderr).text()])
     if (status) throw new Error(errors.trim() || `Build command exited with status ${status}`)
@@ -181,8 +192,32 @@ test.skipIf(!chrome)('keeps keyboard navigation and the presenter window under t
     view = browser
     await browser.navigate(new URL('/training/deck/#/1', site.url).href)
     expect(await browser.evaluate('window.presentationNavigation?.currentPage')).toBe(1)
-    const keypress = (key: string) => browser.evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(key)}, cancelable: true }))`)
+    const keypress = (key: string, options: KeyboardEventInit = {}, target = 'document.body') =>
+      browser.evaluate<boolean>(`${target}.dispatchEvent(new KeyboardEvent('keydown', ${JSON.stringify({ key, bubbles: true, cancelable: true, ...options })}))`)
     const location = () => browser.evaluate<string>('window.location.pathname + window.location.hash')
+    expect(await keypress('Enter', {}, 'document.querySelector("#keyboard-input")')).toBe(true)
+    expect(await keypress('Enter', {}, 'document.querySelector("#presenter")')).toBe(true)
+    expect(await browser.evaluate('window.presentationNavigation.currentPage')).toBe(1)
+    expect(await keypress('j')).toBe(true)
+    expect(await keypress('∆', { altKey: true, code: 'KeyJ' })).toBe(false)
+    expect(await location()).toBe('/training/deck/#slide-3')
+    await keypress('End')
+    expect(await location()).toBe('/training/deck/#slide-1')
+    await keypress('Enter')
+    expect(await location()).toBe('/training/deck/#review/1')
+    await keypress('Enter', { repeat: true })
+    expect(await location()).toBe('/training/deck/#review/2')
+    await keypress('Backspace', { repeat: true })
+    expect(await location()).toBe('/training/deck/#review/2')
+    await keypress('Backspace')
+    expect(await location()).toBe('/training/deck/#review/1')
+    await keypress(' ', { shiftKey: true })
+    expect(await location()).toBe('/training/deck/#slide-1')
+    await keypress('d', { ctrlKey: true })
+    expect(await browser.evaluate('document.documentElement.classList.contains("light")')).toBe(true)
+    await keypress('ArrowRight', { shiftKey: true })
+    expect(await location()).toBe('/training/deck/#review/1')
+    await keypress('Home')
     await keypress('ArrowRight')
     expect(await location()).toBe('/training/deck/#review/1')
     await keypress('ArrowRight')

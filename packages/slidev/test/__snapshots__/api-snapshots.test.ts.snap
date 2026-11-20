@@ -1969,6 +1969,32 @@ export type { TocItem } from './toc.ts';
 export type { FrontmatterDocument, FrontmatterStyle, PreparserExtensionLoader, SlideInfo, SlideInfoBase, SlidePatch, SlidevData, SlidevDetectedFeatures, SlidevMarkdown, SlidevPreparserExtension, SlidevThemeConfig, SlidevThemeMeta, SourceSlideInfo } from './types.ts';
 export type { SlidevConfig } from './config.ts';
 export type { Headmatter, Frontmatter } from './frontmatter.ts';
+export { defineShortcutsSetup } from './shortcuts.ts';
+export type { NavOperations, ShortcutOptions, ShortcutsSetup } from './shortcuts.ts';
+
+// packages/types/src/shortcuts.d.ts
+export interface NavOperations {
+    next(): void;
+    prev(): void;
+    nextSlide(): void;
+    prevSlide(): void;
+    go(slide: number | string, click?: number): void;
+    goFirst(): void;
+    goLast(): void;
+    toggleDark(): void;
+    toggleOverview(): void;
+    toggleDrawing(): void;
+    escapeOverview(): void;
+    showGotoDialog(): void;
+}
+export interface ShortcutOptions {
+    key: string | readonly string[];
+    fn?: (event: KeyboardEvent) => void | boolean | Promise<void>;
+    autoRepeat?: boolean;
+    name?: string;
+}
+export type ShortcutsSetup = (nav: NavOperations, base: ShortcutOptions[]) => ShortcutOptions[];
+export declare function defineShortcutsSetup(setup: ShortcutsSetup): ShortcutsSetup;
 
 // packages/types/src/toc.d.ts
 export interface TocItem {

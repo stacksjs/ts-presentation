@@ -15,6 +15,7 @@ in a new ts-presentation project.
 | Iframe layouts | Full and split STX layouts with per-slide zoom, viewport sizing for enlarged slides, and design-size layout in thumbnails and print |
 | Global and per-slide layers | STX layers from the deck, theme, or addons, slide context bindings, persistent matching global content, and a custom toolbar slot |
 | Subpath hosting | `--base` for build and dev, history and hash navigation, direct presenter links, and deck-relative assets |
+| Custom shortcuts | Browser-side `setup/shortcuts.ts` with named defaults, string key combinations, repeat control, and navigation actions |
 | Monaco editor and runner | Local editor and timed browser-worker runner. Bun compiles TypeScript edits in dev and can save opted-in snippets |
 | Snippets, line highlights, Magic Move | Local file and region imports, numbered click highlights, native token animations |
 | Syntax highlighting themes | `codeTheme` or a local `setup/code-highlighter.ts` selects a first-party palette |

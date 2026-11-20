@@ -48,11 +48,13 @@ function readSlots(host: HTMLElement): Branches {
 export function createSlideConditions(mode: () => SlideMode, refresh: () => void): {
   update(container: HTMLElement): boolean
   observe(slide: HTMLElement): void
+  toggleDark(): void
 } {
   const root = document.documentElement
   const schema = root.dataset.colorSchema
   const preferred = matchMedia('(prefers-color-scheme: dark)')
-  const dark = () => schema === 'auto' ? preferred.matches : schema !== 'light'
+  let override: boolean | undefined
+  const dark = () => override ?? (schema === 'auto' ? preferred.matches : schema !== 'light')
   function applyScheme(): void {
     const value = dark()
     root.classList.toggle('dark', value)
@@ -117,5 +119,13 @@ export function createSlideConditions(mode: () => SlideMode, refresh: () => void
     observed = targets
   }
 
-  return { update, observe }
+  return {
+    update,
+    observe,
+    toggleDark() {
+      override = !dark()
+      applyScheme()
+      refresh()
+    },
+  }
 }
