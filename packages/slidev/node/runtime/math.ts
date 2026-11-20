@@ -355,10 +355,11 @@ interface RowPart {
 }
 
 type Alignment = 'left' | 'center' | 'right'
-type ArrayRule = 'solid' | 'dashed' | 'double'
+type ArrayRule = 'solid' | 'dashed'
+type CellSide = 'top' | 'right' | 'bottom' | 'left'
 const alignments: Record<string, Alignment> = { l: 'left', c: 'center', r: 'right' }
-interface ArrayColumn { align: Alignment, before?: ArrayRule }
-interface ArrayRow { cells: Markup[], label?: Markup, before?: ArrayRule, gap?: string }
+interface ArrayColumn { align: Alignment, before: ArrayRule[] }
+interface ArrayRow { cells: Markup[], label?: Markup, before: ArrayRule[], gap?: string }
 interface MathLine { content: Markup, gap?: string }
 interface EquationTag { label?: Markup, suppressed: boolean }
 
@@ -396,24 +397,49 @@ function stackOperator(markup: Markup): Markup {
   return typeof markup === 'string' ? fixed(markup) : style => fixed(markup(style))
 }
 
-function arrayColumns(spec: string): { columns: ArrayColumn[], after?: ArrayRule } {
+function arrayColumns(spec: string): { columns: ArrayColumn[], after: ArrayRule[] } {
   const columns: ArrayColumn[] = []
-  let after: ArrayRule | undefined
+  let after: ArrayRule[] = []
   for (const char of spec.replace(/\s/g, '')) {
-    if (char === '|' || char === ':') after = after ? 'double' : char === '|' ? 'solid' : 'dashed'
+    if (char === '|' || char === ':') after.push(char === '|' ? 'solid' : 'dashed')
     else if (Object.hasOwn(alignments, char)) {
       columns.push({ align: alignments[char], before: after })
-      after = undefined
+      after = []
     }
     else throw new Error('Invalid array column')
   }
   return { columns, after }
 }
 
-function tableBorder(side: string, line: ArrayRule, minimum: number): string {
-  const layers = line === 'double' ? 3 : 1
-  const width = minimum ? `max(${layers}px,${layers * minimum}em)` : `${layers}px`
-  return `border-${side}:${width} ${line} currentColor`
+function arrayRuleStyles(borders: [CellSide, ArrayRule[] | undefined][], minimum: number): string[] {
+  const styles: string[] = []
+  const strokes: string[] = []
+  const width = minimum ? `max(1px,${minimum}em)` : '1px'
+  for (const [side, rules] of borders) {
+    if (!rules?.length) continue
+    if (rules.length === 1) {
+      styles.push(`border-${side}:${width} ${rules[0]} currentColor`)
+      continue
+    }
+    const horizontal = side === 'top' || side === 'bottom'
+    // Consecutive rules are spaced like TeX's horizontal and vertical rules.
+    // Keep enough space for thick rules selected by minRuleThickness.
+    const step = `max(${horizontal ? '0.25' : '0.2'}em,2 * ${width})`
+    const extent = `calc(${rules.length - 1} * ${step} + ${width})`
+    styles.push(`border-${side}:${extent} solid transparent`)
+    const size = horizontal ? `100% ${width}` : `${width} 100%`
+    for (const [index, rule] of rules.entries()) {
+      const offsetIndex = side === 'right' || side === 'bottom' ? rules.length - 1 - index : index
+      const offset = offsetIndex ? `calc(${offsetIndex} * ${step})` : '0px'
+      const position = horizontal ? `left 0px ${side} ${offset}` : `${side} ${offset} top 0px`
+      const ink = rule === 'solid'
+        ? 'linear-gradient(currentColor,currentColor)'
+        : `repeating-linear-gradient(to ${horizontal ? 'right' : 'bottom'},currentColor 0 3px,transparent 3px 5px)`
+      strokes.push(`${ink} ${position} / ${size} no-repeat border-box`)
+    }
+  }
+  if (strokes.length) styles.push(`background:${strokes.join(',')}`)
+  return styles
 }
 
 function tag(name: string, value: string): string {
@@ -1774,8 +1800,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const gathered = environment.startsWith('gather') || environment.startsWith('multline')
     const cases = environment.endsWith('cases')
     const ordinaryCellStyle = environment.startsWith('d') || aligned || gathered ? 0 : 1
-    const stretch = columnArray && macros.has('\\arraystretch')
-      ? Number(expandDefinition(['\\arraystretch']).join('')) : 1
+    const stretch = !compact && !cases && macros.has('\\arraystretch')
+      ? Number.parseFloat(expandDefinition(['\\arraystretch']).join('')) : 1
     if (!(stretch > 0 && stretch <= 100)) throw new Error('Invalid array stretch')
     const outerTag = tagState
     const rowTags = /^(?:align|alignat|gather)[*]?$/.test(environment)
@@ -1787,15 +1813,13 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const rows: ArrayRow[] = []
     let cells: Markup[] = []
     const end = stack ? '}' : '\\end'
-    let rule: ArrayRule | undefined
+    let rules: ArrayRule[] = []
     let closed = false
     const stops = ['&', '\\\\', '\\newline', '\\cr', end]
     while (peek()) {
       if (!cells.length) {
-        while (peek() === '\\hline' || peek() === '\\hdashline') {
-          const line = take() === '\\hline' ? 'solid' : 'dashed'
-          rule = rule ? 'double' : line
-        }
+        while (peek() === '\\hline' || peek() === '\\hdashline')
+          rules.push(take() === '\\hline' ? 'solid' : 'dashed')
       }
       const followsOrdinary = aligned && cells.length % 2 === 1
       cells.push(inScope(() => row(stops, false, false, undefined, followsOrdinary)))
@@ -1813,8 +1837,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
       if (extra !== undefined && gap === undefined) throw new Error('Invalid array row spacing')
       const label = rowTags ? nextTag(automatic) : undefined
       if (cells.length > 1 || cells[0] || label !== undefined || rows.length === 0 || lineBreak) {
-        rows.push({ cells, label, before: rule, gap })
-        rule = undefined
+        rows.push({ cells, label, before: rules, gap })
+        rules = []
       }
       cells = []
       if (rowTags) tagState = { suppressed: false }
@@ -1834,8 +1858,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const leqno = state?.options.leqno === true
     const columnCount = Math.max(layout.columns.length, ...rows.map(entry => entry.cells.length))
     const grid = !compact && (aligned || alignment.length > 0)
-    const rectangular = grid || columnArray || tags || rows.some(entry => entry.before) || rule !== undefined
+    const rowRules = rows.reduce((count, entry) => count + entry.before.length, rules.length)
+    const columnRules = layout.columns.reduce((count, column) => count + column.before.length, layout.after.length)
+    const rectangular = grid || columnArray || tags || rowRules > 0
     if (rectangular && columnCount * rows.length > 6000) throw new Error('Math array has too many cells')
+    if (rowRules * columnCount + columnRules * rows.length > 24000)
+      throw new Error('Math array has too many rules')
     const alignmentAt = (index: number) => aligned ? (index % 2 ? 'left' : 'right') : alignment[index] ?? alignment.at(-1) ?? (cases ? 'left' : '')
     const columnAlignment = Array.from({ length: columnCount }, (_, index) => alignmentAt(index) || 'center')
     if (tags) {
@@ -1844,7 +1872,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
     const align = aligned || cases || alignment.length || tags ? ` columnalign="${columnAlignment.join(' ')}"` : ''
     const moreRowSpace = aligned || gathered || cases
-    const pad = compact ? '0.06' : moreRowSpace ? '0.125' : (0.14 * stretch).toFixed(4).replace(/0+$/, '').replace(/\.$/, '')
+    const pad = compact ? '0.06' : ((moreRowSpace ? 0.125 : 0.14) * stretch).toFixed(4).replace(/0+$/, '').replace(/\.$/, '')
     const lines = compact ? ' class="math-compact-array"' : ' data-equation-lines'
     const gridLayout = grid ? ` class="math-alignment-grid" style="--math-columns:${columnAlignment.length}"` : ''
     return (style) => {
@@ -1864,11 +1892,14 @@ export function renderMath(source: string, display = false, configured: MathMacr
               styling.push('padding-inline-start:1em')
           }
           if (cellStyle === 0) styling.push('math-style:normal')
-          const before = layout.columns[index]?.before
-          if (before) styling.push(tableBorder('left', before, minRule))
-          if (layout.after && index === columnCount - 1) styling.push(tableBorder('right', layout.after, minRule))
-          if (entry.before) styling.push(tableBorder('top', entry.before, minRule))
-          if (rule && rowIndex === rows.length - 1) styling.push(tableBorder('bottom', rule, minRule))
+          if (rowRules || columnRules) {
+            styling.push(...arrayRuleStyles([
+              ['left', layout.columns[index]?.before],
+              ['right', index === columnCount - 1 ? layout.after : undefined],
+              ['top', entry.before],
+              ['bottom', rowIndex === rows.length - 1 ? rules : undefined],
+            ], minRule))
+          }
           if (compact || stretch !== 1 || moreRowSpace) styling.push(`padding-block:${pad}em`)
           if (entry.gap) styling.push(`padding-bottom:max(0px,calc(${pad}em + ${entry.gap}))`)
           const settings = styling.length ? ` style="${styling.join(';')}"` : ''

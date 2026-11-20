@@ -44,7 +44,7 @@ in a new ts-presentation project.
 | KaTeX trust option | Opt-in links, URL labels, formula images, and HTML attributes through the KaTeX-shaped boolean or callback |
 | KaTeX display options | Formatted `\tag` and `\tag*` labels, `leqno` for left-side equation tags, and `fleqn` for flush-left display formulas |
 | AMS equation numbering | Automatic labels in rendered slide order, tags and suppression inside nested tables, and numbers preserved in range exports |
-| AMS alignment and arrays | Paired operator spacing, equal alignment points across rows, explicit `alignat` counts, stable tag columns on short rows, starred matrix column alignment, and scoped row rules |
+| AMS alignment and arrays | Paired operator spacing, equal alignment points across rows, explicit `alignat` counts, stable tag columns on short rows, starred matrix column alignment, scoped `\arraystretch`, and consecutive solid and dashed rules |
 | KaTeX line breaks | Inline wrapping after outer binary operators and relations, `\allowbreak` and `\nobreak` controls, standalone `\\` and `\newline` in math and text, optional row spacing, and `strict` handling for standalone display breaks |
 | KaTeX strict diagnostics | Unicode text and unrecognized characters, end-of-formula comments, HTML extensions, text accents and strikeout in math, spacing units and modes, and overflowed array columns |
 | Unicode math and text | Combining accents attached to math atoms and scripts, text-mode shaping of accented words, Unicode script and symbol validation, and original tokens in strict callbacks |

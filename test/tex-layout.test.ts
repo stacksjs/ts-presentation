@@ -321,7 +321,7 @@ test('applies minimum rules to fractions and arrays and keeps line-free binomial
   expect(html).toContain('<mfrac linethickness="0">')
   expect(html).toContain('border-left:max(1px,0.3em) solid currentColor')
   expect(html).toContain('dashed currentColor')
-  expect(html).toContain('double currentColor')
+  expect(html).toContain('border-right:calc(1 * max(0.2em,2 * max(1px,0.3em)) + max(1px,0.3em)) solid transparent')
 })
 
 test('renders phase angles, actuarial notation, pseudo-bold, and strikeout as MathML', () => {
@@ -654,7 +654,7 @@ test('lays out AMS arrays with solid and dashed rules, row gaps, and scoped cell
   expect(html).toContain('math-style:normal')
   expect(html).toContain('border-left:1px solid currentColor')
   expect(html).toContain('border-left:1px dashed currentColor')
-  expect(html).toContain('border-right:3px double currentColor')
+  expect(html).toContain('border-right:calc(1 * max(0.2em,2 * 1px) + 1px) solid transparent')
   expect(html).toContain('border-top:1px solid currentColor')
   expect(html).toContain('border-top:1px dashed currentColor')
   expect(html).toContain('border-bottom:1px solid currentColor')
@@ -665,6 +665,29 @@ test('lays out AMS arrays with solid and dashed rules, row gaps, and scoped cell
   expect(array?.match(/<mtr>/g)).toHaveLength(2)
   expect(renderMath(String.raw`\begin{array}{c}a`)).toContain('math-unrendered')
   expect(renderMath(String.raw`\begin{array}{c}a\\[bogus]b\end{array}`)).toContain('math-unrendered')
+})
+
+test('honors the scoped array stretch in AMS matrices and alignment environments', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const html = math(String.raw`
+    {\def\arraystretch{2}\begin{pmatrix}a\\b\end{pmatrix}
+      \begin{aligned}a&=b\\c&=d\end{aligned}}
+    \begin{pmatrix}a\\b\end{pmatrix}
+  `, true)
+  expect(html.match(/padding-block:0\.28em/g)).toHaveLength(2)
+  expect(html.match(/padding-block:0\.25em/g)).toHaveLength(4)
+  expect(() => math(String.raw`\def\arraystretch{0}\begin{matrix}a\end{matrix}`, true)).toThrow('Invalid array stretch')
+  const fixed = math(String.raw`\def\arraystretch{0}\begin{subarray}{l}a\\b\end{subarray}
+    \begin{cases}c&d\end{cases}`, true)
+  expect(fixed).toContain('padding-block:0.06em')
+  expect(fixed).toContain('padding-block:0.125em')
+})
+
+test('limits the number of array rules expanded across cells', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const spec = '|'.repeat(500) + 'c'
+  const body = Array.from({ length: 50 }, () => 'a').join(String.raw`\\`)
+  expect(() => math(`\\begin{array}{${spec}}${body}\\end{array}`, true)).toThrow('Math array has too many rules')
 })
 
 test('renders compact substack and subarray limits with no nested equation click rows', () => {
@@ -982,6 +1005,83 @@ test('enforces KaTeX strict settings for comments, markup, text commands, spacin
 })
 
 const chrome = await findChrome()
+
+test.skipIf(!chrome)('paints mixed array rules as separate strokes on all sides in Chromium', async () => {
+  const math = createMathRenderer({ minRuleThickness: 0.08, throwOnError: true })
+  const formula = String.raw`\begin{array}{|:|c::}
+    \hline\hdashline\hline abcdefghijklmnop\\\hdashline\hline
+  \end{array}`
+  const stylesheet = await Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url)).text()
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response(`<!doctype html><meta charset="utf-8"><style>${stylesheet}</style>
+      <main class="slide" style="background:white;color:#d00000;font-size:40px">${math(formula, true)}</main>`, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    }),
+  })
+  const view = new Bun.WebView({ backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await view.navigate(server.url.href)
+    const screenshot = await view.screenshot()
+    const encoded = Buffer.from(await screenshot.arrayBuffer()).toString('base64')
+    const strokes = await view.evaluate<Record<string, number[]>>(`(async () => {
+      const cell = document.querySelector('math mtd')
+      const { left, right, top, bottom } = cell.getBoundingClientRect()
+      const styles = getComputedStyle(cell)
+      const em = parseFloat(styles.fontSize)
+      const ratio = devicePixelRatio
+      const image = new Image()
+      image.src = 'data:' + ${JSON.stringify(screenshot.type || 'image/png')} + ';base64,${encoded}'
+      await image.decode()
+      const canvas = document.createElement('canvas')
+      canvas.width = image.width
+      canvas.height = image.height
+      const context = canvas.getContext('2d')
+      context.drawImage(image, 0, 0)
+      const { width, data } = context.getImageData(0, 0, image.width, image.height)
+      function coverage(horizontal, fixed, start, end) {
+        let count = 0
+        for (let pos = start; pos < end; pos++) {
+          const x = Math.floor((horizontal ? pos : fixed) * ratio)
+          const y = Math.floor((horizontal ? fixed : pos) * ratio)
+          const i = (y * width + x) * 4
+          if (data[i] > 120 && data[i + 1] < 100 && data[i + 2] < 100)
+            count++
+        }
+        return count / Math.ceil(end - start)
+      }
+      const line = (y) => coverage(true, y, left + 0.5 * em, right - 0.5 * em)
+      const rule = (x) => coverage(false, x, top + 0.65 * em, bottom - 0.4 * em)
+      const center = 0.04 * em
+      return {
+        left: [0, 0.2, 0.4, 0.1].map(n => rule(left + n * em + center)),
+        right: [0.2, 0, 0.1].map(n => rule(right - n * em - center)),
+        top: [0, 0.25, 0.5, 0.125].map(n => line(top + n * em + center)),
+        bottom: [0.25, 0, 0.125].map(n => line(bottom - n * em - center)),
+      }
+    })()`)
+    for (const [side, kinds] of Object.entries({
+      left: ['solid', 'dashed', 'solid', 'gap'],
+      right: ['dashed', 'dashed', 'gap'],
+      top: ['solid', 'dashed', 'solid', 'gap'],
+      bottom: ['dashed', 'solid', 'gap'],
+    })) {
+      for (const [index, kind] of kinds.entries()) {
+        const coverage = strokes[side][index]
+        if (kind === 'solid') expect(coverage).toBeGreaterThan(0.9)
+        if (kind === 'dashed') {
+          expect(coverage).toBeGreaterThan(0.3)
+          expect(coverage).toBeLessThan(0.8)
+        }
+        if (kind === 'gap') expect(coverage).toBe(0)
+      }
+    }
+  }
+  finally {
+    view.close()
+    await server.stop(true)
+  }
+}, 45_000)
 
 test.skipIf(!chrome)('uses continued fraction struts and styles both generalized fraction fences in Chromium', async () => {
   const sources = [
