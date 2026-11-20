@@ -153,6 +153,18 @@ $$
 
 $$
 \hphantom{A\kern{-1em}}+b
+$$
+
+---
+
+# Mathematical alphabets
+
+$$
+\mathbb{R2}+\mathcal{B}+\mathfrak{H}+\mathsf{s}+\mathsfit{t}+\mathtt{u}+\mathbf{V}+\mathit{k}+\boldsymbol{\gamma}
+$$
+
+$$
+\mathbb{M_{\mathrm{index}}\begin{matrix}a&b\\c&d\end{matrix}N}+\mathbb{\text{plain}}+\boldsymbol{\sum_{j=0}^{n} j}
 $$`)
     const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
     const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
@@ -160,7 +172,7 @@ $$`)
     if (status) throw new Error(stderr)
     const frames: PowerPointFrame[] = []
     await captureFrames({ root: join(root, 'dist'), executable: chrome!, scale: 1, canvas, editable: true, withClicks: false }, frame => { frames.push(frame) })
-    expect(frames).toHaveLength(4)
+    expect(frames).toHaveLength(5)
     const equations = frames[0].editable?.nodes.filter((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math') ?? []
     expect(equations).toHaveLength(4)
     expect(equations.filter(node => node.equation)).toHaveLength(3)
@@ -238,7 +250,29 @@ $$`)
       expect(script).toMatch(/^<m:sub>.*?>6<\/m:t>.*?<\/m:sub><m:sup>.*?>14<\/m:t>.*?<\/m:sup><m:e>/)
     expect(prescripts[0]).toContain('<m:sty m:val="p"/>')
     expect(prescripts[1]).toMatch(/<m:e><m:sSup><m:e>.*?>C<\/m:t>.*?<\/m:e><m:sup>.*?>−<\/m:t>/)
-    expect([...parts.keys()].filter(name => name.startsWith('ppt/media/'))).toHaveLength(13)
+    expect([...parts.keys()].filter(name => name.startsWith('ppt/media/'))).toHaveLength(15)
+
+    const alphabets = parts.get('ppt/slides/slide5.xml')?.toString() ?? ''
+    expect(alphabets.match(/<a14:m>/g)).toHaveLength(2)
+    expect(alphabets.match(/<mc:Fallback><p:sp>/g)).toHaveLength(2)
+    const fonts = new Map([...alphabets.matchAll(/<m:r><m:rPr>(.*?)<\/m:rPr>.*?<m:t xml:space="preserve">([^<]*)<\/m:t><\/m:r>/g)]
+      .map(([, properties, letter]) => [letter, properties]))
+    for (const [letter, script, style] of [
+      ['R', 'double-struck', 'p'], ['2', 'double-struck', 'p'], ['B', 'script', 'p'], ['H', 'fraktur', 'p'],
+      ['s', 'sans-serif', 'p'], ['t', 'sans-serif', 'i'], ['u', 'monospace', 'p'],
+      ['M', 'double-struck', 'p'], ['N', 'double-struck', 'p'],
+    ]) expect(fonts.get(letter)).toBe(`<m:scr m:val="${script}"/><m:sty m:val="${style}"/>`)
+    expect(fonts.get('V')).toBe('<m:sty m:val="b"/>')
+    expect(fonts.get('k')).toBe('<m:sty m:val="i"/>')
+    expect(fonts.get('γ')).toBe('<m:sty m:val="bi"/>')
+    for (const cell of ['a', 'b', 'c', 'd']) expect(fonts.get(cell)).toBe('<m:sty m:val="i"/>')
+    expect(fonts.get('i')).toBe('<m:sty m:val="p"/>')
+    expect(fonts.get('plain')).toBe('<m:sty m:val="p"/>')
+    expect(fonts.get('∑')).toBe('<m:sty m:val="b"/>')
+    expect(alphabets).toContain('<m:limUpp><m:e><m:limLow>')
+    expect(alphabets).toContain('<m:m><m:mr>')
+    expect(alphabets).toContain('<m:sSub>')
+
   }
   finally {
     await rm(root, { recursive: true, force: true })

@@ -1,4 +1,5 @@
 import { escapeHtml } from '../html.ts'
+import { baseMathLetters } from '../math-alphabets.ts'
 import type { RawMathElement, Rgba } from './ir.ts'
 import { PT_PER_PX } from './ir.ts'
 
@@ -37,6 +38,28 @@ const textTypefaces: Readonly<Record<string, string>> = {
   'font-family:serif': 'Cambria',
   'font-family:sans-serif': 'Arial',
   'font-family:monospace': 'Courier New',
+}
+
+interface EquationFont {
+  script?: 'double-struck' | 'script' | 'fraktur' | 'sans-serif' | 'monospace'
+  mathItalic?: boolean
+  textItalic: boolean
+  bold: boolean
+  typeface: string
+}
+
+const defaultMathFont: Readonly<EquationFont> = { textItalic: false, bold: false, typeface: mathTypeface }
+const mathFonts: Readonly<Record<string, Partial<EquationFont>>> = {
+  normal: { mathItalic: false },
+  bold: { mathItalic: false, bold: true },
+  italic: { mathItalic: true, textItalic: true },
+  'bold-italic': { mathItalic: true, textItalic: true, bold: true },
+  'double-struck': { script: 'double-struck', mathItalic: false },
+  script: { script: 'script', mathItalic: false },
+  fraktur: { script: 'fraktur', mathItalic: false },
+  'sans-serif': { script: 'sans-serif', mathItalic: false, typeface: 'Arial' },
+  'sans-serif-italic': { script: 'sans-serif', mathItalic: true, textItalic: true, typeface: 'Arial' },
+  monospace: { script: 'monospace', mathItalic: false, typeface: 'Courier New' },
 }
 
 function only(node: RawMathElement, ...names: string[]): boolean {
@@ -89,26 +112,32 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba):
   const size = Math.max(100, Math.min(400000, Math.round(fontSize * PT_PER_PX * 100)))
   const hex = [color.r, color.g, color.b].map(value => Math.round(value).toString(16).padStart(2, '0')).join('').toUpperCase()
   let opacity = color.a
-  let bold = false
-  let italicText = false
-  let typeface = mathTypeface
+  let font: Readonly<EquationFont> = defaultMathFont
+  function inFont(next: Readonly<EquationFont>, render: () => string | undefined): string | undefined {
+    const previous = font
+    font = next
+    try { return render() }
+    finally { font = previous }
+  }
   const properties = (normalText: boolean, italic: boolean) => {
     const paint = opacity === 1 ? `<a:srgbClr val="${hex}"/>` : `<a:srgbClr val="${hex}"><a:alpha val="${Math.round(opacity * 100000)}"/></a:srgbClr>`
-    const formatting = normalText ? ` b="${Number(bold)}" i="${Number(italic)}"` : ''
-    return `<a:rPr sz="${size}"${formatting}><a:solidFill>${paint}</a:solidFill><a:latin typeface="${normalText ? typeface : mathTypeface}"/></a:rPr>`
+    const formatting = normalText ? ` b="${Number(font.bold)}" i="${Number(italic)}"` : ''
+    return `<a:rPr sz="${size}"${formatting}><a:solidFill>${paint}</a:solidFill><a:latin typeface="${normalText ? font.typeface : mathTypeface}"/></a:rPr>`
   }
   const wrap = (name: string, content: string) => `<m:${name}>${content}</m:${name}>`
   const setting = (name: string, value: string) => `<m:${name} m:val="${escapeHtml(value)}"/>`
-  function run(text: string, italic = false, textToken = false): string {
-    const normalText = textToken && typeface !== mathTypeface
-    const style = normalText ? '<m:nor/>' : `<m:sty m:val="${(bold ? 'b' : '') + (italic ? 'i' : '') || 'p'}"/>`
+  function run(text: string, italic = false, textToken = false, script?: EquationFont['script']): string {
+    const normalText = textToken && font.typeface !== mathTypeface
+    const alphabet = script ? setting('scr', script) : ''
+    const style = normalText ? '<m:nor/>' : alphabet + setting('sty', (font.bold ? 'b' : '') + (italic ? 'i' : '') || 'p')
     return wrap('r', `<m:rPr>${style}</m:rPr>${properties(normalText, italic)}<m:t xml:space="preserve">${escapeHtml(text)}</m:t>`)
   }
   function sequence(nodes: readonly RawMathElement[]): string | undefined {
     let output = ''
     for (let index = 0; index < nodes.length; index++) {
       const node = nodes[index]
-      const limits = operatorLimits(node)
+      // Keep the styled operator as an editable run when its weight matters.
+      const limits = font.bold ? undefined : operatorLimits(node)
       if (limits) {
         const end = followingTerm(nodes, index + 1)
         if (end > index + 1) {
@@ -259,11 +288,16 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba):
       // XML 1.0 forbids control characters even inside a text run.
       // eslint-disable-next-line no-control-regex
       if (/[\x00-\x08\x0B\x0C\x0E-\x1F\uFFFE\uFFFF]/.test(text)) return
-      const italic = name === 'mtext' ? italicText
-        : name === 'mi' && !attributes.mathvariant && /^[\p{Script=Latin}\p{Script=Greek}]\p{M}*$/u.test(text)
-      return run(text, italic, name === 'mtext')
+      const letter = name === 'mi' || name === 'mn'
+      const script = letter ? font.script : undefined
+      const italic = name === 'mtext' ? font.textItalic
+        : letter && (font.mathItalic ?? (name === 'mi' && !attributes.mathvariant && /^[\p{Script=Latin}\p{Script=Greek}]\p{M}*$/u.test(text)))
+      return run(script ? baseMathLetters(text, script) : text, italic, name === 'mtext', script)
     }
     if (text.trim()) return
+    if (name === 'mtable' && font !== defaultMathFont && Object.hasOwn(attributes, 'data-math-array'))
+      return inFont(defaultMathFont, () => convert(node))
+
     if (name === 'mtd' && only(node, 'style')) {
       const styles = (attributes.style ?? '').split(';').filter(Boolean)
       if (styles.every(style => alignmentCellStyles.has(style) || measuredCellSpacing.test(style))) return sequence(children)
@@ -283,37 +317,31 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba):
       if (space) return run(space[1])
       return
     }
-    const reset = attributes.class === 'math-font-reset' && only(node, 'class')
-    if (name === 'mrow' && attributes.class && !reset && only(node, 'class')) {
-      if (attributes.class === 'math-chemistry') return sequence(children)
-      if (children.length === 1 && (attributes.class === 'math-overline' || attributes.class === 'math-underline')) {
-        const body = convert(children[0])
-        if (body === undefined) return
-        const options = setting('pos', attributes.class === 'math-overline' ? 'top' : 'bot')
-        return wrap('bar', wrap('barPr', options) + wrap('e', body))
+    if (name === 'mrow') {
+      const variant = attributes.mathvariant
+      if (variant && attributes.class === `math-${variant}` && only(node, 'class', 'mathvariant') && Object.hasOwn(mathFonts, variant))
+        return inFont({ ...defaultMathFont, ...mathFonts[variant] }, () => sequence(children))
+      if (attributes.class === 'math-font-reset' && only(node, 'class'))
+        return inFont(defaultMathFont, () => sequence(children))
+      if (attributes.class && only(node, 'class')) {
+        if (attributes.class === 'math-chemistry') return sequence(children)
+        if (children.length === 1 && (attributes.class === 'math-overline' || attributes.class === 'math-underline')) {
+          const body = convert(children[0])
+          if (body === undefined) return
+          const options = setting('pos', attributes.class === 'math-overline' ? 'top' : 'bot')
+          return wrap('bar', wrap('barPr', options) + wrap('e', body))
+        }
+        return enclosure(node)
       }
-      return enclosure(node)
-    }
-    const upright = attributes.class === 'math-normal' && attributes.mathvariant === 'normal' && only(node, 'class', 'mathvariant')
-    if (name === 'mrow' && (reset || upright || (only(node, 'style') && attributes.style))) {
-      const previousBold = bold
-      const previousItalic = italicText
-      const previousTypeface = typeface
-      try {
-        const styles = reset ? ['font-family:math', 'font-weight:normal', 'font-style:normal']
-          : upright ? ['font-weight:normal', 'font-style:normal'] : attributes.style.split(';').filter(Boolean)
-        for (const style of styles) {
-          if (style === 'font-weight:bold' || style === 'font-weight:normal') bold = style.endsWith('bold')
-          else if (style === 'font-style:italic' || style === 'font-style:normal') italicText = style.endsWith('italic')
-          else if (Object.hasOwn(textTypefaces, style)) typeface = textTypefaces[style]
+      if (attributes.style && only(node, 'style')) {
+        const next = { ...font }
+        for (const style of attributes.style.split(';').filter(Boolean)) {
+          if (style === 'font-weight:bold' || style === 'font-weight:normal') next.bold = style.endsWith('bold')
+          else if (style === 'font-style:italic' || style === 'font-style:normal') next.textItalic = style.endsWith('italic')
+          else if (Object.hasOwn(textTypefaces, style)) next.typeface = textTypefaces[style]
           else return
         }
-        return sequence(children)
-      }
-      finally {
-        bold = previousBold
-        italicText = previousItalic
-        typeface = previousTypeface
+        return inFont(next, () => sequence(children))
       }
     }
     if (name === 'mrow' && only(node)) {

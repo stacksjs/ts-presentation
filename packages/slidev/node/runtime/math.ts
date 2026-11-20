@@ -1,6 +1,7 @@
 import { escapeHtml, unescapeHtml } from './html.ts'
 import type { KatexOptions, KatexTrustContext } from './authoring-setup.ts'
 import { mathArrowBody, stackMathArrow, verticalMathArrow } from './math-arrow.ts'
+import { styledMathAlphabets } from './math-alphabets.ts'
 import { MathParseError } from './math-error.ts'
 import { chemicalFormula, physicalUnits } from './math-chemistry.ts'
 import type { Markup, MathStyle } from './math-markup.ts'
@@ -149,11 +150,6 @@ const spacing: Record<string, string> = {
 const spacingCommands = new Set(['kern', 'mkern', 'mskip', 'hskip'])
 // A partial dimension can end before its magnitude or unit is complete.
 const dimensionPrefix = /^[+-]?\s*(?:(?:\d+(?:\.\d*)?|\.\d*)(?:\s*[a-z]{1,2})?\s*)?$/
-const styledLetters: Record<string, { upper: number, lower: number, digits?: number, exceptions: string }> = {
-  'double-struck': { upper: 0x1D538, lower: 0x1D552, digits: 0x1D7D8, exceptions: 'CℂHℍNℕPℙQℚRℝZℤ' },
-  'script': { upper: 0x1D49C, lower: 0x1D4B6, exceptions: 'BℬEℰFℱHℋIℐLℒMℳRℛeℯgℊoℴ' },
-  'fraktur': { upper: 0x1D504, lower: 0x1D51E, exceptions: 'CℭHℌIℑRℜZℨ' },
-}
 
 export interface MathMacroToken {
   text: string
@@ -405,7 +401,7 @@ export function renderUnrenderedMath(source: string, display: boolean, error: Ma
 }
 
 function applyVariant(content: string, variant: string): string {
-  const style = styledLetters[variant]
+  const style = styledMathAlphabets[variant]
   const uprightFont = variant === 'normal' || variant === 'bold' || variant === 'sans-serif' || variant === 'monospace'
   if (!style && !uprightFont && variant !== 'italic') return content
   // Explicit fonts, array cells, and math inside text own their glyphs.
