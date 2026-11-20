@@ -57,6 +57,50 @@ test('keeps a snapshot of the lookahead and primitive meanings when using let', 
   expect(math(String.raw`\let\word=\textunderscore\text{literal: \word.}`, false)).toContain('literal: _.')
 })
 
+test('selects TeX macro branches before parsing and keeps lookahead tokens available', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const source = String.raw`
+    \def\star{*}
+    \def\choice{\@ifstar{\alpha}{\beta}}
+    \def\optional{\@ifnextchar[\explicit\defaultRoot}
+    \def\explicit[#1]{\sqrt[#1]{x}}
+    \def\defaultRoot{\sqrt{x}}
+    \choice* \choice\star + \optional [3] + \optional
+  `
+  const html = math(source, false)
+  expect(html).toContain('<mi>α</mi><mi>β</mi><mo>*</mo>')
+  expect(html).toContain('<mroot><mrow><mi>x</mi></mrow><mrow><mn>3</mn></mrow></mroot>')
+  expect(html).toContain('<msqrt><mrow><mi>x</mi></mrow></msqrt>')
+  expect(math(String.raw`\@firstoftwo{\frac}{\unrecognized}12`, false)).toContain('<mfrac><mn>1</mn><mn>2</mn></mfrac>')
+  expect(math(String.raw`\@ifnextchar{ab}{X}{Y}a`, false)).toContain('<mi>Y</mi><mi>a</mi>')
+  expect(() => math(String.raw`\text{\@ifstar{yes}}`, false)).toThrow('Missing math argument')
+})
+
+test('expands conditionals eagerly and snapshots their meaning through let', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const html = math(String.raw`
+    \def\letter{A}
+    \edef\saved{\@secondoftwo{C}{\letter}\@ifstar{S}{U}*}
+    \def\letter{B}
+    \let\choose=\@ifstar
+    \def\@ifstar{W}
+    \saved\choose{X}{Y}*
+  `, false)
+  expect(html).toContain('<mi>A</mi><mi>S</mi><mi>X</mi>')
+  expect(math(String.raw`\expandafter\frac\@firstoftwo{12}{34}`, false)).toContain('<mfrac><mn>1</mn><mn>2</mn></mfrac>')
+  expect(() => math(String.raw`\def\cycle{\@ifstar{\cycle}{\cycle}}\cycle`, false)).toThrow('Too many math macro expansions')
+})
+
+test('selects text or math expansions across nested math and equation tags', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const html = math(String.raw`\def\unit{\TextOrMath{meters}{\mu}}
+    \unit + \text{in \unit: $\unit$ or \(\unit\) and \unit}\tag{\unit}`, true)
+  expect(html).toContain('<mtext>in meters: </mtext>')
+  expect(html).toContain('<mtext> and meters</mtext>')
+  expect(html).toContain('<mtext>(meters)</mtext>')
+  expect(html.match(/<mi>μ<\/mi>/g)).toHaveLength(3)
+})
+
 test('renders phase angles, actuarial notation, pseudo-bold, and strikeout as MathML', () => {
   const math = createMathRenderer({ throwOnError: true })
   const html = math(String.raw`\phase{-78^\circ} + a_{\angl{n+1}}+b_\angln + \pmb{\mu} + \text{old \sout{term $x^2$}}`, true)

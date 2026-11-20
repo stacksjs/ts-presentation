@@ -37,6 +37,21 @@ test('expands local declarations and bounds cyclic macros', () => {
   expect(renderMath('\\again', false, { '\\again': '\\again' })).toContain('math-unrendered')
 })
 
+test('uses math and text branches from a deck-wide TeX macro', async () => {
+  const deck = parseDeck(String.raw`---
+math:
+  macros:
+    '\@unit': '\@ifstar{\textbf{meters}}{\TextOrMath{meters}{\mu}}'
+---
+
+$\@unit + \@unit* + \text{in \@unit}$
+`)
+  const html = await renderDeck(deck)
+  expect(html).toContain('<mi>μ</mi>')
+  expect(html).toContain('<mrow style="font-weight:bold"><mtext>meters</mtext></mrow>')
+  expect(html).toContain('<mtext>in meters</mtext>')
+})
+
 test('renders flowchart clusters, styles, and parallel edges', () => {
   const markup = mermaid(`flowchart LR
   accTitle: Review workflow

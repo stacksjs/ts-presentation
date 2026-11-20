@@ -124,13 +124,14 @@ const styledLetters: Record<string, { upper: number, lower: number, digits?: num
 }
 
 export type MathMacros = Readonly<Record<string, string>>
+const controlSequence = /^\\(?:[A-Za-z@]+|[^\s])$/u
 
 export function resolveMathMacros(headmatter?: Record<string, unknown>): MathMacros {
   const options = headmatter?.math ?? headmatter?.katex
   const macros = options && typeof options === 'object' && 'macros' in options ? options.macros : undefined
   return macros && typeof macros === 'object' && !Array.isArray(macros)
     ? Object.fromEntries(Object.entries(macros).filter((entry): entry is [string, string] =>
-      /^\\[A-Za-z]+$/.test(entry[0]) && typeof entry[1] === 'string'))
+      controlSequence.test(entry[0]) && typeof entry[1] === 'string'))
     : {}
 }
 
@@ -174,8 +175,18 @@ function tokenize(source: string): string[] {
 }
 
 type MathStyle = 0 | 1 | 2 | 3
-interface Macro { body: string[], parameters: string[][], prefix: string[], optional?: string[] }
+type MathMode = 'math' | 'text'
+const expansionPrimitives = ['\\expandafter', '\\noexpand', '\\@firstoftwo', '\\@secondoftwo', '\\@ifnextchar', '\\@ifstar', '\\TextOrMath'] as const
+const expansionPrimitiveNames = new Set<string>(expansionPrimitives)
+type ExpansionPrimitive = typeof expansionPrimitives[number]
+type ConditionalPrimitive = Exclude<ExpansionPrimitive, '\\expandafter' | '\\noexpand'>
+interface TokenMacro { body: string[], parameters: string[][], prefix: string[], optional?: string[] }
+type Macro = TokenMacro | { primitive: ExpansionPrimitive }
 interface MathState { globals: Map<string, Macro>, options: KatexOptions }
+
+function isExpansionPrimitive(token: string | undefined): token is ExpansionPrimitive {
+  return token !== undefined && expansionPrimitiveNames.has(token)
+}
 
 export function createMathRenderer(options: KatexOptions = {}): (source: string, display: boolean) => string {
   const state: MathState = { globals: new Map(), options }
@@ -507,6 +518,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   let cursor = 0
   let depth = 0
   let expandedCount = 0
+  let mode: MathMode = 'math'
   let tagState: EquationTag = { suppressed: false }
   let environmentDepth = 0
   let delimiterDepth = 0
@@ -517,7 +529,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   const macros = new Map<string, Macro>()
   const scopes: Map<string, Macro | undefined>[] = []
   function assign(name: string, definition: Macro, global = false): void {
-    if (!/^\\(?:[A-Za-z@]+|[^\s])$/.test(name)) return
+    if (!controlSequence.test(name)) return
     if (global) {
       state?.globals.set(name, definition)
       for (const scope of scopes) scope.delete(name)
@@ -526,7 +538,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (!global && scope && !scope.has(name)) scope.set(name, macros.get(name))
     macros.set(name, definition)
   }
-  function plainMacro(body: string[], arity = 0, optional?: string[]): Macro {
+  function plainMacro(body: string[], arity = 0, optional?: string[]): TokenMacro {
     const count = Math.max(arity, ...body.map(token => /^#[1-9]$/.test(token) ? Number(token[1]) : 0))
     return { body, parameters: Array.from({ length: count }, () => []), prefix: [], optional }
   }
@@ -550,20 +562,56 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
   }
 
+  function inMode<T>(selected: MathMode, render: () => T): T {
+    const previous = mode
+    mode = selected
+    try { return render() }
+    finally { mode = previous }
+  }
+
   function expandable(token: string): boolean {
-    return token === '\\expandafter' || token === '\\noexpand' || macros.has(token)
+    return isExpansionPrimitive(token) || macros.has(token)
+  }
+
+  function chooseBranch(command: ConditionalPrimitive): string[] {
+    const pattern = command === '\\@ifnextchar' ? rawGroup() : undefined
+    const first = rawGroup()
+    const second = rawGroup()
+    switch (command) {
+      case '\\@firstoftwo': return first
+      case '\\@secondoftwo': return second
+      case '\\TextOrMath': return mode === 'text' ? first : second
+      case '\\@ifstar':
+        space()
+        if (tokens[cursor] !== '*') return second
+        cursor++
+        return first
+      case '\\@ifnextchar':
+        space()
+        return pattern?.length === 1 && tokenValue(pattern[0]) === tokenValue(tokens[cursor] ?? '') ? first : second
+    }
+  }
+
+  function replaceExpansion(start: number, body: string[]): void {
+    if (tokens.length - (cursor - start) + body.length > 12000) throw new Error('Expanded equation is too long')
+    tokens.splice(start, cursor - start, ...body)
+    cursor = start
   }
 
   function expandOnce(): boolean {
     const token = tokens[cursor]
-    if (!expandable(token)) return false
+    const definition = macros.get(token)
+    const macro = definition && 'body' in definition ? definition : undefined
+    const primitive = definition && 'primitive' in definition ? definition.primitive
+      : !definition && isExpansionPrimitive(token) ? token : undefined
+    if (!macro && !primitive) return false
     if (++expandedCount > 300) throw new Error('Too many math macro expansions')
-    if (token === '\\expandafter' || token === '\\noexpand') {
+    if (primitive === '\\expandafter' || primitive === '\\noexpand') {
       tokens.splice(cursor, 1)
       space()
       const next = tokens[cursor]
       if (!next || next === boundary) throw new Error('Missing math expansion token')
-      if (token === '\\noexpand') {
+      if (primitive === '\\noexpand') {
         if (expandable(next)) tokens[cursor] = inhibitedToken + next
         return true
       }
@@ -575,7 +623,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
       return true
     }
 
-    const macro = macros.get(token)!
+    if (primitive) {
+      const start = cursor++
+      replaceExpansion(start, chooseBranch(primitive))
+      return true
+    }
+    if (!macro) return false
     const start = cursor++
     space()
     for (const token of macro.prefix) {
@@ -586,9 +639,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       return delimiter.length ? delimitedArgument(delimiter) : rawGroup()
     })
     const body = macro.body.flatMap(token => /^#[1-9]$/.test(token) ? values[Number(token[1]) - 1] ?? [] : [token])
-    if (tokens.length + body.length > 12000) throw new Error('Expanded equation is too long')
-    tokens.splice(start, cursor - start, ...body)
-    cursor = start
+    replaceExpansion(start, body)
     return true
   }
 
@@ -609,7 +660,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
 
   function rawGroup(): string[] {
     space()
-    if (tokens[cursor] === undefined || tokens[cursor] === boundary) throw new Error('Missing math argument')
+    if (tokens[cursor] === undefined || tokens[cursor] === boundary || tokens[cursor] === '}') throw new Error('Missing math argument')
     if (tokens[cursor] !== '{') return [tokens[cursor++]]
     cursor++
     let level = 1
@@ -801,6 +852,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
   }
 
   function textArgument(name: string, parentheses = false): Markup {
+    return inMode('text', () => parseTextArgument(name, parentheses))
+  }
+
+  function parseTextArgument(name: string, parentheses: boolean): Markup {
     if (depth++ > 100) throw new Error('Math text is nested too deeply')
     const properties = textFonts[name]
     const wrap = (markup: Markup) => properties ? xml`<mrow style="${properties}">${markup}</mrow>` : markup
@@ -848,8 +903,11 @@ export function renderMath(source: string, display = false, configured: MathMacr
         else if (token === '$' || token === '\\(') {
           flush()
           const close = token === '$' ? '$' : '\\)'
-          const value = inScope(() => row([close, '}']))
-          if (take() !== close) throw new Error('Unclosed inline math in text')
+          const value = inMode('math', () => {
+            const content = inScope(() => row([close, '}']))
+            if (take() !== close) throw new Error('Unclosed inline math in text')
+            return content
+          })
           parts.push(style => {
             const content = renderMarkup(value, style === 0 ? 1 : style)
             return `<mrow style="font-style:normal;font-weight:normal">${style === 0 ? mathSize(1, content) : content}</mrow>`
@@ -1332,7 +1390,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const value = source.length === 1 ? source[0] : undefined
       const existing = value === undefined ? undefined : macros.get(value)
       const snapshot = value?.startsWith('\\') ? [literalToken + value] : source
-      assign(target, existing ?? plainMacro(snapshot), global)
+      assign(target, existing ?? (isExpansionPrimitive(value) ? { primitive: value } : plainMacro(snapshot)), global)
       return { markup: '' }
     }
     if (name === 'newcommand' || name === 'renewcommand' || name === 'providecommand') {
@@ -1352,12 +1410,6 @@ export function renderMath(source: string, display = false, configured: MathMacr
         return argument()
       })
       return { markup: style => renderMarkup(choices[style], style) }
-    }
-    if (name === '@firstoftwo' || name === '@secondoftwo') {
-      const choices = [rawGroup(), rawGroup()]
-      const selected = choices[name === '@firstoftwo' ? 0 : 1]
-      tokens.splice(cursor, 0, '{', ...selected, '}')
-      return { markup: argument() }
     }
     if (name === 'tag') {
       if (!display) throw new Error('Equation tags require display math')

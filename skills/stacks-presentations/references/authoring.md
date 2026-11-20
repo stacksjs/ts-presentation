@@ -118,6 +118,8 @@ speaker notes. Each hook can be asynchronous.
 - Use `\genfrac` or `\cfrac` for custom or continued fractions, and
   `\mathchoice` for style-dependent notation. TeX macro definitions support
   groups, delimited arguments, optional arguments, and eager expansion.
+  Use `\@ifstar` for starred forms, `\@ifnextchar` to inspect the next token,
+  and `\TextOrMath` to choose an expansion for text or math.
   `\raisebox`, `\rule`, and `\kern` control placement and spacing.
 - Use `{a \over b}` for an infix fraction, `{a \above{2pt} b}` for a
   custom rule, or `{n \choose k}` for a binomial coefficient. Braces
