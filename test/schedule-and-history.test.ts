@@ -336,6 +336,29 @@ dateFormat DD[d]`
   expect(html).toContain('>00.090</tspan>')
 })
 
+test('preserves large explicit millisecond ticks and clips calendar dependencies to Date precision', async () => {
+  const source = `gantt
+dateFormat YYYY-MM-DD HH:mm:ss.SSS
+axisFormat %S.%L
+tickInterval 1500millisecond
+topAxis
+todayMarker off
+Start :start, 2026-01-01 00:00:00.000, 0.6ms
+Next :next, after start, 0.6ms
+Window :window, after next, 5000.6ms`
+  const start = Date.UTC(2026, 0, 1)
+  expect(scheduleGantt(source)?.tasks.map(task => [task.start - start, task.end - start])).toEqual([
+    [0, 0], [0, 0], [0, 5000],
+  ])
+  const deck = parseDeck(['# Timing', '', '~~~mermaid', source, '~~~'].join('\n'))
+  const html = await renderDeck(deck)
+  const labels = [...html.matchAll(/class="diagram-gantt-tick-group"><title>([^<]+)<\/title>/g)].map(match => match[1])
+  expect(labels).toEqual([
+    '00.000', '01.500', '03.000', '04.500',
+    '00.000', '01.500', '03.000', '04.500',
+  ])
+})
+
 test('renders calendar-aligned Gantt ticks and keeps tasks with invalid end dates at their start', async () => {
   const source = `gantt
 dateFormat YYYY-MM-DD
