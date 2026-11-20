@@ -361,13 +361,13 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba, 
     }
     if (rows.length) return rows
   }
-  function matrix(rows: readonly string[][]): string {
+  function matrix(rows: readonly string[][], properties = ''): string {
     const width = Math.max(...rows.map(row => row.length))
     const body = rows.map(row => {
       const cells = Array.from({ length: width }, (_, column) => wrap('e', row[column] ?? '')).join('')
       return wrap('mr', cells)
     }).join('')
-    return wrap('m', body)
+    return wrap('m', properties + body)
   }
   function centeredArray(table: RawMathElement): string | undefined {
     const { columnalign, style } = table.attributes
@@ -479,7 +479,8 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba, 
   function convertElement(node: RawMathElement): string | undefined {
     const { name, text, attributes, children } = node
     if (tokenNames.has(name)) {
-      if (children.length || !only(node, 'mathvariant', 'stretchy', 'lspace', 'rspace') || attributes.stretchy === 'true') return
+      if (children.length || !only(node, 'mathvariant', 'stretchy', 'lspace', 'rspace', 'movablelimits') || attributes.stretchy === 'true') return
+      if (attributes.movablelimits !== undefined && (name !== 'mo' || attributes.movablelimits !== 'false')) return
       if ([attributes.lspace, attributes.rspace].some(value => value !== undefined && value !== '0em')) return
       if (attributes.mathvariant !== undefined && attributes.mathvariant !== 'normal') return
       // XML 1.0 forbids control characters even inside a text run.
@@ -572,6 +573,11 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba, 
       return equationArray(node, attributes['data-equation-environment'])
     if (name === 'mtable' && attributes.class?.startsWith('math-compact-array')) return compactArray(node)
     if (name === 'mtable' && attributes.class === 'math-alignment-grid') return centeredArray(node)
+    if (name === 'mtable' && attributes.class === 'math-vcenter' && only(node, 'class')) {
+      const rows = tableRows(node)
+      if (rows?.length === 1 && rows[0].length === 1) return matrix(rows, wrap('mPr', setting('baseJc', 'center')))
+      return
+    }
     if (name === 'mtable' && attributes.class === 'math-alignment-axis' && only(node, 'class') && children.length === 1) {
       const [row] = children
       const [cell] = row.children

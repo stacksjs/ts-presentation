@@ -1150,6 +1150,25 @@ test('uses the base operator class for labelled and bold symbols', () => {
   expect(ordinary).not.toContain('<mspace')
 })
 
+test('renders AMS corner scripts and paired labels with separate operator limits', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const sum = String.raw`\sideset{_i^j}{_k^l}\sum_{n=1}^m x_n`
+  const sides = '<mmultiscripts><mo movablelimits="false">∑</mo><mi>k</mi><mi>l</mi><mprescripts/><mi>i</mi><mi>j</mi></mmultiscripts>'
+  expect(math(sum, true)).toContain('<munderover>' + sides)
+  expect(math(sum, false)).toContain('<msubsup>' + sides)
+  expect(math(String.raw`\sideset{}{'}\sum\limits_n`, false)).toContain('<munder><mmultiscripts><mo movablelimits="false">∑</mo><none/><mrow><mo>′</mo></mrow><mprescripts/><none/><none/></mmultiscripts><mi>n</mi></munder>')
+  expect(math(String.raw`\def\op{\prod}\def\index{_{\mathchoice{D}{T}{S}{Q}}}\sideset{\index}{}\op\nolimits_k`, true))
+    .toContain('<msub><mmultiscripts><mo movablelimits="false">∏</mo><mprescripts/><mrow><mi>S</mi></mrow><none/></mmultiscripts><mi>k</mi></msub>')
+  expect(math(String.raw`\sideset{}{}\prod_a`, true)).toContain('<munder>' + operator('∏') + '<mi>a</mi></munder>')
+  expect(() => math(String.raw`\sideset{}{_a_b}\sum`, true)).toThrow('Double subscript')
+  expect(() => math(String.raw`\sideset{u}{}\sum`, true)).toThrow('Invalid sideset script')
+  expect(() => math(String.raw`\sideset{}{}x`, true)).toThrow('Sideset requires a sum-class operator')
+  const labels = math(String.raw`a\overunderset{A}{B}{=}b\overunderset{x}{y}{+}c`, true)
+  expect(labels).toContain(thick + '<munderover><mrow>' + operator('=') + '</mrow><mrow><mi>B</mi></mrow><mrow><mi>A</mi></mrow></munderover>' + thick)
+  expect(labels).toContain(medium + '<munderover><mrow>' + operator('+') + '</mrow><mrow><mi>y</mi></mrow><mrow><mi>x</mi></mrow></munderover>' + medium)
+  expect(math(String.raw`\overunderset{A}{B}{\sum}`, false)).toContain(`<munderover><mrow><mo movablelimits="false" ${zeroGap}>∑</mo>`)
+})
+
 test('lays out AMS arrays with solid and dashed rules, row gaps, and scoped cell styles', () => {
   const source = String.raw`\def\arraystretch{1.5}\begin{darray}{|r:c||}
     \hline \def\value{a}\value & \mathchoice{D}{T}{S}{s} \\[1ex]
@@ -2306,6 +2325,37 @@ test.skipIf(!chrome)('stretches bracket and segment rules across their bases and
     server.stop(true)
   }
 }, 45000)
+
+test.skipIf(!chrome)('places AMS corner scripts beside the operator and explicit limits below it', async () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const formula = String.raw`\sideset{_i^j}{_k^l}\sum\limits_n`
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response(`<!doctype html><meta charset="utf-8"><main style="font-size:40px">${math(formula, false)}</main>`, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    }),
+  })
+  const view = new Bun.WebView({ width: 720, height: 400, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await view.navigate(server.url.href)
+    expect(await view.evaluate(`(() => {
+      const [operator, rightSub, rightSup, , leftSub, leftSup] = document.querySelector('mmultiscripts').children
+      const [glyph, lowRight, highRight, lowLeft, highLeft, limit] =
+        [operator, rightSub, rightSup, leftSub, leftSup, document.querySelector('munder > mi')].map(node => node.getBoundingClientRect())
+      const center = bounds => bounds.left + bounds.width / 2
+      return [
+        center(lowLeft) < center(glyph) && center(highLeft) < center(glyph),
+        center(lowRight) > center(glyph) && center(highRight) > center(glyph),
+        highLeft.y < lowLeft.y && highRight.y < lowRight.y,
+        limit.y >= glyph.bottom && center(limit) > lowLeft.left && center(limit) < lowRight.right,
+      ]
+    })()`)).toEqual([true, true, true, true])
+  }
+  finally {
+    view.close()
+    await server.stop(true)
+  }
+}, 15_000)
 
 test.skipIf(!chrome)('renders TeX line breaks and vertical gaps in Chromium', async () => {
   const sources = [String.raw`a\\b`, String.raw`a\\[1em]b`, String.raw`a\newline b`]

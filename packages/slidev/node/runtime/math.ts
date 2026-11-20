@@ -900,7 +900,7 @@ const mathModeFunctions = new Set([
   ...ruledAccents, ...Array.from(infixFractions, command => command.slice(1)),
   'begin', 'end', 'right', 'middle', '@binrel', 'mathchoice', 'vcenter',
   'cancel', 'bcancel', 'xcancel', 'pmb', 'phase', 'mathreflectbox',
-  'prescript', 'mathstrut', 'overset', 'underset', 'stackrel',
+  'prescript', 'mathstrut', 'sideset', 'overset', 'underset', 'overunderset', 'stackrel',
   'shoveleft', 'shoveright', ...Array.from(intertextCommands.keys(), command => command.slice(1)),
   'overline', 'operatorname', 'operatorname@', 'operatornamewithlimits', 'limits', 'nolimits', 'displaylimits',
   'not', 'mod', 'bmod', 'pmod', 'pod', 'ce', 'pu', 'allowbreak',
@@ -1557,11 +1557,11 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return result
   }
 
-  function binRelArgument(): Atom & { mathClass: MathClass } {
+  function binRelArgument(): { markup: Markup, mathClass: MathClass, operator: boolean } {
     const { markup, parts } = fragmentArgument()
     const first = parts.find(part => part.markup !== '')
     const category = first && rowClass(first)
-    return { markup, mathClass: category === 'bin' || category === 'rel' ? category : 'ord' }
+    return { markup, mathClass: category === 'bin' || category === 'rel' ? category : 'ord', operator: first?.operator === true }
   }
 
   function argument(primitive = false): Markup {
@@ -2154,6 +2154,51 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return xml`<mrow>${tag('mo', text)}${following}</mrow>`
   }
 
+  function readScripts(part?: Atom): { lower: Markup, upper: Markup, forceLimits: boolean | 'display' | undefined } {
+    let lower: Markup = ''
+    let upper: Markup = ''
+    let forceLimits: boolean | 'display' | undefined = part?.forceLimits
+    for (let kind = peek(); kind; kind = peek()) {
+      if (kind === '\\limits' || kind === '\\nolimits' || kind === '\\displaylimits') {
+        cursor++
+        if (part?.limits === undefined) throw new MathParseError('Limit control requires a math operator')
+        if (!part.ignoreLimitControl) forceLimits = kind === '\\displaylimits' ? 'display' : kind === '\\limits'
+        continue
+      }
+      if (kind === '_' || unicodeSubscripts.has(kind)) {
+        if (lower) throw new MathParseError('Double subscript')
+        lower = inScript(kind === '_' ? (cursor++, scriptArgument()) : unicodeScript(unicodeSubscripts))
+        continue
+      }
+      const prime = primeCount(kind) > 0
+      if (kind !== '^' && !prime && !unicodeSuperscripts.has(kind)) break
+      if (upper) throw new MathParseError('Double superscript')
+      upper = inScript(kind === '^' ? (cursor++, scriptArgument()) : prime ? primeScript() : unicodeScript(unicodeSuperscripts))
+    }
+    return { lower, upper, forceLimits }
+  }
+
+  function sidedOperator(): Atom {
+    function side() {
+      return withTokens(rawGroup('Missing sideset script argument'), () => inScope(() => {
+        const { lower, upper } = readScripts()
+        if (peek() !== boundary) throw new MathParseError('Invalid sideset script argument')
+        return lower || upper ? xml`${lower || '<none/>'}${upper || '<none/>'}` : ''
+      }))
+    }
+    const left = side()
+    const right = side()
+    const base = withTokens(rawGroup('Missing sideset operator'), () => inScope(() => {
+      const operator = argumentAtom(true)
+      if (operator.limits !== true || peek() !== boundary) throw new MathParseError('Sideset requires a sum-class operator')
+      return operator.markup
+    }))
+    const markup = left || right
+      ? xml`<mmultiscripts>${stackOperator(base)}${right}<mprescripts/>${left || '<none/><none/>'}</mmultiscripts>`
+      : base
+    return { markup, mathClass: 'op', limits: true }
+  }
+
   function modulus(name: string): Markup {
     const label = '<mi mathvariant="normal">mod</mi>'
     if (name === 'bmod') return `<mrow>${muSpace(5)}${label}${muSpace(5)}</mrow>`
@@ -2245,26 +2290,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
         cursor--
       }
       else part = atom(token)
-      let lower: Markup = ''
-      let upper: Markup = ''
-      let forceLimits: boolean | 'display' | undefined = part.forceLimits
-      for (let kind = peek(); kind; kind = peek()) {
-        if (kind === '\\limits' || kind === '\\nolimits' || kind === '\\displaylimits') {
-          cursor++
-          if (part.limits === undefined) throw new MathParseError('Limit control requires a math operator')
-          if (!part.ignoreLimitControl) forceLimits = kind === '\\displaylimits' ? 'display' : kind === '\\limits'
-          continue
-        }
-        if (kind === '_' || unicodeSubscripts.has(kind)) {
-          if (lower) throw new MathParseError('Double subscript')
-          lower = inScript(kind === '_' ? (cursor++, scriptArgument()) : unicodeScript(unicodeSubscripts))
-          continue
-        }
-        const prime = primeCount(kind) > 0
-        if (kind !== '^' && !prime && !unicodeSuperscripts.has(kind)) break
-        if (upper) throw new MathParseError('Double superscript')
-        upper = inScript(kind === '^' ? (cursor++, scriptArgument()) : prime ? primeScript() : unicodeScript(unicodeSuperscripts))
-      }
+      let { lower, upper, forceLimits } = readScripts(part)
       if (part.brace === 'upper' && upper) {
         part.markup = xml`<mover>${part.markup}${upper}</mover>`
         upper = ''
@@ -2864,6 +2890,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const lower = inScript(argument())
       return { markup: xml`<mmultiscripts>${argument()}<mprescripts/>${lower}${upper}</mmultiscripts>` }
     }
+    if (name === 'sideset') return sidedOperator()
     if (name === 'sqrt') {
       const index = rawBracket()
       if (index === undefined) return { markup: xml`<msqrt>${argument(true)}</msqrt>` }
@@ -2911,11 +2938,14 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (name === 'overline' || name === 'underline') {
       return { markup: xml`<mrow class="math-${name}">${argument()}</mrow>` }
     }
-    if (name === 'overset' || name === 'underset' || name === 'stackrel') {
+    if (name === 'overset' || name === 'underset' || name === 'overunderset' || name === 'stackrel') {
       const annotation = inScript(argument())
-      const element = name === 'underset' ? 'munder' : 'mover'
+      const both = name === 'overunderset'
+      const below = both ? inScript(argument()) : ''
+      const element = both ? 'munderover' : name === 'underset' ? 'munder' : 'mover'
       const base = binRelArgument()
-      return { mathClass: name === 'stackrel' ? 'rel' : base.mathClass, markup: xml`<${element}>${base.markup}${annotation}</${element}>` }
+      const content = base.operator ? stackOperator(base.markup) : base.markup
+      return { mathClass: name === 'stackrel' ? 'rel' : base.mathClass, markup: xml`<${element}>${content}${below}${annotation}</${element}>` }
     }
     if (ruledAccents.has(name)) {
       const brace = name.endsWith('bracket') ? (name.startsWith('over') ? 'upper' : 'lower') : undefined

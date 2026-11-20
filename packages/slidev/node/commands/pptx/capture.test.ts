@@ -401,6 +401,22 @@ $$
 
 $$
 \mathbb{M_{\mathrm{index}}\begin{matrix}a&b\\c&d\end{matrix}N}+\mathbb{\text{plain}}+\boldsymbol{\sum_{j=0}^{n} j}
+$$
+
+---
+
+# Operator annotations
+
+$$
+\sideset{_i^j}{_k^l}\sum_{n=1}^{m}x_n
+$$
+
+$$
+a\overunderset{A}{B}{=}b
+$$
+
+$$
+x+\vcenter{\hbox{$\frac{a}{b}$}}+y
 $$`)
     const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
     const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
@@ -408,7 +424,7 @@ $$`)
     if (status) throw new Error(stderr)
     const frames: PowerPointFrame[] = []
     await captureFrames({ root: join(root, 'dist'), executable: chrome!, scale: 1, canvas, editable: true, withClicks: false }, frame => { frames.push(frame) })
-    expect(frames).toHaveLength(5)
+    expect(frames).toHaveLength(6)
     const equations = frames[0].editable?.nodes.filter((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math') ?? []
     expect(equations).toHaveLength(4)
     expect(equations.filter(node => node.equation)).toHaveLength(3)
@@ -486,7 +502,7 @@ $$`)
       expect(script).toMatch(/^<m:sub>.*?>6<\/m:t>.*?<\/m:sub><m:sup>.*?>14<\/m:t>.*?<\/m:sup><m:e>/)
     expect(prescripts[0]).toContain('<m:sty m:val="p"/>')
     expect(prescripts[1]).toMatch(/<m:e><m:sSup><m:e>.*?>C<\/m:t>.*?<\/m:e><m:sup>.*?>−<\/m:t>/)
-    expect([...parts.keys()].filter(name => name.startsWith('ppt/media/'))).toHaveLength(15)
+    expect([...parts.keys()].filter(name => name.startsWith('ppt/media/'))).toHaveLength(18)
 
     const alphabets = parts.get('ppt/slides/slide5.xml')?.toString() ?? ''
     expect(alphabets.match(/<a14:m>/g)).toHaveLength(2)
@@ -501,6 +517,13 @@ $$`)
     expect(fonts.get('V')).toBe('<m:sty m:val="b"/>')
     expect(fonts.get('k')).toBe('<m:sty m:val="i"/>')
     expect(fonts.get('γ')).toBe('<m:sty m:val="bi"/>')
+    const annotations = parts.get('ppt/slides/slide6.xml')?.toString() ?? ''
+    expect(annotations.match(/<a14:m>/g)).toHaveLength(3)
+    expect(annotations.match(/<mc:Fallback><p:sp>/g)).toHaveLength(3)
+    expect(annotations).toContain('<m:limUpp><m:e><m:limLow><m:e><m:sPre>')
+    expect(annotations).toMatch(/<m:sPre><m:sub>.*?>i<\/m:t>.*?<m:sup>.*?>j<\/m:t>.*?<m:sSubSup><m:e>.*?>∑<\/m:t>.*?<m:sub>.*?>k<\/m:t>.*?<m:sup>.*?>l<\/m:t>/)
+    expect(annotations).toMatch(/<m:limUpp><m:e><m:limLow><m:e><m:r>.*?>=<\/m:t>.*?<m:lim>.*?>B<\/m:t>.*?<m:lim>.*?>A<\/m:t>/)
+    expect(annotations).toContain('<m:m><m:mPr><m:baseJc m:val="center"/></m:mPr><m:mr><m:e><m:f>')
     for (const cell of ['a', 'b', 'c', 'd']) expect(fonts.get(cell)).toBe('<m:sty m:val="i"/>')
     expect(fonts.get('i')).toBe('<m:sty m:val="p"/>')
     expect(fonts.get('plain')).toBe('<m:sty m:val="p"/>')
