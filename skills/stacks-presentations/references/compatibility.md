@@ -34,6 +34,8 @@ in a new ts-presentation project.
 | AMS commutative diagrams | Centered vertical arrows with side labels, vertical parallel lines, extensible horizontal arrows, and row-local macros |
 | Macro parameters and operator wrappers | Delimited and nested TeX parameters, inherited binary and relation spacing in bold symbols and stacked labels, and sans-serif italic math |
 | Bra-ket and fraction layout | Scoped bar expansion for bra-ket notation and set builders, directional generalized fraction fences, nested unbraced fractions, and continued fraction numerator struts |
+| Paired TeX delimiters | Macro-defined closing delimiters, closing-fence colors, and multiline formula bodies that honor the display break policy |
+| Logical TeX relations | Expandable `\iff`, `\implies`, and `\impliedby` macros with spaced long arrows |
 | Custom TeX operators and emphasis | Upright operator names with fractions, scripts, and scoped macros, style-aware limits for starred names, and nested `\emph` that alternates between italic and upright text |
 | Mathtools relations and TeX fonts | Colon relation aliases and Unicode forms, scoped legacy font declarations, upright and italic Greek variants, named spacing, and nonbreaking inline spaces |
 | KaTeX trust option | Opt-in links, URL labels, formula images, and HTML attributes through the KaTeX-shaped boolean or callback |
@@ -63,7 +65,7 @@ in a new ts-presentation project.
 | Gantt markers and exclusions | Repeated markers with the same ID, time, and label share one visible marker. Invalid ends warn and keep the task at its start. Whole-day exclusions ignore unmatched calendar tokens |
 | Gantt themes | Named Mermaid palettes set the SVG background, section bands, grid, task states, and labels. Explicit theme variables override the selected palette |
 | Gantt dependencies | Forward references across sections, latest `after` and earliest `until` matches, and warnings with a UTC reference-day fallback when every referenced task is missing |
-| GitGraph | Named Mermaid palettes, diagram padding, branch-only graphs, multiline branch labels with matching backgrounds in every orientation, commit and operation tooltips, and custom symbols. Repeated commit IDs warn, preserve each node, and resolve later references to the latest commit |
+| GitGraph | Named Mermaid palettes, diagram padding, fixed SVG dimensions via `useMaxWidth: false`, branch-only graphs, multiline branch labels with matching backgrounds in every orientation, commit and operation tooltips, and custom symbols. Repeated commit IDs warn, preserve each node, and resolve later references to the latest commit |
 | PlantUML sequence diagrams | Local `ts-charts` rendering for messages, participants, notes, and groups |
 | Presenter mode | Two synced browser windows, notes, timer, resizable layouts, next-frame preview, and reveal seeking |
 | Reveal scheduling | Absolute and relative steps, hide ranges, grouped and nested lists, CSS presets, and switch slots |

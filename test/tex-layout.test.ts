@@ -1460,6 +1460,67 @@ test('pairs nested stretchy delimiters, expands aliases, and supports invisible 
   expect(renderMath(String.raw`\left(x & y\right)`)).toContain('math-unrendered')
 })
 
+// Paired delimiters use the surrounding TeX macro and color scope in KaTeX.
+test('expands closing fences and tracks the last declared color through nested pairs', () => {
+  expect(formula(String.raw`\left(\def\close{)}\def\value{x}\value\right\close\value`))
+    .toBe(formula(String.raw`\left(x\right)x`))
+  expect(() => formula(String.raw`{\left(\def\value{x}\value\right)}\value`))
+    .toThrow(String.raw`Unsupported math command: \value`)
+  const nested = formula(String.raw`\left(\color{red}\left[\color{blue}x\right] y\right)z`)
+  expect(nested).toContain('<mo stretchy="true">(</mo><mrow style="color:red"><mrow><mo stretchy="true">[</mo>')
+  expect(nested).toContain('<mo stretchy="true" style="color:blue">]</mo></mrow><mi>y</mi></mrow><mo stretchy="true" style="color:blue">)</mo></mrow><mi>z</mi>')
+  for (const body of [String.raw`{\color{red}x}`, String.raw`\textcolor{red}{x}`]) {
+    expect(formula(String.raw`\left(${body}\right)`)).toContain('<mo stretchy="true">)</mo>')
+  }
+  expect(formula(String.raw`\left(\color{red}x\right.`)).not.toContain('<mo stretchy="true" style="color:red">')
+})
+
+test('uses KaTeX Greek glyphs, distinct circled minus symbols, and logical arrow macros', () => {
+  expect(formula(String.raw`\epsilon\varepsilon`)).toContain('<mi>ϵ</mi><mi>ε</mi>')
+  expect(formula(String.raw`\ominus\minuso`)).toContain('⊖</mo><mtext>⦵</mtext>')
+  for (const [name, arrow] of [['iff', 'Longleftrightarrow'], ['implies', 'Longrightarrow'], ['impliedby', 'Longleftarrow']]) {
+    expect(formula(`x\\${name} y`)).toBe(formula(`x\\;\\${arrow}\\;y`))
+  }
+  expect(formula(String.raw`\edef\relation{\iff}\def\Longleftrightarrow{=}\relation`))
+    .toBe(formula(String.raw`\;=\;`))
+  expect(formula(String.raw`\def\Longleftrightarrow{=}\edef\relation{\iff}\def\Longleftrightarrow{<}\relation`))
+    .toBe(formula(String.raw`\;=\;`))
+})
+
+test.skipIf(!chrome)('renders colored and multiline paired fences around full-height math in Chromium', async () => {
+  const source = String.raw`\left(\color{red}\frac{a}{b}\\[0.5em]\color{blue}c\right)`
+  const markup = createMathRenderer({ throwOnError: true })(source, false)
+  const strict = createMathRenderer({ strict: 'error', throwOnError: true })(source, true)
+  expect(strict).not.toContain('<mtable')
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response(`<!doctype html><meta charset="utf-8"><main style="font-size:40px;color:black">${markup}</main>`, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    }),
+  })
+  const view = new Bun.WebView({ backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await view.navigate(server.url.href)
+    const layout = await view.evaluate<{ colors: string[], heights: number[], rows: number[] }>(`(() => {
+      const fences = [...document.querySelectorAll('mo[stretchy]')]
+      const rows = [...document.querySelectorAll('mtable mtr')]
+      return {
+        colors: fences.map(node => getComputedStyle(node).color),
+        heights: fences.map(node => node.getBoundingClientRect().height),
+        rows: rows.map(node => node.getBoundingClientRect().top),
+      }
+    })()`)
+    expect(layout.colors).toEqual(['rgb(0, 0, 0)', 'rgb(0, 0, 255)'])
+    expect(layout.rows).toHaveLength(2)
+    expect(layout.rows[1] - layout.rows[0]).toBeGreaterThan(40)
+    expect(layout.heights.every(height => height > 80)).toBe(true)
+  }
+  finally {
+    view.close()
+    await server.stop(true)
+  }
+}, 45000)
+
 test('retains primes with explicit exponents and renders Unicode scripts on one base', () => {
   expect(formula("x''''")).toContain('<msup><mi>x</mi><mrow><mo>′′′′</mo></mrow></msup>')
   const expected = '<msubsup><mi>x</mi><mn>2</mn><mrow><mo>′′</mo></mrow></msubsup>'

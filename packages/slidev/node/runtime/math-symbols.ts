@@ -122,10 +122,11 @@ const aliases: Readonly<Record<string, string>> = {
   minuscolon: 'eqcolon', minuscoloncolon: 'Eqcolon', coloncolonapprox: 'Colonapprox',
   coloncolonsim: 'Colonsim',
   Dagger: 'ddag', clubs: 'clubsuit', diamonds: 'diamondsuit', hearts: 'heartsuit',
-  spades: 'spadesuit', bull: 'bullet', minuso: 'ominus', weierp: 'wp',
+  spades: 'spadesuit', bull: 'bullet', weierp: 'wp',
 }
 
 const legacy: Readonly<Record<string, MathSymbol>> = {
+  minuso: ['⦵', 'ordinary'],
   alef: ['ℵ', 'ordinary'], alefsym: ['ℵ', 'ordinary'], copyright: ['©', 'ordinary'],
   exist: ['∃', 'ordinary'], infin: ['∞', 'ordinary'], isin: ['∈', 'relation'],
   image: ['ℑ', 'ordinary'], real: ['ℜ', 'ordinary'], mapsfrom: ['↤', 'relation'],

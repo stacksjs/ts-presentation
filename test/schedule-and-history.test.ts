@@ -440,7 +440,7 @@ click unsafe href "javascript:alert(1)"`
   expect(await renderDeck(parseDeck(deck))).toContain('<a href="#slide-2" data-slide-link="2" data-slide-click="1" class="diagram-gantt-link"')
 })
 
-test('imports GitGraph rotation and multiline accessible descriptions', () => {
+test('imports GitGraph rotation, fixed dimensions, and multiline accessible descriptions', () => {
   const graph = `gitGraph:
   accTitle: Release history
   accDescr {
@@ -451,12 +451,14 @@ test('imports GitGraph rotation and multiline accessible descriptions', () => {
   branch review
   commit id: "apply reviewer corrections" tag:"v1"`
   const defaultSvg = mermaid(graph, 'rotation')
+  expect(defaultSvg).not.toMatch(/viewBox="[^"]+" width=/)
   expect(defaultSvg).toContain('aria-describedby="rotation-description"')
   expect(defaultSvg).toContain('<desc id="rotation-description">Main and review lanes converge ahead of release.</desc>')
   expect(defaultSvg).toMatch(/rotate\(45 /)
   expect(defaultSvg).toContain('>apply reviewer corrections</tspan>')
-  const frontmatter = ['---', 'config:', '  gitGraph:', '    rotateCommitLabel: false', '---', graph].join('\n')
+  const frontmatter = ['---', 'config:', '  gitGraph:', '    rotateCommitLabel: false', '    useMaxWidth: false', '---', graph].join('\n')
   const horizontal = mermaid(frontmatter, 'horizontal')
+  expect(horizontal).toMatch(/^<svg\b[^>]*viewBox="0 0 ([\d.]+) ([\d.]+)" width="\1" height="\2"/)
   expect(horizontal).not.toContain('rotate(')
   expect(horizontal).toContain('>v1</tspan>')
 })
@@ -667,13 +669,15 @@ test('applies imported Gantt label placement and GitGraph padding in a rendered 
     '~~~mermaid', 'gantt', 'todayMarker off',
     'Schedule :wide, 2026-01-01, 8d',
     'Late checkpoint :milestone, check, 2026-01-09, 0d', '~~~', '',
-    '~~~mermaid', '---', 'config:', '  gitGraph:', '    diagramPadding: 36', '---',
+    '~~~mermaid', '---', 'config:', '  gitGraph:', '    diagramPadding: 36', '    useMaxWidth: false', '---',
     'gitGraph TB:', 'commit id:"review"', '~~~',
   ].join('\n')
   const html = await renderDeck(parseDeck(markdown))
   expect(html).toMatch(/data-task-id="wide"[^>]*>.*?class="diagram-gantt-label" text-anchor="middle"/)
   expect(html).toMatch(/data-task-id="check"[^>]*>.*?class="diagram-gantt-label" text-anchor="end"/)
   expect(html).toContain('data-diagram-kind="gitgraph" transform="translate(36 36)"')
+  const graph = html.match(/<svg\b[^>]*aria-label="Git graph"[^>]*>/)?.[0] ?? ''
+  expect(graph).toMatch(/viewBox="0 0 ([\d.]+) ([\d.]+)" width="\1" height="\2"/)
   expect(html).toContain('data-commit-id="review"')
 })
 

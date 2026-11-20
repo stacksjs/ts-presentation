@@ -1,7 +1,7 @@
 import type { GitCommitStyle, GitGraphDirection, GitGraphOperation, GitGraphOptions, GitHistory } from 'ts-charts/diagrams'
 import { buildGitHistory as buildHistory, gitGraphChart } from 'ts-charts/diagrams'
 import type { MermaidOptions } from '../authoring-setup.ts'
-import { diagramPixels, readChronology } from './chronology.ts'
+import { diagramPixels, readChronology, sizeChronologySvg } from './chronology.ts'
 import { gitGraphPreset } from './gitgraph-themes.ts'
 import { syntaxMask } from './syntax.ts'
 
@@ -75,13 +75,12 @@ function settings(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? value as Record<string, unknown> : {}
 }
 
-function parseGitHistory(source: string, options?: unknown): GitGraphOptions | undefined {
+function parseGitHistory(source: string, config: Record<string, unknown>): GitGraphOptions | undefined {
   const chart = readChronology(logicalLines(source), '', true)
   if (!chart) return
   const rows = commands([chart.header, ...chart.rows])
   const header = /^gitGraph(?:\s+(LR|TB|BT))?\s*:?$/.exec(rows.shift() ?? '')
   if (!header || rows.length > 450) return
-  const config = settings(options)
   const operations: GitGraphOperation[] = []
   for (const row of rows) {
     const fieldsForLine = lex(row)
@@ -147,12 +146,13 @@ function parseGitHistory(source: string, options?: unknown): GitGraphOptions | u
 }
 
 export function buildGitHistory(source: string, options?: unknown): GitHistory | undefined {
-  const chart = parseGitHistory(source, options)
+  const chart = parseGitHistory(source, settings(options))
   if (chart) return buildHistory(chart)
 }
 
 export function gitGraph(source: string, idPrefix: string, options: MermaidOptions = {}): string | undefined {
-  const chart = parseGitHistory(source, options.gitGraph)
+  const config = settings(options.gitGraph)
+  const chart = parseGitHistory(source, config)
   if (!chart) return
   const variables = settings(options.themeVariables)
   const preset = gitGraphPreset(options.theme)
@@ -161,7 +161,7 @@ export function gitGraph(source: string, idPrefix: string, options: MermaidOptio
     Array.from({ length: 8 }, (_, index) => color(`${prefix}${index}`) ?? fallback ?? defaults?.[index])
   const colors = palette('git', preset?.branches)
   const labelBackground = typeof options.themeCSS === 'string' && options.themeCSS.trim() ? 'transparent' : undefined
-  return gitGraphChart({
+  const svg = gitGraphChart({
     ...chart, idPrefix, title: chart.title || (typeof options.title === 'string' ? options.title : ''),
     colors,
     branchLabelColors: palette('gitBranchLabel', preset?.branchText, color('branchLabelColor')),
@@ -181,4 +181,5 @@ export function gitGraph(source: string, idPrefix: string, options: MermaidOptio
       fontSize: diagramPixels(variables.tagLabelFontSize) ?? preset?.tag.fontSize,
     },
   })
+  return sizeChronologySvg(svg, config.useMaxWidth)
 }

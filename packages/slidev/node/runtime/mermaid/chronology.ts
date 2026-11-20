@@ -13,6 +13,11 @@ export function diagramPixels(value: unknown): number | undefined {
   if (typeof value === 'string' && /^\d+(?:\.\d+)?(?:px)?$/i.test(value.trim())) return Number.parseFloat(value)
 }
 
+export function sizeChronologySvg(svg: string | undefined, useMaxWidth: unknown): string | undefined {
+  if (useMaxWidth !== false) return svg
+  return svg?.replace(/^(<svg\b[^>]*\bviewBox="0 0 ([\d.]+) ([\d.]+)")/, '$1 width="$2" height="$3"')
+}
+
 export function readChronology(source: string | readonly string[], title: string, singleQuotes = false): Chronology | undefined {
   const lines = (typeof source === 'string' ? source.split(/\r?\n/) : source).map(line => line.trim())
   const header = lines.findIndex(line => line && !/^(?:%%|#)/.test(line))

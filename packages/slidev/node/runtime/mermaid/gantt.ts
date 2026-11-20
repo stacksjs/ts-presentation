@@ -1,7 +1,7 @@
 import type { GanttChartOptions, GanttMarkerStyle, GanttSchedule, GanttTask, GanttTaskCallback, GanttTaskTag, GanttWeekday } from 'ts-charts/diagrams'
 import { ganttChart, ganttDateParser, ganttDurationEnd, scheduleGantt as scheduleTasks } from 'ts-charts/diagrams'
 import type { MermaidOptions } from '../authoring-setup.ts'
-import { diagramPixels, readChronology } from './chronology.ts'
+import { diagramPixels, readChronology, sizeChronologySvg } from './chronology.ts'
 import { ganttTheme } from './gantt-themes.ts'
 
 function isTag(value: string): value is GanttTaskTag {
@@ -221,7 +221,5 @@ export function gantt(source: string, idPrefix: string, options: MermaidOptions 
       excluded: color('excludeBkgColor'), reference: color('vertLineColor'),
     },
   })
-  if (config.useMaxWidth === false)
-    return svg?.replace(/^(<svg\b[^>]*\bviewBox="0 0 ([\d.]+) ([\d.]+)")/, '$1 width="$2" height="$3"')
-  return svg
+  return sizeChronologySvg(svg, config.useMaxWidth)
 }

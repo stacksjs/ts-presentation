@@ -13,7 +13,7 @@ import { isMathAttributeCommand, isMathUrlCommand, mathAttributes, mathKeyValues
 import { readUnicodeToken, unicodeAccents } from './math-unicode.ts'
 
 const greek: Record<string, string> = {
-  alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε', varepsilon: 'ϵ', zeta: 'ζ', eta: 'η',
+  alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ϵ', varepsilon: 'ε', zeta: 'ζ', eta: 'η',
   theta: 'θ', vartheta: 'ϑ', thetasym: 'ϑ', iota: 'ι', kappa: 'κ', lambda: 'λ', mu: 'μ', nu: 'ν', xi: 'ξ', pi: 'π',
   rho: 'ρ', varrho: 'ϱ', sigma: 'σ', varsigma: 'ς', tau: 'τ', upsilon: 'υ', phi: 'ϕ', varphi: 'φ',
   chi: 'χ', psi: 'ψ', omega: 'ω',
@@ -35,7 +35,7 @@ const operators: Record<string, string> = {
   approx: '≈', sim: '∼', simeq: '≃', equiv: '≡', propto: '∝', in: '∈', notin: '∉', subset: '⊂',
   subseteq: '⊆', supset: '⊃', supseteq: '⊇', cap: '∩', cup: '∪', land: '∧', lor: '∨',
   forall: '∀', exists: '∃', neg: '¬', to: '→', mapsto: '↦', rightarrow: '→', leftarrow: '←', gets: '←',
-  leftrightarrow: '↔', Rightarrow: '⇒', Leftarrow: '⇐', Leftrightarrow: '⇔', iff: '⇔',
+  leftrightarrow: '↔', Rightarrow: '⇒', Leftarrow: '⇐', Leftrightarrow: '⇔',
   sum: '∑', prod: '∏', int: '∫', iint: '∬', oint: '∮', partial: '∂', nabla: '∇', infty: '∞',
   emptyset: '∅', ldots: '…', cdots: '⋯', vdots: '⋮', ddots: '⋱', angle: '∠',
   mid: '∣', parallel: '∥', perp: '⊥', circ: '∘', ast: '∗', setminus: '∖',
@@ -254,6 +254,8 @@ for (const [name, expansion] of Object.entries({
   Ket: '\\left|#1\\right\\rangle',
 })) builtinMacros.set(`\\${name}`, { body: tokenize(expansion), parameters: [[]], prefix: [] })
 for (const name of ['Braket', 'Set', 'set'] as const) builtinMacros.set(`\\${name}`, { notation: name })
+for (const [name, arrow] of Object.entries({ implies: 'Longrightarrow', impliedby: 'Longleftarrow', iff: 'Longleftrightarrow' }))
+  builtinMacros.set(`\\${name}`, { body: ['\\;', `\\${arrow}`, '\\;'], parameters: [], prefix: [] })
 
 function isExpansionPrimitive(token: string | undefined): token is ExpansionPrimitive {
   return token !== undefined && expansionPrimitiveNames.has(token)
@@ -574,9 +576,10 @@ function negatedMarkup(markup: string): string {
   return `${prefix}<${element}${attrs}>${negated}</${element}>${suffix}`
 }
 
-function fence(token: string, stretchy = true): string {
+function fence(token: string, stretchy = true, color = ''): string {
   if (!token || token === '.') return ''
-  return `<mo stretchy="${stretchy}">${escapeHtml(delimiters[token] ?? token)}</mo>`
+  const style = color ? ` style="color:${color}"` : ''
+  return `<mo stretchy="${stretchy}"${style}>${escapeHtml(delimiters[token] ?? token)}</mo>`
 }
 
 function delimiter(token: string, command: string): string {
@@ -610,7 +613,7 @@ const mathModeFunctions = new Set([
   'boxed', 'cancel', 'bcancel', 'xcancel', 'pmb', 'phase', 'angl', 'angln', 'mathreflectbox',
   'prescript', 'mathstrut', 'overset', 'underset', 'stackrel',
   'overline', 'operatorname', 'operatorname@', 'operatornamewithlimits', 'limits', 'nolimits', 'displaylimits',
-  'not', 'mod', 'bmod', 'pmod', 'pod', 'ce', 'pu', 'allowbreak', 'implies', 'impliedby',
+  'not', 'mod', 'bmod', 'pmod', 'pod', 'ce', 'pu', 'allowbreak',
 ])
 const sharedFunctions = new Set([
   ...Object.keys(textFonts), ...typesettingNames, ...textBoxes, ...verticalBoxCommands, ...spacingCommands,
@@ -684,6 +687,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   let tagState: EquationTag = { suppressed: false }
   let environmentDepth = 0
   let delimiterDepth = 0
+  let currentColor = ''
   let equationNumber = 0
   let fontScale = 1
   let textItalic = false
@@ -716,9 +720,11 @@ export function renderMath(source: string, display = false, configured: MathMacr
 
   function inScope<T>(render: () => T): T {
     const saved = new Map<string, Macro | undefined>()
+    const previousColor = currentColor
     scopes.push(saved)
     try { return render() }
     finally {
+      currentColor = previousColor
       scopes.pop()
       for (const [command, previous] of saved) {
         if (previous) macros.set(command, previous)
@@ -1065,11 +1071,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
     delimiterDepth++
     let content: Markup
     try {
-      content = inScope(() => row(['\\right', '}', '\\end', '&', '\\\\', '\\newline', '\\cr']))
+      // KaTeX keeps definitions between the fences in their surrounding group.
+      content = row(['\\right', '}', '\\end', '&', '\\cr'])
     }
     finally { delimiterDepth-- }
     if (take() !== '\\right') throw new Error('Missing \\right for \\left')
-    const right = fence(readDelimiter('right'))
+    const right = fence(readDelimiter('right'), true, currentColor)
     return xml`<mrow>${left}${content}${right}</mrow>`
   }
 
@@ -1596,6 +1603,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       }
       if (token === '\\color' && !options?.colorIsTextColor) {
         const color = readColor()
+        currentColor = color
         const content = row(stop, true, exposeDeclarationLines, undefined, followsOrdinary && !parts.some(rowClass))
         parts.push({ markup: xml`<mrow style="color:${color}">${content}</mrow>` })
         continue
@@ -2195,10 +2203,6 @@ export function renderMath(source: string, display = false, configured: MathMacr
       return { markup: stackMathArrow(mathArrowBody(extensibleArrows[name], '1.75em', bias), above, below) }
     }
     if (name === 'relax' || name === 'allowbreak' || name === 'nobreak') return { markup: '' }
-    if (name === 'implies' || name === 'impliedby') {
-      const arrow = name === 'implies' ? '⟹' : '⟸'
-      return classifiedAtom('rel', `${muSpace(5)}<mo lspace="0em" rspace="0em">${arrow}</mo>${muSpace(5)}`)
-    }
     if (name === 'plim') return { markup: tag('mo', 'plim'), limits: true, forceLimits: true }
     if (Object.hasOwn(variants, name)) {
       const variant = variants[name]
