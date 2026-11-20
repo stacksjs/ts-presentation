@@ -82,6 +82,16 @@ The `export` mapping accepts `format`, `range`, and `withClicks`.
 PNG and PowerPoint can also set `scale`. CLI options override the deck defaults. With PDF
 `--with-clicks`, each selected reveal becomes a page with selectable text.
 
+Use `--dark` or `--light` to set the color scheme for exported slides and
+downloadable PDFs. Use `--wait` to delay each frame and `--timeout` to set the
+overall capture deadline, both in milliseconds. Set `--timeout 0` to disable
+the deadline. Exports wait for the page to load by default. Choose
+`--wait-until domcontentloaded`, `networkidle`, or `none` to select a different
+browser milestone. Add `data-waitfor=".finished"` to a slide element to wait
+for a visible matching descendant before capturing its frame. Use
+`export.dark`, `export.wait`, `export.timeout`, and `export.waitUntil` in
+headmatter to save these settings with the deck.
+
 Use `build --download` or set `download: true` in deck headmatter to bundle
 a PDF and show a **Download PDF** link in the built player. The default file
 is `slidev-exported.pdf`. Use `exportFilename` for a filename or nested path

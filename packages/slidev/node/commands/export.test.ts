@@ -43,6 +43,20 @@ describe('export defaults', () => {
     })
   })
 
+  it('resolves frame wait, timeout, and color settings across capture formats', () => {
+    const headmatter = { config: { export: { timeout: 8000, wait: 300 } }, export: { wait: 500, waitUntil: 'networkidle', dark: true } }
+    expect(resolveExportSettings('/deck/slides.md', headmatter)).toMatchObject({ timeout: 8000, wait: 500, colorScheme: 'dark' })
+    expect(resolveExportSettings('/deck/slides.md', headmatter, { format: 'png', wait: '0', timeout: '0', 'wait-until': 'none', light: true })).toMatchObject({
+      timeout: 0, wait: 0, waitUntil: 'none', colorScheme: 'light',
+    })
+    expect(resolveDownloadCapture(headmatter)).toMatchObject({ timeout: 8000, wait: 500, waitUntil: 'networkidle', colorScheme: 'dark' })
+    expect(resolveNotesExportSettings('/deck/slides.md', headmatter)).toMatchObject({ timeout: 8000, wait: 500, waitUntil: 'networkidle' })
+    expect(() => resolveExportSettings('/deck/slides.md', {}, { dark: true, light: true })).toThrow('Choose either --dark or --light')
+    expect(() => resolveExportSettings('/deck/slides.md', {}, { timeout: '-1' })).toThrow('Invalid export timeout')
+    expect(() => resolveDownloadCapture({}, { wait: '0.25' })).toThrow('Invalid export wait')
+    expect(() => resolveDownloadCapture({}, { 'wait-until': 'idle' })).toThrow('Export wait-until must be')
+  })
+
   it('resolves the generated PDF filename, custom links, and PDF-specific capture options', () => {
     expect(resolveBuildDownload({ download: true })).toEqual({ filename: 'slidev-exported.pdf', href: './slidev-exported.pdf' })
     expect(resolveBuildDownload({ config: { download: 'auto', exportFilename: 'reports/Talk (Draft).pdf' } })).toEqual({
@@ -202,6 +216,98 @@ describe('export creates output directories', () => {
     }
   }, exportTestTimeout)
 })
+
+it.skipIf(!chrome)('captures delayed slide content and the chosen color scheme in PDF and PowerPoint', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-export-readiness-'))
+  try {
+    await Bun.write(join(root, 'slides.md'), [
+      '---', 'theme: deferred', 'colorSchema: light', 'export:', '  dark: true', '---',
+      '', '# Ready when the result appears', '',
+      '<LightOrDark>',
+      '<template #dark><a href="https://example.com/slot-dark">Dark appearance</a></template>',
+      '<template #light><a href="https://example.com/slot-light">Light appearance</a></template>',
+      '</LightOrDark>', '',
+      '<div data-demo data-waitfor=".ready"></div>',
+      '<div hidden data-waitfor=".never"></div>',
+      '<p v-click>One reveal</p>',
+    ].join('\n'))
+    await Bun.write(join(root, 'themes', 'deferred', 'index.ts'), "export default { name: 'deferred', client: './client.ts' }")
+    await Bun.write(join(root, 'themes', 'deferred', 'client.ts'), `
+      let timers = []
+      window.addEventListener('presentation:slide', (event) => {
+        timers.forEach(clearTimeout)
+        const root = document.querySelector('#stage > article:not([hidden]) [data-demo]')
+        if (!root) return
+        root.replaceChildren()
+        const step = event.detail.click
+        const color = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+        const append = (kind) => {
+          const link = document.createElement('a')
+          link.className = kind
+          link.textContent = kind + ' ' + step
+          link.href = 'https://example.com/' + color + '/' + kind + '-' + step
+          root.append(link)
+        }
+        timers = [setTimeout(() => append('ready'), 160), setTimeout(() => append('settled'), 290)]
+      })
+    `)
+    await exportDeck(root, '--with-clicks', '--dark', '--wait', '200', '--wait-until', 'networkidle', '--timeout', '15000', '--out', 'frames.pdf')
+    const pdf = await Bun.file(join(root, 'frames.pdf')).text()
+    expect(pdf.match(/\/Type\s*\/Page\b/g)).toHaveLength(2)
+    for (const step of [0, 1]) {
+      expect(pdf).toContain(`/URI (https://example.com/dark/ready-${step})`)
+      expect(pdf).toContain(`/URI (https://example.com/dark/settled-${step})`)
+    }
+    expect(pdf).toContain('/URI (https://example.com/slot-dark)')
+    expect(pdf).not.toContain('https://example.com/slot-light')
+
+    await exportDeck(root, '--format', 'pptx', '--without-clicks', '--light', '--wait-until', 'none', '--timeout', '15000', '--out', 'frame.pptx')
+    const pptx = await Bun.file(join(root, 'frame.pptx')).text()
+    const links = pptx.match(/https:\/\/example\.com\/[\w/-]+/g) ?? []
+    expect(links).toContain('https://example.com/light/ready-1')
+    expect(links).toContain('https://example.com/slot-light')
+    expect(links).not.toContain('https://example.com/slot-dark')
+  }
+  finally { await rm(root, { recursive: true, force: true }) }
+}, exportTestTimeout)
+
+it.skipIf(!chrome)('honors the export timeout when authored content never becomes visible', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-export-timeout-'))
+  try {
+    await Bun.write(join(root, 'slides.md'), '# Waiting\n\n<div data-waitfor=".ready"><span class="ready" hidden>Unavailable</span></div>')
+    await expect(exportDeck(root, '--timeout', '1000', '--out', 'incomplete.pdf')).rejects.toThrow('Presentation export did not finish within 1000ms')
+    expect(await Bun.file(join(root, 'incomplete.pdf')).exists()).toBe(false)
+  }
+  finally { await rm(root, { recursive: true, force: true }) }
+}, exportTestTimeout)
+
+it.skipIf(!chrome)('can start image capture before unrelated resources finish loading', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-export-navigation-'))
+  const pending = Promise.withResolvers<void>()
+  let requests = 0
+  const resources = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    async fetch() {
+      requests++
+      await pending.promise
+      return new Response(null, { status: 404 })
+    },
+  })
+  try {
+    await Bun.write(join(root, 'slides.md'), `# Ready\n\n<img hidden src="${new URL('pending.png', resources.url)}" alt="">`)
+    await exportDeck(root, '--format', 'png', '--wait-until', 'domcontentloaded', '--timeout', '8000', '--out', 'early')
+    expect(await Bun.file(join(root, 'early', 'slide-1.png')).exists()).toBe(true)
+    expect(requests).toBe(1)
+    await expect(exportDeck(root, '--format', 'png', '--wait-until', 'load', '--timeout', '1200', '--out', 'late')).rejects.toThrow('did not finish within 1200ms')
+    expect(requests).toBe(2)
+    expect(await Bun.file(join(root, 'late', 'slide-1.png')).exists()).toBe(false)
+  }
+  finally {
+    pending.resolve()
+    await resources.stop(true)
+    await rm(root, { recursive: true, force: true })
+  }
+}, exportTestTimeout)
 
 it('formats the entry using the native slide boundaries and leaves included files alone', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-format-'))

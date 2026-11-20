@@ -1,6 +1,8 @@
 import { basename, resolve } from 'node:path'
 
 type Format = 'pdf' | 'png' | 'pptx' | 'pptx-editable' | 'md'
+export type ExportColorScheme = 'light' | 'dark'
+export type ExportWaitUntil = 'load' | 'domcontentloaded' | 'networkidle' | 'none'
 
 interface ExportFlags {
   output?: string
@@ -13,9 +15,22 @@ interface ExportFlags {
   'executable-path'?: string
   timeout?: string
   wait?: string
+  'wait-until'?: string
+  dark?: boolean
+  light?: boolean
 }
 
-interface ExportSettings {
+interface ExportTiming {
+  timeout: number
+  wait: number
+  waitUntil?: ExportWaitUntil
+}
+
+interface ExportRenderSettings extends ExportTiming {
+  colorScheme?: ExportColorScheme
+}
+
+interface ExportSettings extends ExportRenderSettings {
   format: Format
   output: string
   withClicks: boolean
@@ -24,13 +39,11 @@ interface ExportSettings {
   executablePath?: string
 }
 
-interface NotesExportSettings {
+interface NotesExportSettings extends ExportTiming {
   format: 'notes'
   output: string
   executablePath?: string
   range?: string
-  timeout: number
-  wait: number
 }
 
 export interface BuildDownload { href: string, filename?: string }
@@ -78,8 +91,33 @@ function frameSelection(defaults: Record<string, unknown>, flags: ExportFlags, d
   }
 }
 
-export function resolveDownloadCapture(headmatter: Record<string, unknown> = {}, flags: ExportFlags = {}): Pick<ExportSettings, 'range' | 'withClicks' | 'executablePath' | 'scale'> {
-  return { ...frameSelection(exportDefaults(headmatter), flags, false), scale: 1 }
+function milliseconds(value: unknown, label: string): number {
+  const number = typeof value === 'number' || nonempty(value) ? Number(value) : NaN
+  if (!Number.isSafeInteger(number) || number < 0 || number > 2_147_483_647) throw new Error(`Invalid export ${label}: expected milliseconds`)
+  return number
+}
+
+function exportTiming(defaults: Record<string, unknown>, flags: ExportFlags, timeout: number): ExportTiming {
+  const waitUntil = flags['wait-until'] ?? defaults.waitUntil
+  if (waitUntil !== undefined && waitUntil !== 'load' && waitUntil !== 'domcontentloaded' && waitUntil !== 'networkidle' && waitUntil !== 'none')
+    throw new Error('Export wait-until must be load, domcontentloaded, networkidle or none')
+  return {
+    timeout: milliseconds(flags.timeout ?? defaults.timeout ?? timeout, 'timeout'),
+    wait: milliseconds(flags.wait ?? defaults.wait ?? 0, 'wait'),
+    waitUntil,
+  }
+}
+
+function renderSettings(defaults: Record<string, unknown>, flags: ExportFlags): ExportRenderSettings {
+  if (flags.dark && flags.light) throw new Error('Choose either --dark or --light')
+  const dark = flags.light ? false : flags.dark ?? defaults.dark
+  const colorScheme = dark === true ? 'dark' : dark === false ? 'light' : undefined
+  return { ...exportTiming(defaults, flags, 120_000), colorScheme }
+}
+
+export function resolveDownloadCapture(headmatter: Record<string, unknown> = {}, flags: ExportFlags = {}): Pick<ExportSettings, 'range' | 'withClicks' | 'executablePath' | 'scale'> & ExportRenderSettings {
+  const defaults = exportDefaults(headmatter)
+  return { ...frameSelection(defaults, flags, false), ...renderSettings(defaults, flags), scale: 1 }
 }
 
 export function resolveExportSettings(source: string, headmatter: Record<string, unknown> = {}, flags: ExportFlags = {}): ExportSettings {
@@ -104,22 +142,18 @@ export function resolveExportSettings(source: string, headmatter: Record<string,
   const fallback = basename(source, '.md')
   const target = output ?? (format === 'png' ? `${fallback}-frames` : format === 'md' ? `${fallback}-export.md` : fallback + extension)
   const path = (format === 'pptx-editable' || format === 'md' || explicit === undefined && format !== 'png') && !target.toLowerCase().endsWith(extension) ? target + extension : target
-  return { format, output: resolve(path), scale, ...frameSelection(defaults, flags, powerPoint) }
+  return { format, output: resolve(path), scale, ...frameSelection(defaults, flags, powerPoint), ...renderSettings(defaults, flags) }
 }
 
 export function resolveNotesExportSettings(source: string, headmatter: Record<string, unknown> = {}, flags: ExportFlags = {}): NotesExportSettings {
   const name = exportFilename(headmatter)
   const target = flags.out ?? flags.output ?? (name ? `${name}-notes` : `${basename(source, '.md')}-export-notes`)
-  const timeout = Number(flags.timeout ?? 30_000)
-  const wait = Number(flags.wait ?? 0)
-  if (!Number.isSafeInteger(timeout) || timeout < 0 || timeout > 2_147_483_647) throw new Error('Invalid notes export timeout')
-  if (!Number.isSafeInteger(wait) || wait < 0 || wait > 2_147_483_647) throw new Error('Invalid notes export wait')
+  const defaults = exportDefaults(headmatter)
   return {
     format: 'notes',
     output: resolve(target.toLowerCase().endsWith('.pdf') ? target : `${target}.pdf`),
-    executablePath: flags['executable-path'] ?? nonempty(exportDefaults(headmatter).executablePath),
+    executablePath: flags['executable-path'] ?? nonempty(defaults.executablePath),
     range: flags.range,
-    timeout,
-    wait,
+    ...exportTiming(defaults, flags, 30_000),
   }
 }

@@ -45,13 +45,13 @@ function readSlots(host: HTMLElement): Branches {
 }
 
 /** Adapted from Slidev's RenderWhen and LightOrDark components (MIT). */
-export function createSlideConditions(mode: () => SlideMode, refresh: () => void): {
+export function createSlideConditions(mode: () => SlideMode, refresh: () => void, captureColor?: string | null): {
   update(container: HTMLElement): boolean
   observe(slide: HTMLElement): void
   toggleDark(): void
 } {
   const root = document.documentElement
-  const schema = root.dataset.colorSchema
+  const schema = captureColor === 'dark' || captureColor === 'light' ? captureColor : root.dataset.colorSchema
   const preferred = matchMedia('(prefers-color-scheme: dark)')
   let override: boolean | undefined
   const dark = () => override ?? (schema === 'auto' ? preferred.matches : schema !== 'light')

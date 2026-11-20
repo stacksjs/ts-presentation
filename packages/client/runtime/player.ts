@@ -71,7 +71,7 @@ const reveals: ReturnType<typeof collectReveals>[] = []
 const bounds: ClickBounds[] = []
 const isLive = !isCapture && !isEntry && document.documentElement.dataset.liveCompile === 'true'
 const slideMode = (): SlideMode => isNotes ? 'notes' : isOverview ? 'overview' : isPreview ? 'preview' : isCapture ? 'export' : isPresenter || !notesPanel.hidden ? 'presenter' : 'slide'
-const conditions = createSlideConditions(slideMode, refreshConditions)
+const conditions = createSlideConditions(slideMode, refreshConditions, isCapture ? params.get('capture-color') : undefined)
 const currentUrl = () => new URL(location.href)
 const audienceUrl = (route: SlideRoute, click?: number) => deckLocation(currentUrl(), routing, 'slide', route, click)
 

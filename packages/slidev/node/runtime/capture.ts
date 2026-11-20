@@ -5,6 +5,7 @@ import { deckPath } from '../../../client/runtime/routing.ts'
 import { asset } from './assets.ts'
 import { dataPicture, maxOriginalPictureBytes, originalPicture } from './editable/pictures.ts'
 import type { OriginalPicture } from './editable/pictures.ts'
+import type { ExportColorScheme, ExportWaitUntil } from './export-options.ts'
 import { slideRange } from './selection.ts'
 
 interface BrowserOptions {
@@ -13,6 +14,9 @@ interface BrowserOptions {
   scale: number
   canvas: SlideCanvas
   timeout?: number
+  wait?: number
+  waitUntil?: ExportWaitUntil
+  colorScheme?: ExportColorScheme
   base?: string
 }
 
@@ -40,6 +44,47 @@ async function prepareImages(root: Element, visibleOnly = false): Promise<void> 
   }))
 }
 
+async function prepareFonts(root: Element): Promise<void> {
+  // Layout starts the font requests for this frame. Waiting for individual
+  // faces avoids tying an early capture to the document's unrelated load event.
+  for (;;) {
+    root.getBoundingClientRect()
+    const loading = [...document.fonts].filter(face => face.status === 'loading')
+    if (!loading.length) return
+    await Promise.allSettled(loading.map(face => face.loaded))
+  }
+}
+
+async function waitForFrame(root: Element, wait: number): Promise<void> {
+  const waiting = new Map<Element, string>()
+  for (const host of root.querySelectorAll('[data-waitfor]')) {
+    const selector = host.getAttribute('data-waitfor')?.trim()
+    if (selector && !host.closest('[hidden], [data-reveal-hidden], [data-switch-hidden]')
+      && getComputedStyle(host).visibility === 'visible'
+      && (host.getClientRects().length || getComputedStyle(host).display === 'contents')) {
+      waiting.set(host, selector)
+    }
+  }
+  while (waiting.size) {
+    for (const [host, selector] of waiting) {
+      if (!root.contains(host)) {
+        waiting.delete(host)
+        continue
+      }
+      let targets: NodeListOf<Element>
+      try { targets = host.querySelectorAll(selector) }
+      catch { throw new Error(`Invalid export readiness selector: ${selector}`) }
+      if ([...targets].some(target => {
+        if (getComputedStyle(target).visibility !== 'visible') return false
+        const rect = target.getBoundingClientRect()
+        return rect.width > 0 && rect.height > 0
+      })) waiting.delete(host)
+    }
+    if (waiting.size) await new Promise<void>(resolve => setTimeout(resolve, 25))
+  }
+  if (wait) await new Promise<void>(resolve => setTimeout(resolve, wait))
+}
+
 type PictureReader = (source: string) => Promise<OriginalPicture | undefined>
 
 function pictureReader(root: string, origin: string, base: string): PictureReader {
@@ -64,6 +109,38 @@ function pictureReader(root: string, origin: string, base: string): PictureReade
     previous.set(source, result)
     return result
   }
+}
+
+async function navigateForCapture(browser: Bun.WebView, url: string, waitUntil: ExportWaitUntil = 'load'): Promise<void> {
+  if (waitUntil === 'load') {
+    await browser.navigate(url)
+    return
+  }
+  await browser.cdp('Page.enable')
+  await browser.cdp('Page.setLifecycleEventsEnabled', { enabled: true })
+  const eventName = { none: 'init', domcontentloaded: 'DOMContentLoaded', networkidle: 'networkIdle' }[waitUntil]
+  const ready = Promise.withResolvers<void>()
+  const completed = new Set<string>()
+  let loaderId: string | undefined
+  function track(event: Event): void {
+    const { data } = event as MessageEvent<{ name: string, loaderId: string }>
+    if (data.name !== eventName) return
+    completed.add(data.loaderId)
+    if (data.loaderId === loaderId) ready.resolve()
+  }
+  browser.addEventListener('Page.lifecycleEvent', track)
+  try {
+    const result = await browser.cdp<{ errorText?: string, loaderId?: string }>('Page.navigate', { url })
+    if (result.errorText || !result.loaderId) throw new Error(result.errorText || 'Could not navigate to the export page')
+    loaderId = result.loaderId
+    if (!completed.has(loaderId)) await ready.promise
+  }
+  finally { browser.removeEventListener('Page.lifecycleEvent', track) }
+  // The early navigation mode still needs the deck player before it can
+  // select a slide. It can proceed while unrelated resources keep loading.
+  if (waitUntil === 'none') await browser.evaluate(`(async () => {
+    while (!window.presentationNavigation) await new Promise(resolve => setTimeout(resolve, 10))
+  })()`)
 }
 
 async function withExportBrowser<T>(options: BrowserOptions, run: (browser: Bun.WebView, readOriginal: PictureReader) => Promise<T>): Promise<T> {
@@ -99,7 +176,14 @@ async function withExportBrowser<T>(options: BrowserOptions, run: (browser: Bun.
       await chrome.cdp('Emulation.setDeviceMetricsOverride', {
         width, height, deviceScaleFactor: options.scale, mobile: false,
       })
-      await chrome.navigate(new URL(`${base}?capture=1&steps=1`, preview.url).href)
+      const page = new URL(`${base}?capture=1&steps=1`, preview.url)
+      if (options.colorScheme) {
+        await chrome.cdp('Emulation.setEmulatedMedia', {
+          features: [{ name: 'prefers-color-scheme', value: options.colorScheme }],
+        })
+        page.searchParams.set('capture-color', options.colorScheme)
+      }
+      await navigateForCapture(chrome, page.href, options.waitUntil)
       return run(chrome, pictureReader(root, preview.url.origin, base))
     }
     const duration = options.timeout ?? 120_000
@@ -146,7 +230,8 @@ export async function captureFrames(options: CaptureOptions, onFrame: (frame: Po
         const active = document.querySelector('#stage > article:not([hidden])')
         if (active?.id !== 'slide-${position.slide}') throw new Error('Slide did not become active')
         await window.presentationMediaReady?.()
-        await document.fonts.ready
+        await (${waitForFrame.toString()})(active, ${options.wait ?? 0})
+        await (${prepareFonts.toString()})(active)
         await (${prepareImages.toString()})(active, true)
         window.presentationFitText?.(active)
         const note = document.querySelector('#presenter-notes > section[data-has-notes]:not([hidden])')
@@ -202,9 +287,10 @@ export async function captureFrames(options: CaptureOptions, onFrame: (frame: Po
 export async function capturePdf(options: CaptureOptions): Promise<Uint8Array<ArrayBuffer>> {
   return withExportBrowser(options, async (chrome) => {
     const positions = await exportPositions(chrome, options)
-    await chrome.evaluate(`(async (positions) => {
+    await chrome.evaluate(`(async (positions, wait) => {
       const stage = document.getElementById('stage')
       const pages = document.createDocumentFragment()
+      const ready = ${waitForFrame.toString()}
       const destinations = new Map()
       for (const { slide, step } of positions) {
         const id = 'presentation-print-' + slide + '-' + step
@@ -215,6 +301,7 @@ export async function capturePdf(options: CaptureOptions): Promise<Uint8Array<Ar
         window.presentationNavigation.go(slide, step)
         const active = stage.querySelector('article:not([hidden])')
         if (active?.id !== 'slide-' + slide) throw new Error('Slide did not become active')
+        await ready(active, wait)
         const page = active.cloneNode(true)
         await window.presentationMediaReady?.(page)
         const anchor = document.createElement('span')
@@ -237,10 +324,10 @@ export async function capturePdf(options: CaptureOptions): Promise<Uint8Array<Ar
       }
       stage.replaceChildren(pages)
       document.body.classList.add('printing-frames')
-      await document.fonts.ready
+      await (${prepareFonts.toString()})(stage)
       await (${prepareImages.toString()})(stage)
       window.presentationFitText?.(stage)
-    })(${JSON.stringify(positions)})`)
+    })(${JSON.stringify(positions)}, ${options.wait ?? 0})`)
     return printPdf(chrome)
   })
 }
@@ -265,7 +352,7 @@ const notePrintCss = `
 `
 
 /** Print the full presenter notes for each selected slide that has notes. */
-export async function captureNotesPdf(options: BrowserOptions & { range?: string, wait: number }): Promise<Uint8Array<ArrayBuffer>> {
+export async function captureNotesPdf(options: BrowserOptions & { range?: string }): Promise<Uint8Array<ArrayBuffer>> {
   return withExportBrowser(options, async (chrome) => {
     const total = await chrome.evaluate<number>("document.querySelectorAll('#stage > article').length")
     const selected = slideRange(total, options.range)
@@ -294,10 +381,10 @@ export async function captureNotesPdf(options: BrowserOptions & { range?: string
       const styles = document.createElement('style')
       styles.textContent = css
       document.head.append(styles)
-      await document.fonts.ready
+      await (${waitForFrame.toString()})(pages, ${options.wait ?? 0})
+      await (${prepareFonts.toString()})(pages)
       await (${prepareImages.toString()})(pages)
     })(${JSON.stringify(selected)}, ${JSON.stringify(notePrintCss)})`)
-    if (options.wait) await Bun.sleep(options.wait)
     return printPdf(chrome)
   })
 }

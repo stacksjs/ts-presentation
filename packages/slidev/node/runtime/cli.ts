@@ -40,6 +40,9 @@ const options = {
   'executable-path': { type: 'string' },
   timeout: { type: 'string' },
   wait: { type: 'string' },
+  'wait-until': { type: 'string' },
+  dark: { type: 'boolean' },
+  light: { type: 'boolean' },
   help: { type: 'boolean', short: 'h' },
 } as const
 
@@ -53,6 +56,8 @@ const help = `ts-presentation <dev|build|format|export|export-notes|mcp> [slides
   export  Write PDF, PNG, PPTX, editable PPTX or Markdown with slide images using Chrome.
           Optional --out and --executable-path.
           Use --range and --with-clicks to select slides and reveal frames.
+          Use --wait and --timeout in milliseconds. Use --dark or --light to choose a color scheme.
+          --wait-until accepts load (default), domcontentloaded, networkidle, or none.
           PNG, PPTX and Markdown images also support --scale.
   export-notes  Write the speaker notes to a PDF with slide titles and numbers.
           Optional --out, --range, --executable-path, --timeout and --wait.
@@ -370,13 +375,13 @@ async function main(): Promise<void> {
     const browser = { root: temp, executable, canvas: deck.canvas }
     if (settings.format === 'notes') {
       const { captureNotesPdf } = await import('./capture.ts')
-      const { timeout, wait, range } = settings
-      await Bun.write(output, await captureNotesPdf({ ...browser, scale: 1, timeout, wait, range }))
+      const { timeout, wait, waitUntil, range } = settings
+      await Bun.write(output, await captureNotesPdf({ ...browser, scale: 1, timeout, wait, waitUntil, range }))
       console.log(output)
       return
     }
-    const { scale, range, withClicks } = settings
-    const capture = { ...browser, scale, range, withClicks }
+    const { scale, range, withClicks, timeout, wait, waitUntil, colorScheme } = settings
+    const capture = { ...browser, scale, range, withClicks, timeout, wait, waitUntil, colorScheme }
     if (format === 'md') {
       const { exportMarkdown } = await import('./markdown-export.ts')
       await exportMarkdown(output, deck.notesMarkdown, capture)
