@@ -150,6 +150,11 @@ can run the original TypeScript and offers an editable JavaScript version.
 See the [Stacks presentations skill](skills/stacks-presentations/SKILL.md)
 for authoring, extension APIs, exports, and the preserved upstream skill bundle.
 
+Add `global-top.stx` or `global-bottom.stx` beside the deck for shared
+layers and `layouts/slide-top.stx` or `layouts/slide-bottom.stx` for
+per-slide layers. STX templates can use slide context such as
+`nav.currentPage` and `nav.total`. The layers are included in exports.
+
 ## Work with a deck through MCP
 
 Run `bun src/cli.ts mcp path/to/slides.md` for a stdio MCP server. It can list

@@ -410,28 +410,21 @@ function buildSlideIr(
     childIndex.set(node.parent, siblings)
   }
 
-  /**
-   * Where an element paints: CSS puts positioned elements above in-flow content
-   * whatever the document order says. Two tiers and a z-index cover what a slide deck actually does.
-   */
+  /** Position descendants inside the layering set by their outer stacking context. */
   function layerOf(node: RawNode): { tier: number, z: number } {
-    // The nearest positioned ancestor, not the nearest styled one: a page
-    // counter is a positioned `<footer>` wrapping a plain `<div>`.
     let current: RawNode | undefined = node
+    let positioned = false
+    let z = 0
     while (current) {
       const style = styleOf(current)
       if (style && style.position !== 'static' && style.position !== '') {
-        const z = Number.parseInt(style.zIndex, 10)
-        return {
-          tier: 1,
-          z: Number.isNaN(z)
-            ? 0
-            : z,
-        }
+        positioned = true
+        const index = Number.parseInt(style.zIndex, 10)
+        if (Number.isFinite(index)) z = index
       }
       current = byId.get(current.parent)
     }
-    return { tier: 0, z: 0 }
+    return { tier: z < 0 ? -1 : positioned ? 1 : 0, z }
   }
 
   function push(node: IrNode, source: RawNode): void {

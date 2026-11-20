@@ -44,6 +44,7 @@ interface LayoutBindings {
   title: string
   slideNumber: number
   frontmatter: Readonly<Record<string, unknown>>
+  nav?: Readonly<Record<string, unknown>>
 }
 
 export async function compileLayoutTemplate(url: URL): Promise<(bindings: LayoutBindings) => Promise<string>> {
@@ -53,8 +54,8 @@ export async function compileLayoutTemplate(url: URL): Promise<(bindings: Layout
   const slotExpression = /{!!\s*((?:slots\.)?[\w-]+)\s*!!}|\{\{\s*((?:slots\.)?[\w-]+)\s*\}\}/g
   const restoreSlot = new RegExp(`${marker}(\\d+)x`, 'g')
 
-  return async ({ slots, title, slideNumber, frontmatter }) => {
-    const context: Record<string, unknown> = { ...slots, slots, content: slots.default, frontmatter, title, slideNumber }
+  return async ({ slots, title, slideNumber, frontmatter, nav }) => {
+    const context: Record<string, unknown> = { ...slots, slots, content: slots.default, frontmatter, title, slideNumber, nav }
     const values: string[] = []
     const template = source.replace(slotExpression, (expression, raw: string | undefined, escaped: string) => {
       const name = raw ?? escaped

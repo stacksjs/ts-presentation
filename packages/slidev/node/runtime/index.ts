@@ -17,6 +17,8 @@ import type { DrawingClientConfig, SavedDrawing } from '../../../types/src/drawi
 import { escapeHtml, unescapeHtml } from './html.ts'
 import { liveBlock } from './live-markup.ts'
 import { createMathRenderer, resolveMathMacros } from './math.ts'
+import type { DeckLayers } from './layers.ts'
+import { renderLayer, renderSlideLayers } from './layers.ts'
 import type { SlideRoute } from '../../../client/runtime/navigation.ts'
 import { slideAlias } from '../../../client/runtime/navigation.ts'
 import type { RouterMode, Routing } from '../../../client/runtime/routing.ts'
@@ -49,6 +51,7 @@ export interface RenderOptions {
   mcpNavigation?: boolean
   mode?: PreparserContext['mode']
   extensions?: LoadedExtensions
+  layers?: DeckLayers
   resolveFileLayout?: (name: string, registered?: PresentationLayout) => Promise<PresentationLayout | undefined>
   setup?: AuthoringSetup
   writableSnippets?: ReadonlyMap<string, WritableSnippet>
@@ -199,6 +202,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   })
   const outline = { labels, tree: createTocTree(routes) }
   const destination = createSlideDestinations(routes)
+  const layers = options.layers && Object.keys(options.layers).length ? options.layers : undefined
   const slides = await Promise.all(activeSlides.map(async (slide, index) => {
     let diagram = 0
     const { layout, alias, title } = routes[index]
@@ -261,7 +265,10 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     const body = custom
       ? await custom({ slide, index, html: slots.default, slots })
       : builtInBody ?? slots.default
-    const prepared = prepareSlideHtml(body, destination, index + 1, slide.frontmatter, socialTheme, outline)
+    const layer = layers && await renderSlideLayers(layers, routes[index], routes.length)
+    const layered = layer?.above || layer?.below
+    const markup = layered && layer ? layer.below + body + layer.above : body
+    const prepared = prepareSlideHtml(markup, destination, index + 1, slide.frontmatter, socialTheme, outline)
     const className = [defaults?.className, slide.className].filter(Boolean).join(' ')
     const transition = String(slide.frontmatter?.transition ?? '')
     const motion = ['fade', 'slide-left', 'slide-up'].includes(transition) ? ` data-transition="${transition}"` : ''
@@ -272,7 +279,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     const magic = (slide.frontmatter?.magicMoveCopy ?? deck.headmatter?.magicMoveCopy ?? settings?.magicMoveCopy) === false ? ' data-magic-copy-disabled' : ''
     const builtin = builtInBody === undefined ? '' : ' data-builtin-layout'
     return {
-      html: `<article id="slide-${index + 1}" class="slide slidev-layout layout-${escapeHtml(layout)} ${escapeHtml(className)}" aria-label="${escapeHtml(title)}"${route}${motion}${copy}${magic}${builtin}>${baseMarkup(prepared.html)}${overlay}</article>`,
+      html: `<article id="slide-${index + 1}" class="slide slidev-layout layout-${escapeHtml(layout)} ${escapeHtml(className)}" aria-label="${escapeHtml(title)}"${route}${motion}${copy}${magic}${builtin}${layered ? ' data-presentation-layers' : ''}>${baseMarkup(prepared.html)}${overlay}</article>`,
       css: baseMarkup(prepared.css),
     }
   }))
@@ -293,13 +300,15 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   const drawingConfig = JSON.stringify(drawings).replaceAll('<', '\\u003c')
   const globalTop = baseMarkup(activeExtensions.map(extension => extension.globalTop || '').join(''))
   const globalBottom = baseMarkup(activeExtensions.map(extension => extension.globalBottom || '').join(''))
+  const customControls = layers?.['custom-nav-controls']
+    ? baseMarkup(await renderLayer(layers['custom-nav-controls'], routes[0], routes.length)) : ''
   const mcpNavigation = options.mcpNavigation && deck.headmatter?.mcp !== false
   let live: LiveDeck | undefined
   let liveData = ''
   if (options.liveCompile) {
     const drawingOptions = [drawings.enabled, drawings.presenterOnly, drawings.syncAll, drawings.persist]
     const theme = extensions?.theme.name
-    const frame = snippetRevision(JSON.stringify([routing, width, height, clicksPreset, drawingOptions, theme, colorSchema, codeTheme, fontMarkup, mcpNavigation, extensions?.styles, extensions?.client, globalTop, globalBottom]))
+    const frame = snippetRevision(JSON.stringify([routing, width, height, clicksPreset, drawingOptions, theme, colorSchema, codeTheme, fontMarkup, mcpNavigation, extensions?.styles, extensions?.client, globalTop, globalBottom, customControls]))
     const parts = slides.map((slide, index) => {
       const source = options.sourceBindings?.get(activeSlides[index])
       const part = { ...slide, notes: notes[index], route: routes[index], sourceToken: source?.token }
@@ -333,6 +342,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     liveData,
     slideMarkup: slides.map(slide => slide.html).join('\n'),
     globalBottom,
+    customControls,
     editorPanel: options.liveCompile ? sideEditor : '',
     notesMarkup: notes.join('\n'),
     slideChoices: choices.join(''),

@@ -59,6 +59,7 @@
     <span id="drawing-status" role="status" hidden></span>
     <button id="fullscreen" type="button">Fullscreen</button>
     <button id="record-button" type="button" hidden>Record</button>
+    {!! customControls !!}
     {!! liveStatus !!}
   </nav>
   <dialog id="overview" aria-label="Slide overview">

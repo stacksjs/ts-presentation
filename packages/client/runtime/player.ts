@@ -6,6 +6,7 @@ import type { LiveDeck } from '../../types/src/dev-protocol.ts'
 import type { LiveManifest } from './dev-updates.ts'
 import { watchLiveDeck } from './dev-updates.ts'
 import { setupDrags } from './drag-player.ts'
+import { carryGlobalLayers } from './global-layers.ts'
 import { setupDrawings } from './drawing-player.ts'
 import type { DrawingClientConfig } from '../../types/src/drawings.ts'
 import { setupLiveCode } from './live-code.ts'
@@ -151,6 +152,7 @@ function show(number: number, step?: number, writeHistory = true, sync = true, r
   drags?.clear()
   if (slideChanged) {
     if (imageView.open) imageView.close()
+    if (!isCapture && !isPreview) carryGlobalLayers(articles[current - 1], articles[selected - 1])
     articles[current - 1].hidden = true
     notes[current - 1].hidden = true
   }

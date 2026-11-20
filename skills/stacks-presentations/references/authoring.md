@@ -45,6 +45,23 @@ deck. For example, `canvasWidth: 800` and `aspectRatio: 4/3` produce an
 - Serve local images and fonts from the deck's `public/` directory and
   reference them with relative paths.
 
+### Slide and global layers
+
+Create `global-bottom.stx` and `global-top.stx` beside the deck to draw
+behind and above slide content. Use `layouts/slide-bottom.stx` and
+`layouts/slide-top.stx` for per-slide content. Layers can also come from
+your theme and addons. A deck file takes precedence for the same layer.
+
+Use STX bindings such as `{{ nav.currentPage }}`, `{{ nav.total }}`,
+`title`, and `frontmatter`. Author positioned layer elements relative to
+the slide canvas. The audience and presenter keep an unchanged global
+layer mounted across slides when it has no slide-managed reveals or media.
+The overview and exports render each slide's layer content independently.
+
+Add `custom-nav-controls.stx` beside the deck to append controls to the
+toolbar. Use the browser's `presentationNavigation` API to navigate from
+deck client code.
+
 Export a function with `definePreparserSetup` from `setup/preparser.ts`
 to configure Markdown transforms for the entry and included files. The
 setup receives `filepath`, `headmatter`, and `mode`. Return an ordered
