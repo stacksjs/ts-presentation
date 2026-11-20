@@ -25,7 +25,7 @@ engines, layouts and generic examples in library projects.
 - [Authoring and presenting](references/authoring.md) for slide includes, click
   steps, math, live code, and diagrams.
 - [Themes and addons](references/extensions.md) for extension configuration,
-  layouts, hooks, client scripts, and assets.
+  layouts, STX components, hooks, client scripts, and assets.
 - [Export and verification](references/exporting.md) for PDF, PNG and PowerPoint.
 - [Slidev reference](references/slidev-source/skills/slidev/SKILL.md) for
   interpreting Slidev decks and checking feature conventions. Refer to the

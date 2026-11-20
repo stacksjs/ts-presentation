@@ -53,6 +53,7 @@
     "packages/create-app/index.mjs",
     "packages/create-app/scaffold.mjs",
     "packages/create-app/template/{README.md,_gitignore,package.json,slides.md}",
+    "packages/create-app/template/components/*.stx",
     "packages/create-theme/index.mjs",
     "packages/create-theme/template/{README.md,_gitignore,example.md,index.ts,package.json,styles/layout.css}",
     "packages/create-theme/template/layouts/*.stx",

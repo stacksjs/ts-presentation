@@ -47,3 +47,44 @@ server after editing a theme or addon's server module.
 
 Use this API to port Vue themes and addons a deck actually needs.
 Keep the theme and addon module interface independent of the deck's data.
+
+## STX components
+
+Save `Callout.stx` to `components/` or a subdirectory in the deck,
+theme, or addon. The deck wins, followed by the last configured addon
+that provides the component, then the theme. Use `<Callout>` or a
+multiword kebab-case tag such as `<status-badge>`.
+
+```html
+<template>
+  <aside class="callout">
+    <strong>{{ props.heading }}</strong>
+    <slot />
+    <footer><slot name="footer">Questions welcome</slot></footer>
+  </aside>
+</template>
+```
+
+```md
+<Callout heading="Agenda" v-click>
+
+- Review **the main changes**.
+- Leave time for questions.
+
+<template #footer>See the *speaker notes* for details.</template>
+
+</Callout>
+```
+
+Use plain attributes for text, bare attributes for booleans, and
+`:prop` bindings for JSON values, quoted strings, or paths such as
+`:heading="frontmatter.topic"`. A component template can also read
+`frontmatter` and `slideNumber`. Use a single root when applying
+`v-click` or `v-drag` directly to a component.
+
+Add a `<script client>` block for client-side STX primitives such as
+`state` and `defineProps`, or `<style scoped>` for component styles.
+The dev server observes the component directory. Static markup updates
+in place. Changes to a slide with client-side STX reload the player so
+its setup scripts run again. The starter's `components/Counter.stx`
+shows the client API.

@@ -155,6 +155,14 @@ layers and `layouts/slide-top.stx` or `layouts/slide-bottom.stx` for
 per-slide layers. STX templates can use slide context such as
 `nav.currentPage` and `nav.total`. The layers are included in exports.
 
+Put reusable STX components in the deck, theme, or addon's `components/`
+directory. Use them directly in slide Markdown, such as
+`<Counter :start="1" v-click />`. Components support props, Markdown in
+default and named slots, scoped styles, and client-side STX signals. The
+starter includes an interactive counter. See the
+[components reference](skills/stacks-presentations/references/extensions.md#stx-components)
+for examples and precedence.
+
 ## Work with a deck through MCP
 
 Run `bun src/cli.ts mcp path/to/slides.md` for a stdio MCP server. It can list

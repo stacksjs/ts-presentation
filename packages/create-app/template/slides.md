@@ -25,3 +25,11 @@ layout: two-cols
 ## Rehearse
 
 Open presenter view to see your notes, timer, and next slide.
+
+---
+
+## Interactive components
+
+Use the buttons to change the counter.
+
+<Counter :start="1" />

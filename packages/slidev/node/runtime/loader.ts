@@ -16,6 +16,7 @@ import { drawingEnabled, resolveDrawings } from '../../../types/src/drawings.ts'
 import { bindDragSources } from './drag-source.ts'
 import type { WritableDrag } from './drag-source.ts'
 import { defineStxLayout, loadExtensions } from './extensions.ts'
+import { createDeckComponentRenderer, loadDeckComponents } from './deck-components.ts'
 import { loadDeckLayers } from './layers.ts'
 import { findWorkspaceRoot } from './extension-resolver.ts'
 import { renderPresentation } from './index.ts'
@@ -215,10 +216,14 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
     const deckCss = options.liveCompile ? await observe(join(directory, 'style.css')).catch(() => undefined) : undefined
     if (options.liveCompile && deckCss === undefined) files.set(join(directory, 'style.css'), undefined)
     const layoutRoots = [directory, ...(extensions.roots ?? []).filter(root => root !== directory).reverse()]
-    const layers = await loadDeckLayers(layoutRoots, observeOptional)
+    const [layers, components] = await Promise.all([
+      loadDeckLayers(layoutRoots, observeOptional),
+      loadDeckComponents(layoutRoots, observeOptional),
+    ])
     const { html, routes, routing, live } = await renderPresentation(deck, {
       base: options.base, routerMode: options.routerMode, liveCompile: options.liveCompile, mcpNavigation: options.mcpNavigation, mode, extensions, setup, writableSnippets, savedDrawings, saveDrawings,
       deckCssRevision: deckCss && snippetRevision(deckCss), sourceBindings, layers,
+      components: components.size ? (frontmatter, number) => createDeckComponentRenderer(components, filepath, number, frontmatter, observeOptional) : undefined,
       async resolveFileLayout(name, registered) {
         if (!/^[\w-]+$/.test(name)) return
         for (const root of registered ? [directory] : layoutRoots) {

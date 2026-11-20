@@ -11,6 +11,7 @@
   <link rel="stylesheet" id="deck-styles" href="./deck.css">
   {!! scopedStyles !!}
   <style>:root { --slide-width: {{ width }}px; --slide-height: {{ height }}px; } @page { size: {{ width }}px {{ height }}px; margin: 0; }</style>
+  {!! stxRuntime !!}
   {!! extensionScript !!}
   {!! playerScript !!}
 </head>

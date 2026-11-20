@@ -1,3 +1,4 @@
+import { getCachedSignalsRuntime } from '@stacksjs/stx'
 import { deckFontMarkup } from './fonts.ts'
 import { applyNotesAutoRuby } from './notes.ts'
 import { hasBuiltinLayoutSlots, renderBuiltinLayout, renderPresentationShell } from '../../../client/index.ts'
@@ -11,6 +12,7 @@ import { codeBlock, codeFrame, createCodeHighlighter, codeThemeStyles, magicFram
 import { renderMermaid } from './diagram.ts'
 import { optionsForSvg } from './diagram-svg.ts'
 import { renderPlantUml } from './plantuml.ts'
+import type { DeckComponentRenderer } from './deck-components.ts'
 import { drawingOverlay } from './drawing-store.ts'
 import { drawingEnabled, resolveDrawings } from '../../../types/src/drawings.ts'
 import type { DrawingClientConfig, SavedDrawing } from '../../../types/src/drawings.ts'
@@ -52,6 +54,7 @@ export interface RenderOptions {
   mode?: PreparserContext['mode']
   extensions?: LoadedExtensions
   layers?: DeckLayers
+  components?: (frontmatter: Record<string, unknown>, slideNumber: number) => DeckComponentRenderer
   resolveFileLayout?: (name: string, registered?: PresentationLayout) => Promise<PresentationLayout | undefined>
   setup?: AuthoringSetup
   writableSnippets?: ReadonlyMap<string, WritableSnippet>
@@ -172,12 +175,18 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     const html = prepared.restore(Bun.markdown.html(prepared.source))
     return content.includes('[!') ? renderAlerts(html) : html
   }
-  const html = activeSlides.map((slide, index) => {
+  const html: Record<string, string>[] = []
+  for (const [index, slide] of activeSlides.entries()) {
     const comark = (slide.frontmatter?.comark ?? deck.headmatter?.comark ?? settings?.comark) === true
     const layout = layoutNames[index]
-    if (!layoutHooks[layout] && !hasBuiltinLayoutSlots(layout)) return { default: markdown(slide.content, comark) }
-    return Object.fromEntries(Object.entries(splitSlots(slide.content)).map(([name, content]) => [name, markdown(content, comark)]))
-  })
+    const contents = layoutHooks[layout] || hasBuiltinLayoutSlots(layout) ? splitSlots(slide.content) : { default: slide.content }
+    const slots: Record<string, string> = Object.create(null)
+    const renderComponents = options.components?.(slide.frontmatter ?? {}, index + 1)
+    for (const [name, content] of Object.entries(contents)) {
+      slots[name] = renderComponents ? await renderComponents(content, source => markdown(source, comark)) : markdown(content, comark)
+    }
+    html.push(slots)
+  }
   const labels: string[] = []
   const routes = activeSlides.map((slide, index): SlideRoute => {
     const frontmatter = slide.frontmatter ?? {}
@@ -294,6 +303,12 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     return `<section hidden${slide.notes ? ' data-has-notes="true"' : ''}>${segments.map((text, index) => `<div data-note-step="${index}">${baseMarkup(markdown(annotations ? applyNotesAutoRuby(text, annotations) : text))}</div>`).join('')}</section>`
   })
 
+  // The live swap uses inert template fragments. Changes to hydrated slides
+  // need the normal document load to execute their scoped setup scripts.
+  const reactiveSlides = slides.flatMap((slide, index) => /<script\b[^>]*\bdata-stx-scoped(?:[\s=>]|$)/i.test(slide.html)
+    ? [[index, snippetRevision(slide.html)]]
+    : [])
+  const stxRuntime = reactiveSlides.length ? await getCachedSignalsRuntime() : ''
   const preset = deck.headmatter?.clickAnimation
   const clicksPreset = typeof preset === 'string' ? escapeHtml(preset) : ''
   const navigation = JSON.stringify(routes).replaceAll('<', '\\u003c')
@@ -308,7 +323,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   if (options.liveCompile) {
     const drawingOptions = [drawings.enabled, drawings.presenterOnly, drawings.syncAll, drawings.persist]
     const theme = extensions?.theme.name
-    const frame = snippetRevision(JSON.stringify([routing, width, height, clicksPreset, drawingOptions, theme, colorSchema, codeTheme, fontMarkup, mcpNavigation, extensions?.styles, extensions?.client, globalTop, globalBottom, customControls]))
+    const frame = snippetRevision(JSON.stringify([routing, width, height, clicksPreset, drawingOptions, theme, colorSchema, codeTheme, fontMarkup, mcpNavigation, extensions?.styles, extensions?.client, globalTop, globalBottom, customControls, reactiveSlides]))
     const parts = slides.map((slide, index) => {
       const source = options.sourceBindings?.get(activeSlides[index])
       const part = { ...slide, notes: notes[index], route: routes[index], sourceToken: source?.token }
@@ -336,6 +351,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     scopedStyles: [codeTheme, ...slides.map(slide => slide.css)].filter(Boolean).join('\n  '),
     extensionScript: extensions?.client ? '<script defer src="./extensions.js"></script>' : '',
     globalTop,
+    stxRuntime: stxRuntime ? `<script>${stxRuntime}</script>` : '',
     playerScript: '<script defer src="./presentation.js"></script>',
     navigation: `<script id="presentation-navigation" type="application/json">${navigation}</script>`,
     drawingConfig: `<script id="presentation-drawings" type="application/json">${drawingConfig}</script>`,
