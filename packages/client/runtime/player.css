@@ -908,6 +908,7 @@ math .math-xcancel {
   font-size: 14px;
   white-space: pre-wrap;
 }
+.slide .live-output[data-reveal-hidden] { display: none; }
 .live-code-static { display: none; }
 body:is(.capturing, .previewing) .live-code :is(.live-code-toolbar, textarea, .live-output) { display: none; }
 body:is(.capturing, .previewing) .live-code-static { display: block; margin: 0; }

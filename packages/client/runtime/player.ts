@@ -10,7 +10,7 @@ import { setupDrags } from './drag-player.ts'
 import { carryGlobalLayers } from './global-layers.ts'
 import { setupDrawings } from './drawing-player.ts'
 import type { DrawingClientConfig } from '../../types/src/drawings.ts'
-import { setupLiveCode } from './live-code.ts'
+import { setupLiveCode, syncLiveAutorun } from './live-code.ts'
 import { mountInlineMath } from './inline-math.ts'
 import { createSlideMedia } from './media.ts'
 import { mountNotesPage, mountViewLinks, notesSync } from './notes-page.ts'
@@ -167,7 +167,12 @@ function syncPeer(data: Record<string, unknown>): void {
   (opener ?? popup)?.postMessage(data, messageOrigin)
 }
 
-const refreshCode = () => showReveals(reveals[current - 1], click, false, Number(stage.style.getPropertyValue('--slide-scale')) || 1)
+function showCurrentReveals(animate: boolean): void {
+  showReveals(reveals[current - 1], click, animate, Number(stage.style.getPropertyValue('--slide-scale')) || 1)
+  if (!isCapture && !isPreview) syncLiveAutorun(articles[current - 1])
+}
+
+const refreshCode = () => showCurrentReveals(false)
 const codeTabs = !isCapture && !isPreview ? setupCodeTabs(stage, (codeTab) => {
   refreshCode()
   syncPeer({ slide: current, codeTab })
@@ -235,7 +240,7 @@ function show(number: number, step?: number, writeHistory = true, sync = true, r
   for (const frame of active.querySelectorAll<HTMLIFrameElement>('iframe[data-presentation-tweet]:not([src])')) {
     if (frame.dataset.src) frame.src = frame.dataset.src
   }
-  showReveals(reveals[current - 1], click, animate, Number(stage.style.getPropertyValue('--slide-scale')) || 1)
+  showCurrentReveals(animate)
   media.show(active)
   conditions.observe(active)
   displayNotes(current, click, slideChanged)

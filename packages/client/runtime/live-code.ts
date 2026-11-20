@@ -106,6 +106,23 @@ async function execute(program: string, append: WriteOutput, signal: AbortSignal
 }
 
 const mountedEditors = new WeakSet<HTMLElement>()
+const autorunners = new WeakMap<HTMLElement, (visible: boolean) => void>()
+let visibleRunners = new Set<HTMLElement>()
+const superseded = Symbol('Superseded example run')
+
+export function syncLiveAutorun(article: HTMLElement): void {
+  const next = new Set<HTMLElement>()
+  for (const block of article.querySelectorAll<HTMLElement>('.live-code[data-live-autorun]')) {
+    if (autorunners.has(block) && !block.closest('[hidden], [data-reveal-hidden], [data-switch-hidden]')) next.add(block)
+  }
+  for (const block of visibleRunners) {
+    if (!next.has(block)) autorunners.get(block)?.(false)
+  }
+  for (const block of next) {
+    if (!visibleRunners.has(block)) autorunners.get(block)?.(true)
+  }
+  visibleRunners = next
+}
 
 export function setupLiveCode(root: ParentNode = document): void {
   const canCompile = document.documentElement.dataset.liveCompile === 'true'
@@ -128,6 +145,27 @@ export function setupLiveCode(root: ParentNode = document): void {
     const originalLabel = label?.textContent ?? originalLanguage
     let language = originalLanguage
     let active: AbortController | undefined
+    const autorun = block.dataset.liveAutorun
+    let shown = false
+    let automaticRun = false
+    let scheduled: number | undefined
+    let lastRun: { source: string, language: string } | undefined
+
+    function cancelSchedule(): void {
+      if (scheduled !== undefined) window.clearTimeout(scheduled)
+      scheduled = undefined
+    }
+    function scheduleRun(): void {
+      cancelSchedule()
+      if (!shown || !autorun || (lastRun && (autorun === 'once' || (lastRun.source === editor.value && lastRun.language === language)))) return
+      scheduled = window.setTimeout(() => { void runExample(true) }, 200)
+    }
+    function draftChanged(): void {
+      if (autorun !== 'true') return
+      lastRun = undefined
+      active?.abort(superseded)
+      scheduleRun()
+    }
 
     if (save && status) save.addEventListener('click', async () => {
       const source = editor.value
@@ -159,7 +197,7 @@ export function setupLiveCode(root: ParentNode = document): void {
     if (switchLanguage && !canCompile && !error) {
       switchLanguage.hidden = false
       switchLanguage.addEventListener('click', () => {
-        active?.abort()
+        active?.abort(superseded)
         language = 'js'
         editor.value = compiled
         editor.setAttribute('aria-label', 'Edit JavaScript example')
@@ -167,11 +205,12 @@ export function setupLiveCode(root: ParentNode = document): void {
         switchLanguage.hidden = true
         if (output) output.textContent = ''
         editor.focus()
+        draftChanged()
       })
     }
 
     reset.addEventListener('click', () => {
-      active?.abort()
+      active?.abort(superseded)
       language = originalLanguage
       if (label) label.textContent = originalLabel
       editor.setAttribute('aria-label', `Edit ${label?.textContent ?? 'code'} example`)
@@ -179,14 +218,20 @@ export function setupLiveCode(root: ParentNode = document): void {
       editor.value = original
       if (output) output.textContent = ''
       editor.focus()
+      draftChanged()
     })
     if (!run || !output) continue
     const runnerOptions: Record<string, unknown> = JSON.parse(block.dataset.liveOptions ?? '{}')
-    run.addEventListener('click', async () => {
-      if (active) { active.abort(); return }
+    const runExample = async (automatic: boolean) => {
+      cancelSchedule()
+      active?.abort(superseded)
       const controller = new AbortController()
       const { signal } = controller
+      const source = editor.value
+      const currentLanguage = language
+      lastRun = { source, language: currentLanguage }
       active = controller
+      automaticRun = automatic
       run.textContent = 'Stop'
       output.textContent = ''
       const append = (text: string) => {
@@ -198,7 +243,7 @@ export function setupLiveCode(root: ParentNode = document): void {
         run.textContent = 'Run'
       }
       const abort = () => {
-        output.textContent += 'Stopped.\n'
+        if (signal.reason !== superseded) output.textContent += 'Stopped.\n'
         complete()
       }
       signal.addEventListener('abort', abort, { once: true })
@@ -224,8 +269,6 @@ export function setupLiveCode(root: ParentNode = document): void {
         return execute(program, write, signal)
       }
       try {
-        const source = editor.value
-        const currentLanguage = language
         const custom = await customRunner(currentLanguage)
         signal.throwIfAborted()
         if (custom) {
@@ -250,7 +293,26 @@ export function setupLiveCode(root: ParentNode = document): void {
         signal.removeEventListener('abort', abort)
         complete()
       }
+    }
+    run.addEventListener('click', () => {
+      cancelSchedule()
+      if (active) active.abort()
+      else void runExample(false)
     })
+    if (autorun) {
+      autorunners.set(block, (visible) => {
+        shown = visible
+        if (visible) scheduleRun()
+        else {
+          cancelSchedule()
+          if (automaticRun && active) {
+            lastRun = undefined
+            active.abort(superseded)
+          }
+        }
+      })
+      if (autorun === 'true') editor.addEventListener('input', draftChanged)
+    }
     editor.addEventListener('keydown', (event) => {
       if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
         event.preventDefault()

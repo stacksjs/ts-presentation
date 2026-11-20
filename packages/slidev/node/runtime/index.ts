@@ -221,6 +221,9 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     let diagram = 0
     const { layout, alias, title } = routes[index]
     const lineNumbers = (slide.frontmatter?.lineNumbers ?? deck.headmatter?.lineNumbers) === true
+    const monaco = slide.frontmatter?.monaco ?? deck.headmatter?.monaco ?? settings?.monaco
+    const editorMode = options.mode ?? (options.liveCompile ? 'dev' : 'build')
+    const editorEnabled = monaco !== false && (monaco !== 'dev' && monaco !== 'build' || monaco === editorMode)
     const renderCode = async (block: string, language = 'text', code: string) => {
       const decoded = unescapeHtml(code)
       const diagramProps = diagramFences.get(language)
@@ -232,13 +235,14 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
         if (custom !== undefined) return custom
       }
       const writable = info?.writeToken && options.liveCompile && options.writableSnippets?.get(info.writeToken)
-      if (info?.runner === 'diff') {
+      if (editorEnabled && info?.runner === 'diff') {
         const diff = await codeDiffBlock(decoded, info, lineNumbers, highlight)
         if (diff) return diff
       }
-      if (info?.runner || writable) {
+      if (editorEnabled && (info?.runner || writable)) {
         return liveBlock(decoded.replace(/\n$/, ''), language, info?.runner === 'run',
-          writable && info?.writeToken ? { token: info.writeToken, revision: writable.revision } : undefined, info?.runnerOptions)
+          writable && info?.writeToken ? { token: info.writeToken, revision: writable.revision } : undefined,
+          info?.runnerOptions, info?.runnerTiming)
       }
       if (language === 'charts' || language === 'ts-charts') {
         return renderChart(decoded, `chart-${index}-${diagram++}`) ?? block

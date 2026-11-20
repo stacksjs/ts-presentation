@@ -46,8 +46,8 @@ test.skipIf(!chrome)('runs custom languages and composes the isolated JavaScript
   try {
     await Bun.write(source, [
       '---', 'addons: ./addon/index.ts', '---', '', '# Runner', '',
-      '~~~csv {monaco-run}{runnerOptions: {header: "Total", values: [1, 2]}}', '10,20', '~~~', '',
-      '~~~ts {monaco-run}', 'const number: number = 7', 'console.log(number)', '~~~', '',
+      '~~~csv {monaco-run}{autorun:false, runnerOptions: {header: "Total", values: [1, 2]}}', '10,20', '~~~', '',
+      '~~~ts {monaco-run} {autorun:false}', 'const number: number = 7', 'console.log(number)', '~~~', '',
       '~~~unknown-lang {live-run}', 'hello', '~~~',
     ].join('\n'))
     await Bun.write(join(root, 'addon/index.ts'), 'export default { name: "test-addon" }')

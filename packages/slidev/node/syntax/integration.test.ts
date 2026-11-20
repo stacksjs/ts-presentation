@@ -100,7 +100,7 @@ it('compiles the copied Slidev deck fixture through the Bun and STX integration'
     expect(html).toContain('data-presentation-drag="box"')
     expect(html).toContain('data-equation-steps="1"')
     expect(html).toContain('.custom:where(#slide-1, #slide-1 *)')
-    expect(html).toMatch(/<textarea[^>]*>function _foo\(\)/)
+    expect(html).toMatch(/<textarea[^>]*>\nfunction _foo\(\)/)
     expect(html).toContain('<figcaption>filename.ts</figcaption>')
     expect(html).toContain('data-code-ranges="1,2|3"')
     expect(html).toContain('style="max-height:200px"')

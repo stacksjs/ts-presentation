@@ -1,4 +1,5 @@
 import { getTheme, resolveGrammar, themeTokenCss, tokenClass, Tokenizer } from 'ts-syntax-highlighter/browser'
+import { clickSpan } from '../../../client/runtime/clicks.ts'
 import { parseEquationOptions } from '../../../client/runtime/equation-steps.ts'
 import { readFenceOptions } from './fence-options.ts'
 import { escapeHtml } from './html.ts'
@@ -16,7 +17,22 @@ export interface CodeBlockInfo {
   runner?: 'run' | 'edit' | 'diff'
   diffOptions?: { readonly: boolean, height?: string }
   runnerOptions?: Record<string, unknown>
+  runnerTiming?: RunnerTiming
   writeToken?: string
+}
+
+export interface RunnerTiming {
+  autorun?: true | 'once'
+  outputAt?: string
+}
+
+function runnerOutputAt(value: unknown): string | undefined {
+  const position = value === true || typeof value === 'string' || typeof value === 'number' && value !== 0
+    ? String(value)
+    : Array.isArray(value) && value.length === 2 && value.every(bound => typeof bound === 'number' || typeof bound === 'string')
+      ? JSON.stringify(value)
+      : undefined
+  if (position && clickSpan(position, 0)) return position
 }
 
 const decoration = /\{(?:[^{}"']|"[^"]*"|'[^']*')*\}/y
@@ -44,15 +60,17 @@ export function parseCodeInfo(input: string): CodeBlockInfo | undefined {
   let ranges = ''
   let options = {}
   let runner: CodeBlockInfo['runner']
+  let automatic = false
   while (info) {
     decoration.lastIndex = 0
     const group = decoration.exec(info)?.[0] ?? (runner ? runnerDecoration(info) : undefined)
     if (!group) return
-    const launch = /^\{\s*(?:live|monaco)(?:-(run|diff))?\s*\}$/i.exec(group)
+    const launch = /^\{\s*(live|monaco)(?:-(run|diff))?\s*\}$/i.exec(group)
     if (launch) {
-      const mode = launch[1]?.toLowerCase()
+      const mode = launch[2]?.toLowerCase()
       if (runner || magic || (!lang && mode !== 'diff')) return
       runner = mode === 'diff' ? 'diff' : mode === 'run' ? 'run' : 'edit'
+      automatic = launch[1].toLowerCase() === 'monaco'
     }
     else if (!ranges && parseEquationOptions(group)) ranges = group
     else {
@@ -76,6 +94,7 @@ export function parseCodeInfo(input: string): CodeBlockInfo | undefined {
   const maxHeight = typeof configuredHeight === 'string' && /^\d+(?:\.\d+)?(?:px|em|rem|vh|%)$/.test(configuredHeight) ? configuredHeight : undefined
   const diffHeight = typeof props.height === 'number' ? `${props.height}px` : props.height
   const height = typeof diffHeight === 'string' && /^(?:auto|\d+(?:\.\d+)?(?:px|em|rem|vh|%))$/.test(diffHeight) ? diffHeight : undefined
+  const autorun = props.autorun === 'once' ? 'once' : props.autorun === true || (props.autorun === undefined && automatic) ? true : undefined
   return {
     language: (lang || 'text').toLowerCase(), title: caption?.[1], ranges: parseEquationOptions(ranges)?.ranges ?? [],
     start: Number(first), at, final, lines: typeof props.lines === 'boolean' ? props.lines : undefined, maxHeight, magic,
@@ -83,6 +102,7 @@ export function parseCodeInfo(input: string): CodeBlockInfo | undefined {
       ? props.runnerOptions as Record<string, unknown>
       : undefined }),
     ...(runner === 'diff' && { diffOptions: { readonly: props.readonly === true, height } }),
+    ...(runner === 'run' && { runnerTiming: { autorun, outputAt: runnerOutputAt(props.showOutputAt) } }),
     writeToken: typeof props.tpSnippet === 'string' && /^[a-f0-9]{64}$/.test(props.tpSnippet) ? props.tpSnippet : undefined,
   }
 }

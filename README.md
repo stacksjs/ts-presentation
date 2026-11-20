@@ -170,6 +170,13 @@ for a named slot. STX expressions can read `title`, `slideNumber`, and
 
 TypeScript edits run when served by the Bun dev command. The offline build
 can run the original TypeScript and offers an editable JavaScript version.
+`{monaco-run}` starts when its example becomes visible in the audience or
+presenter view and reruns after edits. Set `{autorun:false}` for manual
+execution, `{autorun:'once'}` for a single automatic run, or
+`{showOutputAt:'+1'}` to reveal the output on the next click. `{live-run}`
+uses manual execution by default and accepts the same options.
+Use `monaco: false` in frontmatter for static code blocks, or set it to
+`dev` or `build` to enable editors in that mode.
 
 Register runners in `setup/code-runners.ts` in a deck, theme, or addon. This
 example runs `csv {monaco-run}` fences in both dev and static builds.
