@@ -117,12 +117,15 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
   }
 
   const math: string[] = []
-  const marker = (body: string, display: boolean, options?: EquationOptions) => {
+  function registerMath(body: string, display: boolean, options?: EquationOptions): number {
     const content = (syntax.renderMath ?? renderMath)(body.trim(), display)
     const block = options
       ? `<div class="equation-steps" data-equation-steps="${options.ranges.join('|')}" data-equation-at="${options.at}" data-equation-first="${options.startLine}" data-equation-finally="${options.finally}">${content}</div>`
       : content
-    const index = math.push(block) - 1
+    return math.push(block) - 1
+  }
+  function marker(body: string): string {
+    const index = registerMath(body, false)
     return `<tp-math data-equation="${index}"></tp-math>`
   }
 
@@ -134,7 +137,7 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
         if (syntax.mathEnabled !== false && line[at + 1] === '(') {
           const end = inlineMathEnd(line, at + 2, '\\)')
           if (end > at + 2) {
-            result += marker(line.slice(at + 2, end), false)
+            result += marker(line.slice(at + 2, end))
             at = end + 2
             continue
           }
@@ -162,7 +165,7 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
       if (syntax.mathEnabled !== false && char === '$' && line[at + 1] && !/\s|\$/.test(line[at + 1]) && line[at - 1] !== '$') {
         const end = inlineMathEnd(line, at + 1, '$')
         if (end > at + 1 && !/\s/.test(line[end - 1]) && !/[\d$]/.test(line[end + 1] ?? '')) {
-          result += marker(line.slice(at + 1, end), false)
+          result += marker(line.slice(at + 1, end))
           at = end + 1
           continue
         }
@@ -188,10 +191,32 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
     return registered ? line.slice(0, infoStart) + registered : line
   }
   const fences = new MarkdownFenceReader()
+  let nestedMathFence: string | undefined
+  function mathContinuation(at: number): string | undefined {
+    if (at >= lines.length) return
+    const next = fences.readContinuation(lines[at])
+    if (next !== undefined && !readFenceOpening(next) && !/^ {0,3}<!--/.test(next)) return next
+  }
+  function displayMath(body: string, prefix: string, options?: EquationOptions): void {
+    const index = registerMath(body, true, options)
+    if (prefix) {
+      // Let Bun place the block inside its Markdown container. A fenced block
+      // can interrupt a paragraph without inserting blank lines into list items.
+      nestedMathFence ??= `tp-equation-${Bun.randomUUIDv7()}`
+      const continuation = fences.continuationPrefix
+      output.push(`${prefix}~~~${nestedMathFence}`, continuation + index, `${continuation}~~~`)
+    }
+    else output.push('', `<tp-math data-equation="${index}"></tp-math>`, '')
+    fences.endBlock()
+  }
   let htmlCode = ''
   let comment = false
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index]
+    if ((comment || htmlCode) && fences.readContinuation(line) === undefined) {
+      comment = false
+      htmlCode = ''
+    }
     if (comment) {
       comment = !line.includes('-->')
       output.push(line)
@@ -207,7 +232,8 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
       output.push(fenced.kind === 'opening' ? renderFenceStart(line, fenced.opening) : line)
       continue
     }
-    if (/^ {0,3}<!--/.test(line)) {
+    const { content, prefix } = fences.block
+    if (/^ {0,3}<!--/.test(content)) {
       comment = !line.includes('-->')
       output.push(line)
       continue
@@ -228,48 +254,51 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
         continue
       }
     }
-    const rawCode = /^ {0,3}<(pre|code|script|style)(?:>|\s)/i.exec(line)
-    if (rawCode && !new RegExp(`</${rawCode[1]}\\s*>`, 'i').test(line)) {
+    const rawCode = /^ {0,3}<(pre|code|script|style)(?:>|\s)/i.exec(content)
+    if (rawCode && !new RegExp(`</${rawCode[1]}\\s*>`, 'i').test(content)) {
       htmlCode = rawCode[1]
       output.push(line)
       continue
     }
-    const environment = syntax.mathEnabled !== false && bareDisplay.exec(line)
+    const environment = syntax.mathEnabled !== false && bareDisplay.exec(content)
     if (environment) {
       const closing = `\\end{${environment[1]}}`
+      const body = [content]
       let end = index
-      while (!lines[end].trimEnd().endsWith(closing)) {
-        const next = lines[++end]
-        if (next === undefined || readFenceOpening(next) || bareDisplay.test(next) || /^ {0,3}<!--/.test(next)) {
-          end = -1
-          break
-        }
+      while (!body.at(-1)!.trimEnd().endsWith(closing)) {
+        const next = mathContinuation(++end)
+        if (next === undefined || bareDisplay.test(next)) break
+        body.push(next)
       }
-      if (end >= index) {
-        output.push('', marker(lines.slice(index, end + 1).join('\n'), true), '')
+      if (body.at(-1)!.trimEnd().endsWith(closing)) {
+        displayMath(body.join('\n'), prefix)
         index = end
         continue
       }
     }
-    const display = syntax.mathEnabled !== false && /^ {0,3}(\$\$|\\\[)(.*)$/.exec(line)
+    const display = syntax.mathEnabled !== false && /^ {0,3}(\$\$|\\\[)(.*)$/.exec(content)
     if (display) {
       const delimiter = display[1] === '$$' ? '$$' : '\\]'
-      if (display[2].trimEnd().endsWith(delimiter) && display[2].trim().length > 2) {
-        output.push('', marker(display[2].trimEnd().slice(0, -2), true), '')
+      const single = display[2].trimEnd()
+      if (single.endsWith(delimiter) && single.trim().length > 2) {
+        displayMath(single.slice(0, -2), prefix)
         continue
       }
       const options = parseEquationOptions(display[2])
-      const ends = (value: string) => value.trimEnd().endsWith(delimiter)
-      let close = index + 1
-      while (close < lines.length && !readFenceOpening(lines[close]) && !ends(lines[close])) close++
-      if (close < lines.length && ends(lines[close]) && !readFenceOpening(lines[close])) {
-        const last = lines[close].trimEnd().slice(0, -2)
-        const body = [options ? '' : display[2], ...lines.slice(index + 1, close), last].join('\n').trim()
-        if (body) {
-          output.push('', marker(body, true, options), '')
-          index = close
-          continue
-        }
+      const body = [options ? '' : display[2]]
+      let closed = false
+      let end = index
+      for (let next = mathContinuation(++end); next !== undefined; next = mathContinuation(++end)) {
+        const trimmed = next.trimEnd()
+        closed = trimmed.endsWith(delimiter)
+        body.push(closed ? trimmed.slice(0, -2) : next)
+        if (closed) break
+      }
+      const formula = closed ? body.join('\n').trim() : ''
+      if (formula) {
+        displayMath(formula, prefix, options)
+        index = end
+        continue
       }
     }
     output.push(inline(line))
@@ -278,6 +307,10 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
   return {
     source: output.join('\n'),
     restore(html) {
+      if (nestedMathFence) {
+        const blocks = new RegExp(`<pre><code class="language-${nestedMathFence}">(\\d+)\\n</code></pre>`, 'g')
+        html = html.replace(blocks, (whole, index: string) => math[Number(index)] ?? whole)
+      }
       return html
         .replace(/<p>(<tp-math data-equation="\d+"><\/tp-math>)<\/p>/g, (whole, placeholder) => {
           const index = Number(/\d+/.exec(placeholder)?.[0])

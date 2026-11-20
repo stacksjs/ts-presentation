@@ -43,12 +43,43 @@ function expandTabs(line: string): TabExpansion {
   return { text, offsets }
 }
 
+type Container = number | 'quote'
+
+function matchContainers(text: string, containers: readonly Container[]): { offset: number, matched: number } {
+  let offset = 0
+  let matched = 0
+  for (const container of containers) {
+    const rest = text.slice(offset)
+    if (container === 'quote') {
+      const prefix = quote.exec(rest)
+      if (!prefix) break
+      offset += prefix[0].length
+    }
+    else if (rest.startsWith(' '.repeat(container))) offset += container
+    else if (/^ *\r?$/.test(rest)) offset = text.length
+    else break
+    matched++
+  }
+  return { offset, matched }
+}
+
+function remainingText(line: string, offset: number, expanded?: TabExpansion): string {
+  if (!expanded) return line.slice(offset)
+  const original = expanded.offsets[offset]
+  if (offset === 0 || expanded.offsets[offset - 1] !== original) return line.slice(original)
+  // If a container consumed only part of a tab, keep the leftover columns.
+  let end = offset
+  while (end < expanded.text.length && expanded.offsets[end] === original) end++
+  return ' '.repeat(end - offset) + line.slice(original + 1)
+}
+
 type FenceLine = typeof fencedLine | typeof closingLine | { kind: 'opening', opening: FenceOpening }
 
 /** Identify fence ranges and source metadata. Bun still parses and renders the Markdown. */
 export class MarkdownFenceReader {
   // A quote has no fixed indent. Lists consume their marker width and padding.
-  private containers: (number | 'quote')[] = []
+  private containers: Container[] = []
+  private blockLine = { prefix: '', content: '' }
   private marker = ''
   private paragraph = false
 
@@ -56,25 +87,33 @@ export class MarkdownFenceReader {
     this.containers.length = 0
     this.marker = ''
     this.paragraph = false
+    this.blockLine = { prefix: '', content: '' }
+  }
+
+  get block(): Readonly<{ prefix: string, content: string }> {
+    return this.blockLine
+  }
+
+  get continuationPrefix(): string {
+    return this.containers.map(container => container === 'quote' ? '> ' : ' '.repeat(container)).join('')
+  }
+
+  /** Read within the current containers without opening Markdown blocks inside a literal body. */
+  readContinuation(line: string): string | undefined {
+    if (!this.containers.length) return line
+    const expanded = line.includes('\t') ? expandTabs(line) : undefined
+    const { offset, matched } = matchContainers(expanded?.text ?? line, this.containers)
+    if (matched === this.containers.length) return remainingText(line, offset, expanded)
+  }
+
+  endBlock(): void {
+    this.paragraph = false
   }
 
   read(line: string): FenceLine | undefined {
     const expanded = (this.containers.length || !this.marker) && line.includes('\t') ? expandTabs(line) : undefined
     const text = expanded?.text ?? line
-    let offset = 0
-    let matched = 0
-    for (const container of this.containers) {
-      const rest = text.slice(offset)
-      if (container === 'quote') {
-        const prefix = quote.exec(rest)
-        if (!prefix) break
-        offset += prefix[0].length
-      }
-      else if (rest.startsWith(' '.repeat(container))) offset += container
-      else if (/^ *\r?$/.test(rest)) offset = text.length
-      else break
-      matched++
-    }
+    let { offset, matched } = matchContainers(text, this.containers)
     if (this.marker && matched === this.containers.length) {
       if (!isFenceClose(text.slice(offset), this.marker)) return fencedLine
       this.marker = ''
@@ -105,7 +144,10 @@ export class MarkdownFenceReader {
     const rest = text.slice(offset)
     const opening = readFenceOpening(rest)
     this.paragraph = !opening && /^ {0,3}[^ \r]/.test(rest) && !paragraphBreak.test(rest) && !thematicBreak.test(rest)
-    if (!opening) return
+    if (!opening) {
+      this.blockLine = { prefix: text.slice(0, offset), content: remainingText(line, offset, expanded) }
+      return
+    }
     this.marker = opening.marker
     const infoStart = expanded?.offsets[offset + opening.infoStart] ?? offset + opening.infoStart
     return { kind: 'opening', opening: { marker: opening.marker, info: line.slice(infoStart), infoStart } }

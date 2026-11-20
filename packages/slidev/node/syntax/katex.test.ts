@@ -13,6 +13,85 @@ it('renders block math with line ranges', async () => {
   expect(html).toContain('<math xmlns="http://www.w3.org/1998/Math/MathML" display="block">')
 })
 
+it('keeps display math inside block quotes and tight list items', async () => {
+  const source = [
+    '- Before the integral',
+    String.raw`  $$\int_{0}^{1} x^2\,dx$$`,
+    '  After the integral',
+    '- Next item',
+    '',
+    '1. > $$ {1|2}',
+    String.raw`   > \begin{aligned}`,
+    String.raw`   > a &= b \\`,
+    '   > b &= c',
+    String.raw`   > \end{aligned}`,
+    '   > $$',
+    '   > After the alignment',
+    '2. Next step',
+  ].join('\n')
+  const html = await renderDeck(parseDeck(source))
+  expect(html.match(/<math [^>]* display="block"/g)).toHaveLength(2)
+  expect(html).toMatch(/<ul>\s*<li>Before the integral\s*<math\b[\s\S]*?<\/math>\s*After the integral<\/li>\s*<li>Next item<\/li>/)
+  expect(html).toMatch(/<ol>\s*<li>\s*<blockquote>\s*<div class="equation-steps" data-equation-steps="1\|2"/)
+  expect(html).toContain('<p>After the alignment</p>\n</blockquote>\n</li>\n<li>Next step</li>')
+  expect(html).toContain('<msubsup><mo>∫</mo>')
+  expect(html).not.toContain('language-tp-equation-')
+})
+
+it('renders bare AMS blocks and tab-indented math inside nested containers', async () => {
+  const source = [
+    String.raw`> - \begin{align}`,
+    String.raw`>   a &= b \\`,
+    '>   b &= c',
+    String.raw`>   \end{align}`,
+    '> - After the AMS block',
+    '',
+    '-\t\\[',
+    '\t\\frac{x}{y}',
+    '\t\\]',
+    '- After the fraction',
+  ].join('\n')
+  const html = await renderDeck(parseDeck(source))
+  expect(html.match(/<math [^>]* display="block"/g)).toHaveLength(2)
+  expect(html).toMatch(/<blockquote>\s*<ul>\s*<li>\s*<math\b[\s\S]*?<\/math>\s*<\/li>\s*<li>After the AMS block<\/li>/)
+  expect(html.match(/<mtd class="math-equation-number"/g)).toHaveLength(2)
+  expect(html).toContain('<mfrac><mrow><mi>x</mi></mrow><mrow><mi>y</mi></mrow></mfrac>')
+  expect(html).toContain('<li>After the fraction</li>')
+})
+
+it('preserves nested code and keeps an unclosed equation inside its list item', async () => {
+  const source = [
+    '> ~~~',
+    '> $$fenced$$',
+    '> ~~~',
+    '>',
+    '> <pre>',
+    '> $$raw$$',
+    '> </pre>',
+    '>',
+    '> <!--',
+    '> $$comment$$',
+    '> -->',
+    '',
+    '- $$',
+    '  unfinished',
+    '- $$y^2$$',
+    '  After the intact expression',
+    '',
+    '      $$indented$$',
+  ].join('\n')
+  const html = await renderDeck(parseDeck(source))
+  expect(html.match(/<math [^>]* display="block"/g)).toHaveLength(1)
+  expect(html).toContain('<pre><code>$$fenced$$\n</code></pre>')
+  expect(html).toContain('<pre>\n$$raw$$\n</pre>')
+  expect(html).toContain('<!--\n$$comment$$\n-->')
+  expect(html).toMatch(/<li>\s*(?:<p>)?\$\$\s*unfinished(?:<\/p>)?\s*<\/li>/)
+  expect(html).toContain('<pre><code>$$indented$$\n</code></pre>')
+  expect(html).toContain('<msup><mi>y</mi><mn>2</mn></msup>')
+  const disabled = await renderDeck(parseDeck('---\nmath: false\n---\n\n' + source))
+  expect(disabled).not.toContain('<math ')
+})
+
 it('preserves math delimiters inside fenced code', async () => {
   const html = await renderDeck(parseDeck('```\n$$x^2$$\n```'))
   expect(html).toContain('<pre><code>$$x^2$$\n</code></pre>')
