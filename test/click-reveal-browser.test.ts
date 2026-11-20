@@ -113,6 +113,18 @@ const b = 2
 # SVG annotations
 
 <svg width="160" height="40" viewBox="0 0 160 40"><circle data-token="Marker" v-click cx="20" cy="20" r="10" fill="red"/></svg>
+
+---
+
+# Annotated code reveal
+
+<v-click data-token="Example">
+
+~~~ts {*}
+const answer = 42
+~~~
+
+</v-click>
 `
 
 // Adapted from Slidev's basic Cypress fixtures for click maps, nested lists, and presets.
@@ -210,6 +222,12 @@ test.skipIf(!chrome)('applies click maps, group depth, ranges, and switches in t
 
     expect(await step(8, 0)).toEqual({ tokens: [], total: 1 })
     expect(await step(8, 1)).toEqual({ tokens: ['Marker'], total: 1 })
+
+    expect(await step(9, 0)).toEqual({ tokens: [], total: 1 })
+    const hiddenCode = "document.querySelector('#slide-9 [data-code-block]').closest('[data-reveal-hidden]') !== null"
+    expect(await view.evaluate(hiddenCode)).toBe(true)
+    expect(await step(9, 1)).toEqual({ tokens: ['Example'], total: 1 })
+    expect(await view.evaluate(hiddenCode)).toBe(false)
 
     expect(await step(7, 2)).toEqual({ tokens: ['A', 'B'], total: 5 })
     expect(await view.evaluate("document.querySelector('#slide-7 [data-code-block]').hasAttribute('data-code-hidden')")).toBe(true)

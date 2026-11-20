@@ -438,7 +438,7 @@ button, select { font: inherit; }
     height: auto;
     overflow: visible;
   }
-  .playing :is(#controls, #presenter-notes, #presenter-preview, .presenter-separator) { display: none !important; }
+  .playing :is(#controls, #presenter-notes, #presenter-preview, .presenter-separator, #goto-dialog) { display: none !important; }
   #stage .slide, #stage .slide[hidden] {
     --frame-raster-scale: 1;
     display: block !important;
@@ -526,6 +526,7 @@ v-switch { display: block; }
 .slide img[data-zoom]:focus-visible { outline: 3px solid #ff8278; outline-offset: 3px; }
 
 #overview,
+#goto-dialog,
 #image-view {
   border: 1px solid #5d535b;
   border-radius: 12px;
@@ -535,6 +536,44 @@ v-switch { display: block; }
 
 #overview::backdrop,
 #image-view::backdrop { background: #0a090af2; }
+#goto-dialog::backdrop { background: #0a090a99; }
+
+#goto-dialog {
+  width: min(32rem, calc(100% - 2rem));
+  max-height: calc(100dvh - 2rem);
+  padding: 1rem;
+  margin: min(4rem, 8dvh) auto auto;
+  box-shadow: 0 12px 48px #0007;
+}
+#goto-dialog header { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-bottom: .75rem; }
+#goto-heading { margin: 0; font-size: 1.125rem; }
+#goto-dialog :is(input, button) {
+  border: 1px solid #6d626a;
+  border-radius: 6px;
+  padding: .4em .65em;
+  background: #221e25;
+  color: inherit;
+  font: inherit;
+}
+#goto-dialog :is(input, button):focus-visible { outline: 2px solid #a4d6ff; outline-offset: 2px; }
+#goto-dialog input { width: 100%; }
+#goto-dialog input::placeholder { color: #c6bcc5; }
+#goto-dialog button { cursor: pointer; }
+#goto-results { margin: .75rem 0 0; padding: 0; list-style: none; overflow: auto; max-height: 50dvh; }
+#goto-results li {
+  display: grid;
+  grid-template-columns: minmax(2rem, max-content) minmax(0, 1fr);
+  gap: .6rem;
+  padding: .4rem .45rem;
+  border-radius: 4px;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+#goto-results li[aria-selected="true"] { background: #38485c; }
+#goto-results li:hover { background: #303745; }
+#goto-results li span { color: #c6d7ec; font-variant-numeric: tabular-nums; }
+#goto-status { margin: .75rem 0 0; color: #c6bcc5; }
+#goto-status:empty { display: none; }
 
 #overview {
   width: min(1120px, 94vw);

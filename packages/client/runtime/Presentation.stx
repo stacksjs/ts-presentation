@@ -82,6 +82,17 @@
     {!! customControls !!}
     {!! liveStatus !!}
   </nav>
+  <dialog id="goto-dialog" aria-labelledby="goto-heading">
+    <header>
+      <h2 id="goto-heading">Go to slide</h2>
+      <button id="goto-close" type="button">Close</button>
+    </header>
+    <form id="goto-search" role="search">
+      <input id="slidev-goto-input" role="combobox" aria-label="Find a slide" aria-autocomplete="list" aria-controls="goto-results" aria-expanded="false" placeholder="Slide number, title, or alias" autocomplete="off" enterkeyhint="go" autofocus>
+    </form>
+    <ul id="goto-results" role="listbox" aria-label="Matching slides" hidden></ul>
+    <p id="goto-status" role="status"></p>
+  </dialog>
   <dialog id="overview" aria-label="Slide overview">
     <header>
       <h2>Slide overview</h2>

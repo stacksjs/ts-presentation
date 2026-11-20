@@ -41,6 +41,10 @@ routeAlias: review
 ---
 
 # Review
+
+---
+
+# Review checklist
 `
 
 async function writeDeck(root: string): Promise<string> {
@@ -126,6 +130,36 @@ test.skipIf(!chrome).each(['history', 'hash'] as const)('keeps static %s navigat
       await view.evaluate("document.querySelector('#slide-2 a[href=\"#note\"]').click()")
       expect(await state()).toEqual([locationFor('2?clicks=1#note'), 2, 1, 'slide'])
     }
+    // Adapt the numeric jump from Slidev's cypress/e2e/examples/basic.spec.ts.
+    const search = async (query: string) => {
+      await view!.press('g')
+      expect(await view!.evaluate('document.activeElement.id')).toBe('slidev-goto-input')
+      await view!.cdp('Input.insertText', { text: query })
+      expect(await view!.evaluate(`[document.activeElement.value, document.querySelector('#goto-dialog').open]`)).toEqual([query, true])
+    }
+    await search('/1')
+    expect(await view.evaluate('document.activeElement.value')).toBe('/1')
+    await view.press('Enter')
+    expect(await state()).toEqual([locationFor('1'), 1, 0, 'slide'])
+    await search('999')
+    await view.press('Enter')
+    expect(await view.evaluate(`[
+      document.querySelector('#goto-dialog').open,
+      document.querySelector('#goto-status').textContent,
+      document.activeElement.getAttribute('aria-expanded'),
+    ]`)).toEqual([true, 'No matching slides.', 'false'])
+    await view.press('Escape')
+    expect(await view.evaluate("document.querySelector('#goto-dialog').open")).toBe(false)
+    await search('rvew')
+    expect(await view.evaluate("document.activeElement.getAttribute('aria-activedescendant')")).toBe('goto-result-3')
+    await view.press('ArrowUp')
+    expect(await view.evaluate("document.activeElement.getAttribute('aria-activedescendant')")).toBe('goto-result-4')
+    await view.press('Enter')
+    expect(await state()).toEqual([locationFor('4'), 4, 0, 'slide'])
+    await search('next')
+    await view.press('Enter')
+    expect(await state()).toEqual([locationFor('2'), 2, 0, 'slide'])
+    await advance()
     expect(await view.evaluate(`(() => {
       let opened
       const original = window.open
@@ -143,6 +177,9 @@ test.skipIf(!chrome).each(['history', 'hash'] as const)('keeps static %s navigat
         await new Promise(resolve => setTimeout(resolve, 25))
       return [new URL(frame.src).pathname, frame.contentWindow?.presentationNavigation?.currentPage]
     })()`)).toEqual([base, 3])
+    await search('#review')
+    await view.evaluate("document.querySelector('#goto-result-3 span').click()")
+    expect(await state()).toEqual([locationFor('presenter/review'), 3, 0, 'presenter'])
     await visit('overview')
     expect(await view.evaluate("document.querySelector('a[data-overview-slide=\"3\"]').href")).toBe(locationFor('review'))
   }

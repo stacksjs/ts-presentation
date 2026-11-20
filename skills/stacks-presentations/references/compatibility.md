@@ -21,7 +21,7 @@ in a new ts-presentation project.
 | Global and per-slide layers | STX layers from the deck, theme, or addons, slide context bindings, persistent matching global content, and a custom toolbar slot |
 | Subpath hosting | `--base` for build and dev, history and hash navigation, direct presenter links, and deck-relative assets |
 | Custom pages | `setup/routes.ts` registers fixed paths for interactive STX pages in dev and static builds. Pages use document navigation |
-| Custom shortcuts | Browser-side `setup/shortcuts.ts` with named defaults, string key combinations, repeat control, and navigation actions |
+| Custom shortcuts | Browser-side `setup/shortcuts.ts` with named defaults, string key combinations, repeat control, and navigation actions. The `g` shortcut and `showGotoDialog()` action open a keyboard-operable search by slide number, title, or alias |
 | Context menu | Browser-side `setup/context-menu.ts` with named actions, slide and presenter context, keyboard operation, and mode-specific frontmatter |
 | Monaco editor and runner | Local editor and timed browser-worker runner. Bun compiles TypeScript edits in dev and can save opted-in snippets |
 | Runner imports | Bun bundles local JavaScript, TypeScript, and JSON imports from authored examples. Dev edits can reuse those paths or list additional local modules in `monacoRunAdditionalDeps` |

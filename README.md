@@ -109,7 +109,7 @@ the deck and style slides with an optional `style.css`.
 | Markdown transformers | `setup/transformers.ts` rewrites individual slides and registers custom fenced-code renderers |
 | Slide editor | Edit the Markdown of the current slide and preview file changes in dev |
 | Navigation | `routeAlias: review`, then links such as `#review` or `#review/2`. Use `clicksStart` and `clicks` to set reveal bounds |
-| Keyboard shortcuts | `setup/shortcuts.ts` can add key combinations or change the default bindings in dev and static builds |
+| Keyboard shortcuts | Press `g` to find a slide by number, title, or route alias. Use `setup/shortcuts.ts` to change the default bindings in dev and static builds |
 | Context menu | `setup/context-menu.ts` customizes right-click and keyboard actions on audience and presenter slides |
 | Custom pages | `setup/routes.ts` adds interactive STX pages at fixed paths in dev and static builds |
 | Outline and counters | `<Toc />` links to slides grouped by heading depth. Use `<TitleRenderer no="2" />` for a slide title, or `<SlideCurrentNo />` and `<SlidesTotal />` for page numbers |

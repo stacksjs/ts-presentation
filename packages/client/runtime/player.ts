@@ -10,6 +10,7 @@ import type { LiveManifest } from './dev-updates.ts'
 import { watchLiveDeck } from './dev-updates.ts'
 import { setupDrags } from './drag-player.ts'
 import { carryGlobalLayers } from './global-layers.ts'
+import { setupGotoDialog } from './goto.ts'
 import { setupDrawings } from './drawing-player.ts'
 import type { DrawingClientConfig } from '../../types/src/drawings.ts'
 import { setupLiveCode, syncLiveAutorun } from './live-code.ts'
@@ -688,6 +689,7 @@ if (isLive) {
 }
 
 if (!isCapture && !isPreview && !isEntry) {
+  const gotoDialog = document.querySelector<HTMLDialogElement>('#goto-dialog')!
   const nav: NavOperations = {
     next: nextStep,
     prev: previousStep,
@@ -700,7 +702,7 @@ if (!isCapture && !isPreview && !isEntry) {
     toggleOverview: () => overview.open ? overview.close() : openOverview(),
     toggleDrawing: () => drawing?.toggle(),
     escapeOverview: () => overview.close(),
-    showGotoDialog: () => goto.focus(),
+    showGotoDialog: setupGotoDialog(gotoDialog, routes, show),
   }
   let shortcuts: ShortcutOptions[] = [
     { name: 'next_space', key: 'space', fn: nav.next, autoRepeat: true },
@@ -728,7 +730,7 @@ if (!isCapture && !isPreview && !isEntry) {
   ]
   for (const setup of window.presentationShortcutSetups ?? []) shortcuts = setup(nav, shortcuts)
   const menu = window.parent === window ? document.querySelector<HTMLElement>('#presentation-context-menu') : null
-  const available = () => !overview.open && !imageView.open
+  const available = () => !overview.open && !imageView.open && !gotoDialog.open
   if (menu) {
     mountContextMenu({
       stage, menu, available,
