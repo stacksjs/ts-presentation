@@ -7,7 +7,7 @@ import { joinMarkup, renderMarkup, xml } from './math-markup.ts'
 import { fractionRule, mathDimension } from './math-sizing.ts'
 import { resolveRowClasses, rowSpacing } from './math-spacing.ts'
 import type { MathClass } from './math-spacing.ts'
-import { isCenteredGlyph, mathSymbol, textSymbol, unicodeColonRelation } from './math-symbols.ts'
+import { isCenteredGlyph, isColonRelationCommand, mathSymbol, textSymbol, unicodeColonRelation } from './math-symbols.ts'
 import type { MathSymbol, MathSymbolKind } from './math-symbols.ts'
 import { isMathAttributeCommand, isMathUrlCommand, mathAttributes, mathKeyValues, mathUrl, trustedMath } from './math-trust.ts'
 import { readUnicodeToken, unicodeAccents } from './math-unicode.ts'
@@ -37,7 +37,7 @@ const operators: Record<string, string> = {
   forall: '∀', exists: '∃', neg: '¬', to: '→', mapsto: '↦', rightarrow: '→', leftarrow: '←', gets: '←',
   leftrightarrow: '↔', Rightarrow: '⇒', Leftarrow: '⇐', Leftrightarrow: '⇔',
   sum: '∑', prod: '∏', int: '∫', iint: '∬', oint: '∮', partial: '∂', nabla: '∇', infty: '∞',
-  emptyset: '∅', ldots: '…', cdots: '⋯', vdots: '⋮', ddots: '⋱', angle: '∠',
+  emptyset: '∅', ldots: '…', '@cdots': '⋯', vdots: '⋮', ddots: '⋱', angle: '∠',
   mid: '∣', parallel: '∥', perp: '⊥', circ: '∘', ast: '∗', setminus: '∖',
   coprod: '∐', bigcup: '⋃', bigcap: '⋂', bigvee: '⋁', bigwedge: '⋀',
   bigodot: '⨀', bigoplus: '⨁', bigotimes: '⨂', biguplus: '⨄', bigsqcup: '⨆',
@@ -83,8 +83,15 @@ const negatedOperators: Record<string, string> = {
   '∈': '∉', '∋': '∌', '⊂': '⊄', '⊃': '⊅', '⊆': '⊈', '⊇': '⊉', '∣': '∤', '∥': '∦',
   '⊢': '⊬', '⊨': '⊭', '←': '↚', '→': '↛', '↔': '↮', '⇐': '⇍', '⇒': '⇏', '⇔': '⇎',
 }
-const contextualDots = new Set(['dots', 'dotsc', 'dotsb', 'dotsm', 'dotsi', 'dotso', 'dotsx'])
 const centersDots = /^[+\-−*=<>:±∓·×÷≤≥≠≈∼≃≡∝∈∉∋∌∣∤∥∦⊥⊂⊄⊆⊈⊃⊅⊇⊉∘∗∖∩∪∧∨⊕⊗⊙∑∏∐⋃⋂⋁⋀←→↔⇒⇐⇔↦⟵⟶⟷⟹⟸⟺⟼]$/u
+const dotsBeforeIntegral = new Set(['\\DOTSI', '\\int', '\\oint', '\\iint', '\\iiint'])
+const dotsBeforeOperator = new Set([
+  '\\DOTSB', '\\mathbin', '\\mathrel', '\\relbar', '\\Relbar', '\\xrightarrow', '\\xleftarrow',
+  '\\argmin', '\\argmax', '\\plim', '\\bigoplus', '\\bigotimes', '\\bigodot', '\\biguplus', '\\bigsqcup',
+])
+const explicitColonDots = new Set(['vcentcolon', 'simcolon', 'simcoloncolon', 'approxcolon', 'approxcoloncolon'])
+const negationMacros = new Set(['\\not', '\\notin', '\\notni'])
+const spaceAfterDots = /^(?:[)\],.;$]|\\(?:[}]|right|rbrack|rbrace|rangle|rceil|rfloor|rgroup|rmoustache|bigr|biggr|Bigr|Biggr))$/
 const variants: Record<string, string> = {
   mathbf: 'bold', mathbb: 'double-struck', mathrm: 'normal', mathit: 'italic',
   mathsf: 'sans-serif', mathsfit: 'sans-serif-italic', mathtt: 'monospace', mathcal: 'script', mathscr: 'script',
@@ -308,7 +315,8 @@ type ExpansionPrimitive = typeof expansionPrimitives[number]
 type ConditionalPrimitive = Exclude<ExpansionPrimitive, '\\expandafter' | '\\noexpand' | '\\message' | '\\errmessage' | '\\char'>
 interface TokenMacro { body: string[], parameters: string[][], prefix: string[], optional?: string[], unexpandable?: boolean, source?: string }
 type DelimitedNotation = 'Braket' | 'Set' | 'set'
-type NativeMacro = { primitive: ExpansionPrimitive } | { notation: DelimitedNotation } | { separator: () => string[] }
+type DotsMacro = 'dots' | 'dotsc' | 'dotso' | 'cdots'
+type NativeMacro = { primitive: ExpansionPrimitive } | { notation: DelimitedNotation } | { separator: () => string[] } | { dots: DotsMacro }
 type Macro = TokenMacro | NativeMacro | MathMacroFunction
 interface MathState {
   configured: ReadonlyMap<string, Macro>
@@ -355,7 +363,14 @@ for (const [name, expansion] of Object.entries({
 })) builtinMacros.set(`\\${name}`, { body: tokenize(expansion), parameters: [[]], prefix: [] })
 for (const name of ['Braket', 'Set', 'set'] as const) builtinMacros.set(`\\${name}`, { notation: name })
 for (const [name, arrow] of Object.entries({ implies: 'Longrightarrow', impliedby: 'Longleftarrow', iff: 'Longleftrightarrow' }))
-  builtinMacros.set(`\\${name}`, { body: ['\\;', `\\${arrow}`, '\\;'], parameters: [], prefix: [] })
+  builtinMacros.set(`\\${name}`, { body: ['\\DOTSB', '\\;', `\\${arrow}`, '\\;'], parameters: [], prefix: [] })
+
+// AMS ellipsis commands follow KaTeX's macro expansion rules (MIT).
+for (const name of ['dots', 'dotsc', 'dotso', 'cdots'] as const) builtinMacros.set(`\\${name}`, { dots: name })
+for (const [name, body] of Object.entries({
+  dotsb: ['\\cdots'], dotsm: ['\\cdots'], dotsi: ['\\!', '\\cdots'], dotsx: ['\\ldots', '\\,'],
+  DOTSB: ['\\relax'], DOTSI: ['\\relax'], DOTSX: ['\\relax'],
+})) builtinMacros.set(`\\${name}`, { body, parameters: [], prefix: [] })
 
 function isExpansionPrimitive(token: string | undefined): token is ExpansionPrimitive {
   return token !== undefined && expansionPrimitiveNames.has(token)
@@ -1063,7 +1078,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   function defined(token: string): boolean {
     if (macroFor(token) || activeCharacter.test(token) || isExpansionPrimitive(token) || macroDeclaration.test(token)) return true
     const name = token.slice(1)
-    return sharedFunctions.has(name) || mathModeFunctions.has(name) || functions.has(name) || contextualDots.has(name)
+    return sharedFunctions.has(name) || mathModeFunctions.has(name) || functions.has(name)
       || !!greekLetter(name) || !!mathSymbol(name) || !!textSymbol(token)
       || isMathUrlCommand(token) || isMathAttributeCommand(token)
       || Object.hasOwn(textSymbols, token) || Object.hasOwn(textAccents, token)
@@ -1108,6 +1123,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   function expandNativeMacro(macro: NativeMacro): string[] {
     if ('notation' in macro) return expandDelimitedNotation(macro.notation)
     if ('separator' in macro) return macro.separator()
+    if ('dots' in macro) return expandDots(macro.dots)
     const { primitive } = macro
     if (primitive === '\\expandafter' || primitive === '\\noexpand') {
       space()
@@ -1127,6 +1143,30 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
     if (primitive === '\\char') return expandCharacter()
     return chooseBranch(primitive)
+  }
+
+  function expandDots(name: DotsMacro): string[] {
+    if (name === 'dots') {
+      // AMS math classifies the next token after a single expansion.
+      const expanded = expandOnce() !== false
+      const next = tokenValue(tokens[cursor] ?? '')
+      if (next === ',') return ['\\dotsc']
+      if (dotsBeforeIntegral.has(next)) return ['\\dotsi']
+      if (next === '\\DOTSX') return ['\\dotsx']
+      const command = next.startsWith('\\') ? next.slice(1) : ''
+      // These native relations represent KaTeX macros whose first expansion
+      // can differ from the final relation symbol.
+      if (command === 'ne' || command === 'neq' || (!expanded && negationMacros.has(next))) return ['\\dotso']
+      if (isColonRelationCommand(command))
+        return [!expanded && explicitColonDots.has(command) ? '\\dotsb' : '\\dotso']
+      const category = command ? mathSymbol(command)?.[1] : undefined
+      const centered = dotsBeforeOperator.has(next) || command.startsWith('not') || category === 'binary' || category === 'relation'
+        || centersDots.test(operators[command] ?? next) || (!command && isCenteredGlyph(next))
+      return [centered ? '\\dotsb' : '\\dotso']
+    }
+    const next = tokenValue(tokens[cursor] ?? '')
+    const symbol = name === 'cdots' ? '\\@cdots' : '\\ldots'
+    return spaceAfterDots.test(next) && (name !== 'dotsc' || next !== ',') ? [symbol, '\\,'] : [symbol]
   }
 
   function expandCharacter(): string[] {
@@ -1952,6 +1992,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
           flush()
           parts.push(tag('mtext', '\u00A0'))
         }
+        else if (token === '\\ldots') {
+          flush()
+          parts.push(tag('mo', '…'))
+        }
         else {
           const character = textCharacter(token)
           if (character !== undefined) literal += character
@@ -2040,20 +2084,6 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
     const following = peek() === '^' ? (cursor++, scriptArgument()) : ''
     return xml`<mrow>${tag('mo', text)}${following}</mrow>`
-  }
-
-  function ellipsis(name: string): string {
-    const next = peek()
-    const command = next.startsWith('\\') ? next.slice(1) : ''
-    const integral = name === 'dotsi' || (name === 'dots' && integrals.has(command))
-    const category = command ? mathSymbol(command)?.[1] : undefined
-    const centered = integral || name === 'dotsb' || name === 'dotsm'
-      || (name === 'dots' && (category === 'binary' || category === 'relation' || command.startsWith('not')
-        || centersDots.test(operators[command] ?? next) || (!command && isCenteredGlyph(next))))
-    const nearClosing = /^(?:[)\]},.;]|\\(?:right|rparen|rbrack|rbrace|rangle|rceil|rfloor|rgroup|rmoustache|(?:big|Big|bigg|Bigg)r))$/.test(next)
-    const trailing = name === 'dotsx' || (nearClosing && (name !== 'dotsc' || next !== ',')) ? muSpace(3) : ''
-    const symbol = tag('mo', centered ? '⋯' : '…')
-    return integral || trailing ? `<mrow>${integral ? muSpace(-3) : ''}${symbol}${trailing}</mrow>` : symbol
   }
 
   function modulus(name: string): Markup {
@@ -2700,7 +2730,6 @@ export function renderMath(source: string, display = false, configured: MathMacr
       return { markup: '<mpadded width="0"><mphantom><mo stretchy="false">(</mo></mphantom></mpadded>' }
     }
     if (name === 'mod' || name === 'bmod' || name === 'pmod' || name === 'pod') return { markup: modulus(name) }
-    if (contextualDots.has(name)) return { markup: ellipsis(name) }
     if (name === 'not') {
       const { markup, mathClass } = argumentAtom()
       return { mathClass, markup: typeof markup === 'string' ? negatedMarkup(markup) : style => negatedMarkup(markup(style)) }

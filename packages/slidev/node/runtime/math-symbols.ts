@@ -152,7 +152,7 @@ const text: Readonly<Record<string, string>> = {
   textellipsis: '…', textemdash: '\u2014', textendash: '\u2013', textquotedblleft: '“', textquotedblright: '”',
   textquoteleft: '‘', textquoteright: '’', textsterling: '£', varvdots: '⋮', yen: '¥',
   copyright: '©', textregistered: '®', sect: '\u00a7', lq: '‘', rq: '’',
-  dots: '…', dotsc: '…', dotso: '…', dotsx: '…\u2009', vdots: '⋮',
+  vdots: '⋮',
 }
 
 const centeredGlyphs = new Set([
@@ -168,6 +168,11 @@ export function isCenteredGlyph(glyph: string): boolean {
 
 export function unicodeColonRelation(glyph: string): MathSymbol | undefined {
   if (colonGlyphs.has(glyph)) return [glyph, 'relation']
+}
+
+export function isColonRelationCommand(name: string): boolean {
+  const canonical = Object.hasOwn(aliases, name) ? aliases[name] : name
+  return Object.hasOwn(colonRelations, canonical)
 }
 
 export function mathSymbol(name: string): MathSymbol | undefined {
