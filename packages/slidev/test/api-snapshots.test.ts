@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, it } from 'bun:test'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -41,9 +41,37 @@ async function declarationTree(entries: string[]): Promise<string> {
 }
 
 it('keeps the public parser declarations stable', async () => {
-  expect(await declarationTree(['packages/parser/src/index.d.ts'])).toMatchSnapshot()
+  expect(await declarationTree([
+    'packages/parser/src/index.d.ts',
+    'packages/parser/src/core.d.ts',
+    'packages/parser/src/fs.d.ts',
+    'packages/parser/src/utils.d.ts',
+  ])).toMatchSnapshot()
 })
 
 it('keeps the public types declarations stable', async () => {
   expect(await declarationTree(['packages/types/src/index.d.ts'])).toMatchSnapshot()
+})
+
+it('keeps the executable exports available to a package consumer', async () => {
+  const consumer = await mkdtemp(join(tmpdir(), 'presentation-api-consumer-'))
+  try {
+    const modules = join(consumer, 'node_modules')
+    await mkdir(modules)
+    await symlink(project, join(modules, 'ts-presentation'), 'junction')
+    const file = join(consumer, 'probe.ts')
+    await Bun.write(file, `
+      const surface = {}
+      for (const name of ['parser', 'parser/core', 'parser/fs', 'parser/utils', 'types'])
+        surface[name] = Object.keys(await import('ts-presentation/' + name)).sort()
+      console.log(JSON.stringify(surface))
+    `)
+    const command = Bun.spawn([process.execPath, file], { cwd: consumer, stdout: 'pipe', stderr: 'pipe', timeout: 5_000 })
+    const [status, stdout, stderr] = await Promise.all([command.exited, new Response(command.stdout).text(), new Response(command.stderr).text()])
+    if (status !== 0) throw new Error(stderr)
+    expect(JSON.parse(stdout)).toMatchSnapshot()
+  }
+  finally {
+    await rm(consumer, { recursive: true, force: true })
+  }
 })

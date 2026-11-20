@@ -7,6 +7,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./core": "./src/core.ts",
-    "./fs": "./src/fs.ts"
+    "./fs": "./src/fs.ts",
+    "./utils": "./src/utils.ts"
   }
 }
