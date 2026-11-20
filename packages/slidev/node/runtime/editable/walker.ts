@@ -449,7 +449,7 @@ export function collectSnapshot(options: {
         record.isMath = true
       const semantics = el.localName === 'math' ? el.firstElementChild : undefined
       const presentation = semantics?.localName === 'semantics' ? semantics.firstElementChild : undefined
-      if (presentation && !el.hasAttribute('class')) {
+      if (presentation && !el.hasAttribute('class') && !computed.getPropertyValue('--math-min-rule').trim()) {
         const expression = mathExpression(presentation)
         const rect = relative(presentation.getBoundingClientRect())
         if (expression && rect.w > 0 && rect.h > 0) record.math = { expression, rect, display: el.getAttribute('display') === 'block' }

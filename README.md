@@ -58,11 +58,12 @@ and slide links. It includes each reveal by default. Pass `--without-clicks` for
 frame per slide, or `--with-clicks` to include reveals in a PNG export.
 
 `pptx-editable` rebuilds text, backgrounds, and boxes as PowerPoint
-objects, including supported CSS linear-gradient fills. Basic MathML equations
-with fractions, roots, scripts, and matrices become Office Math objects with
-picture alternatives. Other formulas, diagrams, and browser artwork are
-embedded as pictures. Eligible deck-local PNG and JPEG images retain their
-source bytes and slide-edge crops. Browser capture preserves effects like
+objects, including supported CSS linear-gradient fills. MathML formulas with
+fractions, roots, scripts, matrices, operator limits, accents, and braces can
+become Office Math objects with picture alternatives. Other formulas,
+diagrams, and browser artwork are embedded as pictures. Eligible deck-local
+PNG and JPEG images retain their source bytes and slide-edge crops.
+Browser capture preserves effects like
 image opacity and rotation. The exporter reports slides that require a
 full-frame image. It references fonts by name, so recipients may see font
 substitutions.

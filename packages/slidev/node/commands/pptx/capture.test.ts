@@ -104,6 +104,23 @@ $$
 
 $$
 \cancel{z}
+$$
+
+---
+
+# Limits and accents
+
+$$
+\sum_{i=1}^{n}x_i + y
+$$
+
+$$
+\int_0^1 x^2\,dx
+$$
+
+$$
+\lim_{x\to 0}f(x)=\overbrace{\widehat{ab}+\underline{cd}}^{n}
+  +\underbrace{x+y}_{q}+\overline{z}
 $$`)
     const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
     const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
@@ -111,7 +128,7 @@ $$`)
     if (status) throw new Error(stderr)
     const frames: PowerPointFrame[] = []
     await captureFrames({ root: join(root, 'dist'), executable: chrome!, scale: 1, canvas, editable: true, withClicks: false }, frame => { frames.push(frame) })
-    expect(frames).toHaveLength(1)
+    expect(frames).toHaveLength(2)
     const equations = frames[0].editable?.nodes.filter((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math') ?? []
     expect(equations).toHaveLength(4)
     expect(equations.filter(node => node.equation)).toHaveLength(3)
@@ -131,7 +148,24 @@ $$`)
     expect(slide).toContain('<m:dPr><m:begChr m:val="("/><m:endChr m:val=")"/>')
     expect(slide).toContain('<m:m><m:mr>')
     expect(slide).toContain('<a:latin typeface="Cambria Math"/>')
-    expect([...parts.keys()].filter(name => name.startsWith('ppt/media/'))).toHaveLength(4)
+    const advanced = parts.get('ppt/slides/slide2.xml')?.toString()
+    expect(advanced?.match(/<a14:m>/g)).toHaveLength(3)
+    expect(advanced?.match(/<mc:Fallback><p:sp>/g)).toHaveLength(3)
+    const operators = [...(advanced ?? '').matchAll(/<m:nary>(.*?)<\/m:nary>/g)].map(([, expression]) => expression)
+    expect(operators).toHaveLength(2)
+    expect(operators[0]).toContain('<m:chr m:val="∑"/><m:limLoc m:val="undOvr"/>')
+    expect(operators[0]).toContain('<m:e><m:sSub>')
+    expect(operators[0]).not.toContain('<m:t xml:space="preserve">+</m:t>')
+    expect(operators[1]).toContain('<m:chr m:val="∫"/><m:limLoc m:val="subSup"/>')
+    expect(operators[1]).toContain('<m:t xml:space="preserve">\u2009</m:t>')
+    expect(advanced).toContain('<m:acc><m:accPr><m:chr m:val="\u0302"/>')
+    expect(advanced).toContain('<m:bar><m:barPr><m:pos m:val="bot"/>')
+    expect(advanced).toContain('<m:bar><m:barPr><m:pos m:val="top"/>')
+    expect(advanced).toContain('<m:limLow>')
+    expect(advanced).toContain('<m:limUpp>')
+    expect(advanced).toContain('<m:groupChrPr><m:chr m:val="⏞"/><m:pos m:val="top"/><m:vertJc m:val="bot"/>')
+    expect(advanced).toContain('<m:groupChrPr><m:chr m:val="⏟"/><m:pos m:val="bot"/><m:vertJc m:val="top"/>')
+    expect([...parts.keys()].filter(name => name.startsWith('ppt/media/'))).toHaveLength(7)
   }
   finally {
     await rm(root, { recursive: true, force: true })
