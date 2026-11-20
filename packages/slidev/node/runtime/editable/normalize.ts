@@ -599,7 +599,7 @@ function buildSlideIr(
           const visible = clipToSlide(fragment.rect, size)
           if (visible?.w !== fragment.rect.w || visible.h !== fragment.rect.h || !(fragment.fontSize > 0)
             || !Number.isFinite(fragment.opacity) || fragment.opacity < 0 || fragment.opacity > 1) return
-          const expression = officeMath(fragment.expression, fragment.fontSize, withOpacity(color, fragment.opacity)!)
+          const expression = officeMath(fragment.expression, fragment.fontSize, color, fragment.opacity)
           if (expression) return { expression, rect: fragment.rect, display }
         }
         const tags = math.tags?.map(tag => convertFragment(tag, false)) ?? []

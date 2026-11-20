@@ -1,5 +1,6 @@
 import { escapeHtml } from '../html.ts'
 import { baseMathLetters } from '../math-alphabets.ts'
+import { parseColor } from './color.ts'
 import type { RawMathElement, Rgba } from './ir.ts'
 import { PT_PER_PX } from './ir.ts'
 
@@ -105,13 +106,19 @@ function followingTerm(nodes: readonly RawMathElement[], start: number): number 
   return depth === 0 ? index : start
 }
 
+function mathInk({ r, g, b, a }: Rgba): { hex: string, alpha: number } {
+  const hex = [r, g, b].map(value => Math.round(value).toString(16).padStart(2, '0')).join('').toUpperCase()
+  return { hex, alpha: a }
+}
+
 /** Convert presentation MathML to the structures in the Office Math schema.
  * Decline formulas whose presentation would be lost in the editable shape.
  */
-export function officeMath(root: RawMathElement, fontSize: number, color: Rgba): string | undefined {
-  const size = Math.max(100, Math.min(400000, Math.round(fontSize * PT_PER_PX * 100)))
-  const hex = [color.r, color.g, color.b].map(value => Math.round(value).toString(16).padStart(2, '0')).join('').toUpperCase()
-  let opacity = color.a
+export function officeMath(root: RawMathElement, fontSize: number, color: Rgba, fragmentOpacity: number): string | undefined {
+  const baseInk = mathInk(color)
+  let localSize = fontSize
+  let ink = baseInk
+  let opacity = fragmentOpacity
   let font: Readonly<EquationFont> = defaultMathFont
   function inFont(next: Readonly<EquationFont>, render: () => string | undefined): string | undefined {
     const previous = font
@@ -120,12 +127,16 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba):
     finally { font = previous }
   }
   const properties = (normalText: boolean, italic: boolean) => {
-    const paint = opacity === 1 ? `<a:srgbClr val="${hex}"/>` : `<a:srgbClr val="${hex}"><a:alpha val="${Math.round(opacity * 100000)}"/></a:srgbClr>`
+    const size = Math.max(100, Math.min(400000, Math.round(localSize * PT_PER_PX * 100)))
+    const { hex } = ink
+    const alpha = ink.alpha * opacity
+    const paint = alpha === 1 ? `<a:srgbClr val="${hex}"/>` : `<a:srgbClr val="${hex}"><a:alpha val="${Math.round(alpha * 100000)}"/></a:srgbClr>`
     const formatting = normalText ? ` b="${Number(font.bold)}" i="${Number(italic)}"` : ''
     return `<a:rPr sz="${size}"${formatting}><a:solidFill>${paint}</a:solidFill><a:latin typeface="${normalText ? font.typeface : mathTypeface}"/></a:rPr>`
   }
   const wrap = (name: string, content: string) => `<m:${name}>${content}</m:${name}>`
   const setting = (name: string, value: string) => `<m:${name} m:val="${escapeHtml(value)}"/>`
+  const control = () => ink !== baseInk || localSize !== fontSize || opacity !== 1 ? wrap('ctrlPr', properties(false, false)) : ''
   function run(text: string, italic = false, textToken = false, script?: EquationFont['script']): string {
     const normalText = textToken && font.typeface !== mathTypeface
     const alphabet = script ? setting('scr', script) : ''
@@ -148,7 +159,7 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba):
           if (body) {
             const options = setting('chr', limits.glyph) + setting('limLoc', limits.location)
               + (limits.sub ? '' : setting('subHide', '1')) + (limits.sup ? '' : setting('supHide', '1'))
-            output += wrap('nary', wrap('naryPr', options) + wrap('sub', sub) + wrap('sup', sup) + wrap('e', body))
+            output += wrap('nary', wrap('naryPr', options + control()) + wrap('sub', sub) + wrap('sup', sup) + wrap('e', body))
             index = end - 1
             continue
           }
@@ -174,11 +185,11 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba):
       const glyph = first.text
       if (first.attributes.stretchy === 'true' && stretchMarks.has(glyph)) {
         const options = setting('chr', glyph) + setting('pos', below ? 'bot' : 'top') + setting('vertJc', below ? 'top' : 'bot')
-        return wrap('groupChr', wrap('groupChrPr', options) + wrap('e', body))
+        return wrap('groupChr', wrap('groupChrPr', options + control()) + wrap('e', body))
       }
       const accent = Object.hasOwn(accents, glyph) ? accents[glyph] : undefined
       if (below || !accent) return
-      return wrap('acc', wrap('accPr', setting('chr', accent)) + wrap('e', body))
+      return wrap('acc', wrap('accPr', setting('chr', accent) + control()) + wrap('e', body))
     }
     if (!only(node)) return
     const label = convert(first)
@@ -205,7 +216,7 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba):
     if (!body) return
     const properties = strikes ? ['hideTop', 'hideBot', 'hideLeft', 'hideRight', ...strikes]
       : actuarial ? ['hideBot', 'hideLeft'] : []
-    const options = properties.map(property => setting(property, '1')).join('')
+    const options = properties.map(property => setting(property, '1')).join('') + control()
     return wrap('borderBox', (options ? wrap('borderBoxPr', options) : '') + wrap('e', body))
   }
   function phantom(node: RawMathElement): string | undefined {
@@ -280,6 +291,17 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba):
     if (rows) return wrap('eqArr', rows)
   }
   function convert(node: RawMathElement): string | undefined {
+    if (node.color === undefined) return convertElement(node)
+    const next = parseColor(node.color)
+    if (!next) return
+    const { style, ...attributes } = node.attributes
+    if (!/^color:[^;]+;?$/.test(style ?? '')) return
+    const previous = ink
+    ink = mathInk(next)
+    try { return convertElement({ ...node, attributes, color: undefined }) }
+    finally { ink = previous }
+  }
+  function convertElement(node: RawMathElement): string | undefined {
     const { name, text, attributes, children } = node
     if (tokenNames.has(name)) {
       if (children.length || !only(node, 'mathvariant', 'stretchy', 'lspace', 'rspace') || attributes.stretchy === 'true') return
@@ -329,7 +351,7 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba):
           const body = convert(children[0])
           if (body === undefined) return
           const options = setting('pos', attributes.class === 'math-overline' ? 'top' : 'bot')
-          return wrap('bar', wrap('barPr', options) + wrap('e', body))
+          return wrap('bar', wrap('barPr', options + control()) + wrap('e', body))
         }
         return enclosure(node)
       }
@@ -350,12 +372,19 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba):
       if (children.length > 2 && stretchyFence(left, leftFences) && stretchyFence(right, rightFences)) {
         const expression = sequence(children.slice(1, -1))
         if (expression === undefined) return
-        return wrap('d', `<m:dPr><m:begChr m:val="${escapeHtml(left.text)}"/><m:endChr m:val="${escapeHtml(right.text)}"/></m:dPr>${wrap('e', expression)}`)
+        const options = setting('begChr', left.text) + setting('endChr', right.text) + control()
+        return wrap('d', wrap('dPr', options) + wrap('e', expression))
       }
       return sequence(children)
     }
     if (name === 'mstyle' && only(node, 'displaystyle', 'scriptlevel') && attributes.scriptlevel === '0')
       return sequence(children)
+    if (name === 'mstyle' && only(node, 'mathsize') && /^\d+(?:\.\d+)?em$/.test(attributes.mathsize ?? '')) {
+      const previous = localSize
+      localSize *= Number.parseFloat(attributes.mathsize)
+      try { return sequence(children) }
+      finally { localSize = previous }
+    }
     if (name === 'mtable' && attributes['data-equation-environment'])
       return equationArray(node, attributes['data-equation-environment'])
     if (name === 'mtable' && attributes.class === 'math-alignment-axis' && only(node, 'class') && children.length === 1) {
@@ -386,20 +415,21 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba):
       const numerator = convert(children[0])
       const denominator = convert(children[1])
       if (numerator === undefined || denominator === undefined) return
-      const rule = attributes.linethickness === undefined ? '' : '<m:fPr><m:type m:val="noBar"/></m:fPr>'
-      return wrap('f', rule + wrap('num', numerator) + wrap('den', denominator))
+      const options = (attributes.linethickness === undefined ? '' : setting('type', 'noBar')) + control()
+      return wrap('f', (options ? wrap('fPr', options) : '') + wrap('num', numerator) + wrap('den', denominator))
     }
     if (!only(node)) return
     if (name === 'msqrt') {
       const expression = sequence(children)
       if (!expression) return
-      return wrap('rad', `<m:radPr><m:degHide m:val="1"/></m:radPr><m:deg/>${wrap('e', expression)}`)
+      return wrap('rad', `${wrap('radPr', setting('degHide', '1') + control())}<m:deg/>${wrap('e', expression)}`)
     }
     if (name === 'mroot' && children.length === 2) {
       const radicand = convert(children[0])
       const index = convert(children[1])
       if (radicand === undefined || index === undefined) return
-      return wrap('rad', wrap('deg', index) + wrap('e', radicand))
+      const options = control()
+      return wrap('rad', (options ? wrap('radPr', options) : '') + wrap('deg', index) + wrap('e', radicand))
     }
     const script = Object.hasOwn(scriptProperties, name) ? scriptProperties[name] : undefined
     if (script && children.length === script.length) {

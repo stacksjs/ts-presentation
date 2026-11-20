@@ -96,6 +96,7 @@ export function collectSnapshot(options: {
         children.push(nested)
       }
       const result: RawMathElement = { name: element.localName, attributes, text, children }
+      if (/^color:[^;]+;?$/.test(attributes.style ?? '')) result.color = getComputedStyle(element).color
       if (element.localName === 'mtr' && element.hasAttribute('data-equation-dim'))
         result.opacity = Number(getComputedStyle(element).opacity)
       return result

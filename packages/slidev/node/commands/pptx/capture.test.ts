@@ -279,6 +279,70 @@ $$`)
   }
 }, 45_000)
 
+it.skipIf(!chrome)('keeps scoped TeX colors and font sizes editable in PowerPoint', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-math-paint-'))
+  try {
+    const entry = join(root, 'slides.md')
+    const output = join(root, 'formulas.pptx')
+    await Bun.write(entry, String.raw`# Styled equations
+
+$$
+A+{\color{rebeccapurple}B+\textcolor{#00cc0080}{\frac{C}{\textcolor{blue}{D}}}+E}+F
+$$
+
+$$
+a+{\tiny b{\Large c}d}+e+\text{\small note}
+$$
+
+$$ {1|all}
+\begin{align*}
+x&=y\\
+z&=\textcolor{#cc000080}{w}
+\end{align*}
+$$
+
+$$
+\colorbox{yellow}{Still needs a picture}
+$$`)
+    const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
+    const exportDeck = Bun.spawn([process.execPath, cli, 'export', entry, '--format', 'pptx-editable', '--with-clicks', '--output', output, '--executable-path', chrome!], {
+      stderr: 'pipe', stdout: 'ignore', timeout: 30_000,
+    })
+    const [status, stderr] = await Promise.all([exportDeck.exited, new Response(exportDeck.stderr).text()])
+    if (status) throw new Error(stderr)
+
+    const parts = await storedParts(Bun.file(output))
+    const first = parts.get('ppt/slides/slide1.xml')?.toString() ?? ''
+    const last = parts.get('ppt/slides/slide2.xml')?.toString() ?? ''
+    const runs = (slide: string) => new Map([...slide.matchAll(/<m:r>(.*?)<m:t xml:space="preserve">([^<]*)<\/m:t><\/m:r>/g)]
+      .map(([, properties, token]) => [token, properties]))
+
+    expect(first.match(/<a14:m>/g)).toHaveLength(3)
+    expect(first.match(/<mc:Fallback><p:sp>/g)).toHaveLength(3)
+    expect(first.match(/<p:pic>/g)).toHaveLength(1)
+    const properties = runs(first)
+    const green = '<a:srgbClr val="00CC00"><a:alpha val="50000"/></a:srgbClr>'
+    for (const letter of ['B', 'E']) expect(properties.get(letter)).toContain('<a:srgbClr val="663399"/>')
+    expect(properties.get('A')).toBe(properties.get('F'))
+    expect(properties.get('A')).toBeDefined()
+    expect(properties.get('C')).toContain(green)
+    expect(properties.get('D')).toContain('<a:srgbClr val="0000FF"/>')
+    expect(first).toMatch(/<m:fPr><m:ctrlPr>.*?<a:srgbClr val="00CC00">.*?<\/m:ctrlPr><\/m:fPr>/)
+
+    const size = (token: string) => Number(/sz="(\d+)"/.exec(properties.get(token) ?? '')?.[1])
+    expect(size('a')).toBe(size('e'))
+    expect(size('b')).toBe(Math.round(size('a') * 0.5))
+    expect(size('d')).toBe(size('b'))
+    expect(Math.abs(size('c') - size('a') * 1.44)).toBeLessThan(2)
+    expect(Math.abs(size('note') - size('a') * 0.9)).toBeLessThan(2)
+    expect(properties.get('w')).toContain('<a:srgbClr val="CC0000"><a:alpha val="12000"/></a:srgbClr>')
+    expect(runs(last).get('w')).toContain('<a:srgbClr val="CC0000"><a:alpha val="50000"/></a:srgbClr>')
+  }
+  finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}, 45_000)
+
 it.skipIf(!chrome)('keeps AMS rows, tags, and click highlights editable in PowerPoint', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-ams-'))
   const canvas = { width: 960, height: 540 }

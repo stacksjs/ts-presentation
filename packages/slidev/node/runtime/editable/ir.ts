@@ -91,6 +91,7 @@ export interface RawMathElement {
   attributes: Record<string, string>
   text: string
   children: RawMathElement[]
+  color?: string
   opacity?: number
 }
 
