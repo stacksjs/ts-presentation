@@ -83,7 +83,7 @@ function axisStyle(config: Settings, name: 'xAxis' | 'yAxis', data: CategoryAxis
 }
 
 export function xyDiagram(source: string, marker: string, options: MermaidOptions): string | undefined {
-  const chart = readChronology(source, '', true)
+  const chart = readChronology(source, '', { singleQuotes: true })
   if (!chart) return
   const header = /^xychart(?:-beta)?(?:\s+(vertical|horizontal))?$/.exec(chart.header)
   if (!header) return

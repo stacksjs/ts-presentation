@@ -120,6 +120,29 @@ Milestone :milestone, 2026-01-01, missingDuration`
   finally { warn.mockRestore() }
 })
 
+// From Mermaid's Gantt fixtures for literal punctuation in task names (MIT).
+test('preserves leading hash and semicolon task labels and their dependency dates', () => {
+  const source = [
+    'gantt',
+    '  # existing whole-line comment',
+    '  section Review #1',
+    '  #A task with a hashtag :a1, 2014-01-01, 30d',
+    '  ;A task with a semicolon :a2, after a1, 20d',
+    '  # Review the release :a3, after a2, 2d %% explanatory comment',
+  ].join('\n')
+  const tasks = scheduleGantt(source)?.tasks
+  expect(tasks?.map(({ id, name, start }) => [id, name, new Date(start).toISOString().slice(0, 10)])).toEqual([
+    ['a1', '#A task with a hashtag', '2014-01-01'],
+    ['a2', ';A task with a semicolon', '2014-01-31'],
+    ['a3', '# Review the release', '2014-02-20'],
+  ])
+  const svg = mermaid(source, 'punctuation')
+  expect(svg).toContain('>Review #1</tspan>')
+  expect(svg).toContain('>#A task with a hashtag</tspan>')
+  expect(svg).toContain('>;A task with a semicolon</tspan>')
+  expect(svg).toContain('># Review the release</tspan>')
+})
+
 test('diagnoses unknown imported Gantt dependencies and renders the remaining schedule', async () => {
   const source = `gantt
 Review :review, after missing draft prior, 1d
@@ -791,6 +814,56 @@ test('imports Gantt callback commands and applies security settings', () => {
 })
 
 const chrome = await findChrome()
+
+test.skipIf(!chrome)('fits complete imported GitGraph labels in every orientation in Chromium', async () => {
+  const branch = 'feature/review-release-candidate-across-all-supported-platforms'
+  const commit = 'reviewed-and-approved-release-candidate-for-production'
+  const tag = 'release-candidate-build-with-integration-verification'
+  const graphs = ['LR', 'TB', 'BT'].flatMap(direction => [true, false].map((rotateCommitLabel) => {
+    const source = [
+      `gitGraph ${direction}:`,
+      'commit id:"root"',
+      `branch "${branch}"`,
+      `commit id:"${commit}" tag:"${tag}"`,
+    ].join('\n')
+    return mermaid(source, `long-${direction}-${rotateCommitLabel}`, {
+      theme: 'forest', gitGraph: { rotateCommitLabel, useMaxWidth: false },
+    })
+  }))
+  expect(graphs.every(Boolean)).toBe(true)
+  const css = await Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url)).text()
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response(`<!doctype html><meta charset="utf-8"><style>${css}</style>${graphs.map(svg => `<div class="slide" style="overflow:visible">${svg}</div>`).join('')}`, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    }),
+  })
+  const browser = new Bun.WebView({ width: 1100, height: 780, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await browser.navigate(server.url.href)
+    const boxes = await browser.evaluate<{ labels: string[], fits: boolean }[]>(`[...document.querySelectorAll('svg')].map(svg => {
+      const bounds = svg.getBoundingClientRect()
+      const labels = [...svg.querySelectorAll('.diagram-git-branch-label, .diagram-git-label, .diagram-git-tag')]
+      return {
+        labels: labels.map(node => node.textContent),
+        fits: labels.every(node => {
+          const rect = node.getBoundingClientRect()
+          return rect.left >= bounds.left - 1 && rect.right <= bounds.right + 1 &&
+            rect.top >= bounds.top - 1 && rect.bottom <= bounds.bottom + 1
+        }),
+      }
+    })`)
+    expect(boxes).toHaveLength(6)
+    for (const graph of boxes) {
+      expect(graph.labels).toEqual(['main', branch, 'root', commit, tag])
+      expect(graph.fits).toBe(true)
+    }
+  }
+  finally {
+    browser.close()
+    await server.stop(true)
+  }
+})
 
 test.skipIf(!chrome)('applies scoped indexed CSS to imported Gantt and GitGraph diagrams', async () => {
   const schedule = [

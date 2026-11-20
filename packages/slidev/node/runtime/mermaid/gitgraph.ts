@@ -76,7 +76,7 @@ function settings(value: unknown): Record<string, unknown> {
 }
 
 function parseGitHistory(source: string, config: Record<string, unknown>): GitGraphOptions | undefined {
-  const chart = readChronology(logicalLines(source), '', true)
+  const chart = readChronology(logicalLines(source), '', { singleQuotes: true })
   if (!chart) return
   const rows = commands([chart.header, ...chart.rows])
   const header = /^gitGraph(?:\s+(LR|TB|BT))?\s*:?$/.exec(rows.shift() ?? '')
@@ -163,6 +163,7 @@ export function gitGraph(source: string, idPrefix: string, options: MermaidOptio
   const labelBackground = typeof options.themeCSS === 'string' && options.themeCSS.trim() ? 'transparent' : undefined
   const svg = gitGraphChart({
     ...chart, idPrefix, title: chart.title || (typeof options.title === 'string' ? options.title : ''),
+    truncateLabels: false,
     colors,
     branchLabelColors: palette('gitBranchLabel', preset?.branchText, color('branchLabelColor')),
     branchLabelBackgrounds: preset ? colors : labelBackground ? colors.map(color => color ?? labelBackground) : undefined,

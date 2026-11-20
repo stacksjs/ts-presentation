@@ -18,7 +18,7 @@ export function sizeChronologySvg(svg: string | undefined, useMaxWidth: unknown)
   return svg?.replace(/^(<svg\b[^>]*\bviewBox="0 0 ([\d.]+) ([\d.]+)")/, '$1 width="$2" height="$3"')
 }
 
-export function readChronology(source: string | readonly string[], title: string, singleQuotes = false): Chronology | undefined {
+export function readChronology(source: string | readonly string[], title: string, syntax: { singleQuotes?: boolean, hashTaskNames?: boolean } = {}): Chronology | undefined {
   const lines = (typeof source === 'string' ? source.split(/\r?\n/) : source).map(line => line.trim())
   const header = lines.findIndex(line => line && !/^(?:%%|#)/.test(line))
   if (header < 0) return
@@ -35,9 +35,9 @@ export function readChronology(source: string | readonly string[], title: string
       }
       continue
     }
-    const comment = syntaxMask(line, singleQuotes).indexOf('%%')
+    const comment = syntaxMask(line, syntax.singleQuotes).indexOf('%%')
     const row = (comment < 0 ? line : line.slice(0, comment)).trim()
-    if (!row || /^(?:%%|#)/.test(row)) continue
+    if (!row || (row.startsWith('#') && (!syntax.hashTaskNames || !row.includes(':')))) continue
     const title = /^title\s+(.+)$/i.exec(row)?.[1]
     const accTitle = /^accTitle\s*:\s*(.*)$/i.exec(row)?.[1]
     const accDesc = /^accDescr\s*:\s*(.*)$/i.exec(row)?.[1]

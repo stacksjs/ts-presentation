@@ -72,7 +72,7 @@ function parseClick(line: string): { ids: string[], interaction: TaskInteraction
 }
 
 function parseGantt(source: string, now: number, interactionsEnabled = false, configuredAxisFormat = ''): GanttChartOptions | undefined {
-  const chart = readChronology(source, '')
+  const chart = readChronology(source, '', { hashTaskNames: true })
   if (!chart || !isGanttHeader(chart.header)) return
 
   let dateFormat = 'YYYY-MM-DD'
