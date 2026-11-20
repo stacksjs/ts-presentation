@@ -507,6 +507,7 @@ const alignments: Record<string, Alignment> = { l: 'left', c: 'center', r: 'righ
 interface ArrayColumn { align: Alignment, before: ArrayRule[] }
 interface ArrayRow { cells: Markup[], label?: Markup, before: ArrayRule[], gap?: string }
 interface MathLine { content: Markup, gap?: string }
+interface MultlineRow extends MathLine { align?: 'left' | 'right' }
 interface EquationTag { label?: Markup, suppressed: boolean }
 
 function equationNumberCell(label: Markup | undefined, position?: 'start' | 'end'): string {
@@ -524,6 +525,23 @@ function taggedDisplay(expression: string, label: Markup, left: boolean, flush: 
     ? left ? 'max-content minmax(max-content,1fr)' : 'minmax(max-content,1fr) max-content'
     : 'minmax(max-content,1fr) max-content minmax(max-content,1fr)'
   return `<mtable class="math-tagged-display" style="display:block;width:100%"><mtr style="display:grid;grid-template-columns:${columns};align-items:center;column-gap:0.5em">${left ? number : spacer}${body}${left ? spacer : number}</mtr></mtable>`
+}
+
+function multlineTable(rows: readonly MultlineRow[], label: Markup | undefined, left: boolean, flush: boolean, environment: string): string {
+  const tagRow = left ? 0 : rows.length - 1
+  const markup = rows.map(({ content, gap, align }, index) => {
+    const first = index === 0
+    const last = index === rows.length - 1
+    const placement = align ?? (last && !first ? 'right' : flush || (first && !last) ? 'left' : 'center')
+    const number = label === undefined ? '' : equationNumberCell(index === tagRow ? label : undefined)
+    const rowSpacing = gap ? `;padding-bottom:max(0px,calc(0.125em + ${gap}))` : ''
+    const body = `<mtd style="math-style:normal;padding-block:0.125em${rowSpacing}"><mrow>${renderMarkup(content, 0)}</mrow></mtd>`
+    return `<mtr data-multline-align="${placement}">${left ? number : ''}${body}${left ? '' : number}</mtr>`
+  }).join('')
+  const tags = label === undefined ? '' : ` data-equation-tags="${left ? 'left' : 'right'}"`
+  // Office Math uses one alignment for an array. Measure each row's position
+  // separately, as with AMS displays that have explicit row gaps.
+  return `<mtable class="math-multline" data-equation-lines data-math-array data-equation-environment="${environment}" data-equation-row-spacing${tags}${flush ? ' data-equation-flush' : ''}>${markup}</mtable>`
 }
 
 function inScript(markup: Markup): Markup {
@@ -874,6 +892,7 @@ const mathModeFunctions = new Set([
   'begin', 'end', 'right', 'middle', '@binrel', 'mathchoice', 'vcenter',
   'cancel', 'bcancel', 'xcancel', 'pmb', 'phase', 'mathreflectbox',
   'prescript', 'mathstrut', 'overset', 'underset', 'stackrel',
+  'shoveleft', 'shoveright',
   'overline', 'operatorname', 'operatorname@', 'operatornamewithlimits', 'limits', 'nolimits', 'displaylimits',
   'not', 'mod', 'bmod', 'pmod', 'pod', 'ce', 'pu', 'allowbreak',
 ])
@@ -2310,11 +2329,57 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return `<mtable class="math-cd">${markup}</mtable>`
   }
 
+  function arrayRowGap(separator: string): string | undefined {
+    if (separator !== '\\\\' || tokens[cursor] !== '[') return
+    const extra = rawBracket()
+    const gap = extra === undefined ? undefined : dimension(expandDefinition(extra).join(''))
+    if (gap === undefined) throw new MathParseError('Invalid array row spacing')
+    return gap
+  }
+
+  function multline(environment: string): string {
+    if (environmentDepth) throw new MathParseError(`${environment} cannot be nested in another math environment`)
+    const previousTag = tagState
+    tagState = { suppressed: false }
+    environmentDepth++
+    const rows: MultlineRow[] = []
+    const stops = ['&', '\\\\', '\\newline', '\\cr', '\\end']
+    try {
+      while (peek()) {
+        const line = inScope((): MultlineRow => {
+          const first = peek()
+          if (first !== '\\shoveleft' && first !== '\\shoveright')
+            return { content: row(stops, false, false, undefined, true) }
+          take()
+          const body = rawGroup(`Missing argument to ${first}`)
+          const shoved = withTokens(body, () => inScope(() => row([boundary], false, false, undefined, true)))
+          // Tags and other zero-width directives can follow the group.
+          const tail = row(stops)
+          return { content: joinMarkup([shoved, tail]), align: first === '\\shoveleft' ? 'left' : 'right' }
+        })
+        const separator = take()
+        if (separator === '&') throw new MathParseError(`Too many columns in ${environment}`)
+        if (separator === '\\end' && literalGroup() === environment) {
+          if (!rows.length || renderMarkup(line.content, 0)) rows.push(line)
+          return multlineTable(rows, nextTag(environment === 'multline'), options?.leqno === true, options?.fleqn === true, environment)
+        }
+        if (separator !== '\\\\' && separator !== '\\newline' && separator !== '\\cr') break
+        rows.push({ ...line, gap: arrayRowGap(separator) })
+      }
+      throw new MathParseError(`Unclosed math environment: ${environment}`)
+    }
+    finally {
+      environmentDepth--
+      tagState = previousTag
+    }
+  }
+
   function matrix(environment: string): Markup {
     const unclosed = () => new MathParseError(`Unclosed math environment: ${environment}`)
-    if (!display && /^(?:equation\*?|align(?:at)?\*?|gather\*?|split|CD)$/.test(environment))
+    if (!display && /^(?:(?:equation|align(?:at)?|gather|multline)\*?|split|CD)$/.test(environment))
       throw new MathParseError(`${environment} requires display math`)
     if (environment === 'CD') return commutativeDiagram()
+    if (environment === 'multline' || environment === 'multline*') return multline(environment)
     if (/^equation[*]?$/.test(environment)) {
       environmentDepth++
       const content = row(['&', '\\end'], false, true)
@@ -2324,7 +2389,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       tagState.label = nextTag(display && environment === 'equation')
       return xml`<mrow>${content}</mrow>`
     }
-    if (!/^(?:[pbBvV]?matrix[*]?|smallmatrix|d?rcases|d?cases|align(?:ed|edat|at[*]?|[*])?|gather(?:ed|[*])?|split|d?array|subarray|multline[*]?)$/.test(environment))
+    if (!/^(?:[pbBvV]?matrix[*]?|smallmatrix|d?rcases|d?cases|align(?:ed|edat|at[*]?|[*])?|gather(?:ed|[*])?|split|d?array|subarray)$/.test(environment))
       throw new MathParseError(`Unsupported math environment: ${environment}`)
     const subarray = environment === 'subarray'
     const smallMatrix = environment === 'smallmatrix'
@@ -2341,7 +2406,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (subarray && !/^[lc]?$/.test(columns.trim())) throw new MathParseError('Invalid subarray alignment')
     const compact = subarray || smallMatrix
     const aligned = environment.startsWith('align') || environment === 'split'
-    const gathered = environment.startsWith('gather') || environment.startsWith('multline')
+    const gathered = environment.startsWith('gather')
     const cases = environment.endsWith('cases')
     const ordinaryCellStyle = environment.startsWith('d') || aligned || gathered ? 0 : 1
     const stretch = !compact && !cases && macros.has('\\arraystretch')
@@ -2375,9 +2440,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       }
       if (pairs && cells.length > pairs * 2) throw new MathParseError('Too many alignment columns')
       const lineBreak = separator === '\\\\' || separator === '\\newline' || separator === '\\cr'
-      const extra = separator === '\\\\' && tokens[cursor] === '[' ? rawBracket() : undefined
-      const gap = extra === undefined ? undefined : dimension(expandDefinition(extra).join(''))
-      if (extra !== undefined && gap === undefined) throw new MathParseError('Invalid array row spacing')
+      const gap = arrayRowGap(separator)
       const label = rowTags ? nextTag(automatic) : undefined
       if (cells.length > 1 || cells[0] || label !== undefined || rows.length === 0 || lineBreak) {
         rows.push({ cells, label, before: rules, gap })

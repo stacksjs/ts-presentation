@@ -725,6 +725,33 @@ test('counts explicit empty final rows in numbered AMS alignments', () => {
   expect(suppressed.match(/<mtr>/g)).toHaveLength(1)
 })
 
+test('numbers a standalone AMS multline once and preserves explicit row placement', async () => {
+  const source = String.raw`\begin{multline}
+a+b+c \\[.4em]
++d \\ \shoveleft{+e} \\ \shoveright{+f} \\ =g+h \\
+\end{multline}`
+  const maths = createMathRenderer({ throwOnError: true })
+  const html = maths(source, true).split('<annotation')[0]
+  expect([...html.matchAll(/data-multline-align="(\w+)"/g)].map(match => match[1])).toEqual(['left', 'center', 'left', 'right', 'right'])
+  expect(html).toContain('padding-bottom:max(0px,calc(0.125em + .4em))')
+  expect(html).toContain(medium + operator('+') + medium + '<mi>e</mi>')
+  expect(html).toMatch(/<mi>h<\/mi><\/mrow><\/mtd><mtd class="math-equation-number"><mtext>\(1\)<\/mtext>/)
+  const manual = String.raw`\begin{multline*}a\tag*{Check}\\=b\end{multline*}`
+  const left = createMathRenderer({ throwOnError: true, leqno: true })(manual, true)
+  expect(left).toMatch(/<mtr data-multline-align="left"><mtd class="math-equation-number"><mtext>Check<\/mtext>/)
+  expect(maths(String.raw`\begin{multline}a\notag\\b\end{multline}`, true)).not.toContain('math-equation-number')
+  expect(maths(source.replaceAll('multline', 'multline*'), true)).not.toContain('math-equation-number')
+  expect(() => maths(manual, false)).toThrow('requires display math')
+  expect(() => maths(String.raw`\begin{multline}a&b\end{multline}`, true)).toThrow('Too many columns')
+  expect(() => maths(String.raw`\begin{multline}a\tag{A}\\b\tag{B}\end{multline}`, true)).toThrow('Multiple tags')
+  expect(() => maths(String.raw`\begin{equation}${source}\end{equation}`, true)).toThrow('cannot be nested')
+
+  const equation = String.raw`\begin{equation}z=1\end{equation}`
+  const deck = await renderDeck(parseDeck(['# Equations', '', source, '', manual, '', equation].join('\n')))
+  expect(deck.match(/data-equation-environment="multline\*?"/g)).toHaveLength(2)
+  expect([...deck.matchAll(/<mtext>(Check|\(\d+\))<\/mtext>/g)].map(match => match[1])).toEqual(['(1)', 'Check', '(2)'])
+})
+
 test('reads matrix row spacing only after adjacent double backslashes and permits an empty CD', () => {
   const math = createMathRenderer({ throwOnError: true })
   const source = String.raw`\begin{matrix}a&b\cr[c]&d\\ [e]&f\\[1ex]g&h\end{matrix}`
@@ -1835,6 +1862,61 @@ test.skipIf(!chrome)('places AMS display tags at the margins and keeps the formu
   finally {
     view.close()
     await server.stop(true)
+  }
+}, 45_000)
+
+test.skipIf(!chrome)('places AMS multline rows and tags without collisions in Chromium', async () => {
+  const formula = String.raw`\begin{multline}a+b+c\\+d\\\shoveleft{+e}\\\shoveright{+f}\\=g+h\end{multline}`
+  const narrow = String.raw`\begin{multline*}a\\\text{final expression}\tag*{Wide tag}\end{multline*}`
+  const options = [{}, { leqno: true }, { fleqn: true }, { fleqn: true, leqno: true }]
+  const body = options.map(settings => `<section>${createMathRenderer(settings)(formula, true)}</section>`).join('')
+    + `<section style="width:260px">${renderMath(narrow, true)}</section>`
+  const css = await Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url)).text()
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response(`<!doctype html><meta charset="utf-8"><style>${css}</style><main style="width:600px;font-size:30px">${body}</main>`, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    }),
+  })
+  const view = new Bun.WebView({ width: 720, height: 480, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await view.navigate(server.url.href)
+    type Layout = { rows: { left: number, right: number, center: number, bottom: number }[], tag: { row: number, left: number, right: number, top: number, width: number } }
+    const layouts = await view.evaluate<Layout[]>(`[...document.querySelectorAll('section')].map(section => {
+      const outer = section.getBoundingClientRect()
+      const rows = [...section.querySelector('.math-multline').children]
+      const tag = section.querySelector('.math-equation-number:not(:empty)')
+      const bounds = tag.getBoundingClientRect()
+      return {
+        rows: rows.map(row => {
+          const box = row.querySelector('mtd > mrow').getBoundingClientRect()
+          return { left: box.left - outer.left, right: outer.right - box.right,
+            center: (box.left + box.right - outer.left - outer.right) / 2, bottom: box.bottom }
+        }),
+        tag: { row: rows.indexOf(tag.parentElement), left: bounds.left - outer.left, right: outer.right - bounds.right, top: bounds.top, width: bounds.width },
+      }
+    })`)
+    expect(layouts).toHaveLength(5)
+    for (const [index, { fleqn, leqno }] of options.entries()) {
+      const { rows, tag } = layouts[index]
+      const left = fleqn ? 60 : 30
+      expect(tag.row).toBe(leqno ? 0 : 4)
+      expect(leqno ? tag.left : tag.right).toBeCloseTo(fleqn && leqno ? 60 : 0, 1)
+      expect(rows[0].left).toBeCloseTo(leqno ? tag.left + tag.width + 30 : left, 1)
+      if (fleqn) expect(rows[1].left).toBeCloseTo(60, 1)
+      else expect(rows[1].center).toBeCloseTo(0, 1)
+      expect(rows[2].left).toBeCloseTo(left, 1)
+      expect(rows[3].right).toBeCloseTo(30, 1)
+      expect(rows[4].right).toBeCloseTo(leqno ? 30 : tag.right + tag.width + 30, 1)
+    }
+    const last = layouts[4]
+    expect(last.tag.row).toBe(1)
+    expect(last.tag.right).toBeCloseTo(0, 1)
+    expect(last.tag.top).toBeGreaterThanOrEqual(last.rows[1].bottom - 1)
+  }
+  finally {
+    view.close()
+    server.stop(true)
   }
 }, 45_000)
 

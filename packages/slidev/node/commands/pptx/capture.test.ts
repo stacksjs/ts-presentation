@@ -662,6 +662,60 @@ $$`)
   }
 }, 45_000)
 
+it.skipIf(!chrome)('keeps multline alignment, its single tag, and row reveals editable in PowerPoint', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-multline-'))
+  const canvas = { width: 960, height: 540 }
+  try {
+    const entry = join(root, 'slides.md')
+    await Bun.write(entry, String.raw`# Split calculation
+
+$$ {1|2|all}
+\begin{multline}
+a=b+c\\[1em]
++\frac{d}{e}\\
+=f+g\tag*{Final}
+\end{multline}
+$$`)
+    const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
+    const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
+    const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
+    if (status) throw new Error(stderr)
+    const frames: PowerPointFrame[] = []
+    await captureFrames({ root: join(root, 'dist'), executable: chrome!, scale: 1, canvas, editable: true, withClicks: true }, frame => { frames.push(frame) })
+    expect(frames).toHaveLength(3)
+    for (const [step, frame] of frames.entries()) {
+      const body = frame.editable?.nodes.find((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math')?.equation
+      expect(body).toBeDefined()
+      expect(body?.cells).toHaveLength(2)
+      expect(body?.tags).toHaveLength(1)
+      const [second, last] = body!.cells!
+      const [tag] = body!.tags!
+      expect(second.rect.x).toBeGreaterThan(body!.rect.x + 80)
+      expect(last.rect.x).toBeGreaterThan(second.rect.x + 80)
+      expect(tag.rect.x).toBeGreaterThan(last.rect.x + last.rect.w)
+      expect(tag.rect.y).toBeCloseTo(last.rect.y, -1)
+      const firstGap = second.rect.y - (body!.rect.y + body!.rect.h)
+      const secondGap = last.rect.y - (second.rect.y + second.rect.h)
+      expect(firstGap).toBeGreaterThan(secondGap + 5)
+      expect(second.expression).toContain('<m:f>')
+      expect(tag.expression).toContain('>Final</m:t>')
+      expect([body!, second, last, tag].map(fragment => fragment.expression.includes('<a:alpha val="24000"/>'))).toEqual([
+        step === 1, step === 0, step < 2, step < 2,
+      ])
+    }
+    const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Split calculation' }))
+    const final = parts.get('ppt/slides/slide3.xml')?.toString() ?? ''
+    expect(final.match(/<a14:m>/g)).toHaveLength(4)
+    expect(final.match(/name="Equation cell"/g)).toHaveLength(2)
+    expect(final.match(/name="Equation tag"/g)).toHaveLength(1)
+    expect(final.match(/<mc:Fallback><p:sp>/g)).toHaveLength(1)
+    expect(final).toContain('<m:f>')
+  }
+  finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}, 45_000)
+
 it.skipIf(!chrome)('keeps original images editable and crops them in DrawingML across reveals', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-original-pictures-'))
   const canvas = { width: 960, height: 540 }

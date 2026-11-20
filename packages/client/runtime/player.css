@@ -1011,6 +1011,41 @@ math .math-alignment-axis > mtr > mtd { padding: 0; }
   }
   math .math-display-grid[data-equation-tags] > mtr > .math-equation-number:empty { padding-inline: 0; }
 }
+@supports (display: math) {
+  math:has(> semantics > mrow > .math-multline:only-child),
+  math:has(> semantics > mrow > .math-multline:only-child) > semantics,
+  math:has(> semantics > mrow > .math-multline:only-child) > semantics > mrow { display: block; }
+  math .math-multline { display: grid; }
+  math .math-multline > mtr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: 1em;
+  }
+  math .math-multline > mtr > mtd:not(.math-equation-number) {
+    flex: 1 1 auto;
+    min-inline-size: max-content;
+    display: grid;
+    justify-items: center;
+    padding-inline: 0;
+  }
+  math .math-multline > mtr > mtd > mrow,
+  math .math-multline > mtr > .math-equation-number { display: math; }
+  math .math-multline > [data-multline-align="left"] > mtd:not(.math-equation-number) {
+    justify-items: start;
+    padding-inline-start: 1em;
+  }
+  math .math-multline > [data-multline-align="right"] > mtd:not(.math-equation-number) {
+    justify-items: end;
+    padding-inline-end: 1em;
+  }
+  math .math-multline[data-equation-flush] > [data-multline-align="left"] > mtd:not(.math-equation-number),
+  math .math-multline[data-equation-tags="left"] > [data-multline-align="left"] > .math-equation-number:not(:empty) + mtd { padding-inline-start: 0; }
+  math .math-multline[data-equation-tags="right"] > [data-multline-align="right"] > mtd:has(+ .math-equation-number:not(:empty)) { padding-inline-end: 0; }
+  math .math-multline > mtr > .math-equation-number { padding: 0; flex: none; }
+  math .math-multline[data-equation-tags="right"] > mtr > .math-equation-number { margin-inline-start: auto; }
+  math .math-multline > mtr > .math-equation-number:empty { display: none; }
+}
 math .math-overlap-l { transform: translateX(-100%); }
 math .math-overlap-c { transform: translateX(-50%); }
 math .math-reflect { transform: scaleX(-1); }

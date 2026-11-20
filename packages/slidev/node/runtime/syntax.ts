@@ -15,7 +15,7 @@ const inlineCode = /^`+/
 const protectedHtml = /^<(pre|code|script|style)(?:\s[^>]*)?>[\s\S]*?<\/\1\s*>/i
 const htmlTag = /^<(?:[^>"']|"[^"]*"|'[^']*')+>/
 const slotMarker = /^::\s*([\w.:-]+?)\s*::\s*$/
-const bareDisplay = /^ {0,3}\\begin\{((?:equation|align|alignat|gather)\*?|CD)\}/
+const bareDisplay = /^ {0,3}\\begin\{((?:equation|align|alignat|gather|multline)\*?|CD)\}/
 
 function inlineMathEnd(line: string, start: number, delimiter: string): number {
   let braces = 0
