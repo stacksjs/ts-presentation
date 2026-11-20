@@ -125,6 +125,30 @@ test('supports directed GitGraph layout and checks cherry-pick merge parents', a
   expect(html).not.toContain('language-mermaid')
 })
 
+test('imports GitGraph commit messages and keeps explicit merge symbols in the built deck', async () => {
+  const graph = String.raw`gitGraph TB:
+commit id:"base" msg:"Begin \"review\": phase 1"
+branch "feature/review"
+commit 'Fix; verify 100%% complete' id:"fix" type:REVERSE %% outside comment
+checkout main
+merge "feature/review" id:"approved" type:NORMAL tag:"ready"`
+  const parsed = buildGitHistory(graph)
+  expect(parsed?.commits.map(({ id, message, symbol }) => [id, message, symbol])).toEqual([
+    ['base', 'Begin "review": phase 1', 'NORMAL'],
+    ['fix', 'Fix; verify 100%% complete', 'REVERSE'],
+    ['approved', undefined, 'NORMAL'],
+  ])
+  expect(parsed?.commits.at(-1)?.parents.map(parent => parent.id)).toEqual(['base', 'fix'])
+  const input = ['# Review workflow', '', '~~~mermaid', graph, '~~~'].join('\n')
+  const html = await renderDeck(parseDeck(input))
+  expect(html).toContain('data-commit-message="Begin &quot;review&quot;: phase 1"')
+  expect(html).toContain('data-commit-message="Fix; verify 100%% complete"')
+  expect(html).toContain('diagram-git-reverse-mark')
+  expect(html).toMatch(/data-commit-id="approved" data-parent-ids="base, fix"[^>]*><title>[^<]*<\/title><circle[^>]*\/><g transform=/)
+  expect(buildGitHistory('gitGraph\ncommit msg:bare-message')).toBeUndefined()
+  expect(buildGitHistory('gitGraph\ncommit "first" msg:"second"')).toBeUndefined()
+})
+
 test('native Gantt YAML and compatibility syntax render the same schedule', () => {
   const yaml = `type: gantt
 accessibleTitle: Delivery steps

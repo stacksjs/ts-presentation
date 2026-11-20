@@ -13,7 +13,7 @@ export function diagramPixels(value: unknown): number | undefined {
   if (typeof value === 'string' && /^\d+(?:\.\d+)?(?:px)?$/i.test(value.trim())) return Number.parseFloat(value)
 }
 
-export function readChronology(source: string, title: string): Chronology | undefined {
+export function readChronology(source: string, title: string, singleQuotes = false): Chronology | undefined {
   const lines = source.split(/\r?\n/).map(line => line.trim())
   const header = lines.findIndex(line => line && !/^(?:%%|#)/.test(line))
   if (header < 0) return
@@ -30,7 +30,7 @@ export function readChronology(source: string, title: string): Chronology | unde
       }
       continue
     }
-    const comment = syntaxMask(line).indexOf('%%')
+    const comment = syntaxMask(line, singleQuotes).indexOf('%%')
     const row = (comment < 0 ? line : line.slice(0, comment)).trim()
     if (!row || /^(?:%%|#)/.test(row)) continue
     const title = /^title\s+(.+)$/i.exec(row)?.[1]

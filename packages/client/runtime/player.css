@@ -634,7 +634,7 @@ v-switch { display: block; }
 .slide-diagram .diagram-git-branch path { fill: none; opacity: 0.32; stroke-width: 4; }
 .slide-diagram .diagram-git-edge { fill: none; stroke-width: 2.4; }
 .slide-diagram .diagram-git-dot { stroke: var(--diagram-background, #14202c); stroke-width: 1.8; }
-.slide-diagram .diagram-git-ring { fill: none; stroke: var(--diagram-background, #14202c); stroke-width: 2; }
+.slide-diagram .diagram-git-ring { fill: none; stroke-width: 2; }
 .slide-diagram .diagram-git-tag { font-weight: 650; }
 
 

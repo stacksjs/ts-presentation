@@ -213,6 +213,9 @@ speaker notes. Each hook can be asynchronous.
   Imported GitGraph diagrams support branch ordering, checkout, merges, tags,
   cherry-picking, horizontal or vertical lanes, `rotateCommitLabel`, and the
   diagram's branch, commit, and tag theme variables.
+  Use `commit id:"abc" msg:"Describe the change"` to keep a message in the
+  commit tooltip. Set `type:REVERSE`, `type:HIGHLIGHT`, or `type:NORMAL`
+  on a commit or merge to choose its symbol.
   Imported Gantt tasks without IDs receive `task1`, `task2`, and so on for
   dependencies, links, and callbacks.
 - Use `timeline` or `timeline TD` for chronological periods. A period can

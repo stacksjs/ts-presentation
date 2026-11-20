@@ -7,7 +7,7 @@ import { syntaxMask } from './syntax.ts'
 
 function commands(source: string): string[] {
   return source.split(/\r?\n/).flatMap((line) => {
-    const mask = syntaxMask(line)
+    const mask = syntaxMask(line, true)
     const comment = mask.indexOf('%%')
     const end = comment < 0 ? line.length : comment
     let cursor = 0
@@ -21,26 +21,38 @@ function commands(source: string): string[] {
   })
 }
 
-function lex(source: string): string[] | undefined {
-  const parts: string[] = []
+interface Token { value: string, quoted: boolean }
+
+function lex(source: string): Token[] | undefined {
+  const parts: Token[] = []
   const piece = /\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([^\s:"']+)|(:))/gy
   while (source.slice(piece.lastIndex).trim()) {
     const value = piece.exec(source)
     if (!value) return
     const [, quoted, single, keyword, separator] = value
-    parts.push(keyword ?? separator ?? (quoted ?? single).replace(/\\(["'\\])/g, '$1'))
+    const text = quoted ?? single
+    parts.push({ value: keyword ?? separator ?? text.replace(/\\(["'\\])/g, '$1'), quoted: text !== undefined })
   }
   return parts
 }
 
-function fields(raw: string[], permitted: string[]): Map<string, string[]> | undefined {
-  if (raw.length % 3 !== 0) return
+function fields(raw: Token[], permitted: string[]): Map<string, string[]> | undefined {
   const result = new Map<string, string[]>()
-  for (let cursor = 0; cursor < raw.length; cursor += 3) {
-    const [key, sep, value] = raw.slice(cursor, cursor + 3)
-    if (!permitted.includes(key) || sep !== ':' || (result.has(key) && key !== 'tag')) return
+  const allowMessage = permitted.includes('msg')
+  for (let cursor = 0; cursor < raw.length;) {
+    const token = raw[cursor++]
+    if (allowMessage && token.quoted) {
+      if (result.has('msg')) return
+      result.set('msg', [token.value])
+      continue
+    }
+    const key = token.value
+    const separator = raw[cursor++]
+    const value = raw[cursor++]
+    if (token.quoted || !permitted.includes(key) || separator?.quoted || separator?.value !== ':' || !value) return
+    if ((result.has(key) && key !== 'tag') || (key === 'msg' && !value.quoted)) return
     const values = result.get(key) ?? []
-    values.push(value)
+    values.push(value.value)
     result.set(key, values)
   }
   return result
@@ -51,7 +63,7 @@ function settings(value: unknown): Record<string, unknown> {
 }
 
 function parseGitHistory(source: string, options?: unknown): GitGraphOptions | undefined {
-  const chart = readChronology(source, '')
+  const chart = readChronology(source, '', true)
   if (!chart) return
   const rows = commands([chart.header, ...chart.rows].join('\n'))
   const header = /^gitGraph(?:\s+(LR|TB|BT))?\s*:?$/.exec(rows.shift() ?? '')
@@ -60,8 +72,10 @@ function parseGitHistory(source: string, options?: unknown): GitGraphOptions | u
   const operations: GitGraphOperation[] = []
   for (const row of rows) {
     const fieldsForLine = lex(row)
-    if (!fieldsForLine) return
-    const [op, first, ...rest] = fieldsForLine
+    if (!fieldsForLine?.length || fieldsForLine[0].quoted) return
+    const [command, argument, ...rest] = fieldsForLine
+    const op = command.value
+    const first = argument?.value
     if (op === 'branch') {
       const attrs = fields(rest, ['order'])
       const order = attrs?.get('order')?.[0]
@@ -82,10 +96,16 @@ function parseGitHistory(source: string, options?: unknown): GitGraphOptions | u
       continue
     }
     if (op === 'commit' || op === 'merge') {
-      const attrs = fields(op === 'commit' ? fieldsForLine.slice(1) : rest, ['id', 'tag', 'type'])
+      const attrs = op === 'commit'
+        ? fields(fieldsForLine.slice(1), ['id', 'tag', 'type', 'msg'])
+        : fields(rest, ['id', 'tag', 'type'])
       if (!attrs) return
       const commit = { id: attrs.get('id')?.[0], tags: attrs.get('tag'), style: attrs.get('type')?.[0] as GitCommitStyle | undefined }
-      operations.push(op === 'merge' ? { op, branch: first, ...commit } : { op, ...commit })
+      if (op === 'merge') {
+        if (!first) return
+        operations.push({ op, branch: first, ...commit })
+      }
+      else operations.push({ op, message: attrs.get('msg')?.[0], ...commit })
       continue
     }
     return
