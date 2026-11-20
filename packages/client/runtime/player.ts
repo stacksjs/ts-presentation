@@ -9,7 +9,7 @@ import { setupDiagramActions } from './diagram-actions.ts'
 import type { LiveDeck } from '../../types/src/dev-protocol.ts'
 import type { LiveManifest } from './dev-updates.ts'
 import { watchLiveDeck } from './dev-updates.ts'
-import { createEquationTagFit } from './equation-tags.ts'
+import { createEquationFit } from './equation-tags.ts'
 import { setupDrags } from './drag-player.ts'
 import { carryGlobalLayers } from './global-layers.ts'
 import { setupGotoDialog } from './goto.ts'
@@ -36,7 +36,7 @@ const canvasWidth = Number(document.documentElement.dataset.slideWidth) || defau
 const canvasHeight = Number(document.documentElement.dataset.slideHeight) || defaultCanvas.height
 const stage = document.querySelector<HTMLElement>('#stage')!
 const fittedText = createAutoFitText(stage)
-const fittedTags = createEquationTagFit()
+const fittedEquations = createEquationFit()
 const articles = [...stage.querySelectorAll<HTMLElement>(':scope > article')]
 const notesPanel = document.querySelector<HTMLElement>('#presenter-notes')!
 const notes = [...notesPanel.querySelectorAll<HTMLElement>(':scope > section')]
@@ -212,7 +212,7 @@ function updateCurrentPageText(): void {
 function showCurrentReveals(animate: boolean): void {
   showReveals(reveals[current - 1], click, animate, Number(stage.style.getPropertyValue('--slide-scale')) || 1)
   fittedText(articles[current - 1])
-  fittedTags(articles[current - 1])
+  fittedEquations(articles[current - 1])
   if (!isCapture && !isPreview) syncLiveAutorun(articles[current - 1])
 }
 
@@ -230,14 +230,14 @@ if (isCapture) {
   window.presentationMediaReady = media.ready
   window.presentationFitText = (root) => {
     fittedText(root, true)
-    fittedTags(root, false)
+    fittedEquations(root, false)
   }
 }
 const overviewGrid = isOverview ? setupOverviewGrid(stage, {
   routes, articles, notes, bounds, width: canvasWidth, height: canvasHeight, origin: messageOrigin, audienceUrl,
   render(index, step, nearViewport) {
     showReveals(reveals[index], step, false, 1)
-    fittedTags(articles[index])
+    fittedEquations(articles[index])
     if (nearViewport) media.show(articles[index])
   },
 }) : undefined
@@ -245,7 +245,7 @@ const overviewGrid = isOverview ? setupOverviewGrid(stage, {
 function displayNotes(selected: number, step: number, changed: boolean): void {
   notes[selected - 1].hidden = false
   noteSteps[selected - 1].forEach((note, index) => { note.hidden = index > step })
-  fittedTags(notes[selected - 1])
+  fittedEquations(notes[selected - 1])
   if (changed) notesPanel.scrollTop = 0
   else if (!notesPanel.hidden && step > 0) {
     const stepNotes = noteSteps[selected - 1][step]

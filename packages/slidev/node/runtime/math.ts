@@ -941,7 +941,7 @@ const mathModeFunctions = new Set([
   ...ruledAccents, ...Array.from(infixFractions, command => command.slice(1)),
   'begin', 'end', 'right', 'middle', '@binrel', '@splitfrac', 'mathchoice', 'vcenter',
   'cancel', 'bcancel', 'xcancel', 'pmb', 'phase', 'mathreflectbox',
-  'prescript', 'mathstrut', 'sideset', 'overset', 'underset', 'overunderset', 'stackrel',
+  'prescript', 'mathstrut', 'xmathstrut', 'sideset', 'overset', 'underset', 'overunderset', 'stackrel',
   'shoveleft', 'shoveright', 'ArrowBetweenLines', 'MTFlushSpaceAbove', 'MTFlushSpaceBelow',
   ...Array.from(intertextCommands.keys(), command => command.slice(1)),
   'overline', 'operatorname', 'operatorname@', 'operatornamewithlimits', 'limits', 'nolimits', 'displaylimits',
@@ -1882,6 +1882,24 @@ export function renderMath(source: string, display = false, configured: MathMacr
 
   function overlap(direction: string, content: Markup): Markup {
     return xml`<mpadded width="0"><mrow class="math-overlap-${direction}">${content}</mrow></mpadded>`
+  }
+
+  function mathStrut(variable: boolean): string {
+    const phantom = '<mphantom><mo stretchy="false">(</mo></mphantom>'
+    const basic = `<mpadded width="0">${phantom}</mpadded>`
+    if (!variable) return basic
+    const offset = (tokens: string[]) => {
+      const value = expandDefinition(tokens).join('').trim()
+      if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(value) || !Number.isFinite(Number(value)))
+        throw new MathParseError('Invalid variable math strut adjustment')
+      return Number(value)
+    }
+    const optional = rawBracket()
+    const height = offset(rawGroup())
+    const depth = optional === undefined ? height : offset(optional)
+    if (!height && !depth) return basic
+    const max = maxSize === Infinity ? '' : ` data-math-strut-limit="${maxSize}"`
+    return `<mrow data-math-strut="${height} ${depth}"${max} aria-hidden="true"><mpadded width="0" height="0" depth="0">${phantom}<mpadded width="0" depth="0">${phantom}</mpadded></mpadded><mspace width="0" height="0.75em" depth="0.25em"/></mrow>`
   }
 
   function withMathBoxSpacing(read: () => Markup): Markup {
@@ -3346,9 +3364,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       strictViolation('mathVsTextAccents', 'The ring accent works only in text mode', true, token)
       return { markup: tag('mi', textSymbols[token]) }
     }
-    if (name === 'mathstrut') {
-      return { markup: '<mpadded width="0"><mphantom><mo stretchy="false">(</mo></mphantom></mpadded>' }
-    }
+    if (name === 'mathstrut' || name === 'xmathstrut') return { markup: mathStrut(name === 'xmathstrut') }
     if (name === 'mod' || name === 'bmod' || name === 'pmod' || name === 'pod') return { markup: modulus(name) }
     if (name === 'not') {
       const { markup, mathClass } = argumentAtom()

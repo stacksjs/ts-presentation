@@ -1,5 +1,28 @@
-const selector = 'mtable[data-equation-tags]:is(.math-display-grid, .math-tagged-display, .math-multline)'
+const strut = 'data-math-strut'
+const selector = `mrow[${strut}], mtable[data-equation-tags]:is(.math-display-grid, .math-tagged-display, .math-multline)`
 const shifted = 'data-equation-tag-shifted'
+
+function fitStrut(element: Element): void {
+  const [measure, space] = element.children
+  if (!measure || !space) return
+  const [glyph, ascender] = measure.children
+  if (!glyph || !ascender) return
+  // Computed MathML box sizes already use the glyph's font and script level
+  // and are independent of transforms used to fit the deck in the window.
+  const glyphStyle = getComputedStyle(glyph)
+  const total = Number.parseFloat(glyphStyle.height)
+  const ascent = Number.parseFloat(getComputedStyle(ascender).height)
+  if (!(total > 0) || !Number.isFinite(ascent)) return
+  const [above, below] = (element.getAttribute(strut) ?? '').split(' ').map(Number)
+  const limit = element.getAttribute('data-math-strut-limit')
+  const max = limit === null ? Infinity : Number(limit) * Number.parseFloat(glyphStyle.fontSize)
+  for (const [name, base, growth] of [['height', ascent, above], ['depth', total - ascent, below]] as const) {
+    const length = Math.max(0, base + Math.min(growth * total, max))
+    if (!Number.isFinite(length)) continue
+    const value = `${Number(length.toFixed(4))}px`
+    if (space.getAttribute(name) !== value) space.setAttribute(name, value)
+  }
+}
 
 function fitTable(table: Element): void {
   const width = table.getBoundingClientRect().width
@@ -39,36 +62,54 @@ function fitTable(table: Element): void {
   }
 }
 
-export function createEquationTagFit(): (root: ParentNode, watch?: boolean) => void {
-  const observed = new Set<Element>()
+export function createEquationFit(): (root: ParentNode, watch?: boolean) => void {
+  const observed = new Map<Element, Element>()
   const pending = new Set<Element>()
   let resize: ResizeObserver | undefined
   let frame: number | undefined
+  function fit(element: Element): void {
+    if (element.hasAttribute(strut)) fitStrut(element)
+    else fitTable(element)
+  }
+
   function schedule(elements: Iterable<Element>): void {
     for (const element of elements) pending.add(element)
     frame ??= requestAnimationFrame(() => {
       frame = undefined
-      for (const table of pending) {
-        if (table.isConnected) fitTable(table)
+      const elements = new Set<Element>()
+      for (const target of pending) {
+        const element = observed.get(target)
+        if (element?.isConnected) elements.add(element)
         else {
-          resize?.unobserve(table)
-          observed.delete(table)
+          resize?.unobserve(target)
+          observed.delete(target)
         }
       }
       pending.clear()
+      for (const element of elements) fit(element)
     })
   }
 
+  function observe(target: Element, element: Element): void {
+    if (observed.has(target)) return
+    if (!resize) {
+      resize = new ResizeObserver(entries => schedule(entries.map(entry => entry.target)))
+      document.fonts?.addEventListener('loadingdone', () => schedule(observed.keys()))
+    }
+    observed.set(target, element)
+    resize.observe(target)
+  }
+
   return (root, watch = true) => {
-    for (const table of root.querySelectorAll(selector)) {
-      fitTable(table)
-      if (!watch || observed.has(table)) continue
-      if (!resize) {
-        resize = new ResizeObserver(entries => schedule(entries.map(entry => entry.target)))
-        document.fonts?.addEventListener('loadingdone', () => schedule(observed))
+    // A tag can depend on the dimensions of a strut in its equation.
+    for (const element of Array.from(root.querySelectorAll(selector)).reverse()) {
+      fit(element)
+      if (!watch) continue
+      // The unpadded glyphs change size even when the outer strut has fixed dimensions.
+      if (element.hasAttribute(strut)) {
+        for (const child of element.firstElementChild?.children ?? []) observe(child, element)
       }
-      observed.add(table)
-      resize.observe(table)
+      else observe(element, element)
     }
   }
 }

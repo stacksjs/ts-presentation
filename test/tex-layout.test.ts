@@ -1662,6 +1662,17 @@ test('reads Mathtools math boxes with inherited styles and measured widths', () 
   expect(() => formula(String.raw`\text{\mathmbox{x}}`)).toThrow('requires math mode')
 })
 
+test('reads signed variable math struts and shares the zero adjustment with a standard strut', () => {
+  const normal = formula(String.raw`x\mathstrut y`)
+  expect(formula(String.raw`x\xmathstrut{0} y`)).toBe(normal)
+  expect(formula(String.raw`x\xmathstrut[-0]{+0.0} y`)).toBe(normal)
+  expect(formula(String.raw`x\xmathstrut{+0.25}y`)).toContain('data-math-strut="0.25 0.25"')
+  expect(formula(String.raw`\def\ratio{.2}x_{\xmathstrut[-.15]{\ratio}}`)).toContain('data-math-strut="0.2 -0.15"')
+  expect(() => formula(String.raw`\xmathstrut{1em}`)).toThrow('Invalid variable math strut adjustment')
+  expect(() => formula(String.raw`\xmathstrut[position]{.1}`)).toThrow('Invalid variable math strut adjustment')
+  expect(() => formula(String.raw`\text{\xmathstrut{1}}`)).toThrow('requires math mode')
+})
+
 test('renders explicit TeX breaks in inline, display, text, and alignment math', () => {
   const math = createMathRenderer({ throwOnError: true, maxSize: 2 })
   const source = String.raw`a\\[4em]b\newline[c]`
@@ -2058,7 +2069,7 @@ test.skipIf(!chrome)('shifts radical degrees in both axes without moving the rad
   }
 })
 
-test.skipIf(!chrome)('moves conflicting AMS tags and raises only tags on their own line', async () => {
+test.skipIf(!chrome)('fits equation tags and measures variable struts in the active math font', async () => {
   const align = String.raw`\begin{align}a&=\hspace{6em}b\tag*{Quality control check}\raisetag{6px}\\c&=d\tag*{OK}\end{align}`
   const displays = [
     ['right', true, {}, align],
@@ -2069,6 +2080,12 @@ test.skipIf(!chrome)('moves conflicting AMS tags and raises only tags on their o
     ['single', true, { leqno: true }, String.raw`a=\hspace{6em}b\tag*{Quality control check}\raisetag{6px}`],
   ] as const
   const body = displays.map(([id, narrow, options, equation]) => `<section id="${id}" style="width:${narrow ? 310 : 740}px">${createMathRenderer(options)(equation, true)}</section>`).join('')
+  const struts = [
+    renderMath(String.raw`\xmathstrut{.25}`),
+    renderMath(String.raw`\xmathstrut[-.05]{.2}`),
+    renderMath(String.raw`x_{\xmathstrut{.25}}`),
+    createMathRenderer({ maxSize: 0.25 })(String.raw`\xmathstrut{1}`, false),
+  ].join('')
   const css = await Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url)).text()
   const bundle = await Bun.build({ entrypoints: [new URL('../packages/client/runtime/equation-tags.ts', import.meta.url).pathname], target: 'browser' })
   if (!bundle.success) throw new AggregateError(bundle.logs, 'Could not build equation tag fitting')
@@ -2077,11 +2094,44 @@ test.skipIf(!chrome)('moves conflicting AMS tags and raises only tags on their o
     fetch: request => new URL(request.url).pathname === '/tags.js'
       ? new Response(bundle.outputs[0], { headers: { 'Content-Type': 'text/javascript' } })
       : new Response(`<!doctype html><style>${css} section { font-size:24px; }</style>${body}
-        <script type="module">import {createEquationTagFit} from '/tags.js'; createEquationTagFit()(document);</script>`, { headers: { 'Content-Type': 'text/html' } }),
+        <div id="struts" style="font-size:28px;transform:scale(.75)">${struts}</div>
+        <script type="module">import {createEquationFit} from '/tags.js'; createEquationFit()(document);</script>`, { headers: { 'Content-Type': 'text/html' } }),
   })
   const browser = new Bun.WebView({ width: 860, height: 760, backend: { type: 'chrome', path: chrome!, url: false } })
   try {
     await browser.navigate(server.url.href)
+    const sizes = await browser.evaluate<Array<{ ascent: number, total: number, height: number, depth: number, wide: number, tall: number }>>(`[...document.querySelectorAll('[data-math-strut]')].map(strut => {
+      const [measure, space] = strut.children
+      const [glyph, ascender] = measure.children
+      const { width, height } = strut.getBoundingClientRect()
+      return {
+        ascent: parseFloat(getComputedStyle(ascender).height), total: parseFloat(getComputedStyle(glyph).height),
+        height: parseFloat(space.getAttribute('height')), depth: parseFloat(space.getAttribute('depth')), wide: width, tall: height,
+      }
+    })`)
+    expect(sizes).toHaveLength(4)
+    const [normal, asymmetric, script, capped] = sizes
+    expect(script.total).toBeLessThan(normal.total)
+    for (const [index, { ascent, total, height, depth, wide, tall }] of sizes.entries()) {
+      const growth = index === 3 ? 7 : total * (index === 1 ? 0.2 : 0.25)
+      expect(height).toBeCloseTo(ascent + growth, 2)
+      expect(depth).toBeCloseTo(total - ascent + (index === 1 ? total * -0.05 : growth), 2)
+      expect(wide).toBeCloseTo(0)
+      expect(tall).toBeCloseTo((height + depth) * 0.75, 1)
+    }
+    expect(capped.height).toBeGreaterThan(asymmetric.height)
+    const resized = await browser.evaluate<number>(`(async () => {
+      const container = document.querySelector('#struts')
+      const space = container.querySelector('[data-math-strut] > mspace')
+      container.style.fontSize = '42px'
+      for (let attempt = 0; attempt < 30; attempt++) {
+        await new Promise(requestAnimationFrame)
+        const height = parseFloat(space.getAttribute('height'))
+        if (height > ${normal.height} * 1.25) return height
+      }
+      return 0
+    })()`)
+    expect(resized).toBeCloseTo(normal.height * 1.5, 0)
     const boxes = await browser.evaluate<Record<string, { raised: boolean, delta: number, order: string, short: boolean, within: boolean }>>(`(() => {
       return Object.fromEntries([...document.querySelectorAll('section')].map(section => {
         const raised = section.querySelector('.math-equation-number[style*="--math-tag-raise"]');

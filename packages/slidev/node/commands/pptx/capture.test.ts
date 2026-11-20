@@ -613,7 +613,7 @@ $$
 # Mathtools boxes
 
 $$
-\mathmbox{\frac{x}{y}}+\mathmakebox{b}
+\mathmbox{\frac{x}{y}}+\mathmakebox{b}\xmathstrut{0}
 $$
 
 $$
@@ -622,6 +622,10 @@ $$
 
 $$
 x\vdotswithin{=}y
+$$
+
+$$
+\frac{\xmathstrut[.2]{.3}a}{b}
 $$`)
     const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
     const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
@@ -707,7 +711,7 @@ $$`)
       expect(script).toMatch(/^<m:sub>.*?>6<\/m:t>.*?<\/m:sub><m:sup>.*?>14<\/m:t>.*?<\/m:sup><m:e>/)
     expect(prescripts[0]).toContain('<m:sty m:val="p"/>')
     expect(prescripts[1]).toMatch(/<m:e><m:sSup><m:e>.*?>C<\/m:t>.*?<\/m:e><m:sup>.*?>−<\/m:t>/)
-    expect([...parts.keys()].filter(name => name.startsWith('ppt/media/'))).toHaveLength(22)
+    expect([...parts.keys()].filter(name => name.startsWith('ppt/media/'))).toHaveLength(23)
 
     const alphabets = parts.get('ppt/slides/slide5.xml')?.toString() ?? ''
     expect(alphabets.match(/<a14:m>/g)).toHaveLength(2)
@@ -737,7 +741,8 @@ $$`)
     expect(boxes.match(/<a14:m>/g)).toHaveLength(1)
     expect(boxes).toContain('<m:f><m:num>')
     expect(boxes).toContain('>b</m:t>')
-    expect(boxes.match(/<p:pic>/g)).toHaveLength(2)
+    expect(boxes).toContain('<m:phantPr><m:show m:val="0"/><m:zeroWid m:val="1"/>')
+    expect(boxes.match(/<p:pic>/g)).toHaveLength(3)
     for (const cell of ['a', 'b', 'c', 'd']) expect(fonts.get(cell)).toBe('<m:sty m:val="i"/>')
     expect(fonts.get('i')).toBe('<m:sty m:val="p"/>')
     expect(fonts.get('plain')).toBe('<m:sty m:val="p"/>')
