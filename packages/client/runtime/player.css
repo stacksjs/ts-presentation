@@ -1150,6 +1150,15 @@ math .math-equation-number[data-equation-tag-shifted] > :first-child {
 }
 math .math-overlap-l { transform: translateX(-100%); }
 math .math-overlap-c { transform: translateX(-50%); }
+math .math-measured-box {
+  display: inline-grid;
+  grid-template-columns: max-content;
+  align-items: baseline;
+}
+math .math-measured-box > * { grid-area: 1 / 1; }
+math .math-measured-l { justify-self: start; }
+math .math-measured-c { justify-self: center; }
+math .math-measured-r { justify-self: end; }
 math .math-reflect { transform: scaleX(-1); }
 math :is(.math-cancel, .math-bcancel, .math-xcancel) { position: relative; }
 math .math-cancel-track {

@@ -547,6 +547,22 @@ $$
 
 $$
 \sqrt[\uproot{2}\leftroot{3}\beta]{z+1}
+$$
+
+---
+
+# Mathtools boxes
+
+$$
+\mathmbox{\frac{x}{y}}+\mathmakebox{b}
+$$
+
+$$
+x\mathmakebox[3em][r]{a}y
+$$
+
+$$
+x\vdotswithin{=}y
 $$`)
     const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
     const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
@@ -554,7 +570,7 @@ $$`)
     if (status) throw new Error(stderr)
     const frames: PowerPointFrame[] = []
     await captureFrames({ root: join(root, 'dist'), executable: chrome!, scale: 1, canvas, editable: true, withClicks: false }, frame => { frames.push(frame) })
-    expect(frames).toHaveLength(7)
+    expect(frames).toHaveLength(8)
     const equations = frames[0].editable?.nodes.filter((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math') ?? []
     expect(equations).toHaveLength(4)
     expect(equations.filter(node => node.equation)).toHaveLength(3)
@@ -632,7 +648,7 @@ $$`)
       expect(script).toMatch(/^<m:sub>.*?>6<\/m:t>.*?<\/m:sub><m:sup>.*?>14<\/m:t>.*?<\/m:sup><m:e>/)
     expect(prescripts[0]).toContain('<m:sty m:val="p"/>')
     expect(prescripts[1]).toMatch(/<m:e><m:sSup><m:e>.*?>C<\/m:t>.*?<\/m:e><m:sup>.*?>−<\/m:t>/)
-    expect([...parts.keys()].filter(name => name.startsWith('ppt/media/'))).toHaveLength(19)
+    expect([...parts.keys()].filter(name => name.startsWith('ppt/media/'))).toHaveLength(22)
 
     const alphabets = parts.get('ppt/slides/slide5.xml')?.toString() ?? ''
     expect(alphabets.match(/<a14:m>/g)).toHaveLength(2)
@@ -658,6 +674,11 @@ $$`)
     const adjusted = parts.get('ppt/slides/slide7.xml')?.toString() ?? ''
     expect(adjusted.match(/<p:pic>/g)).toHaveLength(1)
     expect(adjusted).not.toContain('<m:rad>')
+    const boxes = parts.get('ppt/slides/slide8.xml')?.toString() ?? ''
+    expect(boxes.match(/<a14:m>/g)).toHaveLength(1)
+    expect(boxes).toContain('<m:f><m:num>')
+    expect(boxes).toContain('>b</m:t>')
+    expect(boxes.match(/<p:pic>/g)).toHaveLength(2)
     for (const cell of ['a', 'b', 'c', 'd']) expect(fonts.get(cell)).toBe('<m:sty m:val="i"/>')
     expect(fonts.get('i')).toBe('<m:sty m:val="p"/>')
     expect(fonts.get('plain')).toBe('<m:sty m:val="p"/>')

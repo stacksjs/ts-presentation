@@ -1596,10 +1596,33 @@ test('sets text and mixed math in framed, raised, and centered boxes', () => {
 })
 
 test('keeps style-dependent math in a lap and uses text mode for plain laps', () => {
-  const html = renderMath(String.raw`\sum_{\mathclap{\mathchoice{D}{T}{S}{s}}}+\text{\rlap{test}}`, true)
+  const choice = String.raw`\mathchoice{D}{T}{S}{s}`
+  const html = renderMath(String.raw`\sum_{\mathclap{${choice}}}+\text{\rlap{test}}`, true)
   expect(html).toContain('<munder>')
   expect(html).toContain('<mpadded width="0"><mrow class="math-overlap-c"><mrow><mi>S</mi></mrow>')
   expect(html).toContain('<mpadded width="0"><mrow class="math-overlap-r"><mtext>test</mtext>')
+  expect(formula(String.raw`\sum_{\mathclap[\displaystyle]{${choice}}}`, true))
+    .toContain('<mstyle displaystyle="true" scriptlevel="0"><mrow><mi>D</mi></mrow></mstyle>')
+  expect(formula(String.raw`\def\scripts{\scriptscriptstyle}\mathllap[\scripts]{${choice}}`))
+    .toContain('<mstyle displaystyle="false" scriptlevel="2"><mrow><mi>s</mi></mrow></mstyle>')
+  expect(formula(String.raw`\mathrlap[]{${choice}}`)).toBe(formula(String.raw`\mathrlap{${choice}}`))
+  expect(() => formula(String.raw`\mathclap[unknown]{a}`)).toThrow('Invalid math lap style')
+})
+
+test('reads Mathtools math boxes with inherited styles and measured widths', () => {
+  const choice = String.raw`\mathchoice{D}{T}{S}{s}`
+  expect(formula(String.raw`\mathmbox{${choice}}`, true)).toContain('<mrow><mi>D</mi></mrow>')
+  expect(formula(String.raw`x_{\mathmakebox{${choice}}}`)).toContain('<mi>S</mi>')
+  expect(formula(String.raw`\mathmakebox[\width][r]{x}`)).toBe(formula(String.raw`\mathmbox{x}`))
+  expect(formula(String.raw`\ensuremath{x+y}`)).toBe(formula('x+y'))
+  expect(formula(String.raw`\text{at \ensuremath{x+y}}`)).toBe(formula(String.raw`\text{at \(x+y\)}`))
+  expect(formula(String.raw`\def\measure#1{\widthof{\ensuremath{#1}}}\mathmakebox[\measure{WW}][r]{y}`))
+    .toContain('<mphantom><mrow class="math-font-reset"><mi>W</mi><mi>W</mi></mrow></mphantom>')
+  expect(formula(String.raw`\def\size{4em}\mathmakebox[\size]{x}`)).toContain('width="4em" lspace="2em"')
+  expect(() => formula(String.raw`\mathmakebox[2em][x]{a}`)).toThrow('Invalid math box alignment')
+  expect(() => formula(String.raw`\mathmakebox[purple]{a}`)).toThrow('Invalid math box dimension')
+  expect(() => formula(String.raw`\mathmakebox[\widthof{word}extra]{a}`)).toThrow('Unexpected tokens after math box width measurement')
+  expect(() => formula(String.raw`\text{\mathmbox{x}}`)).toThrow('requires math mode')
 })
 
 test('renders explicit TeX breaks in inline, display, text, and alignment math', () => {
@@ -3151,6 +3174,62 @@ test.skipIf(!chrome)('positions lap contents and explicit operator limits in Chr
     })`)
     expect(Math.abs(stacked)).toBeLessThan(2)
     expect(inline).toBeGreaterThan(5)
+  }
+  finally {
+    view.close()
+    server.stop(true)
+  }
+}, 45000)
+
+test.skipIf(!chrome)('preserves the advance, alignment, and baseline of Mathtools math boxes in Chromium', async () => {
+  const alignments = ['l', 'c', 'r']
+  const probe = String.raw`\frac{WW}{WW}`
+  const formulas = [
+    ...alignments.map(alignment => String.raw`A\mathmakebox[3em][${alignment}]{A}A`),
+    ...alignments.map(alignment => String.raw`A\mathmakebox[\widthof{\ensuremath{${probe}}}][${alignment}]{A}A`),
+    String.raw`A\mathmakebox[-1em][r]{A}A`,
+    String.raw`A\mathmakebox[0px]{A}A`,
+    String.raw`A\vdotswithin{=}A`,
+    String.raw`A{${probe}}A`,
+    String.raw`A{{}={}}A`,
+    String.raw`A\mathmakebox[3em]{+}A`,
+    String.raw`A\mathmbox{+}A`,
+    String.raw`A\mathord{+}A`,
+  ]
+  const body = formulas.map(tex => `<div>${renderMath(tex)}</div>`).join('')
+  const css = Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url))
+  const server = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    fetch(request) {
+      if (new URL(request.url).pathname === '/presentation.css') return new Response(css)
+      return new Response(`<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="/presentation.css"><main style="margin:60px;font-size:28px">${body}</main>`, {
+        headers: { 'Content-Type': 'text/html; charset=utf-8' },
+      })
+    },
+  })
+  const view = new Bun.WebView({ width: 720, height: 800, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await view.navigate(server.url.href)
+    const positions = await view.evaluate<Array<{ advance: number, inkLeft?: number, inkWidth?: number, inkOffset?: number }>>(`[...document.querySelectorAll('main > div')].map(formula => {
+      const row = formula.querySelector('semantics > mrow')
+      const start = row.firstElementChild.getBoundingClientRect()
+      const end = row.lastElementChild.getBoundingClientRect()
+      const ink = row.querySelector('[class^="math-overlap"]')?.getBoundingClientRect()
+      return { advance: end.left - start.right, inkLeft: ink && ink.left - start.right, inkWidth: ink?.width, inkOffset: ink && ink.top - end.top }
+    })`)
+    const [negative, zero, dots, measured, relation, fixedOperator, naturalOperator, referenceOperator] = positions.slice(6)
+    const widths = [84, 84, 84, measured.advance, measured.advance, measured.advance, -28, 0, relation.advance]
+    const anchors = [0, 0.5, 1, 0, 0.5, 1, 1, 0.5, 0.5]
+    for (const [index, box] of positions.slice(0, 9).entries()) {
+      expect(Math.abs(box.advance - widths[index])).toBeLessThan(1)
+      expect(Math.abs(box.inkLeft! + box.inkWidth! * anchors[index] - box.advance * anchors[index])).toBeLessThan(1)
+    }
+    expect(measured.advance).toBeGreaterThan(20)
+    for (const box of [...positions.slice(0, 6), negative, zero]) expect(Math.abs(box.inkOffset!)).toBeLessThan(1)
+    expect(dots.inkWidth).toBeGreaterThan(0)
+    expect(Math.abs(fixedOperator.advance - 84)).toBeLessThan(1)
+    expect(Math.abs(naturalOperator.advance - referenceOperator.advance)).toBeLessThan(1)
   }
   finally {
     view.close()

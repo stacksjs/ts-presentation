@@ -355,6 +355,8 @@ const builtinMacros = new Map<string, Macro>(Object.entries(legacyColors).map(([
   [`\\${name}`, { body: ['\\textcolor', '{', value, '}', '{', '#1', '}'], parameters: [[]], prefix: [] }]))
 builtinMacros.set('\\boxed', { body: tokenize('\\fbox{$\\displaystyle{#1}$}'), parameters: [[]], prefix: [] })
 builtinMacros.set('\\substack', { body: tokenize('\\begin{subarray}{c}#1\\end{subarray}'), parameters: [[]], prefix: [] })
+builtinMacros.set('\\ensuremath', { body: tokenize('\\TextOrMath{\\(#1\\)}{#1}'), parameters: [[]], prefix: [] })
+builtinMacros.set('\\vdotswithin', { body: tokenize('{\\mathmakebox[\\widthof{\\ensuremath{{}#1{}}}][c]{\\vdots}}'), parameters: [[]], prefix: [] })
 builtinMacros.set('\\splitfrac', { body: tokenize('\\@splitfrac{1}{\\textstyle#1\\quad}{\\textstyle\\quad\\mathstrut#2}'), parameters: [[], []], prefix: [] })
 builtinMacros.set('\\splitdfrac', { body: tokenize('\\@splitfrac{0}{#1\\quad}{\\quad\\mathstrut#2}'), parameters: [[], []], prefix: [] })
 // LaTeX's spacing macro follows KaTeX's expansion, including the starred zero-width rule.
@@ -921,7 +923,7 @@ const sizeCommands: Readonly<Record<string, number>> = {
 }
 const infixFractions = new Set(['\\over', '\\atop', '\\choose', '\\brace', '\\brack', '\\above'])
 const primitiveArgumentFunctions = new Set(['frac', 'dfrac', 'tfrac', 'binom', 'dbinom', 'tbinom', 'genfrac', 'cfrac', ...Object.keys(variants)])
-const groupedArgumentFunctions = new Set(['sqrt', 'left', 'mathllap', 'mathclap', 'mathrlap', 'angl'])
+const groupedArgumentFunctions = new Set(['sqrt', 'left', 'mathllap', 'mathclap', 'mathrlap', 'mathmbox', 'mathmakebox', 'angl'])
 const intertextCommands: ReadonlyMap<string, string> = new Map([
   ['\\intertext', 'normal'],
   ['\\shortintertext', 'short'],
@@ -1084,6 +1086,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   let textMonospace = false
   let textFont: Readonly<TextFont> | undefined
   let mathFontActive = false
+  let explicitMathBoxSpacing = false
   let linkDepth = 0
   let context: MathMacroContext | undefined
   let localReferences: ReturnType<typeof createEquationReferences> | undefined
@@ -1874,6 +1877,53 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return xml`<mpadded width="0"><mrow class="math-overlap-${direction}">${content}</mrow></mpadded>`
   }
 
+  function withMathBoxSpacing(read: () => Markup): Markup {
+    const previousSpacing = explicitMathBoxSpacing
+    explicitMathBoxSpacing = true
+    try { return read() }
+    finally { explicitMathBoxSpacing = previousSpacing }
+  }
+
+  function mathBox(name: string): Markup {
+    const size = name === 'mathmakebox' ? rawBracket() : undefined
+    if (size === undefined) return withMathBoxSpacing(argument)
+
+    const position = rawBracket()
+    const alignment = position === undefined ? 'c' : expandDefinition(position).join('').trim()
+    if (!/^[lcr]$/.test(alignment)) throw new MathParseError('Invalid math box alignment')
+
+    const width = inScope(() => withTokens(size, () => {
+      if (peek() === '\\widthof') {
+        take()
+        const probe = withMathBoxSpacing(() => textArgument('hbox'))
+        if (peek() !== boundary) throw new MathParseError('Unexpected tokens after math box width measurement')
+        return { probe }
+      }
+      const value = expandDefinition(tokens.slice(cursor, -1)).join('').trim()
+      if (value === '\\width') return
+      const length = dimension(value)
+      if (length === undefined) throw new MathParseError('Invalid math box dimension')
+      return { length }
+    }))
+    const content = withMathBoxSpacing(argument)
+    if (width === undefined) return content
+
+    // TeX aligns the right edge for r and the center for c.
+    const direction = alignment === 'c' ? 'c' : alignment === 'r' ? 'l' : 'r'
+    const ink = (offset?: string) => xml`<mrow class="math-overlap-${direction}"${offset ? ` style="position:relative;left:${offset}"` : ''}>${content}</mrow>`
+    if (width.probe !== undefined) {
+      return xml`<mrow class="math-measured-box"><mpadded height="0" depth="0" aria-hidden="true"><mphantom>${width.probe}</mphantom></mpadded><mpadded width="0" class="math-measured-${alignment}">${ink()}</mpadded></mrow>`
+    }
+    const { length } = width
+    const magnitude = Number.parseFloat(length)
+    const unit = /[a-z]+$/.exec(length)?.[0] ?? ''
+    const anchor = alignment === 'r' ? length : alignment === 'c' ? `${magnitude / 2}${unit}` : '0'
+    // Chromium clamps negative lspace values. Shift the ink independently
+    // of the negative advance, as with a negative TeX kern.
+    if (magnitude < 0) return xml`<mpadded width="0" style="margin-inline-end:${length}">${ink(anchor)}</mpadded>`
+    return xml`<mpadded width="${length}" lspace="${anchor}">${ink()}</mpadded>`
+  }
+
   function untrusted(command: string): string {
     const color = mathErrorColor(options?.errorColor)
     return `<mtext class="math-untrusted" style="color:${color}">${escapeHtml(command)}</mtext>`
@@ -2341,7 +2391,9 @@ export function renderMath(source: string, display = false, configured: MathMacr
     let infix = ''
     let thickness: string | undefined
     const finish = (wrap = false) => {
-      const content = joinRow(parts, wrap && !lines, followsOrdinary)
+      // Math boxes own their operator spacing. Intrinsic MathML widths can
+      // omit native spacing in a grid, and embellished operators can leak it.
+      const content = joinRow(parts, wrap && !lines, followsOrdinary, explicitMathBoxSpacing)
       return lines ? lineTable([...lines, { content }], display && exposeLines, !display || options?.fleqn === true) : content
     }
     for (let token = peek(); token && !stop.includes(token); token = peek()) {
@@ -3155,11 +3207,23 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (name === 'textcolor' || (name === 'color' && options?.colorIsTextColor)) return { markup: coloredArgument(false) }
     if (textBoxes.has(name)) return { markup: textBox(name) }
     if (name === 'mathreflectbox') return { markup: xml`<mrow class="math-reflect">${argument()}</mrow>` }
+    if (name === 'mathmbox' || name === 'mathmakebox') return { markup: mathBox(name) }
     if (name === 'vcenter') {
       return { markup: xml`<mtable class="math-vcenter"><mtr><mtd>${argument()}</mtd></mtr></mtable>` }
     }
     const lap = /^(math)?([lcr])lap$/.exec(name)
-    if (lap) return { markup: overlap(lap[2], lap[1] ? argument() : textArgument()) }
+    if (lap) {
+      if (!lap[1]) return { markup: overlap(lap[2], textArgument()) }
+      const choice = expandDefinition(rawBracket() ?? []).join('').trim()
+      if (choice && !Object.hasOwn(styleCommands, choice)) throw new MathParseError('Invalid math lap style')
+      const content = argument()
+      if (!choice) return { markup: overlap(lap[2], content) }
+      const forced = styleCommands[choice]
+      return { markup: overlap(lap[2], style => {
+        const body = renderMarkup(content, forced)
+        return forced === style ? body : mathSize(forced, body)
+      }) }
+    }
     if (name === 'left') return { markup: pairedDelimiters() }
     if (name === 'right') throw new MathParseError('Unexpected \\right')
     if (name === 'middle') {
