@@ -94,6 +94,44 @@ test('renders taskless Gantt directives and opts into the host calendar in front
   expect(charts.utc).toContain('data-task-start="2020-11-01T00:00:00.000Z" data-task-end="2020-11-02T00:00:00.000Z"')
 })
 
+test('shades consecutive local holidays through a midnight gap in the built deck', async () => {
+  const module = new URL('../packages/slidev/node/runtime/index.ts', import.meta.url).pathname
+  const source = [
+    '# Local calendar', '', '~~~mermaid', '---', 'config:', '  gantt:', '    timeZone: local', '---',
+    'gantt', 'axisFormat %Y-%m-%d %H:%M', 'tickInterval 1day', 'todayMarker off',
+    'excludes sunday monday',
+    'Release :release, 2019-09-07, 2019-09-09',
+    'Cutoff :vert, cutoff, 2019-09-09T00:30, 0d',
+    '~~~',
+    '', '---', '', '# Formatted holiday', '',
+    '~~~mermaid', '---', 'config:', '  gantt:', '    timeZone: local', '---',
+    'gantt', 'dateFormat YYYY-MM-DD[T]HH:mm', 'todayMarker off',
+    'excludes 2019-09-09T00:00',
+    'Draft :draft, 2019-09-07T00:00, 2d',
+    'Publish :publish, after draft, 1d',
+    '~~~',
+  ].join('\n')
+  const code = `
+    import { parseDeck, renderDeck } from ${JSON.stringify(module)}
+    console.log(await renderDeck(parseDeck(${JSON.stringify(source)})))
+  `
+  const child = Bun.spawn([process.execPath, '-e', code], {
+    env: { ...process.env, TZ: 'America/Santiago' }, stdout: 'pipe', stderr: 'pipe',
+  })
+  const [status, html, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()])
+  if (status) throw new Error(stderr)
+  const bands = [...html.matchAll(/class="diagram-gantt-excluded" data-excluded-start="([^"]+)" data-excluded-end="([^"]+)"/g)]
+  expect(bands.map(([, start, end]) => [start, end])).toEqual([
+    ['2019-09-08', '2019-09-10'], ['2019-09-09', '2019-09-10'],
+  ])
+  expect(html).toContain('data-task-id="release" data-task-start="2019-09-07T04:00:00.000Z" data-task-end="2019-09-09T03:00:00.000Z"')
+  expect(html).toContain('data-task-id="cutoff" data-task-start="2019-09-09T03:30:00.000Z"')
+  expect(html).toContain('<title>2019-09-08 01:00</title>')
+  expect(html).toContain('<title>2019-09-09 00:00</title>')
+  expect(html).toContain('data-task-id="draft" data-task-start="2019-09-07T04:00:00.000Z" data-task-end="2019-09-10T03:00:00.000Z" data-task-bar-end="2019-09-09T03:00:00.000Z"')
+  expect(html).toContain('data-task-id="publish" data-task-start="2019-09-10T03:00:00.000Z"')
+})
+
 test('honors the custom work week, split holidays, and inclusion overrides in Gantt imports', () => {
   const source = `gantt
 dateFormat DD-MM-YYYY
