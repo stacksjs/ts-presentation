@@ -355,6 +355,8 @@ const builtinMacros = new Map<string, Macro>(Object.entries(legacyColors).map(([
   [`\\${name}`, { body: ['\\textcolor', '{', value, '}', '{', '#1', '}'], parameters: [[]], prefix: [] }]))
 builtinMacros.set('\\boxed', { body: tokenize('\\fbox{$\\displaystyle{#1}$}'), parameters: [[]], prefix: [] })
 builtinMacros.set('\\substack', { body: tokenize('\\begin{subarray}{c}#1\\end{subarray}'), parameters: [[]], prefix: [] })
+builtinMacros.set('\\splitfrac', { body: tokenize('\\@splitfrac{1}{\\textstyle#1\\quad}{\\textstyle\\quad\\mathstrut#2}'), parameters: [[], []], prefix: [] })
+builtinMacros.set('\\splitdfrac', { body: tokenize('\\@splitfrac{0}{#1\\quad}{\\quad\\mathstrut#2}'), parameters: [[], []], prefix: [] })
 // LaTeX's spacing macro follows KaTeX's expansion, including the starred zero-width rule.
 builtinMacros.set('\\hspace', { body: tokenize('\\@ifstar\\@hspacer\\@hspace'), parameters: [], prefix: [] })
 builtinMacros.set('\\@hspace', { body: tokenize('\\hskip #1\\relax'), parameters: [[]], prefix: [] })
@@ -928,7 +930,7 @@ const mathModeFunctions = new Set([
   ...groupedArgumentFunctions, ...primitiveArgumentFunctions, ...Object.keys(mathClasses), ...Object.keys(accents),
   ...Object.keys(stretchedAccents), ...Object.keys(extensibleArrows),
   ...ruledAccents, ...Array.from(infixFractions, command => command.slice(1)),
-  'begin', 'end', 'right', 'middle', '@binrel', 'mathchoice', 'vcenter',
+  'begin', 'end', 'right', 'middle', '@binrel', '@splitfrac', 'mathchoice', 'vcenter',
   'cancel', 'bcancel', 'xcancel', 'pmb', 'phase', 'mathreflectbox',
   'prescript', 'mathstrut', 'sideset', 'overset', 'underset', 'overunderset', 'stackrel',
   'shoveleft', 'shoveright', ...Array.from(intertextCommands.keys(), command => command.slice(1)),
@@ -1018,25 +1020,30 @@ interface FractionLayout {
   forced?: MathStyle
   thickness?: string
   align?: 'left' | 'right'
+  denominatorAlign?: 'left' | 'right'
   fences?: readonly [string, string]
   continued?: boolean
 }
 
 function fractionMarkup(first: Markup, second: Markup, layout: FractionLayout): Markup {
-  const { forced, thickness, align, fences, continued } = layout
+  const { forced, thickness, align, denominatorAlign, fences, continued } = layout
   const bar = thickness !== undefined ? ` linethickness="${thickness}"` : ''
   const numerator = align ? ` numalign="${align}"` : ''
-  const start = `<mfrac${bar}${numerator}>`
+  const denominator = denominatorAlign ? ` denomalign="${denominatorAlign}"` : ''
+  const start = `<mfrac${bar}${numerator}${denominator}>`
   const [left, right] = fences ?? []
   const opening = left || right ? `<mrow>${left}${start}` : start
   const closing = left || right ? `</mfrac>${right}</mrow>` : '</mfrac>'
   // Continued fractions have TeX's numerator strut without adding ink or width.
   const top = continued ? xml`<mrow><mspace width="0" height="0.85em" depth="0.35em"/>${first}</mrow>` : first
-  if (forced === undefined && typeof top === 'string' && typeof second === 'string') return opening + top + second + closing
+  // Use one grid item per row when MathML Core does not honor numalign or denomalign.
+  const upper = align ? xml`<mrow class="math-fraction-alignment">${top}</mrow>` : top
+  const lower = denominatorAlign ? xml`<mrow class="math-fraction-alignment">${second}</mrow>` : second
+  if (forced === undefined && typeof upper === 'string' && typeof lower === 'string') return opening + upper + lower + closing
   return (parent) => {
     const target = forced ?? parent
     const child = fractionStyle(target)
-    const content = opening + renderMarkup(top, child) + renderMarkup(second, child) + closing
+    const content = opening + renderMarkup(upper, child) + renderMarkup(lower, child) + closing
     return target === parent ? content : mathSize(target, content)
   }
 }
@@ -3123,6 +3130,11 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (name === 'cfrac') {
       const align = bracket()
       return { markup: fraction({ forced: 0, continued: true, align: align === 'l' ? 'left' : align === 'r' ? 'right' : undefined }) }
+    }
+    if (name === '@splitfrac') {
+      const style = literalGroup()
+      if (style !== '0' && style !== '1') throw new MathParseError('Invalid split fraction style')
+      return { markup: fraction({ forced: style === '0' ? 0 : 1, thickness: '0', align: 'left', denominatorAlign: 'right' }) }
     }
     if (name === 'phantom') {
       const { markup, parts } = fragmentArgument()

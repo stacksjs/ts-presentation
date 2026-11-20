@@ -778,6 +778,16 @@ v-switch { display: block; }
 }
 
 .slide math[display="block"] { margin-block: 0.7em; }
+@supports (display: math) {
+  math mfrac > .math-fraction-alignment {
+    display: inline-grid;
+    inline-size: 100%;
+  }
+  math mfrac[numalign="left"] > .math-fraction-alignment:first-child,
+  math mfrac[denomalign="left"] > .math-fraction-alignment:last-child { justify-items: start; }
+  math mfrac[numalign="right"] > .math-fraction-alignment:first-child,
+  math mfrac[denomalign="right"] > .math-fraction-alignment:last-child { justify-items: end; }
+}
 .math-unrendered { white-space: pre-wrap; overflow-wrap: anywhere; }
 .math-unrendered[data-math-display] { display: block; margin-block: 0.7em; }
 .math-inline-fragment { white-space: nowrap; }

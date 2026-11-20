@@ -872,6 +872,10 @@ $$
 
 $$
 A=\left[\begin{multlined}[b][9em]a+b\\=c-d\end{multlined}\right]
+$$
+
+$$
+B=\frac{\splitfrac{x+y+z}{+w}}{n}
 $$`)
     const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
     const exportDeck = Bun.spawn([process.execPath, cli, 'export', entry, '--format', 'pptx-editable', '--output', output, '--executable-path', chrome!], {
@@ -909,7 +913,7 @@ $$`)
     expect(arrays.match(/<m:mr>/g)).toHaveLength(2)
     expect(dotted.match(/<p:pic>/g)).toHaveLength(1)
     expect(dotted).not.toContain('<a14:m>')
-    expect(multiline.match(/<p:pic>/g)).toHaveLength(1)
+    expect(multiline.match(/<p:pic>/g)).toHaveLength(2)
     expect(multiline).not.toContain('<a14:m>')
   }
   finally {

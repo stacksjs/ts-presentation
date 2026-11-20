@@ -1166,11 +1166,27 @@ test('handles general fractions, TeX math styles, and continued fractions', () =
   const html = renderMath(String.raw`\genfrac{(}{]}{2pt}{0}{a}{b}+\cfrac[r]{1}{1+\tfrac12}`)
   expect(html).toContain('<mstyle displaystyle="true" scriptlevel="0"><mrow><mo stretchy="true">(</mo><mfrac linethickness="2pt">')
   expect(html).toContain('<mo stretchy="true">]</mo>')
-  expect(html).toContain('<mfrac numalign="right"><mrow><mspace width="0" height="0.85em" depth="0.35em"/>')
+  expect(html).toContain('<mfrac numalign="right"><mrow class="math-fraction-alignment"><mrow><mspace width="0" height="0.85em" depth="0.35em"/>')
   const choices = String.raw`\mathchoice{D}{T}{S}{s} + x^{\mathchoice{D}{T}{S}{s}}`
   expect(renderMath(choices)).toContain('<semantics><mrow><mi>T</mi>')
   expect(renderMath(choices, true)).toContain('<semantics><mrow><mi>D</mi>')
   expect(renderMath(choices)).toContain('<mrow><mi>S</mi></mrow>')
+})
+
+test('expands split fractions with the Mathtools row styles and spacing', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const split = String.raw`\splitfrac{\mathchoice D T S X}{+b}`
+  const markup = math(split, true).split('<annotation')[0]
+  const fraction = '<mfrac linethickness="0" numalign="left" denomalign="right">'
+  expect(markup).toContain('<mstyle displaystyle="false" scriptlevel="0">' + fraction)
+  expect(markup).toContain('<mi>T</mi><mspace width="1em"/>')
+  expect(markup).toContain('<mspace width="1em"/><mpadded width="0"><mphantom><mo stretchy="false">(</mo>')
+  expect(math(String.raw`\edef\saved{${split}}\saved`, true).split('<annotation')[0]).toBe(markup)
+
+  const display = math(String.raw`\splitdfrac{x+\frac ab}{y}`, false).split('<annotation')[0]
+  expect(display).toContain('<mstyle displaystyle="true" scriptlevel="0">' + fraction)
+  expect(display).toContain('<mfrac><mi>a</mi><mi>b</mi></mfrac>')
+  expect(() => math(String.raw`\text{\splitfrac ab}`, false)).toThrow('requires math mode')
 })
 
 test('spaces math choice branches in the surrounding row at the selected style', () => {
@@ -2334,6 +2350,52 @@ test.skipIf(!chrome)('renders legacy font boundaries and colon relation gaps in 
     server.stop(true)
   }
 }, 45_000)
+
+test.skipIf(!chrome)('aligns split fraction rows and continued numerators in Chromium', async () => {
+  const formulas = [
+    String.raw`\frac{\splitfrac{\text{short}}{\text{a much wider continuation}}}{z}`,
+    String.raw`\frac{\splitdfrac{\text{a much wider first line}}{\text{short}}}{z}`,
+    String.raw`\cfrac[l]{\text{short}}{\text{a much wider denominator}}`,
+    String.raw`\cfrac[r]{\text{short}}{\text{a much wider denominator}}`,
+  ]
+  const css = await Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url)).text()
+  const body = formulas.map(source => `<div>${renderMath(source, true)}</div>`).join('')
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response(`<!doctype html><style>${css}</style><main style="font-size:32px">${body}</main>`, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    }),
+  })
+  const view = new Bun.WebView({ width: 900, height: 720, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await view.navigate(server.url.href)
+    const positions = await view.evaluate<{ leading: number, trailing: number, gap: number, offsets: number[] }[]>(`[...document.querySelectorAll('mfrac[numalign]')].map(fraction => {
+      const bounds = fraction.getBoundingClientRect()
+      const [upper, lower] = [...fraction.querySelectorAll('mtext')].map(text => text.getBoundingClientRect())
+      return {
+        leading: upper.left - bounds.left,
+        trailing: bounds.right - lower.right,
+        gap: lower.top - upper.bottom,
+        offsets: [lower.left - upper.left, upper.right - lower.right, bounds.right - upper.right],
+      }
+    })`)
+    expect(positions).toHaveLength(4)
+    for (const split of positions.slice(0, 2)) {
+      expect(split.leading).toBeLessThan(3)
+      expect(split.trailing).toBeLessThan(3)
+      expect(split.gap).toBeGreaterThan(0)
+      expect(split.offsets[0]).toBeGreaterThan(20)
+    }
+    expect(positions[1].offsets[2]).toBeGreaterThan(30)
+    expect(positions[2].leading).toBeLessThan(3)
+    expect(positions[3].offsets[2]).toBeLessThan(3)
+    expect(positions[3].leading - positions[2].leading).toBeGreaterThan(80)
+  }
+  finally {
+    view.close()
+    await server.stop(true)
+  }
+})
 
 test.skipIf(!chrome)('lays out compact TeX arrays with script-sized rows and correct alignment in Chromium', async () => {
   const examples = [
