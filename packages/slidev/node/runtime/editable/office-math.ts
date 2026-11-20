@@ -1,5 +1,6 @@
 import { escapeHtml } from '../html.ts'
 import { baseMathLetters } from '../math-alphabets.ts'
+import { texArrowMinWidth } from '../math-arrow.ts'
 import type { MathStyle } from '../math-markup.ts'
 import { fractionStyle, scriptStyle } from '../math-markup.ts'
 import { nullDelimiterWidth } from '../math-sizing.ts'
@@ -23,7 +24,8 @@ const accents: Readonly<Record<string, string>> = {
   '˚': '\u030a', 'ˉ': '\u0304', '→': '\u20d7', '⃗': '\u20d7',
 }
 const zeroLength = /^-?0(?:\.0+)?[a-z]+$/
-const stretchMarks = new Set(['⏞', '⏟', '←', '→', '↔', '⇐', '⇒', '⇔', '↼', '⇀'])
+const stretchMarks = new Set(['⏞', '⏟', '⏠', '⏡', '←', '→', '↔', '⇐', '⇒', '⇔', '↼', '⇀', '↽', '⇁'])
+const extensibleArrows = new Set(['←', '→', '↔', '⇐', '⇒', '⇔'])
 const nullFenceSpace = '\u200a'
 const spaces = [[Number.parseFloat(nullDelimiterWidth), nullFenceSpace], [0.17, '\u2009'], [2 / 9, '\u205f'], [5 / 18, '\u2005'], [0.5, '\u2002'], [1, '\u2003'], [2, '\u2003\u2003']] as const
 const strikeProperties: Readonly<Record<string, readonly string[]>> = {
@@ -104,6 +106,7 @@ function followingTerm(nodes: readonly RawMathElement[], start: number): number 
   let index = start
   for (; index < nodes.length; index++) {
     const node = nodes[index]
+    if (depth === 0 && /^(?:munder|mover|munderover)$/.test(node.name) && node.children[0]?.attributes.class === 'math-arrow-body') break
     if (node.name !== 'mo') continue
     const glyph = node.text
     if (depth === 0 && termSeparators.has(glyph)) break
@@ -191,11 +194,40 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba, 
     }
     return output
   }
+  const limit = (tag: string, content: string, value: string) => wrap(tag, wrap('e', content) + wrap('lim', value))
+  function groupCharacter(glyph: string, position: 'top' | 'bot', alignment: 'top' | 'bot', content: string, argumentSize = 0): string {
+    const options = setting('chr', glyph) + setting('pos', position) + setting('vertJc', alignment) + control()
+    const size = argumentSize ? wrap('argPr', setting('argSz', String(argumentSize))) : ''
+    return wrap('groupChr', wrap('groupChrPr', options) + wrap('e', size + content))
+  }
+  function annotatedArrow(node: RawMathElement): string | undefined {
+    const [base, first, second] = node.children
+    if (!only(node) || !only(base, 'class', 'style') || base.attributes.style !== `min-width:${texArrowMinWidth}` || base.text.trim()) return
+    const [glyph, track] = base.children
+    if (base.children.length !== 2 || glyph.name !== 'mo' || glyph.children.length || !extensibleArrows.has(glyph.text)
+      || !only(glyph, 'stretchy', 'movablelimits', 'minsize', 'lspace', 'rspace') || glyph.attributes.stretchy !== 'true'
+      || glyph.attributes.movablelimits !== 'false' || glyph.attributes.minsize !== texArrowMinWidth
+      || [glyph.attributes.lspace, glyph.attributes.rspace].some(space => space !== undefined && space !== '0em')
+      || track.name !== 'mspace' || track.attributes.class !== 'math-arrow-track' || track.attributes['aria-hidden'] !== 'true'
+      || !only(track, 'class', 'aria-hidden', 'data-left', 'data-right', 'data-double') || track.text.trim() || track.children.length) return
+    const above = node.name === 'munder' ? '' : script(second ?? first)
+    const below = node.name === 'mover' ? '' : script(first)
+    if (above === undefined || below === undefined || (!above && !below)) return
+    // Stretch the group character to its wider label. The other label is a
+    // native limit so the two scripts remain independently editable.
+    const useBelow = Boolean(below && (!above || node.widerArrowLabel === 'below'))
+    const position = useBelow ? 'top' : 'bot'
+    const adjustment = Math.max(0, mathStyle - 1) - (scriptStyle(mathStyle) - 1)
+    const body = groupCharacter(glyph.text, position, position, useBelow ? below : above, adjustment)
+    const other = useBelow ? above : below
+    return other ? limit(useBelow ? 'limUpp' : 'limLow', body, other) : body
+  }
   function underOver(node: RawMathElement): string | undefined {
     const { name, attributes, children } = node
     const both = name === 'munderover'
     if (children.length !== (both ? 3 : 2)) return
     const [base, first, last] = children
+    if (base.name === 'mrow' && base.attributes.class === 'math-arrow-body') return annotatedArrow(node)
     const body = convert(base)
     if (body === undefined) return
     if (!both && (attributes.accent === 'true' || attributes.accentunder === 'true')) {
@@ -204,8 +236,7 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba, 
         || first.children.length || !only(first, 'stretchy')) return
       const glyph = first.text
       if (first.attributes.stretchy === 'true' && stretchMarks.has(glyph)) {
-        const options = setting('chr', glyph) + setting('pos', below ? 'bot' : 'top') + setting('vertJc', below ? 'top' : 'bot')
-        return wrap('groupChr', wrap('groupChrPr', options + control()) + wrap('e', body))
+        return groupCharacter(glyph, below ? 'bot' : 'top', below ? 'top' : 'bot', body)
       }
       const accent = Object.hasOwn(accents, glyph) ? accents[glyph] : undefined
       if (below || !accent) return
@@ -214,7 +245,6 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba, 
     if (!only(node)) return
     const label = script(first)
     if (label === undefined) return
-    const limit = (tag: string, content: string, value: string) => wrap(tag, wrap('e', content) + wrap('lim', value))
     if (!both) return limit(name === 'munder' ? 'limLow' : 'limUpp', body, label)
     const upper = script(last)
     if (upper !== undefined) return limit('limUpp', limit('limLow', body, label), upper)

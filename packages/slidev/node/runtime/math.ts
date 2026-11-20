@@ -1,6 +1,6 @@
 import { escapeHtml, unescapeHtml } from './html.ts'
 import type { KatexOptions, KatexTrustContext } from './authoring-setup.ts'
-import { mathArrowBody, stackMathArrow, verticalMathArrow } from './math-arrow.ts'
+import { mathArrowBody, stackMathArrow, texArrowMinWidth, verticalMathArrow } from './math-arrow.ts'
 import { styledMathAlphabets } from './math-alphabets.ts'
 import { MathParseError } from './math-error.ts'
 import { chemicalFormula, physicalUnits } from './math-chemistry.ts'
@@ -2785,7 +2785,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       }
       const above = inScript(argument())
       const bias = name === 'xleftequilibrium' ? 'left' : name === 'xrightequilibrium' ? 'right' : undefined
-      return { markup: stackMathArrow(mathArrowBody(extensibleArrows[name], '1.75em', bias), above, below) }
+      return { markup: stackMathArrow(mathArrowBody(extensibleArrows[name], texArrowMinWidth, bias), above, below) }
     }
     if (name === 'relax' || name === 'allowbreak' || name === 'nobreak') return { markup: '' }
     if (name === 'plim') return { markup: tag('mo', 'plim'), limits: true, forceLimits: true }

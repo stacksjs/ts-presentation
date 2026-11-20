@@ -403,6 +403,85 @@ $$`)
   }
 }, 45_000)
 
+it.skipIf(!chrome)('exports labeled TeX arrows as stretchable Office Math group characters', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-arrows-'))
+  const canvas = { width: 960, height: 540 }
+  try {
+    const entry = join(root, 'slides.md')
+    await Bun.write(entry, String.raw`# Labeled arrows
+
+<style>
+p, math[display="block"] { margin-block: 0.12em; }
+</style>
+
+Inline $x\xLeftarrow[\text{inverse}]{}y$.
+
+<div style="width:2.2em">
+
+$A\xrightarrow{f}B$
+
+</div>
+
+$$
+A\xleftarrow[\text{much longer lower label}]{g} B
+$$
+
+$$
+A\xleftrightarrow[s]{\frac{a+b}{c}} B
+$$
+
+---
+
+# Accents and specialized arrows
+
+$$
+\overgroup{a+b}+\undergroup{c+d}+\underleftharpoon{X}+\underrightharpoon{Y}
+$$
+
+$$
+\sum_{i=1}^{n}x_i\xRightarrow{k}y\xLeftrightarrow[m]{n}z
+$$
+
+$$
+A\xhookrightarrow{u}B + C\xrightleftharpoons[v]{w}D
+$$`)
+    const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
+    const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
+    const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
+    if (status) throw new Error(stderr)
+    const frames: PowerPointFrame[] = []
+    await captureFrames({ root: join(root, 'dist'), executable: chrome!, scale: 1, canvas, editable: true, withClicks: false }, frame => { frames.push(frame) })
+    const wrapped = frames[0].editable?.nodes.filter((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math').slice(2, 4) ?? []
+    expect(wrapped).toHaveLength(2)
+    expect(wrapped[0].equation?.expression).toContain('<m:chr m:val="→"/>')
+    expect(wrapped[1].equation?.expression).toMatch(/<m:t xml:space="preserve">B<\/m:t>/)
+    expect(wrapped[1].rect.y).toBeGreaterThan(wrapped[0].rect.y + wrapped[0].rect.h)
+    const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Labeled arrows' }))
+    const arrows = parts.get('ppt/slides/slide1.xml')?.toString()
+    expect(arrows?.match(/<a14:m>/g)).toHaveLength(6)
+    expect(arrows?.match(/<mc:Fallback><p:sp>/g)).toHaveLength(6)
+    const group = (glyph: string, position: string, align = position) => `<m:groupChrPr><m:chr m:val="${glyph}"/><m:pos m:val="${position}"/><m:vertJc m:val="${align}"/>`
+    expect(arrows).toContain(group('→', 'bot'))
+    expect(arrows).toContain(group('⇐', 'top'))
+    expect(arrows).toContain(`<m:limUpp><m:e><m:groupChr>${group('←', 'top')}`)
+    expect(arrows).toContain(`<m:limLow><m:e><m:groupChr>${group('↔', 'bot')}`)
+    expect(arrows).toContain('<m:e><m:argPr><m:argSz m:val="-1"/></m:argPr><m:f>')
+    expect(arrows).toMatch(/much longer lower label<\/m:t><\/m:r><\/m:e><\/m:groupChr><\/m:e><m:lim><m:r>.*?>g<\/m:t>/)
+    const accents = parts.get('ppt/slides/slide2.xml')?.toString()
+    expect(accents?.match(/<a14:m>/g)).toHaveLength(2)
+    expect(accents?.match(/<p:pic>/g)).toHaveLength(1)
+    expect(accents).toMatch(/<\/m:nary>(?:<m:r>.*?<\/m:r>)*<m:groupChr><m:groupChrPr><m:chr m:val="⇒"\/>/)
+    expect(accents).toContain('<m:chr m:val="⇔"/>')
+    expect(accents).toContain(group('⏠', 'top', 'bot'))
+    expect(accents).toContain(group('⏡', 'bot', 'top'))
+    expect(accents).toContain(group('↽', 'bot', 'top'))
+    expect(accents).toContain(group('⇁', 'bot', 'top'))
+  }
+  finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}, 45_000)
+
 it.skipIf(!chrome)('exports compact TeX arrays and piecewise formulas as native Office Math', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-math-arrays-'))
   try {

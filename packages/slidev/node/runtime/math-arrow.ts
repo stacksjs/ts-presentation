@@ -4,6 +4,7 @@ import { xml } from './math-markup.ts'
 
 type Head = 'open' | 'upper' | 'lower' | 'double' | 'bar' | 'hook' | 'two'
 export type EquilibriumBias = 'left' | 'right'
+export const texArrowMinWidth = '1.75em'
 
 interface Track { left?: Head, right?: Head, lane?: 'upper' | 'lower', double?: boolean }
 

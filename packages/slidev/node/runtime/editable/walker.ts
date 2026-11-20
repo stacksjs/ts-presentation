@@ -96,6 +96,10 @@ export function collectSnapshot(options: {
         children.push(nested)
       }
       const result: RawMathElement = { name: element.localName, attributes, text, children }
+      if (element.localName === 'munderover' && children[0]?.attributes.class === 'math-arrow-body' && children.length === 3) {
+        const [, below, above] = element.children
+        result.widerArrowLabel = below.getBoundingClientRect().width > above.getBoundingClientRect().width ? 'below' : 'above'
+      }
       if (/^color:[^;]+;?$/.test(attributes.style ?? '')) result.color = getComputedStyle(element).color
       if (element.localName === 'mtr' && element.hasAttribute('data-equation-dim'))
         result.opacity = Number(getComputedStyle(element).opacity)
@@ -530,8 +534,12 @@ export function collectSnapshot(options: {
       if (el.localName === 'math' || el.classList.contains('katex'))
         record.isMath = true
       const semantics = el.localName === 'math' ? el.firstElementChild : undefined
-      const presentation = semantics?.localName === 'semantics' ? semantics.firstElementChild : undefined
-      if (presentation && !el.hasAttribute('class') && !computed.getPropertyValue('--math-min-rule').trim()) {
+      // Inline wrapping creates a MathML root for each visible fragment and
+      // keeps the original formula hidden for assistive technology.
+      const fragment = semantics?.localName === 'mrow' && el.getAttribute('class') === 'math-inline-fragment'
+        && el.parentElement?.classList.contains('math-inline')
+      const presentation = fragment ? semantics : semantics?.localName === 'semantics' && !el.hasAttribute('class') ? semantics.firstElementChild : undefined
+      if (presentation && !computed.getPropertyValue('--math-min-rule').trim()) {
         const expression = mathExpression(presentation)
         const source = expression && mathProjection(presentation, expression, el.getAttribute('display') === 'block', scale)
         if (source) record.math = source
