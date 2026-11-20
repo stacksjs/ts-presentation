@@ -174,7 +174,8 @@ function parseGantt(source: string, now: number, interactionsEnabled = false, co
     // Mermaid compares these tokens to formatted dates and weekday names. Unmatched tokens are inert.
     excludes: exclusions.filter(value => value.toLowerCase() === 'weekends' || weekdays.has(value.toLowerCase()) || calendarDate(value)),
     includes: inclusions.filter(calendarDate),
-    exclusionMode: 'whole-days', durationMode: 'calendar', missingDependencyFallback: 'today', now }
+    exclusionMode: 'whole-days', fixedEndDateFormat: 'YYYY-MM-DD',
+    durationMode: 'calendar', missingDependencyFallback: 'today', now }
 }
 
 export function scheduleGantt(source: string, now: number = Date.now()): GanttSchedule | undefined {

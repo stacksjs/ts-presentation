@@ -54,10 +54,31 @@ Follow-up :milestone, followup, 10-03-2026, 0d`
   expect(scheduleGantt(source)?.tasks.map(({ id, start, end, barEnd }) => [id, start, end, barEnd])).toEqual([
     ['draft', march(5), march(7), march(6)],
     ['review', march(7), march(10), undefined],
-    ['deadline', march(5), march(8), undefined],
-    ['window', march(7), march(10), undefined],
+    ['deadline', march(5), march(10), undefined],
+    ['window', march(7), march(11), undefined],
     ['followup', march(10), march(10), undefined],
   ])
+})
+
+test('keeps ISO deadlines fixed and adjusts until endpoints for excluded days', () => {
+  const source = `gantt
+dateFormat YYYY-MM-DD
+inclusiveEndDates
+excludes weekends
+todayMarker off
+Fixed deadline :fixed, 2026-03-06, 2026-03-07
+Review window :review, 2026-03-06, until ship
+Ship :milestone, ship, 2026-03-07, 0d
+Follow-up :next, after fixed review, 1d`
+  const march = (day: number) => Date.UTC(2026, 2, day)
+  expect(scheduleGantt(source)?.tasks.map(({ id, start, end, barEnd }) => [id, start, end, barEnd])).toEqual([
+    ['fixed', march(6), march(8), undefined],
+    ['review', march(6), march(9), march(7)],
+    ['ship', march(7), march(7), undefined],
+    ['next', march(9), march(10), undefined],
+  ])
+  const svg = mermaid(source, 'adjusted-endpoints')
+  expect(svg).toContain('data-task-id="review" data-task-start="2026-03-06T00:00:00.000Z" data-task-end="2026-03-09T00:00:00.000Z" data-task-bar-end="2026-03-07T00:00:00.000Z"')
 })
 
 test('accepts mixed-case Gantt directives and preserves date formats and task IDs', () => {
