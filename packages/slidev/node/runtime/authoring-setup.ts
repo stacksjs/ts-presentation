@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import type { CodeHighlightLanguages } from './code-languages.ts'
+import { mergeDiagramOptions } from './diagram-options.ts'
 import { importDeckModule } from './deck-modules.ts'
 import type { ObserveDeckFile } from './deck-modules.ts'
 import type { MathMacros } from './math.ts'
@@ -82,7 +83,7 @@ export async function loadAuthoringSetup(root: string, observe: ObserveDeckFile,
     ])
     if (diagramRenderer !== undefined && typeof diagramRenderer !== 'function') throw new Error('setup/mermaid-renderer.ts must return a renderer function')
     if (katex) setup.katex = { ...setup.katex, ...katex, macros: { ...setup.katex?.macros, ...katex.macros } }
-    if (mermaid) setup.mermaid = { ...setup.mermaid, ...mermaid }
+    if (mermaid) setup.mermaid = mergeDiagramOptions(setup.mermaid, mermaid)
     if (diagramRenderer) setup.diagramRenderer = diagramRenderer
     if (shiki || nativeHighlight) {
       const languages = [...setup.codeLanguageSources ?? []]

@@ -78,6 +78,93 @@ test('reads Mermaid fence options without executing expressions', async () => {
   expect(disabled).toContain('$x^2$')
 })
 
+test('inherits nested diagram options from a theme, addon, deck setup, and fence', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'presentation-diagram-settings-'))
+  try {
+    const entry = join(directory, 'slides.md')
+    const schedule = ['gantt', 'Review :review, 2026-01-01, 3d'].join('\n')
+    await Promise.all([
+      Bun.write(join(directory, 'theme/index.ts'), 'export default { name: "diagram-test-theme" }'),
+      Bun.write(join(directory, 'theme/setup/mermaid.ts'), `export default () => ({
+        gantt: { leftPadding: 85, barHeight: 22 }, gitGraph: { mainBranchName: 'stable', showCommitLabel: false },
+        themeVariables: { taskBkgColor: '#335599', taskBorderColor: '#113366' },
+      })`),
+      Bun.write(join(directory, 'addon/index.ts'), 'export default { name: "diagram-test-addon" }'),
+      Bun.write(join(directory, 'addon/setup/mermaid.ts'), `export default () => ({
+        gantt: { useWidth: 500 }, gitGraph: { diagramPadding: 17 },
+      })`),
+      Bun.write(join(directory, 'setup/mermaid.ts'), `export default () => ({
+        gantt: { topAxis: true }, gitGraph: { useMaxWidth: false },
+        themeVariables: { taskTextOutsideColor: '#334455' },
+      })`),
+      Bun.write(entry, [
+        '---', 'theme: ./theme/index.ts', 'addons: ./addon/index.ts',
+        'mermaid:', '  gantt: { useMaxWidth: false }', '  gitGraph: { rotateCommitLabel: false }',
+        '  themeVariables: { taskBorderColor: "#226688" }', '---', '', '# Review plan', '',
+        "~~~mermaid {gantt: {barHeight: 12}, themeVariables: {taskBkgColor: '#774411'}}",
+        '---', 'config:', '  gantt: { axisFormat: "%m", barHeight: 16 }', '---',
+        "%%{init: {gantt: {axisFormat: '%Y', barHeight: 18}} }%%", schedule, '~~~',
+        '', '~~~mermaid', schedule, '~~~', '',
+        "~~~mermaid {gitGraph: {showCommitLabel: true}}", 'gitGraph', 'commit id:"review"', '~~~',
+        '', '~~~mermaid', 'gitGraph', 'commit id:"publish"', '~~~',
+      ].join('\n')),
+    ])
+    const { html } = await createDeckCompiler(entry)()
+    const diagrams = html.match(/<svg\b[\s\S]*?<\/svg>/g)!
+    expect(diagrams).toHaveLength(4)
+    for (const diagram of diagrams.slice(0, 2)) {
+      expect(diagram).toMatch(/viewBox="0 0 500 ([\d.]+)" width="500" height="\1"/)
+      expect(diagram).toContain('data-axis="top"')
+      expect(diagram).toMatch(/class="diagram-gantt-bar"[^>]+ x="97"/)
+      expect(diagram).toContain('stroke:#226688')
+    }
+    expect(diagrams[0]).toContain('<title>2026</title>')
+    expect(diagrams[0]).toMatch(/class="diagram-gantt-bar"[^>]+height="12"/)
+    expect(diagrams[0]).toContain('style="fill:#774411;stroke:#226688')
+    expect(diagrams[1]).toMatch(/class="diagram-gantt-bar"[^>]+height="22"/)
+    expect(diagrams[1]).toContain('style="fill:#335599;stroke:#226688')
+    for (const diagram of diagrams.slice(2)) {
+      expect(diagram).toContain('transform="translate(17 17)"')
+      expect(diagram).toContain('>stable</tspan>')
+      expect(diagram).toMatch(/viewBox="0 0 ([\d.]+) ([\d.]+)" width="\1" height="\2"/)
+    }
+    expect(diagrams[2]).toContain('class="diagram-git-label"')
+    expect(diagrams[2]).toContain('>review</tspan>')
+    expect(diagrams[3]).not.toContain('class="diagram-git-label"')
+  }
+  finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test('combines legacy diagram directives in source order and preserves quoted text', () => {
+  const history = [
+    '%% A comment before configuration',
+    "%%{init: {theme: 'forest', gitGraph: {mainBranchName: 'stable'}} }%%",
+    'gitGraph',
+    '  commit id:"root" msg:"Start of the message',
+    "%%{initialize: {theme: 'base'} }%%",
+    'End of the message"',
+    "%%{initialize: {theme: 'neutral', gitGraph: {showCommitLabel: false}} }%%",
+    '  commit id:"review"',
+  ].join('\n')
+  const svg = mermaid(history, 'legacy-history')!
+  expect(svg).toContain('data-diagram-theme="neutral"')
+  expect(svg).toContain('>stable</tspan>')
+  expect(svg).toContain('%%{initialize: {theme:')
+  expect(svg).toContain('data-commit-id="review"')
+  expect(svg).not.toContain('class="diagram-git-label"')
+
+  const schedule = [
+    'gantt',
+    "%%{init: {config: {axisFormat: '%Y', useMaxWidth: false}} }%%",
+    '  Review :review, 2026-01-01, 3d',
+  ].join('\n')
+  const chart = mermaid(schedule, 'legacy-schedule')!
+  expect(chart).toContain('<title>2026</title>')
+  expect(chart).toMatch(/viewBox="0 0 ([\d.]+) ([\d.]+)" width="\1" height="\2"/)
+})
+
 test('renders class and ER diagrams with markers and a pie chart with its legend', () => {
   const diagram = mermaid(`classDiagram
     direction LR

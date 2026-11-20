@@ -1,7 +1,8 @@
 import { mathVerbLength, renderMath } from './math.ts'
 import type { EquationOptions } from '../../../client/runtime/equation-steps.ts'
 import { parseEquationOptions } from '../../../client/runtime/equation-steps.ts'
-import type { FenceScalar } from './fence-options.ts'
+import type { MermaidOptions } from './authoring-setup.ts'
+import { parseDiagramOptions } from './diagram-options.ts'
 import { readFenceOptions } from './fence-options.ts'
 import type { CodeBlockInfo } from './code-blocks.ts'
 import { codeTabLabel, decoratedCode, parseCodeInfo } from './code-blocks.ts'
@@ -84,7 +85,7 @@ export interface MarkdownFence {
   info: string
   length: number
   code?: CodeBlockInfo
-  diagram?: { type: 'mermaid' | 'plantuml', options: Record<string, FenceScalar> }
+  diagram?: { type: 'mermaid' | 'plantuml', options: MermaidOptions }
 }
 
 interface GroupFence { opening: FenceOpening, start: number, end: number, label: string }
@@ -181,7 +182,7 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
   function renderFenceStart(line: string, opening: FenceOpening): string {
     const { marker, info, infoStart } = opening
     const [, type, diagramInfo] = /^\s*(mermaid|plantuml)\s+(\{.*\})\s*$/i.exec(info) ?? []
-    const diagram = diagramInfo && readFenceOptions(diagramInfo)
+    const diagram = diagramInfo && (readFenceOptions(diagramInfo) ?? parseDiagramOptions(diagramInfo))
     const registered = syntax.registerFence?.({
       info,
       length: marker.length,

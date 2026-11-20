@@ -82,6 +82,7 @@ in a new ts-presentation project.
 | First-party diagram authoring | YAML `charts` fences through `ts-charts` for flowcharts, sequence, state, class, ER, pie, timeline, journey, Gantt, Git history, XY charts, and Sankey diagrams |
 | Draggable elements | Inline directives, drag and arrow components, frontmatter positions, scaled editing, and local Markdown saves |
 | Imported Slidev diagrams | Compatibility fences translate the supported syntax to `ts-charts` input |
+| Diagram configuration | Nested options inherit through theme, addon, and deck setup, then deck and diagram frontmatter. Legacy init directives apply in source order, and fence options can override individual nested settings |
 | Diagram theme CSS | `themeCSS` styles apply to the individual diagram, including nested media rules and local animations. Gantt task IDs and indexed selectors for sections, task states, commits, branches, and edges map to native SVG elements |
 | XY charts | Native YAML and imported `xychart` fences render bar and line series with category or numeric axes, orientation, legends, labels, and palette overrides |
 | Quadrant charts | Native YAML and imported `quadrantChart` fences render labeled quadrants, normalized points, point style classes and overrides, named themes, and accessible descriptions |

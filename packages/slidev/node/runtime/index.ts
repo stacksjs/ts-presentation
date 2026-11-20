@@ -12,6 +12,7 @@ import { renderChart } from './charts.ts'
 import { codeBlock, createHighlightedCodeRenderer, codeThemeStyles, magicFrames, parseCodeInfo } from './code-blocks.ts'
 import { codeDiffBlock } from './code-diff.ts'
 import { renderMermaid } from './diagram.ts'
+import { diagramOptionsRecord, mergeDiagramOptions } from './diagram-options.ts'
 import { optionsForSvg } from './diagram-svg.ts'
 import { renderPlantUml } from './plantuml.ts'
 import type { DeckComponentRenderer } from './deck-components.ts'
@@ -182,10 +183,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     }
   }
   const mermaidConfig = deck.headmatter?.mermaid
-  const diagramOptions = {
-    ...configuration?.mermaid,
-    ...(mermaidConfig && typeof mermaidConfig === 'object' && !Array.isArray(mermaidConfig) ? mermaidConfig : {}),
-  }
+  const diagramOptions = mergeDiagramOptions(configuration?.mermaid, diagramOptionsRecord(mermaidConfig))
   const codeFences = new Map<string, MarkdownFence>()
   const renderToken = Bun.randomUUIDv7().replaceAll('-', '')
   const fencePrefix = `tp-fence-${renderToken}-`

@@ -1,4 +1,5 @@
 import type { MermaidOptions, MermaidRenderer } from './authoring-setup.ts'
+import { diagramOptionsRecord, mergeDiagramOptions, parseDiagramOptions } from './diagram-options.ts'
 import { applyDiagramTheme, optionsForSvg } from './diagram-svg.ts'
 import { flowchart } from './mermaid/flowchart.ts'
 import { gantt, isGanttHeader } from './mermaid/gantt.ts'
@@ -11,35 +12,6 @@ import { sankey } from './mermaid/sankey.ts'
 import { sequence } from './mermaid/sequence.ts'
 import { timeline } from './mermaid/timeline.ts'
 import { xyDiagram } from './mermaid/xy.ts'
-
-function mapping(value: unknown): MermaidOptions {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as MermaidOptions : {}
-}
-
-function mergeDiagramOptions(base: MermaidOptions = {}, override: MermaidOptions = {}): MermaidOptions {
-  const result = { ...base, ...override }
-  for (const key of ['flowchart', 'gantt', 'gitGraph', 'journey', 'pie', 'quadrantChart', 'sankey', 'timeline', 'xyChart', 'themeVariables']) {
-    if (base[key] && override[key] && typeof base[key] === 'object' && typeof override[key] === 'object')
-      result[key] = { ...mapping(base[key]), ...mapping(override[key]) }
-  }
-  for (const [scope, children] of [
-    ['xyChart', ['xAxis', 'yAxis']],
-    ['sankey', ['nodeColors']],
-    ['themeVariables', ['xyChart']],
-  ] as const) {
-    const before = mapping(base[scope])
-    const after = mapping(override[scope])
-    if (!Object.keys(before).length || !Object.keys(after).length) continue
-    const combined = { ...mapping(result[scope]) }
-    for (const child of children) {
-      if (Object.hasOwn(before, child) && Object.hasOwn(after, child)) {
-        combined[child] = { ...mapping(before[child]), ...mapping(after[child]) }
-      }
-    }
-    result[scope] = combined
-  }
-  return result
-}
 
 function inlineQuotedScalars(yaml: string): string {
   const property = /^( *)(?:[\w.-]+|"(?:[^"\\\r\n]|\\.)*"|'(?:[^'\r\n]|'')*'):[ \t]*(?=(["'|>]))/gm
@@ -75,12 +47,30 @@ function diagramFrontmatter(source: string): MermaidOptions {
   // A diagram can indent its whole YAML mapping inside a fenced example.
   const indent = Math.min(...Array.from(source.matchAll(/^ *(?=[^#\s])/gm), match => match[0].length))
   const yaml = indent > 0 && Number.isFinite(indent) ? source.replace(new RegExp(`^ {${indent}}`, 'gm'), '') : source
-  try { return mapping(Bun.YAML.parse(yaml)) }
+  try { return diagramOptionsRecord(Bun.YAML.parse(yaml)) ?? {} }
   catch (error) {
     const normalized = inlineQuotedScalars(yaml)
     if (normalized === yaml) throw error
-    return mapping(Bun.YAML.parse(normalized))
+    return diagramOptionsRecord(Bun.YAML.parse(normalized)) ?? {}
   }
+}
+
+// Match directives on their own lines, skipping comments and quoted text in diagram data.
+const quotedDiagramText = /"(?:[^"\\]|\\[\s\S])*"|'(?:[^'\\]|\\[\s\S])*'/.source
+const diagramDirectives = new RegExp(
+  String.raw`^[ \t]*%%\{\s*(?:init|initialize)\s*:\s*(\{(?:${quotedDiagramText}|[^"'])*?\})\s*\}%%`
+  + String.raw`|%%[^\r\n]*|^[ \t]*#[^\r\n]*|(?<!\w)(?:${quotedDiagramText})`,
+  'gm',
+)
+const diagramScopes: Readonly<Record<string, string>> = {
+  graph: 'flowchart', 'flowchart-v2': 'flowchart', sequenceDiagram: 'sequence',
+  classDiagram: 'class', erDiagram: 'er', stateDiagram: 'state', 'stateDiagram-v2': 'state',
+  xychart: 'xyChart', 'xychart-beta': 'xyChart', 'sankey-beta': 'sankey',
+}
+
+function parseDirectiveYaml(literal: string): MermaidOptions | undefined {
+  try { return diagramOptionsRecord(Bun.YAML.parse(literal)) }
+  catch { return }
 }
 
 function prepare(source: string, options?: MermaidOptions): { code: string, options: MermaidOptions } {
@@ -89,22 +79,34 @@ function prepare(source: string, options?: MermaidOptions): { code: string, opti
   const fields = /^---[ \t]*\r?\n([\s\S]+?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(code)
   if (fields) {
     const defined = diagramFrontmatter(fields[1])
-    const config = { ...mapping(defined.config) }
+    const config = { ...diagramOptionsRecord(defined.config) }
     if (typeof defined.title === 'string') config.title = defined.title
-    if (defined.displayMode === 'compact') config.gantt = { ...mapping(config.gantt), displayMode: defined.displayMode }
+    if (defined.displayMode === 'compact') config.gantt = { ...diagramOptionsRecord(config.gantt), displayMode: defined.displayMode }
     inline = config
     code = code.slice(fields[0].length).trimStart()
   }
-  const init = /^%%\{\s*(?:init|initialize)\s*:\s*(\{[\s\S]*?\})\s*\}%%/.exec(code)
-  if (init) {
-    inline = mergeDiagramOptions(inline, mapping(Bun.YAML.parse(init[1])))
-    code = code.slice(init[0].length).trimStart()
+  let directives: MermaidOptions | undefined
+  if (code.includes('%%{')) {
+    code = code.replace(diagramDirectives, (token, literal: string | undefined) => {
+      if (literal === undefined) return token
+      const config = parseDiagramOptions(literal) ?? parseDirectiveYaml(literal)
+      directives = mergeDiagramOptions(directives, config)
+      return ''
+    }).trim()
   }
-  return { code, options: mergeDiagramOptions(options, inline) }
+  const legacyOptions = diagramOptionsRecord(directives?.config)
+  const type = legacyOptions && diagramHeader(code)?.split(/[\s:;]/, 1)[0]
+  const scope = type && (Object.hasOwn(diagramScopes, type) ? diagramScopes[type] : /^gantt$/i.test(type) ? 'gantt' : type)
+  const config = scope ? { ...directives, [scope]: legacyOptions } : directives
+  return { code, options: mergeDiagramOptions(mergeDiagramOptions(options, inline), config) }
+}
+
+function diagramHeader(code: string): string | undefined {
+  return code.split('\n').find(line => line.trim() && !/^\s*(?:%%|#)/.test(line))?.trim()
 }
 
 function render(code: string, marker: string, options: MermaidOptions): string | undefined {
-  const header = code.split('\n').find(line => line.trim() && !/^\s*(?:%%|#)/.test(line))?.trim()
+  const header = diagramHeader(code)
   const title = typeof options.title === 'string' ? options.title : ''
   if (/^timeline(?:\s|$)/i.test(header ?? '')) return timeline(code, marker, options)
   if (/^journey$/i.test(header ?? '')) return journey(code, marker, options)
