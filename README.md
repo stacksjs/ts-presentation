@@ -87,6 +87,10 @@ Set `exportFilename` and `export` in the deck headmatter for repeatable exports.
 The `export` mapping accepts `format`, `range`, and `withClicks`.
 PNG and PowerPoint can also set `scale`. CLI options override the deck defaults. With PDF
 `--with-clicks`, each selected reveal becomes a page with selectable text.
+Use `--omit-background` or `export.omitBackground: true` to omit the built-in
+canvas fill in PNGs, Markdown handout images, and PowerPoint exports.
+Custom CSS backgrounds and artwork retain their colors and opacity.
+
 Use `--with-toc` or set `export.withToc: true` to add nested PDF bookmarks
 from slide titles. Bookmarks skip hidden sections and untitled slides, honor
 the export range, and open the last exported reveal of each slide.

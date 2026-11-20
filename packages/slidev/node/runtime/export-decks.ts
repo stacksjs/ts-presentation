@@ -86,8 +86,8 @@ async function writeDeckExport(job: DeckExport, executable: string, javascript: 
       await Bun.write(output, await captureNotesPdf({ ...browser, scale: 1 }))
       return
     }
-    const { scale, withClicks, colorScheme } = settings
-    const capture = { ...browser, scale, withClicks, colorScheme }
+    const { scale, withClicks, colorScheme, omitBackground } = settings
+    const capture = { ...browser, scale, withClicks, colorScheme, omitBackground }
     if (format === 'md') {
       const { exportMarkdown } = await import('./markdown-export.ts')
       await exportMarkdown(output, deck.notesMarkdown, capture)

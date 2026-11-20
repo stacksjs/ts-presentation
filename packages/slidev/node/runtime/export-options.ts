@@ -13,6 +13,7 @@ export interface ExportFlags {
   'with-clicks'?: boolean
   'without-clicks'?: boolean
   'with-toc'?: boolean
+  'omit-background'?: boolean
   'executable-path'?: string
   timeout?: string
   wait?: string
@@ -36,6 +37,7 @@ interface ExportSettings extends ExportRenderSettings {
   output: string
   withClicks: boolean
   withToc: boolean
+  omitBackground: boolean
   range?: string
   scale: number
   executablePath?: string
@@ -154,6 +156,7 @@ export function resolveExportSettings(source: string, headmatter: Record<string,
     ...frameSelection(defaults, flags, powerPoint),
     ...renderSettings(defaults, flags),
     withToc: format === 'pdf' && (flags['with-toc'] ?? (defaults.withToc === true)),
+    omitBackground: format !== 'pdf' && (flags['omit-background'] ?? (defaults.omitBackground === true)),
   }
 }
 

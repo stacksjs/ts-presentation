@@ -26,6 +26,7 @@ export interface CaptureOptions extends BrowserOptions {
   withClicks: boolean
   range?: string
   editable?: boolean
+  omitBackground?: boolean
 }
 
 interface FrameDetails {
@@ -224,6 +225,8 @@ async function exportPositions(browser: Bun.WebView, options: CaptureOptions): P
 export async function captureFrames(options: CaptureOptions, onFrame: (frame: PowerPointFrame, index: number, count: number) => void | Promise<void>): Promise<void> {
   const captureEditable = options.editable ? (await import('./editable/capture.ts')).captureEditable : undefined
   await withExportBrowser(options, async (chrome, readOriginal) => {
+    if (options.omitBackground)
+      await chrome.evaluate("document.documentElement.style.setProperty('--presentation-capture-background', 'transparent')")
     const positions = await exportPositions(chrome, options)
     for (const [index, position] of positions.entries()) {
       const metadata = await chrome.evaluate<FrameDetails>(`(async () => {
@@ -279,6 +282,9 @@ export async function captureFrames(options: CaptureOptions, onFrame: (frame: Po
         }
         console.warn(`Slide ${position.slide}, step ${position.step}: using a slide image`)
       }
+      // Editable artwork capture can reset the browser's background override.
+      if (options.omitBackground)
+        await chrome.cdp('Emulation.setDefaultBackgroundColorOverride', { color: { r: 0, g: 0, b: 0, a: 0 } })
       const image = new Uint8Array(await (await chrome.screenshot()).arrayBuffer())
       await onFrame({ ...metadata, position: { slide: position.slide, click: position.step }, image }, index, positions.length)
     }

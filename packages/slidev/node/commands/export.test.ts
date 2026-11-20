@@ -81,6 +81,16 @@ describe('export defaults', () => {
     expect(resolveExportSettings(source, headmatter, { format: 'png' }).withToc).toBe(false)
     expect(resolveDownloadCapture(headmatter).withToc).toBe(true)
   })
+
+  it('resolves transparent backgrounds for image exports', () => {
+    const source = '/deck/slides.md'
+    const headmatter = { export: { omitBackground: true } }
+    expect(resolveExportSettings(source, headmatter).omitBackground).toBe(false)
+    expect(resolveExportSettings(source, {}, { format: 'png' }).omitBackground).toBe(false)
+    expect(resolveExportSettings(source, {}, { format: 'png', 'omit-background': true }).omitBackground).toBe(true)
+    for (const format of ['png', 'md', 'pptx', 'pptx-editable'])
+      expect(resolveExportSettings(source, headmatter, { format }).omitBackground).toBe(true)
+  })
 })
 
 const deck = [
@@ -108,6 +118,56 @@ async function deckCommand(root: string, name: string, ...args: string[]): Promi
 function exportDeck(root: string, ...args: string[]): Promise<void> {
   return deckCommand(root, 'export', '--executable-path', chrome!, ...args)
 }
+
+it.skipIf(!chrome)('captures transparent corners while keeping authored backgrounds and partial opacity', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-alpha-export-'))
+  let view: Bun.WebView | undefined
+  try {
+    const slides = [
+      '---', 'canvasWidth: 320', '---', '', '# Plain',
+      '', '<div style="position:absolute;left:10px;top:10px;width:20px;height:20px;background:rgb(0 128 255 / 50%)"></div>',
+      '', '---', 'class: painted', '---', '', '# Palette',
+      '', '---', 'layout: end', '---', '', '# Finish',
+    ].join('\n')
+    await Bun.write(join(root, 'slides.md'), slides)
+    await Bun.write(join(root, 'style.css'), '.slide.painted { background: rgb(210 42 13); }')
+    await exportDeck(root, '--format', 'png', '--range', '1', '--dark', '--out', 'opaque')
+    await exportDeck(root, '--format', 'png', '--omit-background', '--light', '--scale', '2', '--out', 'alpha')
+
+    await Bun.write(join(root, 'slides.md'), slides.replace('canvasWidth: 320', 'canvasWidth: 320\nexport:\n  omitBackground: true'))
+    await exportDeck(root, '--format', 'md', '--range', '1', '--out', 'handout.md')
+    const paths = ['opaque/slide-1.png', 'alpha/slide-1.png', 'alpha/slide-2.png', 'alpha/slide-3.png', 'handout-images/slide-1.png']
+    const images = await Promise.all(paths.map(async path => Buffer.from(await Bun.file(join(root, path)).bytes()).toString('base64')))
+    view = new Bun.WebView({ backend: { type: 'chrome', path: chrome!, url: false } })
+    await view.navigate('about:blank')
+    const samples = await view.evaluate<{ width: number, height: number, corner: number[], swatchAlpha: number }[]>(`Promise.all(
+      ${JSON.stringify(images)}.map(async (base64) => {
+        const image = new Image()
+        image.src = 'data:image/png;base64,' + base64
+        await image.decode()
+        const canvas = document.createElement('canvas')
+        canvas.width = image.width
+        canvas.height = image.height
+        const context = canvas.getContext('2d')
+        context.drawImage(image, 0, 0)
+        const swatch = Math.round(20 * image.width / 320)
+        return {
+          width: image.width, height: image.height,
+          corner: [...context.getImageData(0, 0, 1, 1).data],
+          swatchAlpha: context.getImageData(swatch, swatch, 1, 1).data[3],
+        }
+      })
+    )`)
+    expect(samples.map(({ width, height }) => [width, height])).toEqual([[320, 180], [640, 360], [640, 360], [640, 360], [320, 180]])
+    expect(samples.map(sample => sample.corner)).toEqual([[27, 32, 40, 255], [0, 0, 0, 0], [210, 42, 13, 255], [0, 0, 0, 0], [0, 0, 0, 0]])
+    expect([127, 128]).toContain(samples[1].swatchAlpha)
+    expect([127, 128]).toContain(samples[4].swatchAlpha)
+  }
+  finally {
+    view?.close()
+    await rm(root, { recursive: true, force: true })
+  }
+}, exportTestTimeout)
 
 it.skipIf(!chrome)('exports multiple decks in input order with independent formats and reveal settings', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'presentation-batch-export-')))

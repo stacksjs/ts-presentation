@@ -68,6 +68,7 @@ in a new ts-presentation project.
 | Batch export | `export` and `export-notes` accept multiple entries. Each deck uses its own settings and can write beside its source or into a shared `--out` directory |
 | PDF outlines | `--with-toc` or `export.withToc: true` adds nested bookmarks to exported and downloadable PDFs. Bookmarks honor the slide range and open the last exported reveal of each titled slide |
 | Export rendering controls | `--dark` and `--light` select the capture color scheme. `--wait-until` selects the browser load milestone, `--wait` delays each frame, and `--timeout` sets the capture deadline. `data-waitfor` waits for visible content scoped to the authored element |
+| Transparent exports | `--omit-background` or `export.omitBackground: true` removes the default canvas fill from PNGs, Markdown images, and PowerPoint exports. Authored backgrounds and artwork retain their alpha |
 | Downloadable PDF in static builds | `build --download` or `download: true` generates a vector PDF and adds a player link that follows the deployment base. Set `download` to a PDF path or URL to link to an existing file |
 | Audience builds without notes | `build --without-notes` omits speaker-note content and notes links from the static site while preserving the reveal timeline |
 | First-party diagram authoring | YAML `charts` fences through `ts-charts` for flowcharts, sequence, state, class, ER, pie, timeline, journey, Gantt, Git history, XY charts, and Sankey diagrams |

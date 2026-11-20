@@ -31,6 +31,7 @@ const options = {
   'with-clicks': { type: 'boolean' },
   'without-clicks': { type: 'boolean' },
   'with-toc': { type: 'boolean' },
+  'omit-background': { type: 'boolean' },
   port: { type: 'string' },
   mcp: { type: 'boolean' },
   format: { type: 'string' },
@@ -61,6 +62,7 @@ const help = `ts-presentation <dev|build|format|export|export-notes|mcp> [slides
           Use --wait and --timeout in milliseconds. Use --dark or --light to choose a color scheme.
           --wait-until accepts load (default), domcontentloaded, networkidle, or none.
           PNG, PPTX and Markdown images also support --scale.
+          Use --omit-background for transparent image exports.
   export-notes  Write the speaker notes to a PDF with slide titles and numbers.
           Accepts the same deck paths and batch output directory as export.
           Optional --out, --range, --executable-path, --timeout and --wait.
