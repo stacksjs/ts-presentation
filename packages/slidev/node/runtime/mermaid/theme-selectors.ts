@@ -15,6 +15,7 @@ const ganttSelectors: Readonly<Record<string, string>> = {
   vertText: '.diagram-gantt-reference-label',
   today: '.diagram-gantt-today',
   exclude: '.diagram-gantt-excluded',
+  'exclude-range': '.diagram-gantt-excluded',
 }
 
 const active = '.diagram-gantt-active'

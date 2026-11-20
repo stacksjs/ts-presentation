@@ -166,7 +166,7 @@ function parseGantt(source: string, now: number, interactionsEnabled = false, co
     axisFormat: axisFormat || configuredAxisFormat || (dateFormat === 'D' ? '%d' : ''), tickInterval: ticks,
     weekday, weekend, topAxis, todayMarker, todayMarkerStyle, inclusiveEndDates,
     excludes: exclusions, includes: inclusions, calendarMatch: 'formatted', startDateFallback: 'iso',
-    exclusionMode: 'whole-days', fixedEndDateFormat: 'YYYY-MM-DD',
+    exclusionMode: 'whole-days', exclusionBands: 'ranges', fixedEndDateFormat: 'YYYY-MM-DD',
     durationMode: 'calendar', missingDependencyFallback: 'today', now }
 }
 

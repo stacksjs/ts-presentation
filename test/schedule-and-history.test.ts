@@ -32,10 +32,24 @@ test('schedules Gantt task dependencies and excludes nonworking days', () => {
   const svg = mermaid(project, 'release-gantt')
   expect(svg).toContain('aria-label="Release plan"')
   expect(svg).toContain('diagram-gantt-milestone-shape')
-  expect(svg?.match(/class="diagram-gantt-excluded"/g)).toHaveLength(2)
+  expect(svg?.match(/class="diagram-gantt-excluded"/g)).toHaveLength(1)
+  expect(svg).toContain('data-excluded-start="2026-03-07" data-excluded-end="2026-03-09"')
   expect(svg).toContain('data-task-id="fixes" data-task-start="2026-03-09T00:00:00.000Z"')
   expect(svg).toContain('data-task-bar-end="2026-03-07T00:00:00.000Z"')
   expect(svg).not.toContain('diagram-gantt-today')
+})
+
+test('renders Gantt exclusion bands across a multi-year schedule', () => {
+  const source = `gantt
+excludes weekends
+includes 2024-01-07
+Release :release, 2024-01-05, 2029-12-05`
+  const svg = mermaid(source, 'multi-year')
+  expect(svg).toContain('data-excluded-start="2024-01-06" data-excluded-end="2024-01-07"')
+  expect(svg).toContain('data-excluded-start="2029-12-01" data-excluded-end="2029-12-03"')
+  const longer = mermaid(source.replace('2029-12-05', '2030-01-05'), 'six-years')
+  expect(longer).toContain('data-task-id="release"')
+  expect(longer).not.toContain('class="diagram-gantt-excluded"')
 })
 
 test('honors the custom work week, split holidays, and inclusion overrides in Gantt imports', () => {
@@ -1093,7 +1107,7 @@ test.skipIf(!chrome)('routes GitGraph connectors around intervening commit dots 
 
 test.skipIf(!chrome)('applies scoped indexed CSS to imported Gantt and GitGraph diagrams', async () => {
   const schedule = [
-    'gantt', 'section Draft', 'Draft :draft, 2026-03-01, 7d', 'section Review',
+    'gantt', 'excludes 2026-03-06', 'section Draft', 'Draft :draft, 2026-03-01, 7d', 'section Review',
     'Review :active, crit, review, 2026-03-01, 7d', 'Done :done, finished, 2026-03-01, 7d',
     'section Draft', 'Revision :revision, 2026-03-01, 7d',
   ].join('\n')
@@ -1102,6 +1116,7 @@ test.skipIf(!chrome)('applies scoped indexed CSS to imported Gantt and GitGraph 
     '    // Imported timeline styles',
     '    @media (min-width: 1px) {',
     '      .task { stroke: #112233; }',
+    '      .exclude-range { fill: #123456; }',
     '      .task0 { fill: #3b295e; }',
     '      .activeCritText1, .doneText1 { fill: #ffeedd; }',
     '      .activeCrit1 { stroke-width: 5px; }',
@@ -1148,6 +1163,7 @@ test.skipIf(!chrome)('applies scoped indexed CSS to imported Gantt and GitGraph 
       return {
         review: [review.fill, review.stroke, review.height, review.strokeWidth, label('review'), label('finished')],
         draft: [bar(first, 'draft').fill, bar(first, 'revision').fill],
+        exclusions: [fill(first, '.diagram-gantt-excluded'), fill(second, '.diagram-gantt-excluded')],
         sections: [...first.querySelectorAll('.diagram-gantt-section-label')]
           .filter(node => getComputedStyle(node).fill === 'rgb(0, 102, 119)').map(node => node.textContent),
         outside: [bar(second, 'review').fill, getComputedStyle(document.querySelector('#slide-1 h1')).color],
@@ -1162,6 +1178,7 @@ test.skipIf(!chrome)('applies scoped indexed CSS to imported Gantt and GitGraph 
     })()`)).toEqual({
       review: ['rgb(98, 60, 112)', 'rgb(17, 34, 51)', '12px', '5px', 'rgb(255, 238, 221)', 'rgb(255, 238, 221)'],
       draft: ['rgb(59, 41, 94)', 'rgb(59, 41, 94)'],
+      exclusions: ['rgb(18, 52, 86)', 'rgb(238, 238, 238)'],
       sections: ['Review'],
       outside: ['rgb(205, 228, 152)', 'rgb(0, 128, 128)'],
       commits: ['rgb(18, 52, 86)', 'rgb(171, 51, 170)', 'rgb(7, 150, 124)'],
