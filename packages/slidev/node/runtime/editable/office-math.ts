@@ -537,6 +537,7 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba, 
       return
     }
     if (name === 'mrow') {
+      if (attributes['data-math-smash-operator'] === '' && only(node, 'data-math-smash-operator') && children.length === 1) return convert(children[0])
       if (attributes['data-equation-frame-start'] === '' && only(node, 'data-equation-frame-start')) return sequence(children)
       if (attributes['data-equation-frame-end'] === '' && only(node, 'data-equation-frame-end')) return sequence(children)
       if (attributes['data-math-delimiters'] === '' && only(node, 'data-math-delimiters')) return pairedDelimiters(children)

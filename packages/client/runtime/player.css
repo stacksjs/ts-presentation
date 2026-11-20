@@ -1178,6 +1178,16 @@ math .math-equation-number[data-equation-tag-shifted] > :first-child {
 }
 math .math-overlap-l { transform: translateX(-100%); }
 math .math-overlap-c { transform: translateX(-50%); }
+math [data-math-smash-operator] {
+  display: inline-grid;
+  grid-template-columns: max-content max-content;
+  align-items: baseline;
+}
+math [data-math-smash-operator] > mpadded { display: math; grid-row: 1; }
+math [data-math-smash-operator] > [aria-hidden] { zoom: 0.5; }
+math [data-math-smash-operator] > :nth-child(2),
+math [data-math-smash-operator] > :last-child { grid-column: 2; }
+math [data-math-smash-operator] > :last-child { justify-self: start; }
 math .math-measured-box {
   display: inline-grid;
   grid-template-columns: max-content;

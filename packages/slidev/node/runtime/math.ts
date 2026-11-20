@@ -356,6 +356,8 @@ for (const [name, shades] of Object.entries(legacyColorShades)) {
 const builtinMacros = new Map<string, Macro>(Object.entries(legacyColors).map(([name, value]) =>
   [`\\${name}`, { body: ['\\textcolor', '{', value, '}', '{', '#1', '}'], parameters: [[]], prefix: [] }]))
 builtinMacros.set('\\boxed', { body: tokenize('\\fbox{$\\displaystyle{#1}$}'), parameters: [[]], prefix: [] })
+for (const [name, script] of [['\\sb', '_'], ['\\sp', '^']])
+  builtinMacros.set(name, { body: [script], parameters: [], prefix: [] })
 builtinMacros.set('\\substack', { body: tokenize('\\begin{subarray}{c}#1\\end{subarray}'), parameters: [[]], prefix: [] })
 builtinMacros.set('\\ensuremath', { body: tokenize('\\TextOrMath{\\(#1\\)}{#1}'), parameters: [[]], prefix: [] })
 builtinMacros.set('\\vdotswithin', { body: tokenize('{\\mathmakebox[\\widthof{\\ensuremath{{}#1{}}}][c]{\\vdots}}'), parameters: [[]], prefix: [] })
@@ -972,7 +974,7 @@ const mathModeFunctions = new Set([
   ...ruledAccents, ...Array.from(infixFractions, command => command.slice(1)),
   'begin', 'end', 'right', 'middle', '@binrel', '@splitfrac', 'mathchoice', 'vcenter',
   'cancel', 'bcancel', 'xcancel', 'pmb', 'phase', 'mathreflectbox',
-  'prescript', 'mathstrut', 'xmathstrut', 'sideset', 'adjustlimits', 'SwapAboveDisplaySkip', 'overset', 'underset', 'overunderset', 'stackrel',
+  'prescript', 'mathstrut', 'xmathstrut', 'sideset', 'adjustlimits', 'smashoperator', 'SwapAboveDisplaySkip', 'overset', 'underset', 'overunderset', 'stackrel',
   'shoveleft', 'shoveright', 'ArrowBetweenLines', 'MTFlushSpaceAbove', 'MTFlushSpaceBelow', 'Aboxed', '@AboxedWith', 'MakeAboxedCommand',
   ...Array.from(intertextCommands.keys(), command => command.slice(1)),
   'overline', 'operatorname', 'operatorname@', 'operatornamewithlimits', 'limits', 'nolimits', 'displaylimits',
@@ -2533,6 +2535,30 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return { markup, mathClass: 'op', limits: true }
   }
 
+  function smashedOperator(): Atom {
+    const option = rawBracket()
+    const direction = option === undefined ? 'lr' : expandDefinition(option).join('').trim()
+    if (!/^(?:l|r|lr|rl)$/.test(direction)) throw new MathParseError('Invalid direction in \\smashoperator')
+    return withTokens(rawGroup('Missing argument to \\smashoperator'), () => inScope(() => {
+      const operator = argumentAtom(true)
+      const { lower, upper } = readScripts({ ...operator, limits: true, ignoreLimitControl: true })
+      if (peek() !== boundary) throw new MathParseError('Expected an operator with limits in \\smashoperator')
+      const base = neutralizeOperator(renderMarkup(stackOperator(operator.markup), 0))
+      if (!lower && !upper) return { markup: mathSize(0, base), mathClass: 'op' }
+
+      const element = lower && upper ? 'munderover' : lower ? 'munder' : 'mover'
+      const limits = mathSize(0, `<${element}>${base}${renderMarkup(lower, 0)}${renderMarkup(upper, 0)}</${element}>`)
+      const measure = (markup: string) => `<mpadded height="0" depth="0" aria-hidden="true"><mphantom>${markup}</mphantom></mpadded>`
+      // Reserve half of the operator on the smashed side, and half of the
+      // full stack on the other side. The ink is centered over their seam.
+      const bare = measure(mathSize(0, base))
+      const full = direction.length === 1 ? measure(limits) : bare
+      const widths = direction === 'r' ? full + bare : bare + full
+      const ink = `<mpadded width="0"><mrow class="math-overlap-c">${limits}</mrow></mpadded>`
+      return { markup: `<mrow data-math-smash-operator>${widths}${ink}</mrow>`, mathClass: 'op' }
+    }))
+  }
+
   function adjustLimits(): Atom {
     function readOperator(): { base: Markup, limit: Markup } {
       const base = stackOperator(fragmentArgument('Missing operator in \\adjustlimits').markup)
@@ -3690,6 +3716,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
     if (name === 'sideset') return sidedOperator()
     if (name === 'adjustlimits') return adjustLimits()
+    if (name === 'smashoperator') return smashedOperator()
     if (name === 'sqrt' || name === 'root') {
       const index = name === 'root' ? delimitedArgument(['\\of']) : rawBracket()
       if (index === undefined) return { markup: xml`<msqrt>${argument(true)}</msqrt>` }

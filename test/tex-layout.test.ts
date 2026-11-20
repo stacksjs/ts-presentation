@@ -1456,6 +1456,21 @@ test('uses the short display skip only for the requested top-level alignment', (
   ]) expect(() => math(invalid, true)).toThrow('must start a top-level')
 })
 
+test('parses Mathtools smashoperator options and forces display limits', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const two = String.raw`\def\side{r}\smashoperator[\side]{\sum\nolimits\sb{n=0}\sp{\mathchoice{D}{T}{S}{Q}}}`
+  const html = math(two, false).split('<annotation')[0]
+  expect(html).toContain('<mstyle displaystyle="true" scriptlevel="0"><munderover>')
+  expect(html).toContain('<mi>S</mi>')
+  expect(html).not.toContain('<msubsup>')
+  const arg = String.raw`{\mathop{T}^{n}}`
+  expect(math('\\smashoperator' + arg, true).split('<annotation')[0])
+    .toBe(math('\\smashoperator[rl]' + arg, true).split('<annotation')[0])
+  expect(math(String.raw`\smashoperator{\sum}`, false).split('<annotation')[0]).not.toContain('data-math-smash-operator')
+  expect(() => math('\\smashoperator[x]' + arg, true)).toThrow('Invalid direction')
+  expect(() => math(String.raw`\smashoperator{\sum_n x}`, true)).toThrow('Expected an operator with limits')
+})
+
 test('parses Mathtools adjusted limits as two operators with shared measurements', () => {
   const math = createMathRenderer({ throwOnError: true })
   const source = String.raw`\def\op{\limsup}\def\sub{\sb}
@@ -3498,6 +3513,56 @@ test.skipIf(!chrome)('places AMS corner scripts beside the operator and explicit
         limit.y >= glyph.bottom && center(limit) > lowLeft.left && center(limit) < lowRight.right,
       ]
     })()`)).toEqual([true, true, true, true])
+  }
+  finally {
+    view.close()
+    await server.stop(true)
+  }
+}, 15_000)
+
+test.skipIf(!chrome)('reserves the correct side of a smashed operator while keeping both scripts visible', async () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const stack = String.raw`\sum_{n=123456789}^{987654321}`
+  const css = await Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url)).text()
+  const formulas = ['', '[lr]', '[l]', '[r]'].map(option => math(`A\\smashoperator${option}{${stack}}B`, false)).join('')
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response(`<!doctype html><meta charset="utf-8"><style>${css} main{font-size:40px} main > math{display:block math}</style><main>${formulas}</main>`, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    }),
+  })
+  const view = new Bun.WebView({ width: 900, height: 650, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await view.navigate(server.url.href)
+    const layouts = await view.evaluate<{ advance: number, inkWidth: number, before: number, after: number, top: boolean, bottom: boolean }[]>(`(async () => {
+      await document.fonts.ready
+      return Array.from(document.querySelectorAll('[data-math-smash-operator]'), group => {
+        const box = group.getBoundingClientRect()
+        const stack = group.lastElementChild.querySelector('munderover')
+        const ink = stack.getBoundingClientRect()
+        const [base, low, high] = Array.from(stack.children, child => child.getBoundingClientRect())
+        return {
+          advance: box.width, inkWidth: ink.width, before: ink.left - box.left, after: ink.right - box.right,
+          top: high.bottom <= base.top, bottom: low.top >= base.bottom,
+        }
+      })
+    })()`)
+    const [center, alias, left, right] = layouts
+    const overflow = (center.inkWidth - center.advance) / 2
+    expect(overflow).toBeGreaterThan(10)
+    expect(center).toEqual(alias)
+    for (const layout of layouts) {
+      expect(layout.top && layout.bottom).toBe(true)
+      expect(layout.inkWidth).toBeCloseTo(center.inkWidth, 1)
+    }
+    expect(center.before).toBeCloseTo(-overflow, 0)
+    expect(center.after).toBeCloseTo(overflow, 0)
+    expect(left.advance).toBeCloseTo(center.advance + overflow, 0)
+    expect(right.advance).toBeCloseTo(left.advance, 0)
+    expect(left.before).toBeCloseTo(-overflow, 0)
+    expect(left.after).toBeCloseTo(0, 0)
+    expect(right.before).toBeCloseTo(0, 0)
+    expect(right.after).toBeCloseTo(overflow, 0)
   }
   finally {
     view.close()

@@ -79,6 +79,13 @@ export function collectSnapshot(options: {
   const styles: RawStyle[] = []
   const styleIndex = new Map<string, number>()
 
+  const smashedOperator = '[data-math-smash-operator]'
+  function smashedOperatorInk(element: Element): Element | undefined {
+    if (!element.matches(smashedOperator)) return
+    const ink = element.lastElementChild?.firstElementChild
+    if (ink?.getAttribute('class') === 'math-overlap-c' && ink.children.length === 1) return ink
+  }
+
   function mathExpression(root: Element): RawMathElement | undefined {
     let nodes = 0
     let characters = 0
@@ -94,7 +101,10 @@ export function collectSnapshot(options: {
       characters += text.length
       if (characters > 4096) return
       const children: RawMathElement[] = []
-      for (const child of element.children) {
+      // The width probes duplicate the live stack. Only its ink belongs in Office Math.
+      const ink = smashedOperatorInk(element)
+      const contents = ink ? ink.children : element.children
+      for (const child of contents) {
         const nested = read(child, depth + 1)
         if (!nested) return
         children.push(nested)
@@ -399,6 +409,45 @@ export function collectSnapshot(options: {
       return fragments
     }
 
+    function smashedOperatorFragments(element: Element, expression: RawMathElement, opacity: number, scale: number):
+      { cells: RawMathFragment[], rect: RawMathFragment['rect'] } | undefined {
+      if (!element.matches(smashedOperator) && !element.querySelector(smashedOperator)) return
+      const cells: RawMathFragment[] = []
+      const bounds: DOMRect[] = []
+      let pieces: { element: Element, expression: RawMathElement }[] = []
+      let split = false
+      function add(boxes: DOMRect[], content: RawMathElement, context: Element): void {
+        const rect = mathBounds(boxes)
+        if (!rect) return
+        bounds.push(...boxes)
+        cells.push({ expression: content, opacity, rect, fontSize: Number.parseFloat(getComputedStyle(context).fontSize) * scale })
+      }
+      function flush(): void {
+        if (!pieces.length) return
+        const content = pieces.length === 1 ? pieces[0].expression
+          : { name: 'mrow', attributes: {}, text: '', children: pieces.map(piece => piece.expression) }
+        add(pieces.map(piece => piece.element.getBoundingClientRect()), content, pieces[0].element)
+        pieces = []
+      }
+      function visit(node: Element, data: RawMathElement): void {
+        const ink = smashedOperatorInk(node)
+        if (ink && data.children.length === 1) {
+          flush()
+          split = true
+          add([ink.getBoundingClientRect()], data.children[0], ink)
+        }
+        else if (node.localName === 'mrow' && !data.text.trim() && !Object.keys(data.attributes).length && node.querySelector(smashedOperator)) {
+          for (const [index, child] of Array.from(node.children).entries()) visit(child, data.children[index])
+        }
+        else pieces.push({ element: node, expression: data })
+      }
+      visit(element, expression)
+      if (!split) return
+      flush()
+      const rect = mathBounds(bounds)
+      if (rect && cells.length) return { cells, rect }
+    }
+
     function mathProjection(presentation: Element, expression: RawMathElement, display: boolean, scale: number): RawMathSnapshot | undefined {
       let table = presentation
       let data = expression
@@ -409,8 +458,11 @@ export function collectSnapshot(options: {
       const singleTag = display && table.localName === 'mtable' && table.getAttribute('class') === 'math-tagged-display'
       const ams = display && table.localName === 'mtable' && table.hasAttribute('data-equation-environment')
       const tagsAtMargin = ams && table.hasAttribute('data-equation-tags')
-      const positionedCells = ams && (table.hasAttribute('data-equation-row-spacing') || table.hasAttribute('data-equation-spread'))
+      const positionedCells = ams && (table.hasAttribute('data-equation-row-spacing') || table.hasAttribute('data-equation-spread')
+        || table.querySelector(smashedOperator) !== null)
       if (!singleTag && !tagsAtMargin && !positionedCells) {
+        const smashed = smashedOperatorFragments(presentation, expression, 1, scale)
+        if (smashed) return { ...smashed, display }
         const rect = relative(presentation.getBoundingClientRect())
         if (rect.w > 0 && rect.h > 0) return { expression, rect, display }
         return
@@ -500,6 +552,12 @@ export function collectSnapshot(options: {
                 if (rect) measuredCells.push(fragment(ink, { ...inkData, attributes: {} }, rowOpacity, rect))
                 continue
               }
+            }
+            const smashed = content && cell.children.length === 1
+              ? smashedOperatorFragments(content, cellData.children[0], rowOpacity, scale) : undefined
+            if (smashed) {
+              measuredCells.push(...smashed.cells)
+              continue
             }
             const boxes = Array.from(cell.children, child => child.getBoundingClientRect())
             const rect = mathBounds(boxes)

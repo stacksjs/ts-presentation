@@ -213,6 +213,68 @@ ${limit}
   }
 }, 45_000)
 
+it.skipIf(!chrome)('exports smashed operator limits and neighbors as positioned editable equations', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-smashed-operator-'))
+  const canvas = { width: 960, height: 540 }
+  try {
+    const entry = join(root, 'slides.md')
+    const body = String.raw`\sum_{n=123456789}^{987654321}`
+    const source = ['', '[l]', '[r]'].map(direction => String.raw`# Limits
+
+$$
+A+\smashoperator${direction}{${body}}+B
+$$`).join('\n\n---\n\n')
+    await Bun.write(entry, source + String.raw`
+
+---
+
+# Numbered alignment
+
+\begin{align}
+A&=\smashoperator[l]{${body}}+B\tag{L}
+\end{align}`)
+    const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
+    const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
+    const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
+    if (status) throw new Error(stderr)
+
+    const frames: PowerPointFrame[] = []
+    await captureFrames({ root: join(root, 'dist'), executable: chrome!, scale: 1, canvas, editable: true, withClicks: false }, frame => { frames.push(frame) })
+    expect(frames).toHaveLength(4)
+    const layouts = frames.map((frame, index) => {
+      const body = frame.editable?.nodes.find((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math')?.equation
+      expect(body).toBeDefined()
+      const pieces = [body!, ...(body?.cells ?? [])]
+      expect(pieces).toHaveLength(index === 3 ? 4 : 3)
+      const stack = pieces.find(item => item.expression.includes('<m:limLow>'))!
+      const left = pieces.find(item => item.expression.includes('>A</m:t>'))!
+      const right = pieces.find(item => item.expression.includes('>B</m:t>'))!
+      expect(stack.expression).toContain('>123456789</m:t>')
+      expect(stack.expression).toContain('>987654321</m:t>')
+      expect(stack.expression).not.toContain('<m:phant>')
+      if (index === 3) expect(body?.tags?.[0].expression).toContain('>(L)</m:t>')
+      return {
+        fromLeft: stack.rect.x - left.rect.x,
+        toRight: right.rect.x - stack.rect.x,
+        total: right.rect.x - left.rect.x,
+      }
+    })
+    const [center, left, right] = layouts
+    expect(left.fromLeft).toBeCloseTo(center.fromLeft, 1)
+    expect(right.toRight).toBeCloseTo(center.toRight, 1)
+    expect(left.total).toBeCloseTo(right.total, 1)
+    expect(left.total).toBeGreaterThan(center.total + 10)
+    expect(right.fromLeft - center.fromLeft).toBeCloseTo(left.toRight - center.toRight, 1)
+    const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Smashed limits' }))
+    const slide = parts.get('ppt/slides/slide4.xml')?.toString() ?? ''
+    expect(slide.match(/<a14:m>/g)).toHaveLength(5)
+    expect(slide.match(/>123456789<\/m:t>/g)).toHaveLength(1)
+  }
+  finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}, 45_000)
+
 it.skipIf(!chrome)('keeps AMS subequation letters and reveal opacity editable in a PowerPoint range', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-subequations-'))
   const canvas = { width: 960, height: 540 }
