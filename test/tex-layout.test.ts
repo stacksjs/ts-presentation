@@ -390,6 +390,7 @@ test('renders formatted equation tags and applies them to the correct alignment 
   expect(equation.indexOf('math-equation-number')).toBeLessThan(equation.indexOf('<munder>'))
 
   const align = math(String.raw`\begin{align} a&=b\tag*{First}\\ c&=d\notag\\ e&=f\end{align}`, true)
+  expect(align).toContain('data-equation-tags="left"')
   expect(Array.from(align.matchAll(/class="math-equation-number">(.*?)<\/mtd>/g), match => match[1])).toEqual([
     '<mtext>First</mtext>', '', '<mtext>(1)</mtext>',
   ])
@@ -401,6 +402,7 @@ test('uses nested math annotations for the enclosing equation or alignment row',
   const math = createMathRenderer({ throwOnError: true })
   const manual = math(String.raw`\begin{equation}\begin{split}a&=b\tag{Title}\\&+c\end{split}\end{equation}`, true)
   expect(manual).toContain('class="math-tagged-display"')
+  expect(manual).not.toContain('math-display-grid')
   expect(manual.match(/class="math-equation-number"/g)).toHaveLength(1)
   expect(manual).toContain('<mtext>(Title)</mtext>')
   const noNumber = math(String.raw`\begin{equation}\begin{aligned}a&=b\notag\\&+c\end{aligned}\end{equation}`, true)
@@ -1399,6 +1401,60 @@ test.skipIf(!chrome)('aligns paired AMS cells and row numbers at the expected po
   finally {
     view.close()
     server.stop(true)
+  }
+}, 45_000)
+
+test.skipIf(!chrome)('places AMS display tags at the margins and keeps the formula aligned in Chromium', async () => {
+  const examples = [
+    String.raw`\begin{align}a&=b\tag*{1}\\abcd&=xyz\tag*{Longer label}\\a&=b\notag\end{align}`,
+    String.raw`\begin{alignat}{2}a&=b & c&=d\tag*{1}\\xyz&=p & e&=g\tag*{Longer label}\\a&=b\notag\end{alignat}`,
+    String.raw`\begin{gather}a=b\tag*{1}\\abcd=xyz\tag*{Longer label}\\a=b\notag\end{gather}`,
+  ]
+  const options = [{}, { leqno: true }, { fleqn: true }, { fleqn: true, leqno: true }]
+  const body = examples.flatMap(source => options.map(settings =>
+    `<section>${createMathRenderer(settings)(source, true)}</section>`)).join('')
+  const css = await Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url)).text()
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response(`<!doctype html><meta charset="utf-8"><style>${css}</style><main style="width:600px;font-size:30px">${body}</main>`, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    }),
+  })
+  const view = new Bun.WebView({ width: 720, height: 480, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await view.navigate(server.url.href)
+    const geometry = await view.evaluate<{ shift: number, center: number, leftTags: number[], rightTags: number[], gap: number, labels: string[] }[]>(`[...document.querySelectorAll('main > section')].map(section => {
+      const outer = section.getBoundingClientRect()
+      const rows = [...section.querySelector('mtable[data-equation-lines]').children]
+      const cells = [...rows[1].querySelectorAll('mtd:not(.math-equation-number)')]
+      const boxes = cells.map(cell => cell.getBoundingClientRect())
+      const formulaStart = boxes[0].left
+      const formulaEnd = boxes.at(-1).right
+      const tags = rows.map(row => row.querySelector('.math-equation-number'))
+      const [short, long] = tags.map(tag => tag.getBoundingClientRect())
+      const label = tags[1].querySelector('mtext').getBoundingClientRect()
+      return {
+        shift: formulaStart - outer.left,
+        center: (formulaStart + formulaEnd - outer.left - outer.right) / 2,
+        leftTags: [short, long].map(box => box.left - outer.left),
+        rightTags: [short, long].map(box => outer.right - box.right),
+        gap: label.right <= formulaStart ? formulaStart - label.right : label.left - formulaEnd,
+        labels: tags.map(tag => tag.textContent),
+      }
+    })`)
+    expect(geometry).toHaveLength(12)
+    for (const [index, layout] of geometry.entries()) {
+      const { fleqn, leqno } = options[index % options.length]
+      expect(layout.labels).toEqual(['1', 'Longer label', ''])
+      for (const edge of leqno ? layout.leftTags : layout.rightTags) expect(edge).toBeCloseTo(fleqn && leqno ? 60 : 0, 1)
+      if (!fleqn) expect(layout.center).toBeCloseTo(0, 1)
+      else if (!leqno) expect(layout.shift).toBeCloseTo(60, 1)
+      expect(layout.gap).toBeGreaterThanOrEqual(14)
+    }
+  }
+  finally {
+    view.close()
+    await server.stop(true)
   }
 }, 45_000)
 

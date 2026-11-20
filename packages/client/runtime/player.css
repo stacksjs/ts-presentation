@@ -926,6 +926,29 @@ math .math-alignment-axis > mtr > mtd { padding: 0; }
   }
   math .math-alignment-grid > mtr > mtd > mrow,
   math .math-alignment-grid > mtr > .math-equation-number { display: math; }
+  /* A standalone equation table borrows the display width for its tag gutters. */
+  math:has(> semantics > mrow > .math-display-grid:only-child),
+  math:has(> semantics > mrow > .math-display-grid:only-child) > semantics,
+  math:has(> semantics > mrow > .math-display-grid:only-child) > semantics > mrow { display: block; }
+  math .math-display-grid {
+    display: grid;
+    grid-template-columns: minmax(max-content, 1fr) repeat(var(--math-columns), max-content) minmax(max-content, 1fr);
+  }
+  math .math-display-grid[data-equation-flush] {
+    grid-template-columns: max-content repeat(var(--math-columns), max-content) minmax(max-content, 1fr);
+  }
+  math .math-display-grid > mtr > :first-child { grid-column: 2; }
+  math .math-display-grid[data-equation-tags="right"] > mtr > .math-equation-number {
+    grid-column: -2;
+    justify-self: end;
+    padding-inline: 0.5em 0;
+  }
+  math .math-display-grid[data-equation-tags="left"] > mtr > .math-equation-number {
+    grid-column: 1;
+    justify-self: start;
+    padding-inline: 0 0.5em;
+  }
+  math .math-display-grid[data-equation-tags] > mtr > .math-equation-number:empty { padding-inline: 0; }
 }
 math .math-overlap-l { transform: translateX(-100%); }
 math .math-overlap-c { transform: translateX(-50%); }

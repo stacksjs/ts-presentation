@@ -95,7 +95,10 @@ clickAnimation: custom
 <div v-click data-token="A">A</div>
 
 $$ {hide|1|all}{at:4}
-x+y
+\\begin{align}
+x&=y\\\\
+z&=w
+\\end{align}
 $$
 
 <div v-click data-token="B">B</div>
@@ -215,6 +218,10 @@ test.skipIf(!chrome)('applies click maps, group depth, ranges, and switches in t
     expect(await view.evaluate("document.querySelector('#slide-7 .equation-steps').hasAttribute('data-equation-hidden')")).toBe(true)
     await step(7, 4)
     expect(await view.evaluate("document.querySelector('#slide-7 .equation-steps').hasAttribute('data-equation-hidden')")).toBe(false)
+    const dimmedRows = "[...document.querySelectorAll('#slide-7 .math-display-grid > mtr')].map(row => row.hasAttribute('data-equation-dim'))"
+    expect(await view.evaluate(dimmedRows)).toEqual([false, true])
+    await step(7, 5)
+    expect(await view.evaluate(dimmedRows)).toEqual([false, false])
   }
   finally {
     view.close()

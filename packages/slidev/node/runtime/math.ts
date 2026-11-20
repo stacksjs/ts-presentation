@@ -1964,8 +1964,9 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const alignment = layout.columns.map(column => column.align)
     const tags = rows.some(entry => entry.label !== undefined)
     const leqno = state?.options.leqno === true
+    const displayRows = tags && rowTags && display && depth === 1
     const columnCount = Math.max(layout.columns.length, ...rows.map(entry => entry.cells.length))
-    const grid = !compact && (aligned || alignment.length > 0)
+    const grid = !compact && (aligned || alignment.length > 0 || displayRows)
     const rowRules = rows.reduce((count, entry) => count + entry.before.length, rules.length)
     const columnRules = layout.columns.reduce((count, column) => count + column.before.length, layout.after.length)
     const rectangular = grid || columnArray || tags || rowRules > 0
@@ -1982,7 +1983,9 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const moreRowSpace = aligned || gathered || cases
     const pad = compact ? '0.06' : ((moreRowSpace ? 0.125 : 0.14) * stretch).toFixed(4).replace(/0+$/, '').replace(/\.$/, '')
     const lines = compact ? ' class="math-compact-array"' : ' data-equation-lines'
-    const gridLayout = grid ? ` class="math-alignment-grid" style="--math-columns:${columnAlignment.length}"` : ''
+    const gridLayout = displayRows
+      ? ` class="math-alignment-grid math-display-grid" style="--math-columns:${columnCount}" data-equation-tags="${leqno ? 'left' : 'right'}"${options?.fleqn ? ' data-equation-flush' : ''}`
+      : grid ? ` class="math-alignment-grid" style="--math-columns:${columnAlignment.length}"` : ''
     return (style) => {
       const cellStyle = compact ? Math.max(2, style) as MathStyle : ordinaryCellStyle
       const markup = rows.map((entry, rowIndex) => {
@@ -1994,7 +1997,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
           if (align) styling.push(`text-align:${align}`)
           if (grid && align !== 'left')
             styling.push(`--math-cell-align:${align === 'right' ? 'end' : 'center'}`)
-          if (aligned || cases) {
+          if (aligned || cases || displayRows) {
             styling.push('padding-inline:0')
             if ((aligned && !paired && index > 0 && index % 2 === 0) || (cases && index > 0))
               styling.push('padding-inline-start:1em')
@@ -2018,6 +2021,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
         return `<mtr>${leqno ? cell : ''}${content}${leqno ? '' : cell}</mtr>`
       }).join('')
       const table = `<mtable${lines}${align}${gridLayout}>${markup}</mtable>`
+      if (displayRows) return table
       // Center the whole grid on the math axis beside surrounding inline atoms.
       const centered = grid && style !== 0
         ? `<mtable class="math-alignment-axis"><mtr><mtd>${table}</mtd></mtr></mtable>`
