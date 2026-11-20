@@ -116,7 +116,7 @@ function tabsMarkup(id: string, tabs: GroupFence[]): string {
 
 export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): PreparedMarkdown {
   const attrs = syntax.comark && source.includes('{') ? createComarkAttributes() : undefined
-  if (!attrs && !source.includes('$') && !source.includes('\\(') && !source.includes('\\[') && !source.includes('\\begin{') && !source.includes('{monaco') && !source.includes('{live') && !source.includes('mermaid') && !source.includes('v-click') && !source.includes('v-after') && !source.includes('```') && !source.includes('~~~')) {
+  if (!attrs && !source.includes('$') && !source.includes('\\(') && !source.includes('\\[') && !source.includes('\\begin{') && !source.includes('\\ref') && !source.includes('\\eqref') && !source.includes('{monaco') && !source.includes('{live') && !source.includes('mermaid') && !source.includes('v-click') && !source.includes('v-after') && !source.includes('```') && !source.includes('~~~')) {
     return { source, restore: html => html }
   }
 
@@ -139,6 +139,14 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
     for (let at = 0; at < line.length;) {
       const char = line[at]
       if (char === '\\' && line[at + 1]) {
+        if (syntax.mathEnabled !== false && (line[at + 1] === 'e' || line[at + 1] === 'r')) {
+          const reference = /^\\(?:eq)?ref\*?[ \t]*\{[^{}]+\}/.exec(line.slice(at))?.[0]
+          if (reference) {
+            result += marker(reference)
+            at += reference.length
+            continue
+          }
+        }
         if (syntax.mathEnabled !== false && line[at + 1] === '(') {
           const end = inlineMathEnd(line, at + 2, '\\)')
           if (end > at + 2) {

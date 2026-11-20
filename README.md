@@ -168,6 +168,7 @@ the deck and style slides with an optional `style.css`.
 | PlantUML sequence diagrams | `plantuml` fences render messages, participants, notes, and groups locally through `ts-charts` |
 | Markdown alerts | Start a blockquote with `[!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, or `[!CAUTION]` |
 | Math | Native MathML with scoped macros, styled fractions, formatted equation tags, ruled arrays, commutative diagrams, stacked subscripts, mixed text and math, click highlighting, and chemistry notation. Set `math.fleqn` for flush-left displays and `math.leqno` for left-side tags |
+| Equation references | Name a numbered or tagged equation with `\label{key}`. Use `\ref{key}` or `\eqref{key}` in prose, math, or notes. References link to the equation's slide, and starred references display the value without a link |
 | Math links and images | `\href`, `\url`, `\includegraphics`, and `\html*` attributes honor `math.trust` in deck frontmatter or the `trust` callback in `setup/katex.ts` |
 | Code walkthroughs | `ts [build.ts] {1\|2-3\|all}{lines:true}` for titles and click highlights, or `md magic-move` around nested fences to animate between frames |
 | Code groups | Enable `comark: true` and place titled fences between `::code-group` and `::` to create keyboard-accessible tabs |

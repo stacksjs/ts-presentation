@@ -84,6 +84,10 @@ export function collectSnapshot(options: {
     let characters = 0
     function read(element: Element, depth: number): RawMathElement | undefined {
       if (++nodes > 600 || depth > 40 || element.namespaceURI !== 'http://www.w3.org/1998/Math/MathML') return
+      if (element.localName === 'mtext' && element.getAttribute('class') === 'math-equation-reference') {
+        const expression = element.querySelector(':scope > a[data-slide-link] > math > mrow')
+        return expression ? read(expression, depth + 1) : undefined
+      }
       // Ignore annotations at the root by capturing its presentation child.
       const attributes = Object.fromEntries(Array.from(element.attributes, attribute => [attribute.name, attribute.value]))
       const text = Array.from(element.childNodes).filter(node => node.nodeType === 3).map(node => node.nodeValue).join('')

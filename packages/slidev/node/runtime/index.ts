@@ -24,6 +24,7 @@ import { escapeHtml, unescapeHtml } from './html.ts'
 import { liveBlock } from './live-markup.ts'
 import type { CompileLiveCode } from './compile-code.ts'
 import { createMathRenderer, renderUnrenderedMath, resolveMathMacros } from './math.ts'
+import { createEquationReferences } from './equation-references.ts'
 import { MathParseError } from './math-error.ts'
 import type { DeckLayers } from './layers.ts'
 import { renderLayer, renderSlideLayers } from './layers.ts'
@@ -176,8 +177,8 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     strict: typeof strict === 'boolean' || strict === 'ignore' || strict === 'warn' || strict === 'error' ? strict : configuration?.katex?.strict,
     macros: { ...configuration?.katex?.macros, ...resolveMathMacros(deck.headmatter) },
   }, true)
-  function renderMath(body: string, display: boolean, numberMarkup?: Parameters<typeof renderFormula>[2]): string {
-    try { return renderFormula(body, display, numberMarkup) }
+  function renderMath(body: string, display: boolean, references: Parameters<typeof renderFormula>[3]): string {
+    try { return renderFormula(body, display, undefined, references) }
     catch (error) {
       if (!(error instanceof MathParseError)) throw error
       console.warn(error.message)
@@ -188,6 +189,8 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   const diagramOptions = mergeDiagramOptions(configuration?.mermaid, diagramOptionsRecord(mermaidConfig))
   const codeFences = new Map<string, MarkdownFence>()
   const renderToken = Bun.randomUUIDv7().replaceAll('-', '')
+  const equations = createEquationReferences(renderToken, true)
+  const noteReferences = { reference: equations.markup.reference }
   const fencePrefix = `tp-fence-${renderToken}-`
   const rawFence = new RegExp(`(?<!language-)\\b${fencePrefix}\\d+\\b`, 'g')
   const selectedCodeTheme = deck.headmatter?.codeTheme ?? configuration?.codeHighlight?.theme
@@ -255,11 +258,10 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     }))
   }
   let groups = 0
-  const deckNumberMarkup = (number: number) => `<mtext data-equation-auto="${renderToken}">(${number})</mtext>`
   function markdown(content: string, comark?: boolean): string {
     const transformFences = comark !== undefined && (!!transformers?.codeblocks.length || codeRenderer.hasTransformers)
     const prepared = prepareMarkdown(content, {
-      renderMath: comark === undefined ? renderMath : (body, display) => renderMath(body, display, deckNumberMarkup),
+      renderMath: (body, display) => renderMath(body, display, comark === undefined ? noteReferences : equations.markup),
       mathEnabled: (deck.headmatter?.math ?? deck.headmatter?.katex) !== false,
       registerFence(fence) {
         if (!transformFences && !fence.diagram && !fence.code) return
@@ -450,18 +452,15 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     const magic = (slide.frontmatter?.magicMoveCopy ?? deck.headmatter?.magicMoveCopy ?? settings?.magicMoveCopy) === false ? ' data-magic-copy-disabled' : ''
     const builtin = builtInBody === undefined ? '' : ' data-builtin-layout'
     return {
-      html: `<article id="slide-${index + 1}" class="slide slidev-layout layout-${escapeHtml(layout)} ${escapeHtml(className)}" aria-label="${escapeHtml(title)}"${route}${motion}${copy}${magic}${builtin}${layered ? ' data-presentation-layers' : ''}>${baseMarkup(prepared.html)}${overlay}</article>`,
+      html: `<article id="slide-${index + 1}" class="slide slidev-layout layout-${escapeHtml(layout)} ${escapeHtml(className)}" aria-label="${escapeHtml(title)}"${route}${motion}${copy}${magic}${builtin}${layered ? ' data-presentation-layers' : ''}>${prepared.html}${overlay}</article>`,
       css: baseMarkup(prepared.css),
     }
   }))
 
   // Layouts can reorder slots or omit their content. Count the equations in
   // final slide order so audience, presenter and exported ranges agree.
-  let equationNumber = 0
-  const autoEquation = new RegExp(`<mtext data-equation-auto="${renderToken}">\\(\\d+\\)</mtext>`, 'g')
-  for (const slide of slides) {
-    slide.html = slide.html.replace(autoEquation, () => `<mtext>(${++equationNumber})</mtext>`)
-  }
+  for (const [index, slide] of slides.entries()) slide.html = equations.numberSlide(slide.html, index + 1)
+  for (const slide of slides) slide.html = baseMarkup(equations.resolve(slide.html))
   const choices = routes.map(({ no, title }) => `<option value="${no}">${no}. ${escapeHtml(title)}</option>`)
   const ruby = deck.headmatter?.notesAutoRuby
   const annotations = ruby && typeof ruby === 'object' && !Array.isArray(ruby)
@@ -473,7 +472,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
       return clicks ? `<section hidden data-note-clicks="${clicks}"></section>` : '<section hidden></section>'
     }
     const segments = (slide.notes || 'No speaker notes for this slide.').split(noteBreaks)
-    return `<section hidden${slide.notes ? ' data-has-notes="true"' : ''}>${segments.map((text, index) => `<div data-note-step="${index}">${baseMarkup(markdown(annotations ? applyNotesAutoRuby(text, annotations) : text))}</div>`).join('')}</section>`
+    return `<section hidden${slide.notes ? ' data-has-notes="true"' : ''}>${segments.map((text, index) => `<div data-note-step="${index}">${baseMarkup(equations.resolve(markdown(annotations ? applyNotesAutoRuby(text, annotations) : text)))}</div>`).join('')}</section>`
   })
 
   // The live swap uses inert template fragments. Changes to hydrated slides

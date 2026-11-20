@@ -821,6 +821,61 @@ test('numbers rendered deck equations in layout order and keeps notes out of the
   expect(edited.live?.frame).toBe(first.live?.frame)
 })
 
+test('resolves TeX equation references across slides, laid-out columns, and speaker notes', async () => {
+  const right = String.raw`\begin{equation}r=2\label{eq:right}\end{equation}`
+  const left = String.raw`\begin{equation}l=1\label{eq:left}\end{equation}`
+  const formula = String.raw`References \eqref{eq:right}, $\text{value \ref{eq:left}}$, $\ref*{eq:manual}$, \eqref{eq:star}, and \eqref{eq:hidden}.`
+  const deck = [
+    '# References', '', formula, '', '`\\eqref{literal}`', '',
+    '~~~tex', String.raw`\ref{fenced}`, '~~~', '',
+    '---', 'layout: two-cols', '---', '', '# Columns', '',
+    '::right::', '', right, '', '::left::', '', left, '',
+    '---', 'hide: true', '---', '', '# Hidden', '', String.raw`\begin{equation}z=0\label{eq:hidden}\end{equation}`, '',
+    '---', '', '# Custom tags', '', '$$',
+    String.raw`\begin{align}a&=b\tag{\textbf{Review} $k^2$}\label{eq:manual}\\c&=d\label{eq:star}\tag*{Final}\\e&=f\notag\label{eq:suppressed}\end{align}`, '$$', '',
+    String.raw`Check \ref{eq:suppressed}.`, '', '<!--', String.raw`Speaker note \eqref{eq:right}.`, '-->',
+  ].join('\n')
+  const first = await renderPresentation(parseDeck(deck), { liveCompile: true })
+  const slides = first.live!.slides
+  expect(slides).toHaveLength(3)
+  const referenceSlide = slides[0].html
+  expect(referenceSlide).toContain('<a href="#slide-2" data-slide-link="2"><math><mrow><mtext>(2)</mtext></mrow></math></a>')
+  expect(referenceSlide).toContain('<a href="#slide-2" data-slide-link="2"><math><mrow><mtext>1</mtext></mrow></math></a>')
+  expect(referenceSlide).toContain('<mrow style="font-weight:bold"><mtext>Review</mtext></mrow>')
+  expect(referenceSlide).toContain('<msup><mi>k</mi><mn>2</mn></msup>')
+  expect(referenceSlide).toContain('<a href="#slide-3" data-slide-link="3"><math><mrow><mtext>(</mtext><mtext>Final</mtext><mtext>)</mtext>')
+  expect(referenceSlide).toContain('<mtext>(??)</mtext>')
+  expect(referenceSlide.match(/class="math-equation-reference"/g)).toHaveLength(3)
+  expect(referenceSlide).toContain(String.raw`<code>\eqref{literal}</code>`)
+  expect(referenceSlide).toContain('fenced')
+  expect(slides[2].html).toContain('<mtext>??</mtext>')
+  expect(slides[2].notes).toContain('<a href="#slide-2" data-slide-link="2"><math><mrow><mtext>(2)</mtext>')
+  expect(first.html).not.toContain('data-pending-equation')
+
+  const edited = await renderPresentation(parseDeck(deck.replace(left, 'No equation here.')), { liveCompile: true })
+  expect(edited.live!.slides[0].html).toContain('<a href="#slide-2" data-slide-link="2"><math><mrow><mtext>(1)</mtext>')
+  expect(edited.live!.slides[0].html).toContain('<mtext>??</mtext>')
+  expect(edited.live!.slides[0].revision).not.toBe(slides[0].revision)
+  const repeated = await renderPresentation(parseDeck(deck), { liveCompile: true })
+  expect(repeated.live!.revision).toBe(first.live!.revision)
+})
+
+test('resolves local and chained equation references with bounded cycle handling', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const formula = String.raw`\begin{align}
+  a&=\eqref{b}\label{a}\\
+  b&=c\label{b}\tag*{S}\\
+  c&=d\label{copy}\tag{\ref{b}}\\
+  d&=\ref{copy}\\
+  e&=f\label{loop}\tag{\ref{loop}}
+  \end{align}`
+  const html = math(formula, true).split('<annotation')[0]
+  expect(html).toContain('<mtext>(</mtext><mtext>S</mtext><mtext>)</mtext>')
+  expect(html).toContain('<mrow><mtext>S</mtext></mrow>')
+  expect(html).toContain('<mtext>??</mtext>')
+  expect(html).not.toContain('data-pending-equation')
+})
+
 test('keeps AMS relation spacing, explicit pair counts, and tags aligned across short rows', () => {
   const math = createMathRenderer({ throwOnError: true })
   const source = String.raw`\def\pairs{2}\def\extra{.4em}

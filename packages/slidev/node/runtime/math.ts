@@ -1,4 +1,6 @@
 import { escapeHtml, unescapeHtml } from './html.ts'
+import { createEquationReferences } from './equation-references.ts'
+import type { EquationReferenceMarkup } from './equation-references.ts'
 import type { KatexOptions, KatexTrustContext } from './authoring-setup.ts'
 import { mathArrowBody, stackMathArrow, texArrowMinWidth, verticalMathArrow } from './math-arrow.ts'
 import { styledMathAlphabets } from './math-alphabets.ts'
@@ -379,9 +381,9 @@ function isExpansionPrimitive(token: string | undefined): token is ExpansionPrim
   return token !== undefined && expansionPrimitiveNames.has(token)
 }
 
-export function createMathRenderer(options: KatexOptions = {}, inlineBreaks = false): (source: string, display: boolean, numberMarkup?: EquationNumberMarkup) => string {
+export function createMathRenderer(options: KatexOptions = {}, inlineBreaks = false): (source: string, display: boolean, numberMarkup?: EquationNumberMarkup, references?: EquationReferenceMarkup) => string {
   const state: MathState = { configured: compileMathMacros(options.macros), globals: new Map(), options, inlineBreaks }
-  return (source, display, numberMarkup) => renderMath(source, display, undefined, state, numberMarkup)
+  return (source, display, numberMarkup, references) => renderMath(source, display, undefined, state, numberMarkup, references)
 }
 
 function safeColor(value: string): string {
@@ -508,7 +510,7 @@ interface ArrayColumn { align: Alignment, before: ArrayRule[] }
 interface ArrayRow { cells: Markup[], label?: Markup, before: ArrayRule[], gap?: string }
 interface MathLine { content: Markup, gap?: string }
 interface MultlineRow extends MathLine { align?: 'left' | 'right' }
-interface EquationTag { label?: Markup, suppressed: boolean }
+interface EquationTag { label?: Markup, key?: string, starred?: boolean, suppressed: boolean }
 
 function equationNumberCell(label: Markup | undefined, position?: 'start' | 'end'): string {
   const style = position ? ` style="display:math;padding:0;justify-self:${position}"` : ''
@@ -904,7 +906,7 @@ const sharedFunctions = new Set([
   ...Object.keys(textFonts), ...typesettingNames, ...textBoxes, ...verticalBoxCommands, ...spacingCommands,
   'begingroup', 'endgroup', 'relax', 'newline', 'cr', 'color', 'textcolor',
   'sout', 'underline', 'underbar', 'textcircled', 'llap', 'clap', 'rlap', '@char',
-  'tag', 'label', 'notag', 'nonumber', 'nobreak', 'hline', 'hdashline',
+  'tag', 'label', 'ref', 'eqref', 'notag', 'nonumber', 'nobreak', 'hline', 'hdashline',
 ])
 const fractionFences: Record<string, [string, string]> = {
   '\\choose': ['(', ')'],
@@ -1007,7 +1009,7 @@ function fractionMarkup(first: Markup, second: Markup, layout: FractionLayout): 
 }
 
 /** Translate a bounded TeX math subset to native MathML, with the source retained for accessibility. */
-export function renderMath(source: string, display = false, configured: MathMacros = {}, state?: MathState, numberMarkup?: EquationNumberMarkup): string {
+export function renderMath(source: string, display = false, configured: MathMacros = {}, state?: MathState, numberMarkup?: EquationNumberMarkup, references?: EquationReferenceMarkup): string {
   const options = state?.options
   function parseFailure(error: MathParseError): string {
     if (options?.throwOnError) throw error
@@ -1041,6 +1043,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
   let mathFontActive = false
   let linkDepth = 0
   let context: MathMacroContext | undefined
+  let localReferences: ReturnType<typeof createEquationReferences> | undefined
+  function referenceMarkup(): EquationReferenceMarkup {
+    return references ?? (localReferences ??= createEquationReferences(Bun.randomUUIDv7().replaceAll('-', ''))).markup
+  }
 
   const macros = new Map<string, Macro>(state?.configured ?? compileMathMacros(configured))
   const macroFor = (token: string) => macros.get(token) ?? builtinMacros.get(token)
@@ -2007,6 +2013,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
           flush()
           parts.push(overlap(token[1], textArgument()))
         }
+        else if (token === '\\ref' || token === '\\eqref') {
+          flush()
+          parts.push(equationReference(token))
+        }
         else if (isMathAttributeCommand(token) || token === '\\href' || token === '\\url') {
           flush()
           parts.push(htmlCommand(token, true))
@@ -2070,11 +2080,26 @@ export function renderMath(source: string, display = false, configured: MathMacr
   }
 
   function nextTag(automatic: boolean): Markup | undefined {
-    if (tagState.label !== undefined) return tagState.label
+    const { key, label, starred } = tagState
+    tagState.key = undefined
+    if (label !== undefined) {
+      return key ? referenceMarkup().label?.(key, { markup: renderMarkup(label, 1), starred: starred === true }) ?? label : label
+    }
     if (automatic && !tagState.suppressed) {
       equationNumber++
-      return numberMarkup?.(equationNumber) ?? tag('mtext', `(${equationNumber})`)
+      return (key ? referenceMarkup() : references)?.number?.(equationNumber, key)
+        ?? numberMarkup?.(equationNumber) ?? tag('mtext', `(${equationNumber})`)
     }
+  }
+
+  function equationKey(): string {
+    return expandDefinition(rawGroup('Missing equation label')).join('').trim()
+  }
+
+  function equationReference(token: string): string {
+    const starred = peek() === '*'
+    if (starred) take()
+    return referenceMarkup().reference(equationKey(), token === '\\eqref', !starred && linkDepth === 0)
   }
 
   function equationDirective(token: string): boolean {
@@ -2083,10 +2108,14 @@ export function renderMath(source: string, display = false, configured: MathMacr
       if (tagState.label !== undefined) throw new MathParseError('Multiple tags for one equation')
       const starred = peek() === '*'
       if (starred) take()
+      tagState.starred = starred
       tagState.label = ''
       tagState.label = textArgument(undefined, !starred)
     }
-    else if (token === '\\label') literalGroup()
+    else if (token === '\\label') {
+      const key = equationKey()
+      if (key && display) tagState.key ??= key
+    }
     else if (token === '\\notag' || token === '\\nonumber') tagState.suppressed = true
     else return false
     return true
@@ -2716,6 +2745,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (verbatim !== undefined) return { markup: verbatim }
 
     if (declareMacro(token) || equationDirective(token)) return { markup: '' }
+    if (token === '\\ref' || token === '\\eqref') return { markup: equationReference(token) }
     const name = token.slice(1)
     if (intertextCommands.has(token)) throw new MathParseError(`${token} requires a top-level align, alignat, or gather display`)
     if (name === 'begingroup') {
@@ -2917,13 +2947,14 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (trailingComment) strictViolation('commentAtEnd', 'A TeX comment at the end of the formula needs a terminating newline')
     const expression = `<mrow>${renderMarkup(row([], false, true), display ? 0 : 1)}</mrow>`
     const flush = display && state?.options.fleqn === true
-    const label = tagState.label
+    const label = nextTag(false)
     const markup = label === undefined ? expression : taggedDisplay(expression, label, state?.options.leqno === true, flush)
     const layoutStyle = flush ? 'display:block;padding-inline-start:2em;text-align:start'
       : label === undefined ? '' : 'display:block;text-align:center'
     const styles = [layoutStyle, minRule ? `--math-min-rule:${minRule}em` : ''].filter(Boolean).join(';')
     const layout = styles ? ` style="${styles}"` : ''
-    return `<math xmlns="http://www.w3.org/1998/Math/MathML"${display ? ' display="block"' : ''}${layout}><semantics>${markup}<annotation encoding="application/x-tex">${escapeHtml(source)}</annotation></semantics></math>`
+    const content = `<math xmlns="http://www.w3.org/1998/Math/MathML"${display ? ' display="block"' : ''}${layout}><semantics>${markup}<annotation encoding="application/x-tex">${escapeHtml(source)}</annotation></semantics></math>`
+    return localReferences ? localReferences.resolve(localReferences.numberSlide(content, 1)) : content
   }
   catch (error) {
     if (!(error instanceof MathParseError)) throw error

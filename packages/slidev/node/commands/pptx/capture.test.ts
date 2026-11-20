@@ -25,6 +25,64 @@ it('accepts native PNG and JPEG data URIs and sends mismatches or SVG through br
   expect(dataPicture('data:image/svg+xml;base64,PHN2Zy8+')).toBeUndefined()
 })
 
+it.skipIf(!chrome)('navigates linked equation references and exports their formatted tags as editable math', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-equation-reference-'))
+  const canvas = { width: 960, height: 540 }
+  try {
+    const entry = join(root, 'slides.md')
+    await Bun.write(entry, String.raw`# Reference
+
+See \eqref{rate}.
+
+---
+
+# Formula
+
+\begin{equation}
+x=1\tag{Rate $k^2$}\label{rate}
+\end{equation}`)
+    const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
+    const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
+    const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
+    if (status) throw new Error(stderr)
+    const dist = join(root, 'dist')
+    const server = Bun.serve({
+      hostname: '127.0.0.1', port: 0,
+      fetch(request) {
+        const name = new URL(request.url).pathname.slice(1) || 'index.html'
+        if (!['index.html', 'presentation.js', 'presentation.css', 'deck.css'].includes(name)) return new Response(null, { status: 404 })
+        return new Response(Bun.file(join(dist, name)))
+      },
+    })
+    const view = new Bun.WebView({ ...canvas, backend: { type: 'chrome', path: chrome!, url: false } })
+    try {
+      await view.navigate(server.url.href)
+      const route = await view.evaluate(`(() => {
+        const link = document.querySelector('#slide-1 a[data-slide-link]');
+        const label = link.textContent.replace(/\\s+/g, ' ');
+        link.click();
+        return { label, hash: location.hash, hidden: document.getElementById('slide-2').hidden };
+      })()`)
+      expect(route).toEqual({ label: '(Rate k2)', hash: '#slide-2', hidden: false })
+    }
+    finally {
+      view.close()
+      await server.stop(true)
+    }
+    const frames: PowerPointFrame[] = []
+    await captureFrames({ root: dist, executable: chrome!, scale: 1, canvas, editable: true, withClicks: false }, frame => { frames.push(frame) })
+    expect(frames).toHaveLength(2)
+    const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Equation reference' }))
+    const slide = parts.get('ppt/slides/slide1.xml')?.toString() ?? ''
+    expect(slide).toContain('<a14:m>')
+    expect(slide).toContain('<m:sSup>')
+    expect(slide).toContain('(Rate')
+  }
+  finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}, 45_000)
+
 it('sends animated PNGs and orientation-dependent JPEGs through browser capture', () => {
   const animationChunk = Buffer.from('000000086163544c000000010000000000000000', 'hex')
   const animated = Buffer.concat([png.subarray(0, 33), animationChunk, png.subarray(33)])
