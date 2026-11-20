@@ -344,6 +344,24 @@ click task2 href "#notes"`
   expect(mermaid(source, 'gantt', { securityLevel: 'loose' })).toMatch(/href="#notes"[^>]*><g[^>]*data-task-id="task2"/)
 })
 
+test('allocates automatic Gantt IDs around explicit IDs across sections', () => {
+  const source = `gantt
+Draft :2026-03-06, 1d
+section Review
+Primary review :task1, after task2, 1d
+Send status :after task1, 1d
+Retain record :task3, after task4, 1d
+click task2 href "#draft"
+click task1 href "#review"`
+  const tasks = scheduleGantt(source)?.tasks
+  expect(tasks?.map(task => [task.id, new Date(task.start).getUTCDate()])).toEqual([
+    ['task2', 6], ['task1', 7], ['task4', 8], ['task3', 9],
+  ])
+  const svg = mermaid(source, 'unique-id', { securityLevel: 'loose' })!
+  expect(svg).toMatch(/href="#draft"[^>]*><g[^>]*data-task-id="task2"/)
+  expect(svg).toMatch(/href="#review"[^>]*><g[^>]*data-task-id="task1"/)
+})
+
 const history = `gitGraph LR:
   commit id: "base"
   branch "feature/review" order: 3
@@ -1213,6 +1231,54 @@ Release :release, 2025-12-26, 2026-01-05`
     expect(axes[0].paint).toEqual(['0px', 'rgb(0, 85, 119)', 'rgb(119, 34, 17)'])
     expect(axes[2].paint[0]).toBe('1px')
     expect(axes[2].paint[1]).not.toBe(axes[0].paint[1])
+  }
+  finally {
+    browser.close()
+    await server.stop(true)
+  }
+}, 45_000)
+
+test.skipIf(!chrome)('wraps imported Gantt reference labels inside the chart and clears the time axis', async () => {
+  const name = 'Release readiness review for customer documentation<br />Approval from all reviewers'
+  const source = `gantt
+todayMarker off
+Work :work, 2026-03-06, 3d
+${name} :vert, review, 2026-03-06, 0d
+Publish :vert, publish, 2026-03-06, 0d`
+  const svg = mermaid(source, 'marker-layout', { gantt: { useWidth: 225, leftPadding: 30, rightPadding: 0, fontSize: 16, useMaxWidth: false } })
+  expect(svg).toBeDefined()
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response(`<!doctype html><meta charset="utf-8">${svg}`, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    }),
+  })
+  const browser = new Bun.WebView({ width: 500, height: 520, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await browser.navigate(server.url.href)
+    const layout = await browser.evaluate<{ text: string, lines: number, fit: boolean, axisGap: number, nextGap: number, sameDate: boolean }>(`(() => {
+      const svg = document.querySelector('svg')
+      const label = id => svg.querySelector('[data-task-id="' + id + '"] .diagram-gantt-reference-label')
+      const mark = id => svg.querySelector('[data-task-id="' + id + '"] .diagram-gantt-reference')
+      const spans = [...label('review').querySelectorAll('tspan')]
+      const review = label('review').getBBox()
+      const publish = label('publish').getBBox()
+      const axis = svg.querySelector('[data-axis=bottom]').getBBox()
+      const bounds = svg.viewBox.baseVal
+      return {
+        text: spans.map(span => span.textContent).join(' '), lines: spans.length,
+        fit: [review, publish].every(box => box.x >= 0 && box.x + box.width <= bounds.width && box.y + box.height <= bounds.height),
+        axisGap: review.y - axis.y - axis.height,
+        nextGap: publish.y - review.y - review.height,
+        sameDate: mark('review').getPointAtLength(0).x === mark('publish').getPointAtLength(0).x,
+      }
+    })()`)
+    expect(layout.text).toBe(name.replace('<br />', ' '))
+    expect(layout.lines).toBeGreaterThan(2)
+    expect(layout.fit).toBe(true)
+    expect(layout.axisGap).toBeGreaterThan(0)
+    expect(layout.nextGap).toBeGreaterThan(0)
+    expect(layout.sameDate).toBe(true)
   }
   finally {
     browser.close()

@@ -106,7 +106,6 @@ function parseGantt(source: string, now: number, interactionsEnabled = false, co
   const inclusions: string[] = []
   const sections: { name?: string, tasks: GanttTask[] }[] = [{ tasks: [] }]
   const interactions = new Map<string, TaskInteraction>()
-  let generatedIds = 0
   for (const line of chart.rows) {
     const [, directive, text = ''] = /^([^\s:]+)(?:\s*:\s*|\s+)?(.*)$/.exec(line) ?? []
     switch (directive?.toLowerCase()) {
@@ -149,7 +148,7 @@ function parseGantt(source: string, now: number, interactionsEnabled = false, co
     const tags: GanttTaskTag[] = []
     while (isTag(segments[0])) tags.push(segments.shift() as GanttTaskTag)
     if (segments.length < 1 || segments.length > 3 || segments.slice(0, -1).some(segment => !segment)) return
-    const id = segments.length === 3 ? segments.shift()! : `task${++generatedIds}`
+    const id = segments.length === 3 ? segments.shift() : undefined
     const [start, end] = segments.length === 2 ? segments : [undefined, segments[0]]
     const task: GanttTask = { id, name, tags }
     const after = start && /^after\s+(.+)$/.exec(start)?.[1]
@@ -161,24 +160,30 @@ function parseGantt(source: string, now: number, interactionsEnabled = false, co
     sections.at(-1)!.tasks.push(task)
   }
   const parseDate = ganttDateParser(dateFormat, now)
-  const taskIds = new Set(sections.flatMap(section => section.tasks.map(task => task.id)))
-  for (const section of sections) {
-    for (const task of section.tasks) {
-      for (const kind of ['after', 'until'] as const) {
-        const unknown = task[kind]?.filter(id => !taskIds.has(id))
-        if (unknown?.length) console.warn(`Gantt task "${task.name}" references unknown IDs in "${kind}": ${unknown.join(', ')}`)
-      }
-      // A literal suffix in dateFormat can make a date look like a duration.
-      if (task.end !== undefined && parseDate(task.end) === undefined) {
-        const duration = ganttDurationEnd(0, task.end)
-        if (duration === undefined && task.end && task.end !== '0')
-          console.warn(`Gantt task "${task.name}" has an invalid end "${task.end}". Use a date or duration such as 0d for a milestone.`)
-        task.duration = duration === undefined ? '0ms' : task.end
-        delete task.end
-      }
-      const interaction = task.id ? interactions.get(task.id) : undefined
-      if (interaction) Object.assign(task, interaction)
+  const tasks = sections.flatMap(section => section.tasks)
+  const taskIds = new Set(tasks.flatMap(task => task.id ? [task.id] : []))
+  let nextId = 1
+  for (const task of tasks) {
+    if (task.id) continue
+    while (taskIds.has(`task${nextId}`)) nextId++
+    task.id = `task${nextId++}`
+    taskIds.add(task.id)
+  }
+  for (const task of tasks) {
+    for (const kind of ['after', 'until'] as const) {
+      const unknown = task[kind]?.filter(id => !taskIds.has(id))
+      if (unknown?.length) console.warn(`Gantt task "${task.name}" references unknown IDs in "${kind}": ${unknown.join(', ')}`)
     }
+    // A literal suffix in dateFormat can make a date look like a duration.
+    if (task.end !== undefined && parseDate(task.end) === undefined) {
+      const duration = ganttDurationEnd(0, task.end)
+      if (duration === undefined && task.end && task.end !== '0')
+        console.warn(`Gantt task "${task.name}" has an invalid end "${task.end}". Use a date or duration such as 0d for a milestone.`)
+      task.duration = duration === undefined ? '0ms' : task.end
+      delete task.end
+    }
+    const interaction = task.id ? interactions.get(task.id) : undefined
+    if (interaction) Object.assign(task, interaction)
   }
   return { sections, title: chart.title, accessibleTitle: chart.accessibleTitle, description: chart.description, dateFormat,
     axisFormat: axisFormat || configuredAxisFormat || (dateFormat === 'D' ? '%d' : ''), tickInterval: ticks,
