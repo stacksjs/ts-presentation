@@ -92,7 +92,7 @@ it.skipIf(!chrome)('exports supported TeX as editable Office equations with pict
     const entry = join(root, 'slides.md')
     await Bun.write(entry, String.raw`# Editable equations
 
-Inline formula $a^2$ beside editable text.
+Inline formula $a^2+\nobreak\textsf{\textbf{rate $x+\text{unit}+\texttt{code}$}}$ beside editable text.
 
 $$
 \frac{1+x_i^2}{\sqrt[3]{y}}
@@ -180,6 +180,16 @@ $$`)
     expect(slide).toContain('<m:dPr><m:begChr m:val="("/><m:endChr m:val=")"/>')
     expect(slide).toContain('<m:m><m:mr>')
     expect(slide).toContain('<a:latin typeface="Cambria Math"/>')
+    const inline = /<a14:m><m:oMath>(<m:sSup>.*?)<\/m:oMath><\/a14:m>/.exec(slide ?? '')?.[1] ?? ''
+    const runs = new Map([...inline.matchAll(/<m:r>(.*?)<m:t xml:space="preserve">([^<]*)<\/m:t><\/m:r>/g)]
+      .map(([, properties, content]) => [content, properties]))
+    expect(runs.get('unit')).toContain('<m:nor/>')
+    expect(runs.get('unit')).toContain(' b="1" i="0"')
+    expect(runs.get('unit')).toContain('<a:latin typeface="Arial"/>')
+    expect(runs.get('code')).toContain('<m:nor/>')
+    expect(runs.get('code')).toContain('<a:latin typeface="Courier New"/>')
+    expect(runs.get('x')).toContain('<m:sty m:val="i"/>')
+    expect(runs.get('x')).toContain('<a:latin typeface="Cambria Math"/>')
     const advanced = parts.get('ppt/slides/slide2.xml')?.toString()
     expect(advanced?.match(/<a14:m>/g)).toHaveLength(3)
     expect(advanced?.match(/<mc:Fallback><p:sp>/g)).toHaveLength(3)

@@ -30,6 +30,13 @@ const alignmentCellStyles = new Set([
   'padding-inline:0', 'padding-inline-start:1em', 'math-style:normal', 'padding-block:0.125em',
 ])
 const measuredCellSpacing = /^(?:padding-block:\d+(?:\.\d+)?em|padding-bottom:max\(0px,calc\(\d+(?:\.\d+)?em \+ [+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:em|ex|px|pt|pc|cm|mm|in)\)\))$/
+const mathTypeface = 'Cambria Math'
+const textTypefaces: Readonly<Record<string, string>> = {
+  'font-family:math': mathTypeface,
+  'font-family:serif': 'Cambria',
+  'font-family:sans-serif': 'Arial',
+  'font-family:monospace': 'Courier New',
+}
 
 function only(node: RawMathElement, ...names: string[]): boolean {
   return Object.keys(node.attributes).every(name => names.includes(name))
@@ -83,14 +90,19 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba):
   let opacity = color.a
   let bold = false
   let italicText = false
-  const properties = () => {
+  let typeface = mathTypeface
+  const properties = (normalText: boolean, italic: boolean) => {
     const paint = opacity === 1 ? `<a:srgbClr val="${hex}"/>` : `<a:srgbClr val="${hex}"><a:alpha val="${Math.round(opacity * 100000)}"/></a:srgbClr>`
-    return `<a:rPr sz="${size}"><a:solidFill>${paint}</a:solidFill><a:latin typeface="Cambria Math"/></a:rPr>`
+    const formatting = normalText ? ` b="${Number(bold)}" i="${Number(italic)}"` : ''
+    return `<a:rPr sz="${size}"${formatting}><a:solidFill>${paint}</a:solidFill><a:latin typeface="${normalText ? typeface : mathTypeface}"/></a:rPr>`
   }
   const wrap = (name: string, content: string) => `<m:${name}>${content}</m:${name}>`
   const setting = (name: string, value: string) => `<m:${name} m:val="${escapeHtml(value)}"/>`
-  const run = (text: string, italic = false) =>
-    wrap('r', `<m:rPr><m:sty m:val="${(bold ? 'b' : '') + (italic ? 'i' : '') || 'p'}"/></m:rPr>${properties()}<m:t xml:space="preserve">${escapeHtml(text)}</m:t>`)
+  function run(text: string, italic = false, textToken = false): string {
+    const normalText = textToken && typeface !== mathTypeface
+    const style = normalText ? '<m:nor/>' : `<m:sty m:val="${(bold ? 'b' : '') + (italic ? 'i' : '') || 'p'}"/>`
+    return wrap('r', `<m:rPr>${style}</m:rPr>${properties(normalText, italic)}<m:t xml:space="preserve">${escapeHtml(text)}</m:t>`)
+  }
   function sequence(nodes: readonly RawMathElement[]): string | undefined {
     let output = ''
     for (let index = 0; index < nodes.length; index++) {
@@ -248,7 +260,7 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba):
       if (/[\x00-\x08\x0B\x0C\x0E-\x1F\uFFFE\uFFFF]/.test(text)) return
       const italic = name === 'mtext' ? italicText
         : name === 'mi' && !attributes.mathvariant && /^[\p{Script=Latin}\p{Script=Greek}]\p{M}*$/u.test(text)
-      return run(text, italic)
+      return run(text, italic, name === 'mtext')
     }
     if (text.trim()) return
     if (name === 'mtd' && only(node, 'style')) {
@@ -266,7 +278,8 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba):
       if (space) return run(space[1])
       return
     }
-    if (name === 'mrow' && attributes.class && only(node, 'class')) {
+    const reset = attributes.class === 'math-font-reset' && only(node, 'class')
+    if (name === 'mrow' && attributes.class && !reset && only(node, 'class')) {
       if (attributes.class === 'math-chemistry') return sequence(children)
       if (children.length === 1 && (attributes.class === 'math-overline' || attributes.class === 'math-underline')) {
         const body = convert(children[0])
@@ -277,14 +290,17 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba):
       return enclosure(node)
     }
     const upright = attributes.class === 'math-normal' && attributes.mathvariant === 'normal' && only(node, 'class', 'mathvariant')
-    if (name === 'mrow' && (upright || (only(node, 'style') && attributes.style))) {
+    if (name === 'mrow' && (reset || upright || (only(node, 'style') && attributes.style))) {
       const previousBold = bold
       const previousItalic = italicText
+      const previousTypeface = typeface
       try {
-        const styles = upright ? ['font-weight:normal', 'font-style:normal'] : attributes.style.split(';').filter(Boolean)
+        const styles = reset ? ['font-family:math', 'font-weight:normal', 'font-style:normal']
+          : upright ? ['font-weight:normal', 'font-style:normal'] : attributes.style.split(';').filter(Boolean)
         for (const style of styles) {
           if (style === 'font-weight:bold' || style === 'font-weight:normal') bold = style.endsWith('bold')
           else if (style === 'font-style:italic' || style === 'font-style:normal') italicText = style.endsWith('italic')
+          else if (Object.hasOwn(textTypefaces, style)) typeface = textTypefaces[style]
           else return
         }
         return sequence(children)
@@ -292,6 +308,7 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba):
       finally {
         bold = previousBold
         italicText = previousItalic
+        typeface = previousTypeface
       }
     }
     if (name === 'mrow' && only(node)) {

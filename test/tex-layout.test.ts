@@ -575,6 +575,29 @@ test('keeps surrounding fonts out of array cells and commutative diagram labels'
   expect(fraction).toContain('<mi mathvariant="normal">x</mi><mn>456</mn>')
 })
 
+test('resets math fonts inside text and restores named text styles on reentry', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const switched = math(String.raw`\mathcal{A\textsf{before $x+\text{inside}+\mathbb{R}$ after}B}`, false)
+  expect(switched).toContain('<mi>𝒜</mi>')
+  expect(switched).toContain('<mrow class="math-font-reset"><mi>x</mi>')
+  expect(switched).toContain('<mrow style="font-family:sans-serif;font-weight:normal;font-style:normal"><mtext>inside</mtext></mrow>')
+  expect(switched).toContain('<mi>ℝ</mi>')
+  expect(switched).toContain('<mi>ℬ</mi>')
+  for (const inner of [
+    String.raw`\text{word}`, String.raw`\hbox{word}`, String.raw`\raisebox{2pt}{word}`,
+    String.raw`\fbox{word}`, String.raw`\colorbox{red}{word}`, String.raw`\fcolorbox{blue}{red}{word}`, String.raw`\angl{word}`,
+  ]) {
+    expect(math(`\\mathsf{${inner}}`, false))
+      .toContain('<mrow style="font-family:math;font-weight:normal;font-style:normal"><mtext>word</mtext></mrow>')
+  }
+  const legacy = math(String.raw`\text{\tt $x+\text{word}$}`, false)
+  expect(legacy).toContain('<mrow class="math-font-reset"><mi>x</mi><mo>+</mo><mtext>word</mtext></mrow>')
+  const italic = math(String.raw`\textit{\text{upright}\hbox{italic} $x+\text{upright}+\hbox{italic}$}`, false)
+  expect(italic).toContain('<mrow style="font-style:normal"><mtext>upright</mtext></mrow><mtext>italic')
+  expect(italic).toContain('font-style:normal"><mtext>upright</mtext></mrow><mo>+</mo>')
+  expect(italic).toContain('font-style:italic"><mtext>italic</mtext></mrow>')
+})
+
 // Operator and emphasis cases adapted from KaTeX v0.19.1 (licenses/KaTeX-MIT.txt).
 test('preserves spacing, markup, and limits in named TeX operators', () => {
   const math = createMathRenderer({ throwOnError: true })
@@ -1086,7 +1109,7 @@ test('sets text and mixed math in framed, raised, and centered boxes', () => {
   expect(html).toContain('style="background-color:#fc9;border-color:#d66c21"')
   expect(html).toContain('<mfrac><mrow><mi>a</mi></mrow><mrow><mi>b</mi></mrow></mfrac>')
   expect(html).toContain('<mtext> result</mtext>')
-  expect(html).toMatch(/vertical-align:\.3em"><math[^>]* scriptlevel="0" displaystyle="false"><mrow><mrow style="font-style:normal;font-weight:normal"><msup><mi>y<\/mi><mn>2<\/mn><\/msup>/)
+  expect(html).toMatch(/vertical-align:\.3em"><math[^>]* scriptlevel="0" displaystyle="false"><mrow><mrow class="math-font-reset"><msup><mi>y<\/mi><mn>2<\/mn><\/msup>/)
   expect(html).toContain('class="math-color-box math-frame"><mstyle displaystyle="false" scriptlevel="0"><mtext>check</mtext>')
   expect(html).toContain('style="background-color:yellow"><mstyle displaystyle="false" scriptlevel="0"><mtext>draft</mtext>')
   expect(html).toContain('style="color:#228B22"')
@@ -1557,7 +1580,8 @@ test.skipIf(!chrome)('renders legacy font boundaries and colon relation gaps in 
   const source = String.raw`{\bf A{\tt B}C} \Gamma\varGamma + a\coloneqq b`
   const matrix = String.raw`\mathbf{a\begin{matrix}x&\mathbf{y}\end{matrix}b}`
   const scripts = String.raw`x_{\hbox{Box}}+y_{\text{Script}}`
-  const body = `<div>${renderMath(source)}</div><div id="matrix-fonts">${renderMath(matrix)}</div><div id="box-style">${renderMath(scripts)}</div>`
+  const switches = String.raw`\textsf{\textbf{\textit{outer $x+\text{inner}+\textit{italic}$ rest}}}\mathsf{\text{reset}}`
+  const body = `<div>${renderMath(source)}</div><div id="matrix-fonts">${renderMath(matrix)}</div><div id="box-style">${renderMath(scripts)}</div><div id="font-switch">${renderMath(switches)}</div>`
   const stylesheet = await Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url)).text()
   const server = Bun.serve({
     hostname: '127.0.0.1', port: 0,
@@ -1568,7 +1592,7 @@ test.skipIf(!chrome)('renders legacy font boundaries and colon relation gaps in 
   const view = new Bun.WebView({ backend: { type: 'chrome', path: chrome!, url: false } })
   try {
     await view.navigate(server.url.href)
-    const geometry = await view.evaluate<{ weights: string[], family: string, transforms: string[], gaps: number[], matrix: string[], sizes: number[] }>(`(() => {
+    const geometry = await view.evaluate<{ weights: string[], family: string, transforms: string[], gaps: number[], matrix: string[], sizes: number[], switches: string[][] }>(`(() => {
       const bold = document.querySelector('.math-bold')
       const [a, b, c] = bold.querySelectorAll('mi')
       const capitals = [...document.querySelectorAll('mi')].filter(letter => letter.textContent === 'Γ')
@@ -1580,6 +1604,10 @@ test.skipIf(!chrome)('renders legacy font boundaries and colon relation gaps in 
         gaps: [relation.previousElementSibling, relation.nextElementSibling].map(space => space.getBoundingClientRect().width),
         matrix: [...document.querySelectorAll('#matrix-fonts mi')].map(letter => getComputedStyle(letter).fontWeight),
         sizes: [...document.querySelectorAll('#box-style mtext')].map(text => parseFloat(getComputedStyle(text).fontSize)),
+        switches: [...document.querySelectorAll('#font-switch :is(mtext, mi)')].map(node => {
+          const { fontFamily, fontStyle, fontWeight } = getComputedStyle(node)
+          return [node.textContent.trim(), fontFamily, fontStyle, fontWeight]
+        }),
       }
     })()`)
     expect(geometry.weights).toEqual(['700', '400', '700'])
@@ -1588,6 +1616,10 @@ test.skipIf(!chrome)('renders legacy font boundaries and colon relation gaps in 
     expect(geometry.gaps.map(Math.round)).toEqual([10, 10])
     expect(geometry.matrix).toEqual(['700', '400', '700', '700'])
     expect(geometry.sizes[0]).toBeGreaterThan(geometry.sizes[1])
+    expect(geometry.switches).toEqual([
+      ['outer', 'sans-serif', 'italic', '700'], ['x', 'math', 'normal', '400'], ['inner', 'sans-serif', 'normal', '700'],
+      ['italic', 'sans-serif', 'italic', '700'], ['rest', 'sans-serif', 'italic', '700'], ['reset', 'math', 'normal', '400'],
+    ])
   }
   finally {
     view.close()

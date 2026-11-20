@@ -375,7 +375,7 @@ function applyVariant(content: string, variant: string): string {
   const style = styledLetters[variant]
   const uprightFont = variant === 'normal' || variant === 'bold' || variant === 'sans-serif' || variant === 'monospace'
   if (!style && !uprightFont && variant !== 'italic') return content
-  // Explicit fonts and array cells own their glyphs independently of surrounding fonts.
+  // Explicit fonts, array cells, and math inside text own their glyphs.
   const groups: boolean[] = []
   let innerFont = 0
   return content.replace(/<m(?:row|table)(?: [^>]*?)?>|<\/m(?:row|table)>|<(mi|mn)( mathvariant="normal")?>([^<]+)<\/\1>/g,
@@ -383,7 +383,8 @@ function applyVariant(content: string, variant: string): string {
       if (!element) {
         if (markup.startsWith('</')) innerFont -= Number(groups.pop() ?? false)
         else if (!markup.endsWith('/>')) {
-          const explicit = markup.includes(' mathvariant="') || markup.includes(' data-math-array') || markup.includes(' class="math-cd"')
+          const explicit = markup.includes(' mathvariant="') || markup.includes(' data-math-array')
+            || markup.includes(' class="math-cd"') || markup.includes(' class="math-font-reset"')
           groups.push(explicit)
           innerFont += Number(explicit)
         }
@@ -410,17 +411,25 @@ function fontMarkup(content: Markup, variant: string): Markup {
   return xml`<mrow class="math-${variant}" mathvariant="${variant}">${styled}</mrow>`
 }
 
-const textFonts: Record<string, string> = {
-  text: '', hbox: '', mbox: '', textnormal: 'font-family:serif;font-weight:normal;font-style:normal', textrm: 'font-family:serif',
-  textsf: 'font-family:sans-serif', texttt: 'font-family:monospace',
-  textbf: 'font-weight:bold', textmd: 'font-weight:normal', textup: 'font-style:normal',
-  textit: 'font-style:italic', emph: 'font-style:italic',
+interface TextFont {
+  'font-family'?: 'math' | 'serif' | 'sans-serif' | 'monospace'
+  'font-weight'?: 'bold' | 'normal'
+  'font-style'?: 'italic' | 'normal'
+}
+const normalFont: Readonly<TextFont> = { 'font-family': 'math', 'font-weight': 'normal', 'font-style': 'normal' }
+const textFonts: Readonly<Record<string, Readonly<TextFont>>> = {
+  text: {}, hbox: {}, mbox: {}, textnormal: { ...normalFont, 'font-family': 'serif' }, textrm: { 'font-family': 'serif' },
+  textsf: { 'font-family': 'sans-serif' }, texttt: { 'font-family': 'monospace' },
+  textbf: { 'font-weight': 'bold' }, textmd: { 'font-weight': 'normal' }, textup: { 'font-style': 'normal' },
+  textit: { 'font-style': 'italic' }, emph: { 'font-style': 'italic' },
+}
+function textFontCSS(font: Readonly<TextFont>): string {
+  return Object.entries(font).map(([property, value]) => `${property}:${value}`).join(';')
 }
 const textLigatures: Readonly<Record<string, string>> = {
   '---': '\u2014', '--': '\u2013', '\x60\x60': '\u201c', "''": '\u201d',
   '\x60': '\u2018', "'": '\u2019',
 }
-const proportionalTextFonts = new Set(['textnormal', 'textrm', 'textsf'])
 const typesettingNames = new Set(['TeX', 'LaTeX', 'KaTeX'])
 const textBoxes = new Set(['colorbox', 'fcolorbox', 'fbox', 'reflectbox'])
 const verticalBoxCommands = new Set(['phantom', 'hphantom', 'vphantom', 'smash', 'raisebox', 'rule'])
@@ -570,7 +579,7 @@ function operatorLabel(body: Markup): Markup {
 }
 
 function typesettingName(name: string): string {
-  return `<mrow style="${textFonts.textrm}">${tag('mtext', name)}</mrow>`
+  return `<mrow style="${textFontCSS(textFonts.textrm)}">${tag('mtext', name)}</mrow>`
 }
 
 function spaceMarkup(width: string): string {
@@ -934,6 +943,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
   let fontScale = 1
   let textItalic = false
   let textMonospace = false
+  let textFont: Readonly<TextFont> | undefined
+  let mathFontActive = false
   let linkDepth = 0
   let context: MathMacroContext | undefined
 
@@ -988,6 +999,13 @@ export function renderMath(source: string, display = false, configured: MathMacr
     mode = selected
     try { return render() }
     finally { mode = previous }
+  }
+
+  function withMathFont<T>(active: boolean, render: () => T): T {
+    const previous = mathFontActive
+    mathFontActive = active
+    try { return render() }
+    finally { mathFontActive = previous }
   }
 
   function expandable(token: string): boolean {
@@ -1550,7 +1568,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const offset = readDimension('0px')
       const height = optionalBoxDimension()
       const depth = optionalBoxDimension()
-      const body = renderMarkup(textArgument('text'), 1)
+      const body = renderMarkup(textArgument(), 1)
       // Use an inline box baseline so the shift affects both layout and paint.
       // Zero font adjustment removes the empty line strut without shrinking the content.
       const text = `<math style="font-size:math;font-family:inherit;font-style:inherit;font-weight:inherit" scriptlevel="0" displaystyle="false"><mrow>${body}</mrow></math>`
@@ -1567,7 +1585,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
     if (name === 'hphantom') {
       let parts: Markup[] = []
-      const body = textArgument('text', false, value => { parts = value })
+      const body = textArgument(undefined, false, value => { parts = value })
       return horizontalPhantom(body, parts.map(markup => ({ markup })), 'text')
     }
     const invisible = xml`<mphantom>${readBody()}</mphantom>`
@@ -1607,7 +1625,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   }
 
   function htmlCommand(command: KatexTrustContext['command'], text = false): Markup {
-    const body = () => text ? textArgument('text') : argument()
+    const body = () => text ? textArgument() : argument()
     if (isMathUrlCommand(command)) {
       const options = command === '\\includegraphics' ? bracket() : undefined
       const raw = expandDefinition(rawGroup()).join('')
@@ -1632,14 +1650,20 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return trustedMath(context, state?.options.trust) ? xml`<mrow ${attributes}>${content}</mrow>` : untrusted(command)
   }
 
-  function textArgument(name: string, parentheses = false, capture?: (parts: Markup[]) => void): Markup {
+  function textArgument(name?: string, parentheses = false, capture?: (parts: Markup[]) => void): Markup {
     const previousItalic = textItalic
     const previousMonospace = textMonospace
-    const font = name === 'emph' ? (textItalic ? 'textup' : 'textit') : name
-    if (font === 'textit') textItalic = true
-    else if (font === 'textup' || font === 'textnormal') textItalic = false
-    if (font === 'texttt') textMonospace = true
-    else if (proportionalTextFonts.has(font)) textMonospace = false
+    const previousFont = textFont
+    const font = name === 'emph' ? (textItalic ? 'textup' : 'textit')
+      : name === 'text' && textItalic ? 'textup' : name
+    const declaration = font ? textFonts[font] : undefined
+    if (declaration?.['font-style']) textItalic = declaration['font-style'] === 'italic'
+    if (declaration?.['font-family']) textMonospace = declaration['font-family'] === 'monospace'
+    if (declaration && Object.keys(declaration).length) textFont = { ...textFont, ...declaration }
+    // Named text styles survive an embedded formula. The formula's math font
+    // and any legacy math font declaration stay on their own side of the switch.
+    const reset = mode === 'math' && (mathFontActive || previousFont !== undefined)
+    const properties = reset ? textFontCSS({ ...normalFont, ...textFont }) : declaration ? textFontCSS(declaration) : ''
     try {
       space()
       const start = cursor
@@ -1648,7 +1672,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       if (word) space()
       // Scan the argument before expansion so a token's whole expansion
       // stays in text mode and stops at the boundary of this argument.
-      const content = inMode('text', () => withTokens(body, () => parseTextArgument(font, parentheses, capture), start))
+      const content = inMode('text', () => withTokens(body, () => parseTextArgument(properties, parentheses, capture), start))
       if (name !== 'hbox') return content
       const sized = renderMarkup(content, 1)
       return style => style === 1 ? sized : mathSize(1, sized)
@@ -1656,6 +1680,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     finally {
       textItalic = previousItalic
       textMonospace = previousMonospace
+      textFont = previousFont
     }
   }
 
@@ -1682,7 +1707,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   function textAccent(command: string): { literal: string } | { markup: Markup } {
     const blank = Object.hasOwn(textAccents, command) && !/^\\[A-Za-z]+$/.test(command) && texWhitespace.test(tokens[cursor] ?? '')
     if (blank) cursor++
-    const content = blank ? tag('mtext', '\u00A0') : textArgument('text')
+    const content = blank ? tag('mtext', '\u00A0') : textArgument()
     if (command === '\\textcircled') return { markup: xml`<mrow class="math-text-circled">${content}</mrow>` }
     const [mark, glyph, below] = textAccents[command]
     const plain = typeof content === 'string' ? /^<mtext>([^&<]\p{M}*)<\/mtext>$/u.exec(content)?.[1] : undefined
@@ -1696,13 +1721,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
 
   function coloredArgument(text: boolean): Markup {
     const color = readColor()
-    const content = text ? textArgument('text') : argument()
+    const content = text ? textArgument() : argument()
     return xml`<mrow style="color:${color}">${content}</mrow>`
   }
 
-  function parseTextArgument(name: string, parentheses: boolean, capture?: (parts: Markup[]) => void, end = boundary): Markup {
+  function parseTextArgument(properties: string, parentheses: boolean, capture?: (parts: Markup[]) => void, end = boundary): Markup {
     if (depth++ > 100) throw new Error('Math text is nested too deeply')
-    const properties = textFonts[name]
     const wrap = (markup: Markup) => properties ? xml`<mrow style="${properties}">${markup}</mrow>` : markup
     const opening = parentheses ? '(' : ''
     const closing = parentheses ? ')' : ''
@@ -1769,20 +1793,22 @@ export function renderMath(source: string, display = false, configured: MathMacr
         else if (token === '$' || token === '\\(') {
           flush()
           const close = token === '$' ? '$' : '\\)'
-          const value = inMode('math', () => {
-            const content = inScope(() => row([close, '}', '\\endgroup', boundary]))
+          const value = inScope(() => inMode('math', () => withMathFont(false, () => {
+            textItalic = textFont?.['font-style'] === 'italic'
+            textMonospace = textFont?.['font-family'] === 'monospace'
+            const content = row([close, '}', '\\endgroup', boundary])
             if (take() !== close) throw new Error('Unclosed inline math in text')
             return content
-          })
+          })))
           parts.push(style => {
             const content = renderMarkup(value, style === 0 ? 1 : style)
-            return `<mrow style="font-style:normal;font-weight:normal">${style === 0 ? mathSize(1, content) : content}</mrow>`
+            return `<mrow class="math-font-reset">${style === 0 ? mathSize(1, content) : content}</mrow>`
           })
         }
         else if (token === '{' || token === '\\begingroup') {
           flush()
           if (token === '\\begingroup') space()
-          parts.push(parseTextArgument('text', false, undefined, token === '{' ? '}' : '\\endgroup'))
+          parts.push(parseTextArgument('', false, undefined, token === '{' ? '}' : '\\endgroup'))
         }
         else if (Object.hasOwn(textFonts, command)) {
           flush()
@@ -1794,7 +1820,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
         }
         else if (verticalBoxCommands.has(command)) {
           flush()
-          parts.push(verticalBox(command, () => textArgument('text')))
+          parts.push(verticalBox(command, () => textArgument()))
         }
         else if (typesettingNames.has(command)) {
           flush()
@@ -1811,11 +1837,11 @@ export function renderMath(source: string, display = false, configured: MathMacr
         }
         else if (token === '\\sout') {
           flush()
-          parts.push(xml`<mrow class="math-sout">${textArgument('text')}</mrow>`)
+          parts.push(xml`<mrow class="math-sout">${textArgument()}</mrow>`)
         }
         else if (token === '\\underbar' || token === '\\underline') {
           flush()
-          parts.push(xml`<mrow class="math-underline">${textArgument('text')}</mrow>`)
+          parts.push(xml`<mrow class="math-underline">${textArgument()}</mrow>`)
         }
         else if (spacingCommands.has(command)) {
           flush()
@@ -1828,7 +1854,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
         }
         else if (token === '\\llap' || token === '\\clap' || token === '\\rlap') {
           flush()
-          parts.push(overlap(token[1], textArgument('text')))
+          parts.push(overlap(token[1], textArgument()))
         }
         else if (isMathAttributeCommand(token) || token === '\\href' || token === '\\url') {
           flush()
@@ -1903,7 +1929,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const starred = peek() === '*'
       if (starred) take()
       tagState.label = ''
-      tagState.label = textArgument('text', !starred)
+      tagState.label = textArgument(undefined, !starred)
     }
     else if (token === '\\label') literalGroup()
     else if (token === '\\notag' || token === '\\nonumber') tagState.suppressed = true
@@ -2015,7 +2041,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
         continue
       }
       if (Object.hasOwn(legacyFonts, token)) {
-        const content = row(stop, true, exposeDeclarationLines, undefined, followsOrdinary && !parts.some(rowClass))
+        const content = withMathFont(true, () => row(stop, true, exposeDeclarationLines, undefined, followsOrdinary && !parts.some(rowClass)))
         parts.push({ markup: fontMarkup(content, legacyFonts[token]) })
         continue
       }
@@ -2538,7 +2564,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       return { markup: xml`<mtable class="math-vcenter"><mtr><mtd>${argument()}</mtd></mtr></mtable>` }
     }
     const lap = /^(math)?([lcr])lap$/.exec(name)
-    if (lap) return { markup: overlap(lap[2], lap[1] ? argument() : textArgument('text')) }
+    if (lap) return { markup: overlap(lap[2], lap[1] ? argument() : textArgument()) }
     if (name === 'left') return { markup: pairedDelimiters() }
     if (name === 'right') throw new Error('Unexpected \\right')
     if (name === 'middle') {
@@ -2639,7 +2665,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const mark = name === 'varinjlim' ? '→' : '←'
       return { markup: `<munder accentunder="true"><mo>lim</mo><mo stretchy="true">${mark}</mo></munder>`, limits: true }
     }
-    if (name === 'underbar') return { markup: xml`<mrow class="math-underline">${textArgument('text')}</mrow>` }
+    if (name === 'underbar') return { markup: xml`<mrow class="math-underline">${textArgument()}</mrow>` }
     if (name === 'textcircled' || Object.hasOwn(textAccents, token)) {
       const accented = textAccent(token)
       strictViolation('mathVsTextAccents', `LaTeX accent ${token} works only in text mode`, true, token)
@@ -2679,9 +2705,9 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (name === 'plim') return { markup: tag('mo', 'plim'), limits: true, forceLimits: true }
     if (Object.hasOwn(variants, name)) {
       const variant = variants[name]
-      const { mathClass, markup: content } = name === 'boldsymbol' || name === 'bm'
+      const { mathClass, markup: content } = withMathFont(true, () => name === 'boldsymbol' || name === 'bm'
         ? binRelArgument()
-        : { markup: argument(), mathClass: undefined }
+        : { markup: argument(), mathClass: undefined })
       return { mathClass, markup: fontMarkup(content, variant) }
     }
     if (Object.hasOwn(accents, name)) return { markup: xml`<mover accent="true">${argument()}${tag('mo', accents[name])}</mover>` }
