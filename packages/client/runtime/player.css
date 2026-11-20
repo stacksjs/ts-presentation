@@ -903,9 +903,8 @@ math .math-cd-arrow[data-direction="down"]::after {
   bottom: 0;
   transform: translateX(-50%) rotate(180deg);
 }
-math .math-boxed { border: max(1px, var(--math-min-rule, 0px)) solid currentColor; padding-inline: 0.14em; }
-math .math-color-box { padding: 0.16em; }
-math .math-frame { border: max(1px, var(--math-min-rule, 0px)) solid currentColor; }
+math .math-color-box { padding: 0.3em; }
+math .math-frame { border: max(0.04em, var(--math-min-rule, 0px)) solid currentColor; }
 math .math-vcenter > mtr > mtd { padding: 0; }
 math .math-alignment-axis > mtr > mtd { padding: 0; }
 @supports (grid-template-columns: subgrid) and (display: math) {
@@ -931,11 +930,23 @@ math .math-alignment-axis > mtr > mtd { padding: 0; }
 math .math-overlap-l { transform: translateX(-100%); }
 math .math-overlap-c { transform: translateX(-50%); }
 math .math-reflect { transform: scaleX(-1); }
-math .math-cancel { background: linear-gradient(to top right, transparent 48%, currentColor 49% 51%, transparent 52%); }
-math .math-bcancel { background: linear-gradient(to bottom right, transparent 48%, currentColor 49% 51%, transparent 52%); }
-math .math-xcancel {
-  background: linear-gradient(to top right, transparent 48%, currentColor 49% 51%, transparent 52%),
-    linear-gradient(to bottom right, transparent 48%, currentColor 49% 51%, transparent 52%);
+math :is(.math-cancel, .math-bcancel, .math-xcancel) { position: relative; }
+math .math-cancel-track {
+  --math-cancel-start: calc(50% - 0.023em);
+  --math-cancel-end: calc(50% + 0.023em);
+  --math-cancel-stroke: transparent var(--math-cancel-start), currentColor var(--math-cancel-start) var(--math-cancel-end), transparent var(--math-cancel-end);
+  position: absolute;
+  inset: 0 -0.2em;
+  pointer-events: none;
+  print-color-adjust: exact;
+}
+math :is(.math-cancel, .math-bcancel, .math-xcancel):has(> :is(mi, mn, mo):first-child, > mrow:first-child > :is(mi, mn, mo):only-child) > .math-cancel-track {
+  inset: -0.2em 0;
+}
+math .math-cancel > .math-cancel-track { background-image: linear-gradient(to bottom right, var(--math-cancel-stroke)); }
+math .math-bcancel > .math-cancel-track { background-image: linear-gradient(to top right, var(--math-cancel-stroke)); }
+math .math-xcancel > .math-cancel-track {
+  background-image: linear-gradient(to top right, var(--math-cancel-stroke)), linear-gradient(to bottom right, var(--math-cancel-stroke));
 }
 
 .live-code {

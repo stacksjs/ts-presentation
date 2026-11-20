@@ -244,6 +244,7 @@ for (const [name, shades] of Object.entries(legacyColorShades)) {
 }
 const builtinMacros = new Map<string, Macro>(Object.entries(legacyColors).map(([name, value]) =>
   [`\\${name}`, { body: ['\\textcolor', '{', value, '}', '{', '#1', '}'], parameters: [[]], prefix: [] }]))
+builtinMacros.set('\\boxed', { body: tokenize('\\fbox{$\\displaystyle{#1}$}'), parameters: [[]], prefix: [] })
 
 // Bra-ket expansions follow braket.sty as documented by KaTeX (MIT).
 for (const [name, expansion] of Object.entries({
@@ -648,10 +649,12 @@ function lineTable(lines: MathLine[], exposeRows: boolean, alignStart: boolean):
   }
 }
 
+const cancelTrack = '<mspace class="math-cancel-track" aria-hidden="true"/>'
+
 function negatedMarkup(markup: string): string {
   const symbol = /^((?:<mrow>)*)<(mo|mi|mn)([^>]*)>([^<]+)<\/\2>((?:<\/mrow>)*)$/.exec(markup)
   if (!symbol || !/^(?:[^&]|&(?:lt|gt|amp|quot|#39);)$/u.test(symbol[4]))
-    return `<mrow class="math-cancel">${markup}</mrow>`
+    return `<mrow class="math-cancel">${markup}${cancelTrack}</mrow>`
   const [, prefix, element, attrs, value, suffix] = symbol
   const negated = negatedOperators[value] ?? `${value}\u0338`
   return `${prefix}<${element}${attrs}>${negated}</${element}>${suffix}`
@@ -691,7 +694,7 @@ const mathModeFunctions = new Set([
   ...Object.keys(stretchedAccents), ...Object.keys(extensibleArrows),
   ...ruledAccents, ...Array.from(infixFractions, command => command.slice(1)),
   'begin', 'end', 'right', 'middle', '@binrel', 'mathchoice', 'vcenter', 'substack',
-  'boxed', 'cancel', 'bcancel', 'xcancel', 'pmb', 'phase', 'angl', 'angln', 'mathreflectbox',
+  'cancel', 'bcancel', 'xcancel', 'pmb', 'phase', 'angl', 'angln', 'mathreflectbox',
   'prescript', 'mathstrut', 'overset', 'underset', 'stackrel',
   'overline', 'operatorname', 'operatorname@', 'operatornamewithlimits', 'limits', 'nolimits', 'displaylimits',
   'not', 'mod', 'bmod', 'pmod', 'pod', 'ce', 'pu', 'allowbreak',
@@ -2203,8 +2206,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
         fragment: style => choices[style].parts,
       }
     }
-    if (name === 'boxed' || name === 'cancel' || name === 'bcancel' || name === 'xcancel') {
-      return { markup: xml`<mrow class="math-${name}">${argument()}</mrow>` }
+    if (name === 'cancel' || name === 'bcancel' || name === 'xcancel') {
+      return { markup: xml`<mrow class="math-${name}">${argument()}${cancelTrack}</mrow>` }
     }
     if (name === 'sout') {
       const content = argument()

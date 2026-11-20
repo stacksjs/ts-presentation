@@ -1548,6 +1548,18 @@ test.skipIf(!chrome)('renders TeX line breaks and vertical gaps in Chromium', as
   }
 }, 45000)
 
+test('expands boxed formulas in math and text with display-style contents', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const inline = math(String.raw`a+\boxed{\mathchoice{D}{T}{S}{s}+\sum_{i=1}^{n} i}+b`, false)
+  expect(inline).toContain('<mstyle displaystyle="true" scriptlevel="0"><mrow><mi>D</mi>')
+  expect(inline).toContain('<munderover>')
+  const script = math(String.raw`x^{\boxed{\mathchoice{D}{T}{S}{s}}}`, false)
+  expect(script).toContain('<mstyle displaystyle="true" scriptlevel="0"><mrow><mi>D</mi>')
+  const nested = math(String.raw`\edef\answer{\boxed{\frac ab}}\text{Answer: \answer}`, false)
+  expect(nested).toContain('<mrow class="math-color-box math-frame">')
+  expect(nested).toContain('<mstyle displaystyle="true" scriptlevel="0"><mrow><mfrac><mi>a</mi><mi>b</mi></mfrac>')
+})
+
 test.skipIf(!chrome)('applies configured TeX sizing to the rendered browser geometry', async () => {
   const source = String.raw`\rule{4em}{.2em}+\frac ab+\overline{c}+\boxed{d}`
   const css = Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url))
@@ -1564,23 +1576,98 @@ test.skipIf(!chrome)('applies configured TeX sizing to the rendered browser geom
   const view = new Bun.WebView({ width: 720, height: 400, backend: { type: 'chrome', path: chrome!, url: false } })
   try {
     await view.navigate(server.url.href)
-    const geometry = await view.evaluate<{ width: number, fraction: number, line: number, box: number }[]>(`[...document.querySelectorAll('main > div')].map(formula => ({
-      width: formula.querySelector('mspace').getBoundingClientRect().width,
-      fraction: formula.querySelector('mfrac').getBoundingClientRect().height,
-      line: Number.parseFloat(getComputedStyle(formula.querySelector('.math-overline')).borderTopWidth),
-      box: Number.parseFloat(getComputedStyle(formula.querySelector('.math-boxed')).borderTopWidth),
-    }))`)
+    const geometry = await view.evaluate<{ width: number, fraction: number, line: number, box: number, padding: number[] }[]>(`[...document.querySelectorAll('main > div')].map(formula => {
+      const box = getComputedStyle(formula.querySelector('.math-frame'))
+      return {
+        width: formula.querySelector('mspace').getBoundingClientRect().width,
+        fraction: formula.querySelector('mfrac').getBoundingClientRect().height,
+        line: Number.parseFloat(getComputedStyle(formula.querySelector('.math-overline')).borderTopWidth),
+        box: Number.parseFloat(box.borderTopWidth),
+        padding: [box.paddingTop, box.paddingRight, box.paddingBottom, box.paddingLeft].map(parseFloat),
+      }
+    })`)
     expect(geometry[0].width).toBeCloseTo(160)
     expect(geometry[1].width).toBeCloseTo(60)
     expect(geometry[1].fraction).toBeGreaterThan(geometry[0].fraction)
     expect(geometry[1].line).toBeCloseTo(26, 0)
     expect(geometry[1].box).toBeCloseTo(26, 0)
+    expect(geometry[0].padding).toEqual([12, 12, 12, 12])
   }
   finally {
     view.close()
     server.stop(true)
   }
 }, 45000)
+
+test.skipIf(!chrome)('paints cancellation strokes at a constant thickness without changing layout in Chromium', async () => {
+  const examples = [
+    String.raw`\phantom{\rule{4em}{1em}}`,
+    String.raw`\cancel{\phantom{\rule{4em}{1em}}}`,
+    String.raw`\bcancel{\phantom{\rule{10em}{2.5em}}}`,
+    String.raw`\xcancel{\phantom{\rule{10em}{2.5em}}}`,
+  ]
+  const body = examples.map(source => `<div>${renderMath(source)}</div>`).join('')
+  const css = await Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url)).text()
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response(`<!doctype html><meta charset="utf-8"><style>${css}</style>
+      <main style="width:max-content;padding:20px;background:white;color:#f00000;font-size:48px">${body}</main>`, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    }),
+  })
+  const view = new Bun.WebView({ width: 580, height: 540, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await view.navigate(server.url.href)
+    const screenshot = await view.screenshot()
+    const src = `data:${screenshot.type || 'image/png'};base64,${Buffer.from(await screenshot.arrayBuffer()).toString('base64')}`
+    const boxes = await view.evaluate<{ width: number, height: number, strokes: { y: number, length: number }[][] }[]>(`(async () => {
+      const image = new Image()
+      image.src = ${JSON.stringify(src)}
+      await image.decode()
+      const canvas = new OffscreenCanvas(image.width, image.height)
+      const context = canvas.getContext('2d')
+      context.drawImage(image, 0, 0)
+      return [...document.querySelectorAll('main math')].map(math => {
+        const { left, top, width, height } = math.getBoundingClientRect()
+        const strokes = [0.3, 0.7].map(fraction => {
+          const x = Math.round((left + width * fraction) * devicePixelRatio)
+          const { data } = context.getImageData(x, Math.ceil(top * devicePixelRatio), 1, Math.floor(height * devicePixelRatio))
+          const runs = []
+          let length = 0
+          for (let i = 0; i <= data.length; i += 4) {
+            if (data[i] > 150 && data[i + 1] < 100) length++
+            else if (length) {
+              runs.push({ y: i / 4 - length, length: length / devicePixelRatio })
+              length = 0
+            }
+          }
+          return runs
+        })
+        return { width, height, strokes }
+      })
+    })()`)
+    expect(boxes[0].strokes).toEqual([[], []])
+    expect(boxes[1].width).toBeCloseTo(boxes[0].width)
+    expect(boxes[1].height).toBeCloseTo(boxes[0].height)
+    expect(boxes[3].width).toBeCloseTo(boxes[2].width)
+    expect(boxes[3].height).toBeCloseTo(boxes[2].height)
+    for (const [index, box] of boxes.slice(1).entries()) {
+      for (const strokes of box.strokes) {
+        expect(strokes).toHaveLength(index === 2 ? 2 : 1)
+        for (const { length } of strokes) {
+          expect(length).toBeGreaterThanOrEqual(1)
+          expect(length).toBeLessThanOrEqual(3)
+        }
+      }
+    }
+    expect(boxes[1].strokes[0][0].y).toBeGreaterThan(boxes[1].strokes[1][0].y)
+    expect(boxes[2].strokes[0][0].y).toBeLessThan(boxes[2].strokes[1][0].y)
+  }
+  finally {
+    view.close()
+    await server.stop(true)
+  }
+}, 45_000)
 
 test.skipIf(!chrome)('keeps tagged displays centered and supports flush-left math in Chromium', async () => {
   const options = [{}, { leqno: true }, { fleqn: true }, { fleqn: true }]

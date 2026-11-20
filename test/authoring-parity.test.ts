@@ -27,7 +27,7 @@ B &= \boxed{12.5}
   expect(html).toContain('<mfrac><mn>1</mn><mn>2</mn></mfrac>')
   expect(html).toContain('columnalign="right left"')
   expect(html).toContain('<mtext>(1)</mtext>')
-  expect(html).toContain('class="math-boxed"')
+  expect(html).toContain('class="math-color-box math-frame"')
   expect(html).toContain('stretchy="true">‖</mo>')
 })
 
