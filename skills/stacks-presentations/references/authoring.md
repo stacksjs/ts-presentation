@@ -133,8 +133,12 @@ speaker notes. Each hook can be asynchronous.
   additional range uses one click. Add `{at: 3, startLine: 2, finally: 'all'}`
   after the ranges to control click and line numbering and the final state.
   Row numbers and explicit tags work in `align` and `gather`.
-- Use `\ce{...}` for common reactions and molecular notation, and
-  `\pu{...}` for quantities and units.
+- Use `\ce{^{227}_{90}Th+}` for isotopes, `\ce{CrO4^2-}` for charged
+  species, and `\ce{A ->[H2O][$p_i$] B}` for reaction labels above and
+  below an arrow. Write a hydrate with `\ce{CuSO4*5H2O}`.
+- Use `\pu{1,2(3)e-4 J // mol K}` for a quantity with uncertainty,
+  scientific notation, and a stacked unit fraction. A single slash is
+  inline. See the [mhchem syntax manual](https://mhchem.github.io/MathJax-mhchem/).
 - Use `\genfrac` or `\cfrac` for custom or continued fractions, and
   `\mathchoice` for style-dependent notation. TeX macro definitions support
   groups, delimited arguments, optional arguments, and eager expansion.

@@ -113,6 +113,19 @@ Delivery :delivery, after plan, 2026-11-01`
   expect(html).toContain('data-task-id="plan" data-task-start="2026-02-15T00:00:00.000Z" data-task-end="2026-02-15T00:00:00.000Z"')
 })
 
+test('honors configured Gantt axis labels with day-only date input', () => {
+  const source = `gantt
+dateFormat D
+todayMarker off
+tickInterval 1day
+Example :example, 4, 6`
+  const defaults = mermaid(source, 'day-labels')
+  expect(defaults).toContain('>04</tspan>')
+  const configured = { gantt: { axisFormat: 'day %d' } }
+  expect(mermaid(source, 'formatted-day-labels', configured)).toContain('>day 04</tspan>')
+  expect(mermaid(source.replace('dateFormat D', 'dateFormat D\naxisFormat date %d'), 'explicit-day-labels', configured)).toContain('>date 04</tspan>')
+})
+
 test('uses automatic Gantt task IDs for dependencies and task links', () => {
   const source = `gantt
 dateFormat DD/MM/YYYY

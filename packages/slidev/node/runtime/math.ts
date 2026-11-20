@@ -1,6 +1,8 @@
 import { escapeHtml } from './html.ts'
 import type { KatexOptions, KatexTrustContext } from './authoring-setup.ts'
 import { chemicalFormula, physicalUnits } from './math-chemistry.ts'
+import type { Markup, MathStyle } from './math-markup.ts'
+import { joinMarkup, renderMarkup, xml } from './math-markup.ts'
 import { fractionRule, mathDimension } from './math-sizing.ts'
 import { rowSpacing } from './math-spacing.ts'
 import type { MathClass } from './math-spacing.ts'
@@ -179,7 +181,6 @@ function tokenize(source: string, onTrailingComment?: () => void): string[] {
   return tokens
 }
 
-type MathStyle = 0 | 1 | 2 | 3
 type MathMode = 'math' | 'text'
 const expansionPrimitives = ['\\expandafter', '\\noexpand', '\\@firstoftwo', '\\@secondoftwo', '\\@ifnextchar', '\\@ifstar', '\\TextOrMath', '\\long'] as const
 const expansionPrimitiveNames = new Set<string>(expansionPrimitives)
@@ -266,14 +267,6 @@ interface ArrayRow { cells: Markup[], label?: Markup, before?: ArrayRule, gap?: 
 interface MathLine { content: Markup, gap?: string }
 interface EquationTag { label?: Markup, suppressed: boolean }
 
-// Infix fractions decide the style of both operands after the row is parsed.
-// Static fragments stay strings. Only style-dependent parts defer rendering.
-type Markup = string | ((style: MathStyle) => string)
-
-function renderMarkup(markup: Markup, style: MathStyle): string {
-  return typeof markup === 'string' ? markup : markup(style)
-}
-
 function equationNumberCell(label: Markup | undefined, position?: 'start' | 'end'): string {
   const style = position ? ` style="display:math;padding:0;justify-self:${position}"` : ''
   return `<mtd class="math-equation-number"${style}>${renderMarkup(label ?? '', 1)}</mtd>`
@@ -289,28 +282,6 @@ function taggedDisplay(expression: string, label: Markup, left: boolean, flush: 
     ? left ? 'max-content minmax(max-content,1fr)' : 'minmax(max-content,1fr) max-content'
     : 'minmax(max-content,1fr) max-content minmax(max-content,1fr)'
   return `<mtable class="math-tagged-display" style="display:block;width:100%"><mtr style="display:grid;grid-template-columns:${columns};align-items:center;column-gap:0.5em">${left ? number : spacer}${body}${left ? spacer : number}</mtr></mtable>`
-}
-
-function joinMarkup(parts: Markup[]): Markup {
-  return parts.some(part => typeof part !== 'string')
-    ? style => parts.map(part => renderMarkup(part, style)).join('')
-    : parts.join('')
-}
-
-function xml(parts: TemplateStringsArray, ...values: Markup[]): Markup {
-  let leading = parts[0]
-  for (let index = 0; index < values.length; index++) {
-    const value = values[index]
-    if (typeof value !== 'string') {
-      return (style) => {
-        let result = leading
-        for (let rest = index; rest < values.length; rest++) result += renderMarkup(values[rest], style) + parts[rest + 1]
-        return result
-      }
-    }
-    leading += value + parts[index + 1]
-  }
-  return leading
 }
 
 function fractionStyle(style: MathStyle): MathStyle {
@@ -755,6 +726,22 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
     if (preserveLiterals) countExpansions(definition.length)
     return definition
+  }
+
+  function chemistryMath(source: string): Markup {
+    const begin = cursor
+    const previous = tagState
+    tagState = { suppressed: false }
+    tokens.splice(begin, 0, ...tokenize(source), boundary)
+    try {
+      return inScope(() => row([boundary]))
+    }
+    finally {
+      const end = tokens.indexOf(boundary, begin)
+      tokens.splice(begin, end - begin + 1)
+      cursor = begin
+      tagState = previous
+    }
   }
 
   function argumentAtom(): Atom {
@@ -1544,9 +1531,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
       if (take() !== close) throw new Error('Unclosed math group')
       return { markup: xml`<mrow>${content}</mrow>` }
     }
-    if (name === 'ce' || name === 'pu') {
-      return { markup: (name === 'ce' ? chemicalFormula : physicalUnits)(literalGroup()) }
-    }
+    if (name === 'ce') return { markup: chemicalFormula(literalGroup(), chemistryMath) }
+    if (name === 'pu') return { markup: physicalUnits(literalGroup()) }
     if (isMathAttributeCommand(token) || isMathUrlCommand(token)) return { markup: htmlCommand(token) }
     if (Object.hasOwn(mathClasses, name)) return classifiedAtom(mathClasses[name], argument())
     if (name === 'mathchoice') {

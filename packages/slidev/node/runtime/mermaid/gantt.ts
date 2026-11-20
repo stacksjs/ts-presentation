@@ -65,7 +65,7 @@ function parseClick(line: string): { ids: string[], interaction: TaskInteraction
   return { ids: ids.split(','), interaction }
 }
 
-function parseGantt(source: string, now: number, interactionsEnabled = false): GanttChartOptions | undefined {
+function parseGantt(source: string, now: number, interactionsEnabled = false, configuredAxisFormat = ''): GanttChartOptions | undefined {
   const chart = readChronology(source, '')
   if (!chart || chart.header !== 'gantt') return
 
@@ -146,7 +146,7 @@ function parseGantt(source: string, now: number, interactionsEnabled = false): G
     }
   }
   return { sections, title: chart.title, accessibleTitle: chart.accessibleTitle, description: chart.description, dateFormat,
-    axisFormat: axisFormat || (dateFormat === 'D' ? '%d' : ''), tickInterval: ticks,
+    axisFormat: axisFormat || configuredAxisFormat || (dateFormat === 'D' ? '%d' : ''), tickInterval: ticks,
     weekday, weekend, topAxis, todayMarker, todayMarkerStyle, inclusiveEndDates, excludes: exclusions, includes: inclusions, exclusionMode: 'whole-days', now }
 }
 
@@ -156,9 +156,10 @@ export function scheduleGantt(source: string, now: number = Date.now()): GanttSc
 }
 
 export function gantt(source: string, idPrefix: string, options?: unknown, fallbackTitle = '', interactionsEnabled = false, theme?: unknown): string | undefined {
-  const chart = parseGantt(source, Date.now(), interactionsEnabled)
-  if (!chart) return
   const config = options && typeof options === 'object' ? options as Record<string, unknown> : {}
+  const axisFormat = typeof config.axisFormat === 'string' ? config.axisFormat : undefined
+  const chart = parseGantt(source, Date.now(), interactionsEnabled, axisFormat)
+  if (!chart) return
   const variables = theme && typeof theme === 'object' ? theme as Record<string, unknown> : {}
   const number = (key: string) => diagramPixels(config[key])
   const color = (key: string) => typeof variables[key] === 'string' ? variables[key] as string : undefined
@@ -166,7 +167,6 @@ export function gantt(source: string, idPrefix: string, options?: unknown, fallb
   const sectionColors = [color('sectionBkgColor'), alternateSection, color('sectionBkgColor2'), alternateSection]
   return ganttChart({
     ...chart, idPrefix, title: chart.title || fallbackTitle,
-    axisFormat: chart.axisFormat || (typeof config.axisFormat === 'string' ? config.axisFormat : undefined),
     tickInterval: chart.tickInterval || (typeof config.tickInterval === 'string' ? config.tickInterval : undefined),
     weekday: chart.weekday ?? (isWeekday(config.weekday) ? config.weekday : undefined),
     topAxis: chart.topAxis ?? config.topAxis === true,
