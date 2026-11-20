@@ -293,6 +293,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     html.push(slots)
   }
   const labels: string[] = []
+  const defaultTransition = [deck.headmatter?.transition, settings?.transition, defaults?.transition].find(value => value !== undefined)
   const routes = activeSlides.map((slide, index): SlideRoute => {
     const frontmatter = slide.frontmatter ?? {}
     const override = frontmatter.title || frontmatter.name
@@ -303,6 +304,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
       : override ? undefined : heading?.level ?? slide.level
     const inline = override ? Bun.markdown.html(String(override).replace(/\s*\r?\n\s*/g, ' '), { tagFilter: true }).trim().replace(/^<p>|<\/p>$/g, '')
       : heading?.html ?? escapeHtml(slide.title)
+    const transition = frontmatter.transition === undefined ? defaultTransition : frontmatter.transition
     labels.push(fallbackTitle && !heading ? '' : titleLabel(inline))
     return {
       no: index + 1,
@@ -310,6 +312,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
       title,
       layout: layoutNames[index],
       frontmatter,
+      ...(transition === undefined ? {} : { transition }),
       ...(level === undefined ? {} : { level }),
       ...(fallbackTitle && !heading ? { untitled: true } : {}),
     }
@@ -430,8 +433,8 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     const markup = layered && layer ? layer.below + body + layer.above : body
     const prepared = prepareSlideHtml(markup, destination, index + 1, slide.frontmatter, socialTheme, outline)
     const className = [defaults?.className, slide.className].filter(Boolean).join(' ')
-    const transition = String(slide.frontmatter?.transition ?? '')
-    const motion = ['fade', 'slide-left', 'slide-up'].includes(transition) ? ` data-transition="${transition}"` : ''
+    const authoredTransition = slide.frontmatter?.transition
+    const motion = typeof authoredTransition === 'string' ? ` data-transition="${escapeHtml(authoredTransition)}"` : ''
     const route = alias ? ` data-route="${escapeHtml(alias)}"` : ''
     const drawing = options.savedDrawings?.get(index + 1)
     const overlay = drawing && (drawing.sketch.strokes.length || drawing.legacy) ? drawingOverlay(drawing, { width, height }) : ''

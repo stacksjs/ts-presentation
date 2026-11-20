@@ -12,6 +12,8 @@ export const htmlTag: RegExp = /<(\/?)([a-z][\w:-]*)(?=[\s/>])((?:[^>"']|"[^"]*"
 const htmlTags = new RegExp(`<!--[\\s\\S]*?(?:-->|$)|${htmlTag.source}`, 'gi')
 const rawText = new Set(['style', 'script', 'textarea', 'title', 'xmp', 'iframe', 'noembed', 'noframes', 'noscript', 'pre', 'code'])
 const destinationPattern = /^(?:#\/?|\.\/|\/)?([a-z][a-z0-9-]*|\d+)(?:\/(\d+)|\?clicks=(\d+))?$/i
+const viewTransitionClass = /^view-transition-((?:-?[a-zA-Z_]|--)[\w-]*)$/
+const reservedViewNames = /^(?:none|initial|inherit|unset|revert|revert-layer|default)$/i
 interface StyleBlock { attributes: string, content: string }
 interface Attribute { value: string, source: string, offset: number }
 
@@ -352,8 +354,9 @@ function tweetMarkup(source: string, theme: 'light' | 'dark'): string {
 
 /** Adapted from Slidev's Markdown link and scoped style transforms (MIT). */
 export function prepareSlideHtml(input: string, destination: (value: string) => SlideDestination | undefined, slide: number, frontmatter: Record<string, unknown> = {}, theme: 'light' | 'dark' = 'dark', outline?: SlideOutline): { html: string, css: string } {
-  if (!/<(?:style|(?:a|Link|Tweet|SlidevVideo|Youtube|Toc|TitleRenderer|SlideCurrentNo|SlidesTotal|RenderWhen|LightOrDark|AutoFitText|Transform)(?=[\s/>])|v-?drag)|\sv-drag\b/i.test(input)) return { html: input, css: '' }
+  if (!/<(?:style|(?:a|Link|Tweet|SlidevVideo|Youtube|Toc|TitleRenderer|SlideCurrentNo|SlidesTotal|RenderWhen|LightOrDark|AutoFitText|Transform)(?=[\s/>])|v-?drag)|\sv-drag\b|view-transition-/i.test(input)) return { html: input, css: '' }
   const blocks: StyleBlock[] = []
+  const viewRules = new Set<string>()
   const tags = new RegExp(htmlTags)
   let offset = 0
   let html = ''
@@ -368,6 +371,14 @@ export function prepareSlideHtml(input: string, destination: (value: string) => 
     const name = rawName?.toLowerCase()
     let replacement = original
     if (name === 'p') paragraph = !closing
+    if (name && !closing && source.includes('view-transition-')) {
+      const classes = attributeValues(source).get('class')?.value.split(/\s+/) ?? []
+      for (const className of classes) {
+        const viewName = viewTransitionClass.exec(className)?.[1]
+        if (viewName && !reservedViewNames.test(viewName))
+          viewRules.add(`:where(#slide-${slide} .${className}){view-transition-name:${viewName}}`)
+      }
+    }
     if (name && !closing && rawText.has(name)) {
       const close = new RegExp(`</${name}\\s*>`, 'gi')
       close.lastIndex = tags.lastIndex
@@ -497,6 +508,7 @@ export function prepareSlideHtml(input: string, destination: (value: string) => 
   }
   html += input.slice(offset)
   const scoped = scopeSlideStyles(blocks.map(block => block.content), slide)
-  const css = scoped.map((content, index) => `<style data-slide-style="${slide}"${blocks[index].attributes}>${content}</style>`).join('\n')
-  return { html, css }
+  const styles = scoped.map((content, index) => `<style data-slide-style="${slide}"${blocks[index].attributes}>${content}</style>`)
+  if (viewRules.size) styles.unshift(`<style data-slide-style="${slide}">${[...viewRules].join('\n')}</style>`)
+  return { html, css: styles.join('\n') }
 }

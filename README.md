@@ -156,7 +156,8 @@ the deck and style slides with an optional `style.css`.
 | Slide overview | Press **O** for a thumbnail grid and jump to any slide. Open `/overview` on the dev server or add `?overview=1` to a built deck URL to review speaker notes and reveal steps |
 | Conditional content | `<RenderWhen context="presenter">` selects content by view, with an optional `#fallback` slot. `<LightOrDark>` selects a `#light` or `#dark` slot. Set `colorSchema: auto` to follow system appearance |
 | Text fitting and scaling | `<AutoFitText :min="20" :max="72" modelValue="Heading" />` fits text to its width. `<Transform :scale="0.5">` scales its content with a configurable origin |
-| Per-slide options | `class`, `hide`, `disabled`, and `transition: fade`, `slide-left`, or `slide-up` |
+| Per-slide options | `class`, `hide`, and `disabled` |
+| Slide transitions | Set `transition` in deck or slide frontmatter. Use `fade`, `fade-out`, `slide-left`, `slide-right`, `slide-up`, `slide-down`, `view-transition`, or a custom CSS name. Separate custom forward and backward names with `\|`. Give matching elements a `view-transition-<name>` class for shared animations |
 | Images and component markup | Trusted HTML, with optional `data-zoom` on an image |
 | Post embeds | `<Tweet id="…" />` or `<Tweet url="…" />` loads the X widget in a sandboxed iframe |
 | Video | `<SlidevVideo v-click controls>` accepts native video sources, playback and reset options, and a print poster or seek time. `<Youtube id="…" />` embeds playback in the deck and links to YouTube in exports |

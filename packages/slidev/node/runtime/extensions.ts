@@ -35,7 +35,7 @@ export interface PresentationAddon {
 }
 
 export interface PresentationTheme extends PresentationAddon {
-  defaults?: Pick<Headmatter, 'timer' | 'duration'> & {
+  defaults?: Pick<Headmatter, 'timer' | 'duration' | 'transition'> & {
     layout?: string
     className?: string
     drawings?: DrawingOptions

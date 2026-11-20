@@ -462,3 +462,110 @@ test.skipIf(!chrome)('walks every reveal in play and presenter views and opens t
     await rm(root, { recursive: true, force: true })
   }
 }, browserTestTimeout)
+
+test.skipIf(!chrome)('applies Slidev page transitions across the audience and presenter views', async () => {
+  const root = await mkdtemp(resolve(tmpdir(), 'presentation-page-transitions-'))
+  const source = resolve(root, 'slides.md')
+  let view: Bun.WebView | undefined
+  let server: ReturnType<typeof cli> | undefined
+  try {
+    await Promise.all([
+      Bun.write(source, [
+        '---', 'transition: slide-left', '---', '# First', '<p v-click>Reveal</p>',
+        '---', 'transition: forward | backward', '---', '# Second',
+        '---', 'transition:', '  name: authored', '  enterFromClass: start-hidden', '  enterActiveClass: animate-opacity',
+        '  leaveToClass: start-hidden', '  leaveActiveClass: animate-opacity', '---', '# Third',
+        '---', 'transition: view-transition', '---', '<h1 class="view-transition-title">Fourth</h1>',
+        '---', 'transition: null', '---', '<h1 class="view-transition-title">Fifth</h1>',
+        '---', 'transition: fade-out', '---', '# Sixth',
+        '---', 'transition: slide-up', '---', '# Seventh',
+        '---', '', '# Last',
+      ].join('\n')),
+      Bun.write(resolve(root, 'style.css'), [
+        ':root { --slidev-transition-duration: 1s; }',
+        '.forward-enter-active, .forward-leave-active, .backward-enter-active, .backward-leave-active, .animate-opacity { transition: opacity 1s; }',
+        '.forward-enter-from, .forward-leave-to, .backward-enter-from, .backward-leave-to, .start-hidden { opacity: 0; }',
+      ].join('\n')),
+    ])
+    server = cli('dev', source, '--port', '0')
+    const origin = await serverOrigin(server)
+    view = new Bun.WebView({ width: 860, height: 680, backend: { type: 'chrome', path: chrome!, url: false } })
+    await view.navigate(origin)
+    const state = `(() => {
+      const stage = document.querySelector('#stage')
+      const nav = window.presentationNavigation
+      const list = Array.from(stage.querySelectorAll('article:not([hidden])'), article => {
+        const animation = article.getAnimations().find(effect => effect.transitionProperty === 'translate')
+        return [article.id, article.dataset.slideTransitionRole ?? '', article.inert, animation?.effect.getKeyframes().map(frame => frame.translate) ?? []]
+      })
+      return { name: stage.dataset.slideTransition ?? '', page: nav.currentPage, click: nav.clicks, list }
+    })()`
+    type State = { name: string, page: number, click: number, list: [id: string, role: string, inert: boolean, translate: string[]][] }
+    const read = (commands = '') => view!.evaluate<State>(`(() => { ${commands}; return ${state} })()`)
+    expect(await read()).toEqual({ name: '', page: 1, click: 0, list: [['slide-1', '', false, []]] })
+    expect(await read('window.presentationNavigation.next()')).toMatchObject({ name: '', page: 1, click: 1 })
+    const forward = await read('window.presentationNavigation.next()')
+    expect(forward).toMatchObject({ name: 'slide-left', page: 2, click: 0 })
+    expect(forward.list.map(row => row.slice(0, 3))).toEqual([['slide-1', 'leave', true], ['slide-2', 'enter', false]])
+    expect(Number.parseFloat(forward.list[1][3][0])).toBeGreaterThan(0)
+    const back = await read('window.presentationNavigation.go(1)')
+    expect(back.name).toBe('slide-right')
+    expect(back.list.map(row => row.slice(0, 3))).toEqual([['slide-1', 'enter', false], ['slide-2', 'leave', true]])
+    expect(Number.parseFloat(back.list[0][3][0])).toBeLessThan(0)
+    expect(await read('window.presentationNavigation.go(2); window.presentationNavigation.go(3)')).toMatchObject({ name: 'forward', page: 3 })
+    expect(await read('window.presentationNavigation.go(2)')).toMatchObject({ name: 'backward', page: 2 })
+    expect(await read('window.presentationNavigation.go(3); window.presentationNavigation.go(4)')).toMatchObject({ name: 'authored', page: 4 })
+    expect(await view.evaluate('document.querySelector("#slide-4").classList.contains("animate-opacity")')).toBe(true)
+    expect(await view.evaluate('getComputedStyle(document.querySelector("#slide-4 h1")).viewTransitionName')).toBe('title')
+
+    expect(await view.evaluate(`(async () => {
+      const start = document.startViewTransition.bind(document)
+      let transition
+      document.startViewTransition = callback => transition = start(callback)
+      window.presentationNavigation.go(5)
+      try {
+        await transition.ready
+        const page = window.presentationNavigation.currentPage
+        await transition.finished
+        return [page, document.querySelector('#slide-5').hidden]
+      }
+      finally { document.startViewTransition = start }
+    })()`)).toEqual([5, false])
+    const viewFallback = await read('document.startViewTransition = undefined; window.presentationNavigation.go(4)')
+    expect(viewFallback).toMatchObject({ name: 'fade', page: 4 })
+    expect(await read('window.presentationNavigation.go(5); window.presentationNavigation.go(6)')).toEqual({
+      name: '', page: 6, click: 0, list: [['slide-6', '', false, []]],
+    })
+    expect(await read('window.presentationNavigation.go(7)')).toMatchObject({ name: 'fade-out', page: 7 })
+    const up = await read('window.presentationNavigation.go(8)')
+    expect(up).toMatchObject({ name: 'slide-up', page: 8 })
+    expect(Number.parseFloat(up.list[1][3][0].split(' ')[1])).toBeGreaterThan(0)
+    const down = await read('window.presentationNavigation.go(7)')
+    expect(down).toMatchObject({ name: 'slide-down', page: 7 })
+    expect(Number.parseFloat(down.list[0][3][0].split(' ')[1])).toBeLessThan(0)
+    await view.evaluate(`(async () => {
+      const stage = document.querySelector('#stage')
+      const animations = Array.from(stage.querySelectorAll('[data-slide-transition-role]')).flatMap(slide => slide.getAnimations())
+      await Promise.allSettled(animations.map(animation => animation.finished))
+      await new Promise(requestAnimationFrame)
+    })()`)
+    expect(await read()).toEqual({ name: '', page: 7, click: 0, list: [['slide-7', '', false, []]] })
+    await view.cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
+    expect(await read('window.presentationNavigation.go(6)')).toEqual({
+      name: '', page: 6, click: 0, list: [['slide-6', '', false, []]],
+    })
+    await view.cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] })
+    for (const page of ['preview', 'capture', 'presenter']) {
+      await view.navigate(`${origin}/?${page}#slide-1`)
+      const result = await read('window.presentationNavigation.go(2)')
+      expect(result.page).toBe(2)
+      expect(result.name).toBe(page === 'presenter' ? 'slide-left' : '')
+    }
+  }
+  finally {
+    view?.close()
+    server?.kill()
+    await server?.exited
+    await rm(root, { recursive: true, force: true })
+  }
+}, browserTestTimeout)

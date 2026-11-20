@@ -11,6 +11,7 @@ export interface SlideRoute {
     untitled?: boolean;
     layout: string;
     frontmatter: Record<string, unknown>;
+    transition?: unknown;
 }
 export interface ClickBounds {
     start: number;
@@ -893,7 +894,7 @@ export interface ShikiMagicMoveOptions {
 export type BuiltinSlideTransition = 'fade' | 'fade-out' | 'slide-up' | 'slide-down' | 'slide-left' | 'slide-right' | 'view-transition';
 export interface TransitionOptions {
     /**
-     * Page transition, powered by Vue's \`<TransitionGroup/>\`
+     * Transition to the following slide, with an optional separate backward preset.
      *
      * Built-in transitions:
      * - fade
@@ -911,6 +912,7 @@ export interface TransitionOptions {
     transition?: BuiltinSlideTransition | string | TransitionGroupProps | null;
 }
 export interface TransitionGroupProps {
+    name?: string;
     appear?: boolean;
     persisted?: boolean;
     tag?: string;
@@ -1107,6 +1109,7 @@ export interface SlideRoute {
     untitled?: boolean;
     layout: string;
     frontmatter: Record<string, unknown>;
+    transition?: unknown;
 }
 export interface ClickBounds {
     start: number;
@@ -2025,7 +2028,7 @@ export interface ShikiMagicMoveOptions {
 export type BuiltinSlideTransition = 'fade' | 'fade-out' | 'slide-up' | 'slide-down' | 'slide-left' | 'slide-right' | 'view-transition';
 export interface TransitionOptions {
     /**
-     * Page transition, powered by Vue's \`<TransitionGroup/>\`
+     * Transition to the following slide, with an optional separate backward preset.
      *
      * Built-in transitions:
      * - fade
@@ -2043,6 +2046,7 @@ export interface TransitionOptions {
     transition?: BuiltinSlideTransition | string | TransitionGroupProps | null;
 }
 export interface TransitionGroupProps {
+    name?: string;
     appear?: boolean;
     persisted?: boolean;
     tag?: string;

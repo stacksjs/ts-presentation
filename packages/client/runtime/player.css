@@ -751,16 +751,27 @@ v-switch { display: block; }
 .slide-diagram .diagram-git-tag { font-weight: 650; }
 
 
+/* Slide transition classes adapted from Slidev (MIT). */
 @media screen and (prefers-reduced-motion: no-preference) {
-  .playing .slide[data-transition="fade"]:not([hidden]) { animation: slide-fade 220ms ease-out; }
-  .playing .slide[data-transition="slide-left"]:not([hidden]) { animation: slide-left 220ms ease-out; }
-  .playing .slide[data-transition="slide-up"]:not([hidden]) { animation: slide-up 220ms ease-out; }
-  body:is(.capturing, .previewing) .slide[data-transition]:not([hidden]) { animation: none; }
+  #stage[data-slide-transition] { overflow: hidden; isolation: isolate; }
+  [data-slide-transition-role="leave"] { pointer-events: none; z-index: 0; }
+  [data-slide-transition-role="enter"] { z-index: 1; }
+  :is(.slide-left-enter-active, .slide-left-leave-active, .slide-right-enter-active, .slide-right-leave-active,
+      .slide-up-enter-active, .slide-up-leave-active, .slide-down-enter-active, .slide-down-leave-active) {
+    transition: translate var(--slidev-transition-duration, 0.5s) ease;
+  }
+  :is(.slide-left-enter-from, .slide-right-leave-to) { translate: calc(var(--slide-width) * var(--slide-scale, 1)) 0; }
+  :is(.slide-left-leave-to, .slide-right-enter-from) { translate: calc(-1 * var(--slide-width) * var(--slide-scale, 1)) 0; }
+  :is(.slide-up-enter-from, .slide-down-leave-to) { translate: 0 calc(var(--slide-height) * var(--slide-scale, 1)); }
+  :is(.slide-up-leave-to, .slide-down-enter-from) { translate: 0 calc(-1 * var(--slide-height) * var(--slide-scale, 1)); }
+  :is(.fade-enter-active, .fade-leave-active) { transition: opacity var(--slidev-transition-duration, 0.5s) ease; }
+  .fade-out-leave-active { transition: opacity calc(var(--slidev-transition-duration, 0.5s) * 0.6) ease-out; }
+  .fade-out-enter-active {
+    transition: opacity calc(var(--slidev-transition-duration, 0.5s) * 0.8) ease-in;
+    transition-delay: calc(var(--slidev-transition-duration, 0.5s) * 0.6);
+  }
+  :is(.fade-enter-from, .fade-leave-to, .fade-out-enter-from, .fade-out-leave-to) { opacity: 0; }
 }
-
-@keyframes slide-fade { from { opacity: 0; } }
-@keyframes slide-left { from { opacity: 0; translate: 16px 0; } }
-@keyframes slide-up { from { opacity: 0; translate: 0 16px; } }
 
 .slide math[display="block"] { margin-block: 0.7em; }
 .math-unrendered { white-space: pre-wrap; overflow-wrap: anywhere; }

@@ -604,7 +604,7 @@ export type BuiltinSlideTransition = 'fade' | 'fade-out' | 'slide-up' | 'slide-d
 
 export interface TransitionOptions {
   /**
-   * Page transition, powered by Vue's `<TransitionGroup/>`
+   * Transition to the following slide, with an optional separate backward preset.
    *
    * Built-in transitions:
    * - fade
@@ -623,6 +623,7 @@ export interface TransitionOptions {
 }
 
 export interface TransitionGroupProps {
+  name?: string
   appear?: boolean
   persisted?: boolean
   tag?: string

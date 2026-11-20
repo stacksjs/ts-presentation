@@ -28,6 +28,7 @@ import { collectReveals, prepareSwitchPrint, showReveals } from './reveals.ts'
 import { setupSideEditor } from './side-editor.ts'
 import type { NavOperations, ShortcutOptions } from '../../types/src/shortcuts.ts'
 import { registerShortcuts } from './shortcuts.ts'
+import { createSlideTransitions } from './slide-transitions.ts'
 
 const canvasWidth = Number(document.documentElement.dataset.slideWidth) || defaultCanvas.width
 const canvasHeight = Number(document.documentElement.dataset.slideHeight) || defaultCanvas.height
@@ -60,6 +61,7 @@ const isEntry = initialLocation.page === 'entry'
 const isNotes = initialLocation.page === 'notes' && !document.documentElement.hasAttribute('data-without-notes')
 const isPreview = initialLocation.page === 'preview' || isOverview || isEntry || isNotes
 const isPresenter = initialLocation.page === 'presenter'
+const slideTransitions = createSlideTransitions(stage, !isCapture && !isPreview)
 const opener: Window | null = isPresenter ? window.opener : null
 const messageOrigin = location.protocol === 'file:' ? '*' : location.origin
 const disclosures: HTMLDetailsElement[][] = []
@@ -205,12 +207,13 @@ function displayNotes(selected: number, step: number, changed: boolean): void {
 
 function show(number: number, step?: number, writeHistory = true, sync = true, refresh = false): void {
   if (isEntry) return
+  slideTransitions.flush()
   const { slide: selected, click: nextStep } = slidePosition(number, step, bounds)
   if (!overviewGrid && !refresh && selected === current && nextStep === click && !articles[current - 1].hidden) return
   const slideChanged = selected !== current
   const animate = !isCapture && !isPreview && selected === current && nextStep !== click
-  if (!isNotes && writeHistory && (selected !== current || nextStep !== click)) writePosition(selected, nextStep, selected === current)
   if (overviewGrid) {
+    if (writeHistory && (slideChanged || nextStep !== click)) writePosition(selected, nextStep, !slideChanged)
     current = selected
     click = nextStep
     overviewGrid.select(current)
@@ -226,53 +229,67 @@ function show(number: number, step?: number, writeHistory = true, sync = true, r
     return
   }
 
-  drags?.clear()
-  if (slideChanged) {
-    if (imageView.open) imageView.close()
-    if (!isCapture && !isPreview) carryGlobalLayers(articles[current - 1], articles[selected - 1])
-    articles[current - 1].hidden = true
-    notes[current - 1].hidden = true
+  function commit(retainOutgoing: boolean): void {
+    if (writeHistory && (slideChanged || nextStep !== click)) writePosition(selected, nextStep, !slideChanged)
+    drags?.clear()
+    if (slideChanged) {
+      if (imageView.open) imageView.close()
+      if (!isCapture && !isPreview) carryGlobalLayers(articles[current - 1], articles[selected - 1])
+      if (!retainOutgoing) articles[current - 1].hidden = true
+      notes[current - 1].hidden = true
+    }
+    current = selected
+    click = nextStep
+    const active = articles[current - 1]
+    active.hidden = false
+    for (const frame of active.querySelectorAll<HTMLIFrameElement>('iframe[data-presentation-tweet]:not([src])')) {
+      if (frame.dataset.src) frame.src = frame.dataset.src
+    }
+    showCurrentReveals(animate)
+    media.show(active)
+    conditions.observe(active)
+    displayNotes(current, click, slideChanged)
+    const here = position()
+    goto.value = String(current)
+    previous.disabled = previousPosition(here, bounds) === undefined
+    next.disabled = nextPosition(here, bounds) === undefined
+    presenterControls?.update(here)
+    drawing?.refresh()
+    if (!refresh) sideEditor?.follow()
+    window.dispatchEvent(new CustomEvent('presentation:slide', {
+      detail: { ...here, title: routes[current - 1].title, route: routes[current - 1] },
+    }))
+    if (!refresh) notesFeed?.publish(here)
+    if (sync) syncPeer({ presentationSlide: current, presentationClick: click })
   }
-  current = selected
-  click = nextStep
-  const active = articles[current - 1]
-  active.hidden = false
-  for (const frame of active.querySelectorAll<HTMLIFrameElement>('iframe[data-presentation-tweet]:not([src])')) {
-    if (frame.dataset.src) frame.src = frame.dataset.src
-  }
-  showCurrentReveals(animate)
-  media.show(active)
-  conditions.observe(active)
-  displayNotes(current, click, slideChanged)
-  const here = position()
-  goto.value = String(current)
-  previous.disabled = previousPosition(here, bounds) === undefined
-  next.disabled = nextPosition(here, bounds) === undefined
-  presenterControls?.update(here)
-  drawing?.refresh()
-  if (!refresh) sideEditor?.follow()
-  window.dispatchEvent(new CustomEvent('presentation:slide', {
-    detail: { ...here, title: routes[current - 1].title, route: routes[current - 1] },
-  }))
-  if (!refresh) notesFeed?.publish(here)
-  if (sync) syncPeer({ presentationSlide: current, presentationClick: click })
+
+  const previousSlide = articles[current - 1]
+  const initial = previousSlide.hidden
+  if (refresh) slideTransitions.stop()
+  if (refresh || (!initial && !slideChanged)) return commit(false)
+  const transition = routes[(initial ? selected : Math.min(current, selected)) - 1].transition
+  slideTransitions.play(transition, !initial && selected < current, initial ? undefined : previousSlide, articles[selected - 1], commit)
 }
 
 function nextStep(): void {
+  slideTransitions.flush()
   const upcoming = nextPosition(position(), bounds)
   if (upcoming) show(upcoming.slide, upcoming.click)
 }
 
 function previousStep(): void {
+  slideTransitions.flush()
   const previous = previousPosition(position(), bounds)
   if (previous) show(previous.slide, previous.click)
 }
 
 function nextSlide(): void {
+  slideTransitions.flush()
   if (current < articles.length) show(current + 1)
 }
 
 function previousSlide(): void {
+  slideTransitions.flush()
   if (current > 1) show(current - 1)
 }
 
@@ -592,6 +609,7 @@ function applyLiveDeck(deck: LiveDeck, before: LiveManifest): boolean {
     return false
   }
   if (drags?.active() || document.activeElement?.matches('.live-code textarea')) return false
+  slideTransitions.stop()
   const previous = routes[current - 1]
   const previousClick = click
   const titlesChanged = routes.length !== deck.slides.length

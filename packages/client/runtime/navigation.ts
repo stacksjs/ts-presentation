@@ -9,6 +9,7 @@ export interface SlideRoute {
   untitled?: boolean
   layout: string
   frontmatter: Record<string, unknown>
+  transition?: unknown
 }
 
 export interface ClickBounds { start: number, end: number }

@@ -105,6 +105,7 @@ in a new ts-presentation project.
 | Presenter mode | Two synced browser windows, notes, timer, resizable layouts, next-frame preview, and reveal seeking |
 | Presenter timer | Stopwatch and countdown modes use the deck's `timer` and `duration` settings. Start, pause, resume, and reset in presenter mode. The notes view follows the same timer, including progress and overtime |
 | Reveal scheduling | Absolute and relative steps, hide ranges, grouped and nested lists, CSS presets, and switch slots |
+| Slide transitions | Deck, theme, and slide transition settings support crossfades, sequential fades, directional slides, custom CSS classes, and the native View Transition API. Match elements across slides with `view-transition-<name>` classes. Forward and backward names can differ. Reduced motion, thumbnails, and exports switch slides immediately |
 | Navigation context | Slide-local metadata, route aliases, reveal bounds, nested outlines, slide titles and counters, and native links to slides and reveal steps |
 | Conditional slots | `RenderWhen` for slide, presenter, next-frame preview, overview, print exports, and viewport visibility. `LightOrDark` for fixed or system appearance |
 | Text fitting and scaling | `AutoFitText` fits literal text or Markdown slots within min and max font sizes. `Transform` scales a slot from a configurable origin. Uniform positive scales preserve editable text in PowerPoint |
