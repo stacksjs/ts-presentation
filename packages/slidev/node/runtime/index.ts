@@ -19,6 +19,7 @@ import { drawingEnabled, resolveDrawings } from '../../../types/src/drawings.ts'
 import type { DrawingClientConfig, SavedDrawing } from '../../../types/src/drawings.ts'
 import { escapeHtml, unescapeHtml } from './html.ts'
 import { liveBlock } from './live-markup.ts'
+import type { CompileLiveCode } from './compile-code.ts'
 import { createMathRenderer, resolveMathMacros } from './math.ts'
 import type { DeckLayers } from './layers.ts'
 import { renderLayer, renderSlideLayers } from './layers.ts'
@@ -55,6 +56,7 @@ export interface RenderOptions {
   base?: string
   routerMode?: RouterMode
   liveCompile?: boolean
+  compileExample?: CompileLiveCode
   mcpNavigation?: boolean
   mode?: PreparserContext['mode']
   extensions?: LoadedExtensions
@@ -242,7 +244,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
       if (editorEnabled && (info?.runner || writable)) {
         return liveBlock(decoded.replace(/\n$/, ''), language, info?.runner === 'run',
           writable && info?.writeToken ? { token: info.writeToken, revision: writable.revision } : undefined,
-          info?.runnerOptions, info?.runnerTiming)
+          info?.runnerOptions, info?.runnerTiming, options.compileExample)
       }
       if (language === 'charts' || language === 'ts-charts') {
         return renderChart(decoded, `chart-${index}-${diagram++}`) ?? block

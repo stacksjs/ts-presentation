@@ -1,16 +1,17 @@
 import { compileLiveCode } from './compile-code.ts'
+import type { CompileLiveCode, LiveProgram } from './compile-code.ts'
 import { escapeHtml } from './html.ts'
 import { nativeCodeLanguage } from '../../../types/src/code-runner.ts'
 import type { RunnerTiming } from './code-blocks.ts'
 
-export function liveBlock(source: string, language: string, runnable: boolean, writable?: { token: string, revision: string }, runnerOptions?: Record<string, unknown>, timing?: RunnerTiming): string {
+export async function liveBlock(source: string, language: string, runnable: boolean, writable?: { token: string, revision: string }, runnerOptions?: Record<string, unknown>, timing?: RunnerTiming, compile: CompileLiveCode = compileLiveCode): Promise<string> {
   const native = nativeCodeLanguage(language)
   const label = native === 'ts' ? 'TypeScript' : native === 'js' ? 'JavaScript' : escapeHtml(language)
-  let initial = source
+  let initial: LiveProgram | undefined
   let problem = ''
   if (runnable && native) {
     try {
-      initial = compileLiveCode(source, native)
+      initial = await compile(source, native)
     }
     catch (error) {
       problem = error instanceof Error ? error.message : 'Could not compile the code block'
@@ -31,7 +32,7 @@ export function liveBlock(source: string, language: string, runnable: boolean, w
 ${escapeHtml(source)}</textarea>
     ${writable ? '<output class="live-output" data-snippet-status aria-live="polite"></output>' : ''}
     ${runnable ? `<div class="live-output" data-live-result aria-live="polite"${reveal}></div>
-      ${native ? `<template data-live-program>${escapeHtml(initial)}</template>` : ''}
+      ${initial ? `<template data-live-program${initial.module ? ' data-live-module' : ''}>${escapeHtml(initial.code)}</template>` : ''}
       ${problem ? `<template data-live-error>${escapeHtml(problem)}</template>` : ''}` : ''}
     <pre class="live-code-static"><code>${escapeHtml(source)}</code></pre>
   </section>`

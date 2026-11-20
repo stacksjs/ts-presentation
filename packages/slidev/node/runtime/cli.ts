@@ -7,7 +7,7 @@ import { asset, within } from './assets.ts'
 import { findChrome } from './chrome.ts'
 import { resolveExportSettings } from './export-options.ts'
 import { resolveDeckEntry } from './extension-resolver.ts'
-import { compileLiveCode, maxCodeLength } from './compile-code.ts'
+import { maxCodeLength } from './compile-code.ts'
 import { saveDrag } from './drag-source.ts'
 import { saveDrawing } from './drawing-store.ts'
 import type { CompiledDeck } from './loader.ts'
@@ -216,16 +216,22 @@ async function main(): Promise<void> {
               ? Response.json(readSlideSource(editable), { headers: { 'Cache-Control': 'no-store' } })
               : new Response('This slide has no editable Markdown source.', { status: 404 })
           }
-          case '/__presentation/compile':
+          case '/__presentation/compile': {
             if (request.method !== 'POST') return new Response(null, { status: 405, headers: { Allow: 'POST' } })
             if (!localAuthorRequest(request, url))
               return new Response('Compile requests must come from the local presenter.', { status: 403 })
+            const language = url.searchParams.get('language') ?? 'ts'
+            if (language !== 'ts' && language !== 'js') return new Response('Invalid code language.', { status: 400 })
             try {
-              return new Response(compileLiveCode(await request.text(), 'ts'))
+              const { code, module } = await (await compile()).compileExample(await request.text(), language)
+              return new Response(code, {
+                headers: { 'Cache-Control': 'no-store', 'X-Presentation-Program': module ? 'module' : 'script' },
+              })
             }
             catch (error) {
               return new Response(error instanceof Error ? error.message : 'Invalid code', { status: 422 })
             }
+          }
           case '/__presentation/snippet': {
             if (request.method !== 'POST') return new Response(null, { status: 405, headers: { Allow: 'POST' } })
             if (!localAuthorRequest(request, url)) return new Response('Save requests must come from the local presenter.', { status: 403 })

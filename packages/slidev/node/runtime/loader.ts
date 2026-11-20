@@ -30,6 +30,8 @@ import { bindSlideSource } from './side-editor-source.ts'
 import type { WritableSnippet } from './snippet-write.ts'
 import { snippetRevision, snippetToken } from './snippet-write.ts'
 import { maxCodeLength } from './compile-code.ts'
+import type { CompileLiveCode } from './compile-code.ts'
+import { createLiveCodeCompiler } from './live-modules.ts'
 import { prefixCssUrls } from './base-assets.ts'
 import type { Routing } from '../../../client/runtime/routing.ts'
 import { expandSnippets } from './snippets.ts'
@@ -45,6 +47,7 @@ export interface CompiledDeck extends ExtensionAssets {
   writableSnippets: ReadonlyMap<string, WritableSnippet>
   writableDrags: ReadonlyMap<string, WritableDrag>
   writableSlides: ReadonlyMap<string, WritableSlide>
+  compileExample: CompileLiveCode
   live?: LiveDeck
   drawingStore?: DrawingStore
 }
@@ -225,9 +228,10 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
       loadDeckLayers(layoutRoots, observeOptional),
       loadDeckComponents(layoutRoots, observeOptional),
     ])
+    const liveCode = createLiveCodeCompiler(directory, deck.headmatter?.monacoRunAdditionalDeps, observeOptional)
     const { html, routes, routing, live } = await renderPresentation(deck, {
       base: options.base, routerMode: options.routerMode, liveCompile: options.liveCompile, mcpNavigation: options.mcpNavigation, mode, extensions, setup, writableSnippets, savedDrawings, saveDrawings,
-      deckCssRevision: deckCss && snippetRevision(deckCss), sourceBindings, layers,
+      deckCssRevision: deckCss && snippetRevision(deckCss), sourceBindings, layers, compileExample: liveCode.authored,
       components: components.size ? (frontmatter, number) => createDeckComponentRenderer(components, filepath, number, frontmatter, observeOptional) : undefined,
       async resolveFileLayout(name, registered) {
         if (!/^[\w-]+$/.test(name)) return
@@ -243,7 +247,7 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
     const author = typeof deck.headmatter?.author === 'string' ? deck.headmatter.author : undefined
     const routeAliases = new Set(routes.flatMap(route => route.alias ? [route.alias] : []))
     const drawingStore = saveDrawings ? { ...store, slideCount: routes.length } : undefined
-    const compiled = { title: deck.title, author, headmatter: deck.headmatter, canvas, routing, html, styles: prefixCssUrls(extensions.styles, routing.base), client: extensions.client, mounts: extensions.mounts, writableSnippets, writableDrags, writableSlides, routeAliases, drawingStore, live }
+    const compiled = { title: deck.title, author, headmatter: deck.headmatter, canvas, routing, html, styles: prefixCssUrls(extensions.styles, routing.base), client: extensions.client, mounts: extensions.mounts, writableSnippets, writableDrags, writableSlides, routeAliases, drawingStore, live, compileExample: liveCode.edited }
     cached = { files, deck: compiled }
     return compiled
   }

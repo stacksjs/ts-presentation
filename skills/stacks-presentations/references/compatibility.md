@@ -17,6 +17,7 @@ in a new ts-presentation project.
 | Subpath hosting | `--base` for build and dev, history and hash navigation, direct presenter links, and deck-relative assets |
 | Custom shortcuts | Browser-side `setup/shortcuts.ts` with named defaults, string key combinations, repeat control, and navigation actions |
 | Monaco editor and runner | Local editor and timed browser-worker runner. Bun compiles TypeScript edits in dev and can save opted-in snippets |
+| Runner imports | Bun bundles local JavaScript, TypeScript, and JSON imports from authored examples. Dev edits can reuse those paths or list additional local modules in `monacoRunAdditionalDeps` |
 | Custom code runners | Browser-side `setup/code-runners.ts` for decks, themes, and addons, with fence options, chained runners, cancellation, and text, HTML, or DOM results |
 | Runner timing | Visibility-scoped autorun, one-time and manual modes, debounced edits, and `showOutputAt` reveal scheduling |
 | Monaco diff editor | Side-by-side line comparison for `{monaco-diff}` and `{live-diff}`, with an editable modified version, reset, line numbers, and printable markup |

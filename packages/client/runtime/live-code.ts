@@ -24,9 +24,18 @@ const logger = Object.fromEntries(['log', 'info', 'warn', 'error', 'debug', 'tab
 self.console = logger
 self.onmessage = async ({ data }) => {
   try {
-    const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
-    const result = await new AsyncFunction('console', data)(logger)
-    if (result !== undefined) write([result])
+    if (data.module) {
+      const url = URL.createObjectURL(new Blob([data.code], { type: 'text/javascript' }))
+      try {
+        await import(url)
+      } finally {
+        URL.revokeObjectURL(url)
+      }
+    } else {
+      const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
+      const result = await new AsyncFunction('console', data.code)(logger)
+      if (result !== undefined) write([result])
+    }
     send({ kind: 'finished' })
   } catch (error) {
     send({ kind: 'error', text: String(error).slice(0, 800) })
@@ -35,12 +44,12 @@ self.onmessage = async ({ data }) => {
 `
 
 const sandbox = `<!doctype html><meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; worker-src blob:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' blob:; worker-src blob:; connect-src 'none'; base-uri 'none'; form-action 'none'">
 <script>
   const workerCode = ${JSON.stringify(workerBody).replaceAll('<', '\\u003c')}
   const notify = message => parent.postMessage(message, '*')
   addEventListener('message', event => {
-    if (event.source !== parent || typeof event.data !== 'string') return
+    if (event.source !== parent || typeof event.data?.code !== 'string') return
     let location
     try {
       location = URL.createObjectURL(new Blob([workerCode], { type: 'text/javascript' }))
@@ -58,7 +67,7 @@ const sandbox = `<!doctype html><meta charset="utf-8">
 
 type WriteOutput = (text: string, error?: boolean) => void
 
-async function execute(program: string, append: WriteOutput, signal: AbortSignal): Promise<boolean> {
+async function execute(code: string, module: boolean, append: WriteOutput, signal: AbortSignal): Promise<boolean> {
   if (signal.aborted) return false
   const iframe = document.createElement('iframe')
   iframe.hidden = true
@@ -100,7 +109,7 @@ async function execute(program: string, append: WriteOutput, signal: AbortSignal
     }, 3000)
     window.addEventListener('message', receive)
     signal.addEventListener('abort', abort, { once: true })
-    iframe.addEventListener('load', () => iframe.contentWindow?.postMessage(program, '*'), { once: true })
+    iframe.addEventListener('load', () => iframe.contentWindow?.postMessage({ code, module }, '*'), { once: true })
     document.body.append(iframe)
   })
 }
@@ -135,7 +144,9 @@ export function setupLiveCode(root: ParentNode = document): void {
     const output = block.querySelector<HTMLElement>('[data-live-result]')
     const authored = editor.value
     let original = authored
-    const compiled = block.querySelector<HTMLTemplateElement>('[data-live-program]')?.content.textContent ?? ''
+    const authoredProgram = block.querySelector<HTMLTemplateElement>('[data-live-program]')
+    const compiled = authoredProgram?.content.textContent ?? ''
+    const authoredModule = authoredProgram?.hasAttribute('data-live-module') ?? false
     const error = block.querySelector<HTMLTemplateElement>('[data-live-error]')?.content.textContent
     const switchLanguage = block.querySelector<HTMLButtonElement>('[data-live-convert]')
     const label = block.querySelector<HTMLElement>('.live-code-toolbar > span')
@@ -194,7 +205,7 @@ export function setupLiveCode(root: ParentNode = document): void {
       }
     })
 
-    if (switchLanguage && !canCompile && !error) {
+    if (switchLanguage && !canCompile && !error && !authoredModule) {
       switchLanguage.hidden = false
       switchLanguage.addEventListener('click', () => {
         active?.abort(superseded)
@@ -214,7 +225,7 @@ export function setupLiveCode(root: ParentNode = document): void {
       language = originalLanguage
       if (label) label.textContent = originalLabel
       editor.setAttribute('aria-label', `Edit ${label?.textContent ?? 'code'} example`)
-      if (switchLanguage) switchLanguage.hidden = canCompile || Boolean(error)
+      if (switchLanguage) switchLanguage.hidden = canCompile || authoredModule || Boolean(error)
       editor.value = original
       if (output) output.textContent = ''
       editor.focus()
@@ -250,12 +261,14 @@ export function setupLiveCode(root: ParentNode = document): void {
       async function runNative(source: string, kind: 'ts' | 'js', write: WriteOutput): Promise<boolean> {
         signal.throwIfAborted()
         let program = source
-        if (kind === 'ts' && nativeCodeLanguage(originalLanguage) === 'ts' && source === authored) {
+        let module = false
+        if (kind === nativeCodeLanguage(originalLanguage) && source === authored) {
           if (error) throw new Error(error)
           program = compiled
+          module = authoredModule
         }
-        else if (kind === 'ts' && canCompile) {
-          const response = await fetch('./__presentation/compile', {
+        else if (canCompile && (kind === 'ts' || /\b(?:import|export)\b/.test(source))) {
+          const response = await fetch(`./__presentation/compile?language=${kind}`, {
             method: 'POST',
             headers: { 'Content-Type': 'text/plain; charset=utf-8' },
             body: program,
@@ -263,10 +276,13 @@ export function setupLiveCode(root: ParentNode = document): void {
           })
           program = await response.text()
           if (!response.ok) throw new Error(program)
+          module = response.headers.get('X-Presentation-Program') === 'module'
         }
-        else if (kind === 'ts') throw new Error('Use Edit as JavaScript to run edits in the static deck.')
-        if (program.length > 64_000) throw new Error('Code sample is too large')
-        return execute(program, write, signal)
+        else if (kind === 'ts') throw new Error(authoredModule
+          ? 'Start the dev server to run edits to TypeScript module examples.'
+          : 'Use Edit as JavaScript to run edits in the static deck.')
+        if (program.length > (module ? 256_000 : 64_000)) throw new Error('Code sample is too large')
+        return execute(program, module, write, signal)
       }
       try {
         const custom = await customRunner(currentLanguage)

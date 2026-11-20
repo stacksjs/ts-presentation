@@ -169,7 +169,8 @@ for a named slot. STX expressions can read `title`, `slideNumber`, and
 `frontmatter`. The image layouts accept `image`, `imageAlt`, and `backgroundSize`.
 
 TypeScript edits run when served by the Bun dev command. The offline build
-can run the original TypeScript and offers an editable JavaScript version.
+runs the original TypeScript and offers an editable JavaScript version of
+self-contained examples.
 `{monaco-run}` starts when its example becomes visible in the audience or
 presenter view and reruns after edits. Set `{autorun:false}` for manual
 execution, `{autorun:'once'}` for a single automatic run, or
@@ -177,6 +178,25 @@ execution, `{autorun:'once'}` for a single automatic run, or
 uses manual execution by default and accepts the same options.
 Use `monaco: false` in frontmatter for static code blocks, or set it to
 `dev` or `build` to enable editors in that mode.
+
+JavaScript and TypeScript runner examples can import local modules. Place
+shared helpers under `snippets/` beside the deck. For example, this runnable
+fence uses the `formatScore` export from `snippets/score.ts`.
+
+````markdown
+```ts {monaco-run}
+import { formatScore } from './score'
+console.log(formatScore(42))
+```
+````
+
+Bun bundles the authored imports for static builds. Use the dev server to run
+edits that use imports. An edit can reuse imports from the deck's authored
+examples or introduce paths listed in `monacoRunAdditionalDeps` in headmatter,
+such as `monacoRunAdditionalDeps: ['./score', './statistics']`. The entry paths
+are relative to `snippets/`. Helpers can import other JavaScript, TypeScript,
+and JSON files inside the deck directory. Runnable examples with imports use
+module syntax and report output through `console.log`.
 
 Register runners in `setup/code-runners.ts` in a deck, theme, or addon. This
 example runs `csv {monaco-run}` fences in both dev and static builds.
