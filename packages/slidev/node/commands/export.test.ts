@@ -93,7 +93,7 @@ it('exposes an existing PDF in the static player without generating a second fil
   finally { await rm(root, { recursive: true, force: true }) }
 }, exportTestTimeout)
 
-it.skipIf(!chrome)('bundles and links a downloadable vector PDF in a subpath build', async () => {
+it.skipIf(!chrome)('bundles a downloadable vector PDF and keeps note-only reveals in a subpath build without notes', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-built-pdf-'))
   const base = '/talks/d%C3%A9mo/'
   const site = join(root, 'output', 'site')
@@ -103,16 +103,24 @@ it.skipIf(!chrome)('bundles and links a downloadable vector PDF in a subpath bui
     const filename = 'handouts/Release notes.pdf'
     await Bun.write(join(root, 'slides.md'), deck
       .replace('nested/final/report', filename)
+      .replace('Second distinct reveal</p>', [
+        'Second distinct reveal</p>', '', '<!-- presenter-only-example', '',
+        '[click]', '', 'First note', '', '[click]', '', 'Second note', '', '[click]', '', 'Last note -->',
+      ].join('\n'))
       .replace('src="./missing-screenshot.png"', 'src="/cover.png"'))
     await Bun.write(join(root, 'public', 'cover.png'), Bun.file(new URL('../../test/fixtures/pptx/picture.png', import.meta.url)))
-    await deckCommand(root, 'build', '--download', '--out', site, '--base', base, '--router-mode', 'history',
+    await deckCommand(root, 'build', '--download', '--without-notes', '--out', site, '--base', base, '--router-mode', 'history',
       '--range', '2', '--with-clicks', '--executable-path', chrome!)
+    const html = await Bun.file(join(site, 'index.html')).text()
+    expect(html).toContain('data-without-notes')
+    expect(html).not.toMatch(/presenter-only-example|First note|Second note|Last note/)
+    expect(html).not.toContain('data-deck-page-link="notes"')
     const pdf = await Bun.file(join(site, filename)).text()
     expect(pdf.startsWith('%PDF')).toBe(true)
-    expect(pdf.match(/\/Type\s*\/Page\b/g)).toHaveLength(3)
+    expect(pdf.match(/\/Type\s*\/Page\b/g)).toHaveLength(4)
     expect(pdf).toContain('/Type /Font')
     expect(pdf).toContain('/Subtype /Image')
-    expect(pdf.match(/\/Dest \/presentation-print-2-2\b/g)).toHaveLength(3)
+    expect(pdf.match(/\/Dest \/presentation-print-2-2\b/g)).toHaveLength(4)
     const files = await realpath(site)
     server = Bun.serve({
       hostname: '127.0.0.1',
@@ -120,7 +128,7 @@ it.skipIf(!chrome)('bundles and links a downloadable vector PDF in a subpath bui
       fetch(request) {
         const path = deckPath(new URL(request.url).pathname, base)
         if (path === undefined) return new Response(null, { status: 404 })
-        return asset(files, path === '/selected' ? '/index.html' : decodeURIComponent(path), request)
+        return asset(files, ['/selected', '/presenter/selected', '/entry', '/overview', '/notes'].includes(path) ? '/index.html' : decodeURIComponent(path), request)
       },
     })
     view = new Bun.WebView({ width: 960, height: 600, backend: { type: 'chrome', path: chrome!, url: false } })
@@ -128,6 +136,17 @@ it.skipIf(!chrome)('bundles and links a downloadable vector PDF in a subpath bui
     const href = await view.evaluate<string>("document.querySelector('#download-pdf[download]').href")
     expect(new URL(href).pathname).toBe(base + 'handouts/Release%20notes.pdf')
     expect((await fetch(href)).headers.get('Content-Type')).toBe('application/pdf')
+    expect(await view.evaluate('window.presentationNavigation.clicksTotal')).toBe(3)
+    await view.navigate(new URL(base + 'presenter/selected', server.url).href)
+    expect(await view.evaluate(`[
+      window.presentationNavigation.mode, window.presentationNavigation.clicksTotal,
+      document.querySelector('#presenter-notes h2').textContent,
+      document.querySelector('#presenter-notes-link'),
+    ]`)).toEqual(['presenter', 3, 'Presenter timer', null])
+    await view.navigate(new URL(base + 'overview', server.url).href)
+    expect(await view.evaluate("document.querySelectorAll('.overview-notes').length")).toBe(0)
+    await view.navigate(new URL(base + 'notes', server.url).href)
+    expect(await view.evaluate("window.presentationNavigation.mode")).toBe('slide')
   }
   finally {
     view?.close()

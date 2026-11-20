@@ -26,6 +26,7 @@ const options = {
   out: { type: 'string' },
   output: { type: 'string' },
   download: { type: 'boolean' },
+  'without-notes': { type: 'boolean' },
   range: { type: 'string' },
   scale: { type: 'string' },
   'with-clicks': { type: 'boolean' },
@@ -47,6 +48,7 @@ const help = `ts-presentation <dev|build|format|export|export-notes|mcp> [slides
   dev     Serve a local presentation. Optional --port (default: 3030) and --mcp.
   build   Build a static site. Optional --out (default: dist beside the deck).
           Use --download to include a downloadable PDF.
+          Use --without-notes to omit speaker notes from the built site.
   format Normalize slide boundaries and speaker note blocks in the source.
   export  Write PDF, PNG, PPTX, editable PPTX or Markdown with slide images using Chrome.
           Optional --out and --executable-path.
@@ -108,7 +110,11 @@ async function main(): Promise<void> {
   if (!player.success || !player.outputs[0]) throw new Error('Could not build the browser player')
   const javascript = await player.outputs[0].text()
   const emptyStyle = '/* This deck has no custom styles. */\n'
-  const compile = createDeckCompiler(source, { base, routerMode, liveCompile: command === 'dev', mcpNavigation: command === 'dev' && values.mcp, mode, theme: values.theme, download: values.download })
+  const compile = createDeckCompiler(source, {
+    base, routerMode, mode, theme: values.theme, download: values.download,
+    liveCompile: command === 'dev', mcpNavigation: command === 'dev' && values.mcp,
+    withoutNotes: command === 'build' && values['without-notes'],
+  })
 
   async function deckStyles(): Promise<string | Bun.BunFile> {
     const css = Bun.file(customStyle)

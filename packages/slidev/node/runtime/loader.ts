@@ -59,7 +59,7 @@ export interface CompiledDeck extends ExtensionAssets {
   drawingStore?: DrawingStore
 }
 
-export interface CompileOptions extends Pick<RenderOptions, 'base' | 'routerMode' | 'liveCompile' | 'mode' | 'mcpNavigation'> {
+export interface CompileOptions extends Pick<RenderOptions, 'base' | 'routerMode' | 'liveCompile' | 'mode' | 'mcpNavigation' | 'withoutNotes'> {
   theme?: string
   download?: boolean
 }
@@ -243,7 +243,7 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
     const { html, routes, routing, live, notesMarkdown } = await renderPresentation(deck, {
       base: options.base, routerMode: options.routerMode, liveCompile: options.liveCompile, mcpNavigation: options.mcpNavigation, mode, extensions, setup, writableSnippets, savedDrawings, saveDrawings,
       deckCssRevision: deckCss && snippetRevision(deckCss), sourceBindings, layers, compileExample: liveCode.authored,
-      entry: filepath, transformerSources, pdfDownloadHref: download?.href,
+      entry: filepath, transformerSources, pdfDownloadHref: download?.href, withoutNotes: options.withoutNotes,
       components: components.size ? (frontmatter, number) => createDeckComponentRenderer(components, filepath, number, frontmatter, observeOptional) : undefined,
       async resolveFileLayout(name, registered) {
         if (!/^[\w-]+$/.test(name)) return

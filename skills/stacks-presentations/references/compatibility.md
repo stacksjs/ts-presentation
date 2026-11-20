@@ -64,6 +64,7 @@ in a new ts-presentation project.
 | PowerPoint equation enclosures and spacing | Frames, actuarial notation, cancellation strokes, and strikeout export as native Office Math border boxes. Phantom spaces, smashed dimensions, left-side scripts, and supported chemical isotope notation also stay editable. Serif, sans-serif, and typewriter text inside equations use Cambria, Arial, and Courier New respectively |
 | Notes and Markdown export | `export-notes` prints notes with slide titles and numbers. `export --format md` links selected slide images and keeps raw speaker-note Markdown |
 | Downloadable PDF in static builds | `build --download` or `download: true` generates a vector PDF and adds a player link that follows the deployment base. Set `download` to a PDF path or URL to link to an existing file |
+| Audience builds without notes | `build --without-notes` omits speaker-note content and notes links from the static site while preserving the reveal timeline |
 | First-party diagram authoring | YAML `charts` fences through `ts-charts` for flowcharts, sequence, state, class, ER, pie, timeline, journey, Gantt, Git history, XY charts, and Sankey diagrams |
 | Draggable elements | Inline directives, drag and arrow components, frontmatter positions, scaled editing, and local Markdown saves |
 | Imported Slidev diagrams | Compatibility fences translate the supported syntax to `ts-charts` input |

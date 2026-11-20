@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en"{!! clickAnimation !!} data-slide-width="{{ width }}" data-slide-height="{{ height }}" data-theme="{{ theme }}" data-color-schema="{{ colorSchema }}"{!! liveAttribute !!}{!! routeAttributes !!}>
+<html lang="en"{!! clickAnimation !!} data-slide-width="{{ width }}" data-slide-height="{{ height }}" data-theme="{{ theme }}" data-color-schema="{{ colorSchema }}"{!! liveAttribute !!}{!! routeAttributes !!}{!! withoutNotes !!}>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -25,20 +25,20 @@
     <nav aria-label="Presentation views">
       <a data-deck-page-link="slide">Slides</a>
       <a data-deck-page-link="presenter">Presenter</a>
-      <a data-deck-page-link="notes">Notes</a>
+      {!! entryNotesLink !!}
       <a data-deck-page-link="overview">Overview</a>
     </nav>
   </main>
   <main id="stage">{!! slideMarkup !!}</main>
   {!! globalBottom !!}
   {!! editorPanel !!}
-  <aside id="presenter-notes" hidden aria-label="Speaker notes">
+  <aside id="presenter-notes" hidden aria-label="{{ presenterPanelTitle }}">
     <header class="presenter-header">
-      <h2>Speaker notes</h2>
+      <h2>{{ presenterPanelTitle }}</h2>
       <div class="presenter-timing">
         <span id="presenter-time" aria-label="Elapsed time">0:00</span>
         <button id="presenter-reset" type="button">Reset timer</button>
-        <a id="presenter-notes-link" data-deck-page-link="notes" target="_blank" rel="noopener">Open notes view</a>
+        {!! presenterNotesLink !!}
       </div>
     </header>
     {!! notesMarkup !!}
@@ -64,8 +64,8 @@
     <button id="next" type="button" aria-label="Next slide">→</button>
     <button id="presenter" type="button">Presenter view</button>
     <select id="presenter-layout" aria-label="Presenter layout" hidden>
-      <option value="1">Notes below</option>
-      <option value="2">Notes beside slides</option>
+      <option value="1">{{ presenterLayoutBelow }}</option>
+      <option value="2">{{ presenterLayoutBeside }}</option>
       <option value="3">Large preview</option>
     </select>
     <div id="presenter-steps" hidden>

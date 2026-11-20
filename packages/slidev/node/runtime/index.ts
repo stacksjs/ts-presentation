@@ -82,6 +82,7 @@ export interface RenderOptions {
   mcpNavigation?: boolean
   mode?: PreparserContext['mode']
   pdfDownloadHref?: string
+  withoutNotes?: boolean
   extensions?: LoadedExtensions
   layers?: DeckLayers
   components?: (frontmatter: Record<string, unknown>, slideNumber: number) => DeckComponentRenderer
@@ -112,6 +113,8 @@ const sideEditor = `<aside id="side-editor" aria-labelledby="side-editor-heading
 export async function renderDeck(deck: Deck, options?: RenderOptions): Promise<string> {
   return (await renderPresentation(deck, options)).html
 }
+
+const noteBreaks = /^\[click\]\s*$/gm
 
 export async function renderPresentation(deck: Deck, options: RenderOptions = {}): Promise<{ html: string, routes: SlideRoute[], routing: Routing, live?: LiveDeck, notesMarkdown: readonly string[] }> {
   const nested = deck.headmatter?.config as Record<string, unknown> | undefined
@@ -172,9 +175,17 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   const activeExtensions: PresentationAddon[] = extensions ? [extensions.theme, ...extensions.addons] : []
   const defaults = extensions?.theme.defaults
   const transforms = activeExtensions.flatMap(extension => extension.transformSlide ? [extension.transformSlide] : [])
-  const adapted = transforms.length ? await Promise.all(deck.slides.map(async (slide, index) => {
-    let result = slide
-    for (const transform of transforms) result = await transform(result, index)
+  const noteClicks = options.withoutNotes ? new WeakMap<Slide, number>() : undefined
+  const adapted = transforms.length || noteClicks ? await Promise.all(deck.slides.map(async (slide, index) => {
+    let result = noteClicks ? { ...slide, notes: '' } : slide
+    for (const transform of transforms) {
+      result = await transform(result, index)
+      if (noteClicks && result.notes) result = { ...result, notes: '' }
+    }
+    if (noteClicks) {
+      result = { ...result, notes: '' }
+      noteClicks.set(result, slide.notes.match(noteBreaks)?.length ?? 0)
+    }
     const source = options.sourceBindings?.get(slide)
     if (source) options.sourceBindings?.set(result, source)
     const origin = options.transformerSources?.get(slide)
@@ -406,7 +417,11 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     ? ruby as Record<string, unknown>
     : undefined
   const notes = activeSlides.map((slide) => {
-    const segments = (slide.notes || 'No speaker notes for this slide.').split(/^\[click\]\s*$/m)
+    if (noteClicks) {
+      const clicks = noteClicks.get(slide) ?? 0
+      return clicks ? `<section hidden data-note-clicks="${clicks}"></section>` : '<section hidden></section>'
+    }
+    const segments = (slide.notes || 'No speaker notes for this slide.').split(noteBreaks)
     return `<section hidden${slide.notes ? ' data-has-notes="true"' : ''}>${segments.map((text, index) => `<div data-note-step="${index}">${baseMarkup(markdown(annotations ? applyNotesAutoRuby(text, annotations) : text))}</div>`).join('')}</section>`
   })
 
@@ -471,12 +486,18 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
       : '',
     contextMenu: contextMenu ? '<div id="presentation-context-menu" role="menu" aria-label="Presentation actions" hidden></div>' : '',
     editorPanel: options.liveCompile ? sideEditor : '',
+    withoutNotes: noteClicks ? ' data-without-notes' : '',
+    entryNotesLink: noteClicks ? '' : '<a data-deck-page-link="notes">Notes</a>',
+    presenterNotesLink: noteClicks ? '' : '<a id="presenter-notes-link" data-deck-page-link="notes" target="_blank" rel="noopener">Open notes view</a>',
+    presenterPanelTitle: noteClicks ? 'Presenter timer' : 'Speaker notes',
+    presenterLayoutBelow: noteClicks ? 'Timer below' : 'Notes below',
+    presenterLayoutBeside: noteClicks ? 'Timer beside slides' : 'Notes beside slides',
     notesMarkup: notes.join('\n'),
     slideChoices: choices.join(''),
     editorButton: options.liveCompile ? '<button id="edit-slide" type="button" aria-controls="side-editor" aria-expanded="false" hidden>Edit slide</button>' : '',
     drawHidden: !drawings.enabled || drawings.presenterOnly ? ' hidden' : '',
     liveStatus: options.liveCompile ? '<span id="live-update-status" role="status" hidden></span>' : '',
   })
-  const notesMarkdown = options.mode === 'export' ? activeSlides.map(slide => slide.notes) : []
+  const notesMarkdown = options.mode === 'export' && !noteClicks ? activeSlides.map(slide => slide.notes) : []
   return { html: document, routes, routing, live, notesMarkdown }
 }

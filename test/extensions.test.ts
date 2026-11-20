@@ -30,6 +30,51 @@ test('keeps literal slot markers in code and joins repeated slots', () => {
   expect(slots.right).toBe('First\n\nSecond')
 })
 
+test('omits speaker notes from render hooks and markup without mutating the source deck', async () => {
+  const deck = parseDeck('# Audience slide\n\n<!--\nauthored-note-example\n\n[click]\n\nsecond-note-example\n-->')
+  const received: string[] = []
+  const html = await renderDeck(deck, {
+    withoutNotes: true,
+    extensions: {
+      styles: '', client: '', mounts: {},
+      theme: {
+        name: 'notes-test',
+        transformSlide(slide) {
+          received.push(slide.notes)
+          return { ...slide, notes: 'generated-note-example' }
+        },
+        layouts: {
+          default({ slide, html }) {
+            received.push(slide.notes)
+            return html
+          },
+        },
+      },
+      addons: [{
+        name: 'notes-test-addon',
+        transformSlide(slide) {
+          received.push(slide.notes)
+          return { ...slide }
+        },
+      }],
+    },
+    setup: {
+      transformers: {
+        markdown: [({ slide, options }) => {
+          received.push(slide.note ?? '', options.data.slides[0].notes ?? '')
+        }],
+        codeblocks: [],
+      },
+    },
+  })
+  expect(received).toEqual(['', '', '', '', ''])
+  expect(html).not.toMatch(/(?:authored|second|generated)-note-example/)
+  expect(html).not.toContain('data-has-notes')
+  expect(html).toContain('<section hidden data-note-clicks="1"></section>')
+  expect(deck.slides[0].notes).toContain('authored-note-example')
+  expect(await renderDeck(deck)).toContain('second-note-example')
+})
+
 test('compiles a local theme and refreshes changed addon styles', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'ts-presentation-test-'))
   try {

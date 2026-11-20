@@ -57,7 +57,7 @@ const isCapture = initialLocation.page === 'export'
 const captureSteps = params.has('steps') || (isCapture && !params.has('capture') && initialLocation.click !== undefined)
 const isOverview = initialLocation.page === 'overview'
 const isEntry = initialLocation.page === 'entry'
-const isNotes = initialLocation.page === 'notes'
+const isNotes = initialLocation.page === 'notes' && !document.documentElement.hasAttribute('data-without-notes')
 const isPreview = initialLocation.page === 'preview' || isOverview || isEntry || isNotes
 const isPresenter = initialLocation.page === 'presenter'
 const opener: Window | null = isPresenter ? window.opener : null
@@ -101,7 +101,8 @@ function mountSlide(article: HTMLElement, index: number): void {
     image.setAttribute('aria-label', `Enlarge ${image.alt || 'image'}`)
   }
   noteSteps[index] = [...notes[index].querySelectorAll<HTMLElement>('[data-note-step]')]
-  bounds[index] = clickBounds(routes[index].frontmatter, Math.max(reveals[index].total, noteSteps[index].length - 1))
+  const noteClicks = Number(notes[index].dataset.noteClicks ?? 0)
+  bounds[index] = clickBounds(routes[index].frontmatter, Math.max(reveals[index].total, noteSteps[index].length - 1, noteClicks))
   article.dataset.clicks = String(bounds[index].end)
   article.dataset.clicksStart = String(bounds[index].start)
   prepareSwitchPrint(reveals[index], bounds[index].end)

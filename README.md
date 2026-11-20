@@ -96,6 +96,10 @@ for slide routes. Set `routerMode` in the deck headmatter or override it
 with `--router-mode`. Deck resources such as `/image.png` resolve under
 the configured base.
 
+Use `build --without-notes` to publish an audience deck with the speaker-note
+text and notes links removed from the static player. The build keeps the
+authored reveal counts and supports the same option alongside `--download`.
+
 ## Write a deck
 
 Run `bun src/cli.ts dev path/to/slides.md`. Put a blank line after
