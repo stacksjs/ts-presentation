@@ -281,6 +281,12 @@ presenter view and reruns after edits. Set `{autorun:false}` for manual
 execution, `{autorun:'once'}` for a single automatic run, or
 `{showOutputAt:'+1'}` to reveal the output on the next click. `{live-run}`
 uses manual execution by default and accepts the same options.
+Live editors inherit the deck's `lineNumbers` setting. Use
+`{lines:true, startLine:7}` for an individual fence or set
+`lineNumbers` to `'on'`, `'off'`, `'relative'`, or `'interval'`.
+Set `{height:'auto'}` to grow as you type, `{height:'140px'}` for a fixed
+height, or `{height:'initial'}` to size from the original code. Use
+`{readonly:true}` to lock the code while keeping Run available.
 Use `monaco: false` in frontmatter for static code blocks, or set it to
 `dev` or `build` to enable editors in that mode.
 

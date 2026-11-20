@@ -1042,20 +1042,54 @@ math .math-xcancel > .math-cancel-track {
   padding: 3px 9px;
   cursor: pointer;
 }
-.live-code textarea {
+.live-code-editor {
+  position: relative;
+  font: 400 15px/1.5 var(--presentation-font-mono, ui-monospace, monospace);
+}
+.live-code-editor textarea {
   display: block;
   width: 100%;
+  height: calc(var(--live-code-rows) * 1.5em + 20px);
   min-height: 6.6em;
-  max-height: 15em;
+  max-height: var(--live-code-max-height, 15em);
   resize: vertical;
   padding: 10px 12px;
   margin: 0;
   border: 0;
   color: #e9f0f8;
   background: #13202f;
-  font: 400 15px/1.5 var(--presentation-font-mono, ui-monospace, monospace);
+  font: inherit;
   tab-size: 2;
 }
+.live-code-editor[data-live-height="fixed"] {
+  height: var(--live-code-height);
+  max-height: var(--live-code-max-height, none);
+}
+.live-code-editor[data-live-height="fixed"] textarea { height: 100%; }
+.live-code-editor:not([data-live-height="initial"]) textarea {
+  min-height: 0;
+  max-height: var(--live-code-max-height, none);
+  resize: none;
+}
+.live-code-editor[data-live-numbering] {
+  --live-code-gutter-width: calc(var(--live-code-digits) * 1ch + 17px);
+}
+.live-code-editor[data-live-numbering] textarea {
+  padding-inline-start: calc(var(--live-code-gutter-width) + 12px);
+}
+.live-code-gutter {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  width: var(--live-code-gutter-width);
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+  background: #111c28;
+  color: #aeb8c8;
+  border-inline-end: 1px solid #36465b;
+}
+.live-code-gutter > div { padding: 10px 8px; text-align: end; white-space: pre; }
 .slide .live-output {
   margin: 0;
   max-height: 5.5em;
@@ -1070,7 +1104,7 @@ math .math-xcancel > .math-cancel-track {
 }
 .slide .live-output[data-reveal-hidden] { display: none; }
 .live-code-static { display: none; }
-body:is(.capturing, .previewing) .live-code :is(.live-code-toolbar, textarea, .live-output) { display: none; }
+body:is(.capturing, .previewing) .live-code :is(.live-code-toolbar, .live-code-editor, .live-output) { display: none; }
 body:is(.capturing, .previewing) .live-code-static { display: block; margin: 0; }
 
 .slide .code-diff {
@@ -1131,7 +1165,7 @@ body:is(.capturing, .previewing) .live-code-static { display: block; margin: 0; 
 }
 body:is(.capturing, .previewing) .code-diff-edit { display: none; }
 @media print {
-  .live-code :is(.live-code-toolbar, textarea, .live-output) { display: none; }
+  .live-code :is(.live-code-toolbar, .live-code-editor, .live-output) { display: none; }
   .live-code-static { display: block; margin: 0; }
   .code-diff-edit { display: none; }
 }

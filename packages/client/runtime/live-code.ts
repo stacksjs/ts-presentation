@@ -1,6 +1,7 @@
 import type { CodeRunnerOutput } from '../../types/src/code-runner.ts'
 import { nativeCodeLanguage } from '../../types/src/code-runner.ts'
 import { customRunner, showRunnerOutput } from './code-runners.ts'
+import { setupLiveEditor } from './live-editor.ts'
 
 const workerBody = String.raw`
 const send = self.postMessage.bind(self)
@@ -139,7 +140,8 @@ export function setupLiveCode(root: ParentNode = document): void {
     if (mountedEditors.has(block)) continue
     mountedEditors.add(block)
     const editor = block.querySelector('textarea')!
-    const reset = block.querySelector<HTMLButtonElement>('[data-live-reset]')!
+    const syncEditor = setupLiveEditor(block, editor)
+    const reset = block.querySelector<HTMLButtonElement>('[data-live-reset]')
     const run = block.querySelector<HTMLButtonElement>('[data-live-run]')
     const output = block.querySelector<HTMLElement>('[data-live-result]')
     const authored = editor.value
@@ -211,6 +213,7 @@ export function setupLiveCode(root: ParentNode = document): void {
         active?.abort(superseded)
         language = 'js'
         editor.value = compiled
+        syncEditor()
         editor.setAttribute('aria-label', 'Edit JavaScript example')
         if (label) label.textContent = 'JavaScript'
         switchLanguage.hidden = true
@@ -220,13 +223,14 @@ export function setupLiveCode(root: ParentNode = document): void {
       })
     }
 
-    reset.addEventListener('click', () => {
+    reset?.addEventListener('click', () => {
       active?.abort(superseded)
       language = originalLanguage
       if (label) label.textContent = originalLabel
       editor.setAttribute('aria-label', `Edit ${label?.textContent ?? 'code'} example`)
       if (switchLanguage) switchLanguage.hidden = canCompile || authoredModule || Boolean(error)
       editor.value = original
+      syncEditor()
       if (output) output.textContent = ''
       editor.focus()
       draftChanged()

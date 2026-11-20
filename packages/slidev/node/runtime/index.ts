@@ -353,10 +353,9 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
         const diff = await codeDiffBlock(decoded, info, lineNumbers, codeRenderer.highlight)
         if (diff) return diff
       }
-      if (editorEnabled && (info?.runner || writable)) {
-        return liveBlock(decoded.replace(/\n$/, ''), language, info?.runner === 'run',
-          writable && info?.writeToken ? { token: info.writeToken, revision: writable.revision } : undefined,
-          info?.runnerOptions, info?.runnerTiming, options.compileExample)
+      if (editorEnabled && info && (info.runner || writable)) {
+        return liveBlock(decoded.replace(/\n$/, ''), language, info, lineNumbers,
+          writable && info.writeToken ? { token: info.writeToken, revision: writable.revision } : undefined, options.compileExample)
       }
       if (language === 'charts' || language === 'ts-charts') {
         return renderChart(decoded, `chart-${index}-${diagramIndex}`) ?? block

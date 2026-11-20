@@ -1,7 +1,8 @@
 import { expect, test } from 'bun:test'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { asset } from '../packages/slidev/node/runtime/assets.ts'
 import { findChrome } from '../packages/slidev/node/runtime/chrome.ts'
 import { parseCodeInfo } from '../packages/slidev/node/runtime/code-blocks.ts'
 import { createDeckCompiler, parseDeck, renderDeck } from '../src/index.ts'
@@ -33,6 +34,103 @@ test('honors deck and slide editor settings before emitting runnable markup', as
   expect(build).toContain('language-js')
   expect(dev.match(/data-live-autorun="true"/g)).toHaveLength(2)
 })
+
+test.skipIf(!chrome)('sizes live editors, synchronizes their number gutters, and runs read-only examples', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-live-editor-'))
+  let view: Bun.WebView | undefined
+  let server: ReturnType<typeof Bun.serve> | undefined
+  try {
+    const source = join(root, 'slides.md')
+    await Bun.write(source, [
+      '---', 'lineNumbers: true', '---', '', '# Automatic editor height',
+      '', '~~~js {monaco} {height:"auto", lineNumbers:"relative", startLine:7}', 'const first = 1', 'const second = 2', '~~~',
+      '', '---', '', '# Fixed editor height',
+      '', '~~~js {monaco} {height:"90px", lineNumbers:"interval", startLine:8}',
+      ...Array.from({ length: 12 }, (_, line) => '// Line ' + (line + 8)), '~~~',
+      '', '---', '', '# Read-only runner',
+      '', '~~~js {monaco-run} {readonly:true, autorun:false}', 'console.log("read-only result")', '~~~',
+      '', '---', '', '# Hidden line numbers',
+      '', '~~~js {live} {height:"initial", lines:false}', 'const fixed = 1', '~~~',
+    ].join('\n'))
+    const output = join(root, 'site')
+    const build = Bun.spawn([process.execPath, 'src/cli.ts', 'build', source, '--out', output], {
+      cwd: join(import.meta.dir, '..'), stdout: 'ignore', stderr: 'pipe',
+    })
+    const [status, errors] = await Promise.all([build.exited, new Response(build.stderr).text()])
+    if (status !== 0) throw new Error(errors || `Build exited with status ${status}`)
+    const directory = await realpath(output)
+    server = Bun.serve({
+      hostname: '127.0.0.1', port: 0,
+      fetch(request) {
+        const { pathname } = new URL(request.url)
+        return asset(directory, pathname === '/' ? '/index.html' : pathname)
+      },
+    })
+    const browser = new Bun.WebView({ width: 960, height: 540, backend: { type: 'chrome', path: chrome!, url: false } })
+    view = browser
+    await browser.navigate(server.url.href)
+    const geometry = await browser.evaluate<{ auto: number[], fixed: number, initial: number[], relative: string, interval: string, scroll: number[], hidden: boolean }>(`(() => {
+      const editor = slide => document.querySelector('#slide-' + slide + ' textarea')
+      const gutter = slide => document.querySelector('#slide-' + slide + ' [data-live-gutter]')
+      const height = element => parseFloat(getComputedStyle(element).height)
+      const changed = element => element.dispatchEvent(new Event('input', { bubbles: true }))
+      const first = editor(1)
+      const auto = [height(first)]
+      first.value += '\\nconst third = 3\\nconst fourth = 4'
+      first.setSelectionRange(first.value.length, first.value.length)
+      changed(first)
+      auto.push(height(first))
+      const relative = gutter(1).textContent
+      document.querySelector('#slide-1 [data-live-reset]').click()
+      auto.push(height(first))
+      window.presentationNavigation.go(2)
+      const second = editor(2)
+      second.scrollTop = 60
+      second.dispatchEvent(new Event('scroll'))
+      const offset = new DOMMatrix(getComputedStyle(gutter(2)).transform).m42
+      const scroll = [second.scrollTop, offset]
+      const fixed = height(second)
+      const interval = gutter(2).textContent
+      window.presentationNavigation.go(4)
+      const last = editor(4)
+      const initial = [height(last)]
+      last.value += '\\n'.repeat(15)
+      changed(last)
+      initial.push(height(last))
+      return { auto, fixed, initial, relative, interval, scroll, hidden: gutter(4) === null }
+    })()`)
+    expect(geometry.auto[1] - geometry.auto[0]).toBe(45)
+    expect(geometry.auto[2]).toBe(geometry.auto[0])
+    expect(geometry.relative).toBe('3\n2\n1\n10')
+    expect(geometry.fixed).toBe(90)
+    expect(geometry.interval.split('\n').slice(0, 4)).toEqual(['8', '', '10', ''])
+    expect(geometry.scroll).toEqual([60, -60])
+    expect(geometry.initial[0]).toBe(geometry.initial[1])
+    expect(geometry.hidden).toBe(true)
+    expect(await browser.evaluate(`(() => {
+      window.presentationNavigation.go(3)
+      const block = document.querySelector('#slide-3 .live-code')
+      const editor = block.querySelector('textarea')
+      editor.focus()
+      editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }))
+      return [editor.readOnly, !!block.querySelector('[data-live-reset]'), block.querySelector('[data-live-gutter]').textContent]
+    })()`)).toEqual([true, false, '1'])
+    expect(await browser.evaluate(`(async () => {
+      const output = document.querySelector('#slide-3 [data-live-result]')
+      for (let attempt = 0; attempt < 100 && !output.textContent; attempt++)
+        await new Promise(resolve => setTimeout(resolve, 25))
+      return output.textContent.trim()
+    })()`)).toBe('read-only result')
+    await browser.navigate(new URL('/?capture=1', server.url).href)
+    expect(await browser.evaluate("getComputedStyle(document.querySelector('#slide-1 .live-code-editor')).display")).toBe('none')
+    expect(await browser.evaluate("getComputedStyle(document.querySelector('#slide-1 .live-code-static')).display")).toBe('block')
+  }
+  finally {
+    view?.close()
+    await server?.stop(true)
+    await rm(root, { recursive: true, force: true })
+  }
+}, 45_000)
 
 test.skipIf(!chrome)('autoruns visible runners, tracks the output reveal, and cancels superseded drafts', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-runner-timing-'))
