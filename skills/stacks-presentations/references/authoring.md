@@ -161,6 +161,12 @@ speaker notes. Each hook can be asynchronous.
 - Set `maxSize` under `math` to cap explicit positive dimensions in TeX ems.
   Set `minRuleThickness` to make fraction bars, array rules, box borders,
   and overlines or underlines thicker. Radical rule widths follow the math font.
+- Use `\\` or `\newline` for an explicit math line break. Add space with
+  `\\[0.5em]`. Set `math.strict` to `true` or `error` to suppress standalone
+  display breaks, or `warn` to keep them and log a warning. Inline breaks and
+  row separators in environments such as `aligned` still work with strict
+  mode enabled. In `setup/katex.ts`, a callback can set the policy for
+  `newLineInDisplayMode`.
 - Position a floating element with `v-drag="[left, top, width, height, angle]"`
   or `<v-drag pos="left, top, width, height, angle">`. Use `NaN` in the
   directive or `_` in the component to retain automatic height. Set

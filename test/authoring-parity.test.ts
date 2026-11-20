@@ -93,6 +93,23 @@ $$
   expect(html).toContain('<mfrac linethickness="0.2em">')
 })
 
+test('lets a deck override the strict TeX display option from setup', async () => {
+  const deck = parseDeck(String.raw`---
+math:
+  strict: error
+---
+
+$$
+a \\ b
+$$
+
+$a\newline b$
+`)
+  const html = await renderDeck(deck, { setup: { katex: { strict: 'ignore' } } })
+  expect(html).toContain('<semantics><mrow><mi>a</mi><mi>b</mi></mrow>')
+  expect(html).toContain('<mtable><mtr><mtd style="text-align:start;padding-bottom:0.14em"><mi>a</mi></mtd></mtr>')
+})
+
 test('renders flowchart clusters, styles, and parallel edges', () => {
   const markup = mermaid(`flowchart LR
   accTitle: Review workflow

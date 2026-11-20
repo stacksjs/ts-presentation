@@ -259,6 +259,7 @@ type ArrayRule = 'solid' | 'dashed' | 'double'
 const alignments: Record<string, Alignment> = { l: 'left', c: 'center', r: 'right' }
 interface ArrayColumn { align: Alignment, before?: ArrayRule }
 interface ArrayRow { cells: Markup[], label?: Markup, before?: ArrayRule, gap?: string }
+interface MathLine { content: Markup, gap?: string }
 interface EquationTag { label?: Markup, suppressed: boolean }
 
 // Infix fractions decide the style of both operands after the row is parsed.
@@ -433,6 +434,21 @@ function joinRow(parts: RowPart[]): Markup {
     // The renderer inserts a single gap between neighbors, including composites.
     return (gap ? muSpace(gap) : '') + (classes[index] ? neutralizeOperator(value) : value)
   }).join('')
+}
+
+function lineTable(lines: MathLine[], exposeRows: boolean, alignStart: boolean): Markup {
+  // MathML Core browsers need separate rows to show a line break.
+  return (style) => {
+    const rows = lines.map(({ content, gap }) => {
+      const cellStyle = [
+        alignStart ? 'text-align:start' : '',
+        style === 0 ? 'math-style:normal' : '',
+        gap ? `padding-bottom:max(0px,calc(0.14em + ${gap}))` : 'padding-bottom:0.14em',
+      ].filter(Boolean).join(';')
+      return `<mtr><mtd style="${cellStyle}">${renderMarkup(content, style) || '<mrow/>'}</mtd></mtr>`
+    }).join('')
+    return `<mtable${exposeRows ? ' data-equation-lines' : ''}>${rows}</mtable>`
+  }
 }
 
 function negatedMarkup(markup: string): string {
@@ -753,6 +769,22 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return rawBracket()?.join('')
   }
 
+  function lineGap(command: string): string | undefined {
+    const extra = command === '\\\\' && tokens[cursor] === '[' ? bracket() : undefined
+    const gap = extra === undefined ? '' : dimension(extra)
+    if (gap === undefined) throw new Error('Invalid math line spacing')
+    if (!display) return gap
+    const code = 'newLineInDisplayMode'
+    const message = 'A standalone TeX line break has no effect in LaTeX display math'
+    let strict = options?.strict
+    if (typeof strict === 'function') {
+      try { strict = strict(code, message) }
+      catch { strict = 'error' }
+    }
+    if (strict === 'warn') console.warn(`${message} [${code}]`)
+    return strict === true || strict === 'error' ? undefined : gap
+  }
+
   function readDelimiter(command: string): string {
     const token = take()
     if (token !== '{') return delimiter(token, command)
@@ -766,7 +798,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     delimiterDepth++
     let content: Markup
     try {
-      content = inScope(() => row(['\\right', '}', '\\end', '&', '\\\\', '\\cr']))
+      content = inScope(() => row(['\\right', '}', '\\end', '&', '\\\\', '\\newline', '\\cr']))
     }
     finally { delimiterDepth-- }
     if (take() !== '\\right') throw new Error('Missing \\right for \\left')
@@ -888,6 +920,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
     cursor++
     const sized: Markup[] = []
+    const lines: MathLine[] = []
     const baseScale = fontScale
     let parts: Markup[] = []
     let literal = opening
@@ -912,7 +945,13 @@ export function renderMath(source: string, display = false, configured: MathMacr
           break
         }
         if (token === '\\relax' || declareMacro(token)) continue
-        if (Object.hasOwn(sizeCommands, token)) {
+        if (token === '\\\\' || token === '\\newline') {
+          const gap = lineGap(token)
+          if (gap === undefined) continue
+          flushSize()
+          lines.push({ content: joinMarkup(sized.splice(0)), gap })
+        }
+        else if (Object.hasOwn(sizeCommands, token)) {
           flushSize()
           fontScale = sizeCommands[token]
           space()
@@ -974,6 +1013,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     flush()
     depth--
     const content = joinMarkup(parts)
+    if (lines.length) return wrap(lineTable([...lines, { content }], false, true))
     return properties || parts.length === 1 ? wrap(content) : xml`<mrow>${content}</mrow>`
   }
 
@@ -1040,12 +1080,17 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
   }
 
-  function row(stop: string[] = [], breakOnInfix = false): Markup {
+  function row(stop: string[] = [], breakOnInfix = false, exposeLines = false): Markup {
     if (depth++ > 100) throw new Error('Math groups are nested too deeply')
-    const before: RowPart[] = []
-    let parts = before
+    let parts: RowPart[] = []
+    let lines: MathLine[] | undefined
+    let numerator: Markup = ''
     let infix = ''
     let thickness: string | undefined
+    const finish = () => {
+      const content = joinRow(parts)
+      return lines ? lineTable([...lines, { content }], display && exposeLines, !display || options?.fleqn === true) : content
+    }
     for (let token = peek(); token && !stop.includes(token); token = peek()) {
       if (breakOnInfix && infixFractions.has(token)) break
       cursor++
@@ -1053,24 +1098,36 @@ export function renderMath(source: string, display = false, configured: MathMacr
         if (infix) throw new Error('Only one infix fraction is allowed per math group')
         infix = token
         thickness = infixThickness(token)
+        numerator = finish()
         parts = []
+        lines = undefined
         continue
       }
+      if (token === '\\\\' || token === '\\newline') {
+        const gap = lineGap(token)
+        if (gap !== undefined) {
+          lines ??= []
+          lines.push({ content: joinRow(parts), gap })
+          parts = []
+        }
+        continue
+      }
+      const exposeDeclarationLines = exposeLines && !parts.length && !infix && !lines
       if (Object.hasOwn(styleCommands, token)) {
         const selected = styleCommands[token]
-        parts.push({ markup: mathSize(selected, renderMarkup(row(stop, true), selected)) })
+        parts.push({ markup: mathSize(selected, renderMarkup(row(stop, true, exposeDeclarationLines), selected)) })
         continue
       }
       if (Object.hasOwn(sizeCommands, token)) {
         const baseScale = fontScale
         fontScale = sizeCommands[token]
-        parts.push({ markup: scaledMath(row(stop, true), fontScale / baseScale) })
+        parts.push({ markup: scaledMath(row(stop, true, exposeDeclarationLines), fontScale / baseScale) })
         fontScale = baseScale
         continue
       }
       if (token === '\\color' && !options?.colorIsTextColor) {
         const color = safeColor(literalGroup())
-        const content = row(stop, true)
+        const content = row(stop, true, exposeDeclarationLines)
         parts.push({ markup: color ? xml`<mrow style="color:${color}">${content}</mrow>` : content })
         continue
       }
@@ -1134,15 +1191,15 @@ export function renderMath(source: string, display = false, configured: MathMacr
       parts.push({ markup: content, token, mathClass: part.mathClass, operator: part.limits !== undefined })
     }
     depth--
-    const result = joinRow(parts)
+    const result = finish()
     if (!infix) return result
-    const quotient = fractionMarkup(xml`<mrow>${joinRow(before)}</mrow>`, xml`<mrow>${result}</mrow>`, undefined, fractionRule(thickness, minRule))
+    const quotient = fractionMarkup(xml`<mrow>${numerator}</mrow>`, xml`<mrow>${result}</mrow>`, undefined, fractionRule(thickness, minRule))
     const fences = fractionFences[infix]
     return fences ? xml`<mrow>${fence(fences[0])}${quotient}${fence(fences[1])}</mrow>` : quotient
   }
 
   function commutativeDiagram(): string {
-    const stops = ['@', '&', '\\\\', '\\cr', '\\end']
+    const stops = ['@', '&', '\\\\', '\\newline', '\\cr', '\\end']
     const rows: string[][] = []
     function arrowLabel(type: string): string {
       const label = renderMarkup(inScope(() => row([...stops, type])), 2)
@@ -1168,7 +1225,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const separator = take()
       if (separator === '@') { cells.push(commutativeArrow()); continue }
       if (separator === '&') continue
-      const lineBreak = separator === '\\\\' || separator === '\\cr'
+      const lineBreak = separator === '\\\\' || separator === '\\newline' || separator === '\\cr'
       if (!lineBreak && (separator !== '\\end' || literalGroup() !== 'CD')) break
       if (rows.length % 2) {
         if (cells[0] === '') cells.shift()
@@ -1213,7 +1270,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (environment === 'CD') return commutativeDiagram()
     if (/^equation[*]?$/.test(environment)) {
       environmentDepth++
-      const content = row(['\\end'])
+      const content = row(['\\end'], false, true)
       environmentDepth--
       if (take() !== '\\end' || literalGroup() !== environment) throw unclosed()
       tagState.label = nextTag(display && environment === 'equation')
@@ -1246,7 +1303,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const end = stack ? '}' : '\\end'
     let rule: ArrayRule | undefined
     let closed = false
-    const stops = ['&', '\\\\', '\\cr', end]
+    const stops = ['&', '\\\\', '\\newline', '\\cr', end]
     while (peek()) {
       if (columnArray && !cells.length) {
         while (peek() === '\\hline' || peek() === '\\hdashline') {
@@ -1261,8 +1318,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
         continue
       }
       if (pairs && cells.length > pairs * 2) throw new Error('Too many alignment columns')
-      const lineBreak = separator === '\\\\' || separator === '\\cr'
-      const extra = lineBreak ? bracket() : undefined
+      const lineBreak = separator === '\\\\' || separator === '\\newline' || separator === '\\cr'
+      const extra = lineBreak && separator !== '\\newline' ? bracket() : undefined
       const gap = extra === undefined ? undefined : dimension(extra)
       if (extra !== undefined && gap === undefined) throw new Error('Invalid array row spacing')
       if (cells.length > 1 || cells[0] || tagState.label !== undefined || rows.length === 0 || lineBreak) {
@@ -1635,7 +1692,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   }
 
   try {
-    const expression = `<mrow>${renderMarkup(row(), display ? 0 : 1)}</mrow>`
+    const expression = `<mrow>${renderMarkup(row([], false, true), display ? 0 : 1)}</mrow>`
     const flush = display && state?.options.fleqn === true
     const label = tagState.label
     const markup = label === undefined ? expression : taggedDisplay(expression, label, state?.options.leqno === true, flush)

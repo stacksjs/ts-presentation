@@ -11,6 +11,8 @@ export type KatexTrustContext =
   | { command: '\\htmlStyle', style: string }
   | { command: '\\htmlData', attributes: Readonly<Record<string, string>> }
 
+export type KatexStrictMode = boolean | 'ignore' | 'warn' | 'error'
+
 export interface KatexOptions {
   macros?: MathMacros
   errorColor?: string
@@ -22,6 +24,7 @@ export interface KatexOptions {
   maxSize?: number
   minRuleThickness?: number
   colorIsTextColor?: boolean
+  strict?: KatexStrictMode | ((code: string, message: string) => KatexStrictMode | undefined)
   trust?: boolean | ((context: KatexTrustContext) => boolean)
 }
 

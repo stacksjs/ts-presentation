@@ -83,6 +83,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   const configuration = options.setup
   const mathOptions = deck.headmatter?.math ?? deck.headmatter?.katex
   const mathConfig = mathOptions && typeof mathOptions === 'object' ? mathOptions as Record<string, unknown> : {}
+  const strict = mathConfig.strict
   const renderMath = createMathRenderer({
     ...configuration?.katex,
     trust: typeof mathConfig.trust === 'boolean' ? mathConfig.trust : configuration?.katex?.trust,
@@ -93,6 +94,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     maxSize: typeof mathConfig.maxSize === 'number' ? mathConfig.maxSize : configuration?.katex?.maxSize,
     minRuleThickness: typeof mathConfig.minRuleThickness === 'number' ? mathConfig.minRuleThickness : configuration?.katex?.minRuleThickness,
     colorIsTextColor: typeof mathConfig.colorIsTextColor === 'boolean' ? mathConfig.colorIsTextColor : configuration?.katex?.colorIsTextColor,
+    strict: typeof strict === 'boolean' || strict === 'ignore' || strict === 'warn' || strict === 'error' ? strict : configuration?.katex?.strict,
     macros: { ...configuration?.katex?.macros, ...resolveMathMacros(deck.headmatter) },
   })
   const mermaidConfig = deck.headmatter?.mermaid

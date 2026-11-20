@@ -446,7 +446,67 @@ test('keeps style-dependent math in a lap and uses text mode for plain laps', ()
   expect(html).toContain('<mpadded width="0"><mrow class="math-overlap-r"><mtext>test</mtext>')
 })
 
+test('renders explicit TeX breaks in inline, display, text, and alignment math', () => {
+  const math = createMathRenderer({ throwOnError: true, maxSize: 2 })
+  const source = String.raw`a\\[4em]b\newline[c]`
+  const inline = math(source, false)
+  expect(inline).toContain('<mtable><mtr><mtd style="text-align:start;padding-bottom:max(0px,calc(0.14em + 2em))">')
+  expect(inline.match(/<mtr>/g)).toHaveLength(3)
+  expect(inline).toContain('<mo stretchy="false">[</mo><mi>c</mi><mo stretchy="false">]</mo>')
+  expect(math(source, true)).toContain('<mtable data-equation-lines>')
+  expect(math(String.raw`\textbf{first\newline second}`, false)).toContain('<mrow style="font-weight:bold"><mtable>')
+  expect(math(String.raw`\text{up\\[1em]down}`, false)).toContain('<mtext>up</mtext></mtd></mtr>')
+  expect(math(String.raw`\begin{equation*}a\\b\end{equation*}`, true)).toContain('<mtable data-equation-lines>')
+  expect(math(String.raw`\begin{align*}a&=b\newline c&=d\end{align*}`, true).match(/<mtr>/g)).toHaveLength(2)
+  expect(() => math(String.raw`a\\[large]b`, false)).toThrow('Invalid math line spacing')
+})
+
+test('uses the strict display break policy while keeping inline and AMS line breaks', () => {
+  const calls: { code: string, message: string }[] = []
+  const math = createMathRenderer({
+    throwOnError: true,
+    strict(code, message) {
+      calls.push({ code, message })
+      return 'error'
+    },
+  })
+  const source = String.raw`a + \\[1em] b\newline c`
+  expect(math(source, true)).toContain('<mrow><mi>a</mi><mo>+</mo><mi>b</mi><mi>c</mi></mrow>')
+  expect(math(source, false)).toContain('<mtable>')
+  expect(math(String.raw`\begin{aligned}a&=b\\[.5em]c&=d\end{aligned}`, true).match(/<mtr>/g)).toHaveLength(2)
+  expect(calls.map(call => call.code)).toEqual(['newLineInDisplayMode', 'newLineInDisplayMode'])
+  expect(calls[0].message).toContain('LaTeX display math')
+  expect(createMathRenderer({ strict: true })(source, true)).not.toContain('<mtable')
+  expect(createMathRenderer({ strict: 'ignore' })(source, true)).toContain('<mtable data-equation-lines>')
+})
+
 const chrome = await findChrome()
+test.skipIf(!chrome)('renders TeX line breaks and vertical gaps in Chromium', async () => {
+  const sources = [String.raw`a\\b`, String.raw`a\\[1em]b`, String.raw`a\newline b`]
+  const body = sources.map((source, index) => `<div>${renderMath(source, index !== 2)}</div>`).join('')
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response(`<!doctype html><meta charset="utf-8"><main style="font-size:40px">${body}</main>`, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    }),
+  })
+  const view = new Bun.WebView({ width: 720, height: 400, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await view.navigate(server.url.href)
+    const rows = await view.evaluate<number[][]>(`[...document.querySelectorAll('mtable')].map(table =>
+      [...table.querySelectorAll('mi')].map(token => token.getBoundingClientRect().top))`)
+    expect(rows).toHaveLength(3)
+    const [normal, spaced, inline] = rows.map(([first, second]) => second - first)
+    expect(normal).toBeGreaterThan(20)
+    expect(spaced - normal).toBeCloseTo(40, 0)
+    expect(inline).toBeGreaterThan(20)
+  }
+  finally {
+    view.close()
+    server.stop(true)
+  }
+}, 45000)
+
 test.skipIf(!chrome)('applies configured TeX sizing to the rendered browser geometry', async () => {
   const source = String.raw`\rule{4em}{.2em}+\frac ab+\overline{c}+\boxed{d}`
   const css = Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url))
