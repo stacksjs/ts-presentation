@@ -914,6 +914,34 @@ e&=f\\
   expect(() => math(String.raw`\begin{align}a&=b\\\intertext\end{align}`, true)).toThrow()
 })
 
+test('inserts Mathtools arrows on either side of an alignment without allocating equation tags', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const left = math(String.raw`\begin{alignat}{2}
+&&a&=b\\
+\ArrowBetweenLines
+&&c&=d\\
+\ArrowBetweenLines
+\end{alignat}`, true).split('<annotation')[0]
+  expect([...left.matchAll(/<mtr(?: data-equation-arrow="(\w+)")?>/g)].map(match => match[1] ?? 'equation'))
+    .toEqual(['equation', 'left', 'equation', 'left'])
+  expect([...left.matchAll(/<mtext>\((\d+)\)<\/mtext>/g)].map(match => match[1])).toEqual(['1', '2'])
+  expect(left).toContain('<mo>⇕</mo><mspace width="1em"/>')
+
+  const right = math(String.raw`\newcommand{\nextline}{\ArrowBetweenLines*}
+\begin{alignat*}{2}
+a&=b&&\\
+\nextline[\Downarrow]
+c&=d&&
+\end{alignat*}`, true).split('<annotation')[0]
+  expect(right).toContain('data-equation-arrow="right"')
+  expect(right).toContain('<mspace width="1em"/><mo>⇓</mo>')
+  expect(right).not.toContain('math-equation-number')
+  expect(math(String.raw`\begin{alignedat}{1}a&=b\\\ArrowBetweenLines[\uparrow]c&=d\end{alignedat}`, false)).toContain('>↑</mo>')
+  expect(() => math(String.raw`\begin{alignat*}{1}a&=b\\\ArrowBetweenLines* c&=d\end{alignat*}`, true))
+    .toThrow('requires two alignment pairs')
+  expect(() => math(String.raw`a\ArrowBetweenLines b`, true)).toThrow('requires an align')
+})
+
 test('parses AMS full-width alignments and applies their tag and column rules', async () => {
   const flalign = String.raw`\begin{flalign}
 a&=b\label{first} & c&=d\\

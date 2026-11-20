@@ -280,6 +280,76 @@ $$`)
   }
 }, 45_000)
 
+it.skipIf(!chrome)('exports Mathtools alignment arrows with the following equation reveal and editable symbols', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-alignment-arrows-'))
+  const canvas = { width: 960, height: 540 }
+  try {
+    const entry = join(root, 'slides.md')
+    await Bun.write(entry, String.raw`# Transformations
+
+$$ {1|2|all}
+\begin{alignat}{2}
+&&a&=b\\
+\ArrowBetweenLines
+&&c&=d
+\end{alignat}
+$$
+
+---
+
+# Reverse transformations
+
+\begin{alignat*}{2}
+a&=b&&\\
+\ArrowBetweenLines*[\Downarrow]
+c&=d&&
+\end{alignat*}
+
+---
+
+# Inline transformations
+
+From $\begin{alignedat}{2}&&x&=y\\\ArrowBetweenLines[\uparrow]&&y&=z\end{alignedat}$ as stated.`)
+    const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
+    const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
+    const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
+    if (status) throw new Error(stderr)
+    const frames: PowerPointFrame[] = []
+    await captureFrames({ root: join(root, 'dist'), executable: chrome!, scale: 1, canvas, editable: true, withClicks: true }, frame => { frames.push(frame) })
+    expect(frames.map(frame => [frame.position?.slide, frame.position?.click])).toEqual([[1, 0], [1, 1], [1, 2], [2, 0], [3, 0]])
+    for (const [index, frame] of frames.slice(0, 4).entries()) {
+      const equation = frame.editable?.nodes.find((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math')?.equation
+      const right = index === 3
+      const cells = equation ? [equation, ...(equation.cells ?? [])] : []
+      const arrow = cells.find(cell => cell.expression.includes(right ? '⇓' : '⇕'))
+      const first = cells.find(cell => cell.expression.includes('>a</m:t>'))
+      const second = cells.find(cell => cell.expression.includes('>c</m:t>'))
+      const relation = cells.find(cell => cell.expression.includes('>b</m:t>'))
+      expect(arrow).toBeDefined()
+      expect(first).toBeDefined()
+      expect(second).toBeDefined()
+      expect(relation).toBeDefined()
+      expect(arrow!.rect.y).toBeGreaterThan(first!.rect.y)
+      expect(arrow!.rect.y).toBeLessThan(second!.rect.y)
+      if (right) expect(arrow!.rect.x).toBeGreaterThanOrEqual(relation!.rect.x + relation!.rect.w - 0.25)
+      else expect(arrow!.rect.x + arrow!.rect.w).toBeLessThanOrEqual(first!.rect.x + 1)
+      expect(arrow!.expression.includes('<a:alpha val="24000"/>')).toBe(index === 0)
+      expect(first!.expression.includes('<a:alpha val="24000"/>')).toBe(index === 1)
+      expect(second!.expression.includes('<a:alpha val="24000"/>')).toBe(index === 0)
+      expect(equation?.tags?.length ?? 0).toBe(right ? 0 : 2)
+    }
+    const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Transformations' }))
+    expect(parts.get('ppt/slides/slide3.xml')?.toString()).toMatch(/<m:t(?: [^>]*)?>⇕<\/m:t>/)
+    expect(parts.get('ppt/slides/slide4.xml')?.toString()).toMatch(/<m:t(?: [^>]*)?>⇓<\/m:t>/)
+    const inline = parts.get('ppt/slides/slide5.xml')?.toString() ?? ''
+    expect(inline).toContain('<m:eqArr>')
+    expect(inline).toMatch(/<m:t(?: [^>]*)?>↑<\/m:t>/)
+  }
+  finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}, 45_000)
+
 it.skipIf(!chrome)('exports AMS full-width alignments with editable columns and tags', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-flalign-'))
   const canvas = { width: 960, height: 540 }

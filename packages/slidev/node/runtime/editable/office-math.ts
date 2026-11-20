@@ -315,7 +315,9 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba, 
     const aligned = !environment.startsWith('gather')
     let rows = ''
     for (const row of table.children) {
-      if (row.name !== 'mtr' || row.text.trim() || !only(row, 'data-equation-dim') || !row.children.length
+      const arrow = row.attributes['data-equation-arrow']
+      if (row.name !== 'mtr' || row.text.trim() || !only(row, 'data-equation-dim', 'data-equation-arrow') || !row.children.length
+        || (arrow !== undefined && (!aligned || (arrow !== 'left' && arrow !== 'right')))
         || (!aligned && row.children.length !== 1)) return
       const rowOpacity = row.opacity ?? 1
       if (!Number.isFinite(rowOpacity) || rowOpacity < 0 || rowOpacity > 1) return
@@ -326,7 +328,7 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba, 
         for (const [index, cell] of row.children.entries()) {
           const styles = (cell.attributes.style ?? '').split(';').filter(Boolean)
           if (cell.name !== 'mtd' || cell.text.trim() || !only(cell, 'style')
-            || !styles.every(style => alignmentCellStyles.has(style))) return
+            || !styles.every(style => alignmentCellStyles.has(style) || (arrow && style === 'padding-block:0em'))) return
           const content = sequence(cell.children)
           // Ampersands inside an Office equation array are alignment syntax.
           if (content === undefined || content.includes('&amp;')) return
