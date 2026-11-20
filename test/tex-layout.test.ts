@@ -1,6 +1,7 @@
 import { expect, spyOn, test } from 'bun:test'
 import { findChrome } from '../packages/slidev/node/runtime/chrome.ts'
 import { collectSnapshot } from '../packages/slidev/node/runtime/editable/walker.ts'
+import { parseDeck, renderDeck } from '../packages/slidev/node/runtime/index.ts'
 import { createMathRenderer, renderMath } from '../packages/slidev/node/runtime/math.ts'
 
 const thin = '<mspace width="0.16666666666666666em"/>'
@@ -508,6 +509,26 @@ test('renders explicit TeX breaks in inline, display, text, and alignment math',
   expect(() => math(String.raw`a\\[large]b`, false)).toThrow('Invalid math line spacing')
 })
 
+test('marks outer binary operators and relations for inline wrapping', () => {
+  const math = createMathRenderer({ throwOnError: true }, true)
+  const marker = '<mspace width="0" data-math-break=""/>'
+  const pieces = (source: string, display = false) => math(source, display).split('<annotation')[0].split(marker)
+  const automatic = pieces(String.raw`a+b=c`)
+  expect(automatic).toHaveLength(3)
+  expect(automatic[0]).toEndWith(operator('+') + medium)
+  expect(automatic[1]).toBe('<mi>b</mi>' + thick + operator('=') + thick)
+  expect(automatic[2]).toBe('<mi>c</mi></mrow>')
+  expect(pieces(String.raw`+a=b+`)).toHaveLength(2)
+  expect(pieces(String.raw`a + \kern{1em}\nobreak b\allowbreak c`)).toHaveLength(2)
+  expect(pieces(String.raw`a + \kern{1em}\nobreak b\allowbreak c`)[0]).toEndWith('<mi>b</mi>')
+  expect(pieces(String.raw`{a+b}+\frac{c+d}{e=f}`)).toHaveLength(2)
+  expect(pieces(String.raw`{a+b}=c+d`)).toHaveLength(3)
+  expect(pieces(String.raw`x^{a+b}y`)).toHaveLength(1)
+  expect(pieces(String.raw`a+b\over c+d`)).toHaveLength(1)
+  expect(pieces(String.raw`a+b\allowbreak c=d`, true)).toHaveLength(1)
+  expect(pieces(String.raw`a+b\\c+d`)).toHaveLength(1)
+})
+
 test('uses the strict display break policy while keeping inline and AMS line breaks', () => {
   const calls: { code: string, message: string }[] = []
   const math = createMathRenderer({
@@ -594,6 +615,86 @@ test('enforces KaTeX strict settings for comments, markup, text commands, spacin
 })
 
 const chrome = await findChrome()
+
+test.skipIf(!chrome)('wraps inline formulas in the player while preserving one accessible expression', async () => {
+  const html = await renderDeck(parseDeck(String.raw`---
+math:
+  trust: true
+---
+# Inline formulas
+
+<div id="automatic" style="width:8.5em">
+
+$\text{alpha bravo}+\text{charlie delta}=\text{echo foxtrot}$
+
+</div>
+<div id="suppressed" style="width:8.5em">
+
+$\text{alpha bravo}+\nobreak\text{charlie delta}$
+
+</div>
+<div id="explicit" style="width:8.5em">
+
+$\text{alpha bravo}\allowbreak\text{echo foxtrot}$
+
+</div>
+<div id="linked">
+
+$a+\href{#last}{b}=c$
+
+</div>
+
+<!-- Read $a+\text{remaining terms}$ aloud. -->
+
+---
+routeAlias: last
+---
+# End
+`))
+  const player = await Bun.build({
+    entrypoints: [new URL('../packages/client/runtime/player.ts', import.meta.url).pathname],
+    target: 'browser',
+    format: 'iife',
+  })
+  const css = Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url))
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch(request) {
+      switch (new URL(request.url).pathname) {
+        case '/': return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+        case '/presentation.js': return new Response(player.outputs[0])
+        case '/presentation.css': return new Response(css)
+        default: return new Response(null, { status: 404 })
+      }
+    },
+  })
+  const view = new Bun.WebView({ width: 1024, height: 680, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await view.navigate(server.url.href)
+    const countLines = (selector: string) => view.evaluate<number>(`new Set([...document.querySelectorAll(${JSON.stringify(selector + ' .math-inline-fragment')})]
+      .map(fragment => Math.round(fragment.getBoundingClientRect().top))).size`)
+    expect(await countLines('#automatic')).toBe(3)
+    expect(await countLines('#explicit')).toBe(2)
+    expect(await view.evaluate("document.querySelectorAll('#suppressed math').length")).toBe(1)
+    expect(await view.evaluate("document.querySelectorAll('#automatic math:not([aria-hidden=true])').length")).toBe(1)
+    expect(await view.evaluate("document.querySelector('#automatic math:not([aria-hidden=true]) annotation').textContent"))
+      .toBe(String.raw`\text{alpha bravo}+\text{charlie delta}=\text{echo foxtrot}`)
+    expect(await view.evaluate("document.querySelectorAll('#presenter-notes .math-inline-fragment').length")).toBe(2)
+    const snapshot = await view.evaluate<ReturnType<typeof collectSnapshot>>(`(${collectSnapshot.toString()})({
+      containerSelector: '#automatic', idAttribute: 'data-export-id', slide: 1, click: 0,
+    })`)
+    expect(snapshot.slides[0].nodes.filter(node => node.isMath)).toHaveLength(3)
+    await view.evaluate("document.querySelector('#automatic').style.width = '30em'")
+    expect(await countLines('#automatic')).toBe(1)
+    await view.evaluate("document.querySelector('#linked a').click()")
+    expect(await view.evaluate('window.presentationNavigation.currentPage')).toBe(2)
+  }
+  finally {
+    view.close()
+    server.stop(true)
+  }
+}, 45_000)
+
 test.skipIf(!chrome)('stretches bracket and segment rules across their bases and stacks bracket labels in Chromium', async () => {
   const math = createMathRenderer({ minRuleThickness: 0.2, throwOnError: true })
   const formula = String.raw`\overbracket{x}^{top}+\overbracket{a+b+c+d}^{wide}
@@ -1053,9 +1154,9 @@ test('renders TeX character codes, zero-width struts, and common font aliases', 
 })
 
 test('renders verbatim math without opening Markdown or TeX delimiters inside it', async () => {
-  const { parseDeck, renderDeck } = await import('../src/index.ts')
   const html = await renderDeck(parseDeck(String.raw`Examples $\verb|x $ y % { <em>| + z$ and \(\verb*+a b+\).`))
-  expect(html).toContain('>x $ y % { &lt;em&gt;</mtext><mo>+</mo><mi>z</mi>')
+  expect(html).toContain('>x $ y % { &lt;em&gt;</mtext>')
+  expect(html).toContain('data-math-break=""/><mi>z</mi>')
   expect(html).toContain('>a␣b</mtext>')
   expect(html).not.toContain('<em>')
   expect(renderMath(String.raw`\verb@  a b  @`)).toContain('>  a b  </mtext>')

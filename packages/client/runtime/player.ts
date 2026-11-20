@@ -10,6 +10,7 @@ import { carryGlobalLayers } from './global-layers.ts'
 import { setupDrawings } from './drawing-player.ts'
 import type { DrawingClientConfig } from '../../types/src/drawings.ts'
 import { setupLiveCode } from './live-code.ts'
+import { mountInlineMath } from './inline-math.ts'
 import { createSlideMedia } from './media.ts'
 import { mountNotesPage, mountViewLinks, notesSync } from './notes-page.ts'
 import type { ClickBounds, SlideMode, SlidePosition, SlideRoute } from './navigation.ts'
@@ -83,8 +84,9 @@ function mountSlide(article: HTMLElement, index: number): void {
       if (target) link.setAttribute('href', audienceUrl(target, Number(link.dataset.slideClick) || undefined).href)
     }
   }
-  conditions.update(article)
-  reveals[index] = collectReveals(article, routes[index].frontmatter.clickAnimation || defaultClickAnimation, conditions.update)
+  updateSlideContent(article)
+  mountInlineMath(notes[index])
+  reveals[index] = collectReveals(article, routes[index].frontmatter.clickAnimation || defaultClickAnimation, updateSlideContent)
   disclosures[index] = [...article.querySelectorAll('details')]
   screenshots[index] = [...article.querySelectorAll<HTMLImageElement>('img[data-zoom]')]
   for (const image of screenshots[index]) {
@@ -98,6 +100,12 @@ function mountSlide(article: HTMLElement, index: number): void {
   article.dataset.clicksStart = String(bounds[index].start)
   prepareSwitchPrint(reveals[index], bounds[index].end)
 }
+
+function updateSlideContent(container: HTMLElement): void {
+  conditions.update(container)
+  mountInlineMath(container)
+}
+
 articles.forEach(mountSlide)
 let current = 1
 let click = 0

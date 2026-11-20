@@ -103,9 +103,10 @@ describe('utilities', () => {
 export default () => ({ macros: { '\\A': token, '\\common': 'y' } })`)
     await Bun.write(join(root, 'deck/setup/katex.ts'), String.raw`export default () => ({ macros: { '\\P': 'p', '\\common': 'z' } })`)
     const compile = createDeckCompiler(entry)
-    expect((await compile()).html).toContain('<mi>t</mi><mo>+</mo><mi>a</mi><mo>+</mo><mi>p</mi><mo>+</mo><mi>z</mi>')
+    const identifiers = (html: string) => [...html.matchAll(/<mi>([a-z])<\/mi>/g)].map(match => match[1])
+    expect(identifiers((await compile()).html)).toEqual(['t', 'a', 'p', 'z'])
     await Bun.write(join(addon, 'setup/values.ts'), "export const token = 'b'")
-    expect((await compile()).html).toContain('<mi>t</mi><mo>+</mo><mi>b</mi><mo>+</mo><mi>p</mi><mo>+</mo><mi>z</mi>')
+    expect(identifiers((await compile()).html)).toEqual(['t', 'b', 'p', 'z'])
   }))
 
   it('updates YAML neighbouring comments, deletion, and multiline values through the MCP editor', () => project(async (root) => {

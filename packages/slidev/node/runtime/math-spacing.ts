@@ -25,7 +25,7 @@ const cancelsPrecedingBinary = new Set<MathClass>(['rel', 'close', 'punct'])
 
 // Undefined slots are explicit spaces and do not interrupt atom adjacency.
 // Demote a binary atom in unary position before looking up pair spacing.
-export function rowSpacing(classes: readonly (MathClass | undefined)[], tight: boolean): number[] {
+export function resolveRowClasses(classes: readonly (MathClass | undefined)[]): (MathClass | undefined)[] {
   const resolved = [...classes]
   let previous = -1
   for (const [index, current] of classes.entries()) {
@@ -36,7 +36,10 @@ export function rowSpacing(classes: readonly (MathClass | undefined)[], tight: b
     previous = index
   }
   if (resolved[previous] === 'bin') resolved[previous] = 'ord'
+  return resolved
+}
 
+export function rowSpacing(resolved: readonly (MathClass | undefined)[], tight: boolean): number[] {
   const table = tight ? scriptSpacing : normalSpacing
   let left: MathClass | undefined
   return resolved.map((right) => {

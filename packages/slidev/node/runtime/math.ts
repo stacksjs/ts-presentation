@@ -5,7 +5,7 @@ import { chemicalFormula, physicalUnits } from './math-chemistry.ts'
 import type { Markup, MathStyle } from './math-markup.ts'
 import { joinMarkup, renderMarkup, xml } from './math-markup.ts'
 import { fractionRule, mathDimension } from './math-sizing.ts'
-import { rowSpacing } from './math-spacing.ts'
+import { resolveRowClasses, rowSpacing } from './math-spacing.ts'
 import type { MathClass } from './math-spacing.ts'
 import { isCenteredGlyph, mathSymbol, textSymbol } from './math-symbols.ts'
 import type { MathSymbol, MathSymbolKind } from './math-symbols.ts'
@@ -191,14 +191,14 @@ type ExpansionPrimitive = typeof expansionPrimitives[number]
 type ConditionalPrimitive = Exclude<ExpansionPrimitive, '\\expandafter' | '\\noexpand' | '\\long'>
 interface TokenMacro { body: string[], parameters: string[][], prefix: string[], optional?: string[] }
 type Macro = TokenMacro | { primitive: ExpansionPrimitive }
-interface MathState { globals: Map<string, Macro>, options: KatexOptions }
+interface MathState { globals: Map<string, Macro>, options: KatexOptions, inlineBreaks: boolean }
 
 function isExpansionPrimitive(token: string | undefined): token is ExpansionPrimitive {
   return token !== undefined && expansionPrimitiveNames.has(token)
 }
 
-export function createMathRenderer(options: KatexOptions = {}): (source: string, display: boolean) => string {
-  const state: MathState = { globals: new Map(), options }
+export function createMathRenderer(options: KatexOptions = {}, inlineBreaks = false): (source: string, display: boolean) => string {
+  const state: MathState = { globals: new Map(), options, inlineBreaks }
   return (source, display) => renderMath(source, display, options.macros, state)
 }
 
@@ -374,6 +374,7 @@ function rowClass({ markup, token = '', mathClass, operator }: RowPart): MathCla
   if (operator) return 'op'
   const name = token.startsWith('\\') ? token.slice(1) : ''
   if (Object.hasOwn(spacing, name) || spacingCommands.has(name)) return
+  if (token === '{') return 'ord'
   if (name === 'left') return 'inner'
   if (name === 'middle' || name === 'not' || name === 'stackrel' || Object.hasOwn(extensibleArrows, name)) return 'rel'
   const sized = /^(?:bigg|Bigg|big|Big)([lrm]?)$/.exec(name)
@@ -400,16 +401,39 @@ function neutralizeOperator(markup: string): string {
   })
 }
 
-function joinRow(parts: RowPart[]): Markup {
-  if (!parts.some(part => part.mathClass)) return joinMarkup(parts.map(part => part.markup))
-  const classes = parts.map(rowClass)
+function inlineBreaksBefore(parts: readonly RowPart[], classes: readonly (MathClass | undefined)[]): Set<number> {
+  const offsets = new Set<number>()
+  let seen = false
+  let allow = false
+  let suppress = false
+  for (const [index, part] of parts.entries()) {
+    const category = classes[index]
+    if (category) {
+      if (seen && allow && !suppress) offsets.add(index)
+      seen = true
+      allow = category === 'bin' || category === 'rel'
+      suppress = false
+    }
+    else if (part.token === '\\allowbreak') allow = true
+    else if (part.token === '\\nobreak') suppress = true
+  }
+  return offsets
+}
+
+function joinRow(parts: RowPart[], wrap = false): Markup {
+  const explicit = parts.some(part => part.mathClass)
+  if (!explicit && !wrap) return joinMarkup(parts.map(part => part.markup))
+  const classes = resolveRowClasses(parts.map(rowClass))
+  const breaks = wrap ? inlineBreaksBefore(parts, classes) : undefined
+  if (!explicit && !breaks?.size) return joinMarkup(parts.map(part => part.markup))
   const normal = rowSpacing(classes, false)
   const tight = rowSpacing(classes, true)
   return style => parts.map((part, index) => {
     const gap = (style < 2 ? normal : tight)[index]
     const value = renderMarkup(part.markup, style)
     // The renderer inserts a single gap between neighbors, including composites.
-    return (gap ? muSpace(gap) : '') + (classes[index] ? neutralizeOperator(value) : value)
+    const boundary = breaks?.has(index) ? '<mspace width="0" data-math-break=""/>' : ''
+    return (gap ? muSpace(gap) : '') + boundary + (classes[index] ? neutralizeOperator(value) : value)
   }).join('')
 }
 
@@ -1139,13 +1163,14 @@ export function renderMath(source: string, display = false, configured: MathMacr
 
   function row(stop: string[] = [], breakOnInfix = false, exposeLines = false, firstClass?: (value: MathClass | undefined) => void): Markup {
     if (depth++ > 100) throw new Error('Math groups are nested too deeply')
+    const softWrap = !display && depth === 1 && state?.inlineBreaks === true
     let parts: RowPart[] = []
     let lines: MathLine[] | undefined
     let numerator: Markup = ''
     let infix = ''
     let thickness: string | undefined
-    const finish = () => {
-      const content = joinRow(parts)
+    const finish = (wrap = false) => {
+      const content = joinRow(parts, wrap && !lines)
       return lines ? lineTable([...lines, { content }], display && exposeLines, !display || options?.fleqn === true) : content
     }
     for (let token = peek(); token && !stop.includes(token); token = peek()) {
@@ -1252,7 +1277,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const first = parts.find(part => part.markup !== '')
       firstClass(first && rowClass(first))
     }
-    const result = finish()
+    const result = finish(softWrap && !infix)
     if (!infix) return result
     const quotient = fractionMarkup(xml`<mrow>${numerator}</mrow>`, xml`<mrow>${result}</mrow>`, undefined, fractionRule(thickness, minRule))
     const fences = fractionFences[infix]

@@ -118,7 +118,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     colorIsTextColor: typeof mathConfig.colorIsTextColor === 'boolean' ? mathConfig.colorIsTextColor : configuration?.katex?.colorIsTextColor,
     strict: typeof strict === 'boolean' || strict === 'ignore' || strict === 'warn' || strict === 'error' ? strict : configuration?.katex?.strict,
     macros: { ...configuration?.katex?.macros, ...resolveMathMacros(deck.headmatter) },
-  })
+  }, true)
   const mermaidConfig = deck.headmatter?.mermaid
   const diagramOptions = {
     ...configuration?.mermaid,
