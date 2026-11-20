@@ -301,6 +301,12 @@ Arrow keys advance through click steps. On the dev server, open `/presenter`
 or `/presenter/review?clicks=2` to start at a named slide and step. For an
 offline deck, open `index.html?presenter=1#review/2`.
 
+Open `/entry` on the dev server or `index.html?entry=1` in a built deck
+to choose Slides, Presenter, Notes, or Overview. To read notes hands-free,
+open `/notes` or use **Open notes view** from the presenter. The notes
+window follows slide changes, reveal steps, and the timer across tabs
+in the same browser profile. Its text size is stored in that browser.
+
 Addons can listen for `presentation:slide`. Its detail includes `slide`,
 `click`, `title`, and `route`. Read the active metadata and navigate via
 `window.presentationNavigation` on the page that owns the slide. For example,

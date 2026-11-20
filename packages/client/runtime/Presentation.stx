@@ -20,6 +20,15 @@
   {!! navigation !!}
   {!! drawingConfig !!}
   {!! liveData !!}
+  <main id="deck-entry" hidden>
+    <h1>{{ title }}</h1>
+    <nav aria-label="Presentation views">
+      <a data-deck-page-link="slide">Slides</a>
+      <a data-deck-page-link="presenter">Presenter</a>
+      <a data-deck-page-link="notes">Notes</a>
+      <a data-deck-page-link="overview">Overview</a>
+    </nav>
+  </main>
   <main id="stage">{!! slideMarkup !!}</main>
   {!! globalBottom !!}
   {!! editorPanel !!}
@@ -29,10 +38,20 @@
       <div class="presenter-timing">
         <span id="presenter-time" aria-label="Elapsed time">0:00</span>
         <button id="presenter-reset" type="button">Reset timer</button>
+        <a id="presenter-notes-link" data-deck-page-link="notes" target="_blank" rel="noopener">Open notes view</a>
       </div>
     </header>
     {!! notesMarkup !!}
   </aside>
+  <nav id="notes-controls" aria-label="Speaker notes controls" hidden>
+    <a data-deck-page-link="entry">Presentation views</a>
+    <div>
+      <button type="button" id="notes-smaller" aria-label="Decrease note font size">A−</button>
+      <button type="button" id="notes-larger" aria-label="Increase note font size">A+</button>
+      <button type="button" id="notes-fullscreen">Fullscreen</button>
+    </div>
+    <output id="notes-position" aria-live="polite"></output>
+  </nav>
   <aside id="presenter-preview" hidden aria-label="Next frame">
     <p id="presenter-next"></p>
     <iframe title="Next presentation frame" tabindex="-1" inert></iframe>

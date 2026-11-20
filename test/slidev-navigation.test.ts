@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { parseDeck, renderPresentation } from '../packages/slidev/node/runtime/index.ts'
 import type { SlideMode, SlidePosition, SlideRoute } from '../packages/client/runtime/navigation.ts'
+import { deckLocation, matchDeckPath, readDeckLocation } from '../packages/client/runtime/routing.ts'
 import { clickBounds, createNavigationContext, getSlideRoutePath, legacySlideLocation, nextPosition, previousPosition, readSlideHash, slideHash, slidePosition } from '../packages/client/runtime/navigation.ts'
 
 const routes: SlideRoute[] = [
@@ -34,6 +35,22 @@ describe('Slidev slide paths', () => {
     expect(legacySlideLocation(new URL('http://localhost/overview'), aliases)?.href).toBe('http://localhost/?overview=1')
     expect(legacySlideLocation(new URL('http://localhost/overview'), new Set(['overview']))?.href).toBe('http://localhost/#overview')
   })
+})
+
+test('routes entry and notes in history, hash, and portable decks', () => {
+  const base = '/talk/'
+  const root = new URL(base, 'http://localhost')
+  for (const page of ['entry', 'notes'] as const) {
+    const alias = new Map<string, number>([[page, 2]])
+    expect(matchDeckPath('/' + page, key => alias.has(key))).toEqual({ key: page, page: 'slide' })
+    expect(legacySlideLocation(new URL('/' + page + '/', root), new Set())?.searchParams.has(page)).toBe(true)
+    for (const mode of ['history', 'hash', 'legacy', 'memory'] as const) {
+      const routing = { base, mode }
+      const url = deckLocation(root, routing, page, routes[0])
+      expect(readDeckLocation(url, routing, new Map()).page).toBe(page)
+      expect(deckLocation(url, routing, 'slide', routes[0]).searchParams.has(page)).toBe(false)
+    }
+  }
 })
 
 describe('Slidev navigation context', () => {

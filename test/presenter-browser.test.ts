@@ -236,3 +236,102 @@ test.skipIf(!chrome)('keeps keyboard navigation and the presenter window under t
     await rm(root, { recursive: true, force: true })
   }
 }, browserTestTimeout)
+
+// Adapted from Slidev's cypress/e2e/examples/smoke.spec.ts (MIT).
+test.skipIf(!chrome)('walks every reveal in play and presenter views and opens the entry, overview, and live notes pages', async () => {
+  const root = await mkdtemp(resolve(tmpdir(), 'presentation-route-smoke-'))
+  const source = resolve(root, 'slides.md')
+  await Bun.write(source, fixture)
+  const base = '/talk/'
+  const server = cli('dev', source, '--port', '0', '--base', base, '--router-mode', 'history')
+  let view: Bun.WebView | undefined
+  try {
+    const rootUrl = await serverOrigin(server) + base
+    view = new Bun.WebView({ width: 990, height: 730, backend: { type: 'chrome', path: chrome!, url: false } })
+    await view.navigate('about:blank')
+    await view.cdp('Page.addScriptToEvaluateOnNewDocument', {
+      source: `window.smokeErrors = [];
+        window.addEventListener('error', event => { if (event.message) window.smokeErrors.push(event.message) });
+        window.addEventListener('unhandledrejection', event => window.smokeErrors.push(String(event.reason)));`,
+    })
+    await view.navigate(rootUrl + 'entry')
+    const links = await view.evaluate<string[]>(`[...document.querySelectorAll('#deck-entry:not([hidden]) a')].map(link => link.href)`)
+    expect(links).toEqual(['1', 'presenter/1', 'notes', 'overview'].map(path => rootUrl + path))
+    expect(await view.evaluate("document.querySelector('#deck-entry h1').textContent")).toBe('Intro')
+    expect(await view.evaluate('window.smokeErrors')).toEqual([])
+
+    const position = () => view!.evaluate<[number, number, string]>(`(() => {
+      const nav = window.presentationNavigation
+      return [nav.currentPage, nav.clicks, nav.mode]
+    })()`)
+    for (const [url, mode] of [[links[0], 'slide'], [links[1], 'presenter']]) {
+      await view.navigate(url)
+      expect(await position()).toEqual([1, 0, mode])
+      for (const [slide, click] of [[2, 1], [2, 2], [2, 3], [3, 0], [3, 0]]) {
+        await view.press('ArrowRight')
+        expect(await position()).toEqual([slide, click, mode])
+      }
+      expect(await view.evaluate('window.smokeErrors')).toEqual([])
+    }
+
+    await view.navigate(links[3])
+    expect(await position()).toEqual([1, 0, 'overview'])
+    expect(await view.evaluate("document.querySelectorAll('.overview-card').length")).toBe(3)
+    expect(await view.evaluate('window.smokeErrors')).toEqual([])
+
+    await view.navigate(rootUrl + 'presenter/review?clicks=1')
+    const openNotes = async () => view!.evaluate(`(async () => {
+      document.querySelector('#smoke-notes')?.remove()
+      const notes = document.createElement('iframe')
+      notes.id = 'smoke-notes'
+      notes.src = ${JSON.stringify(links[2])}
+      notes.hidden = true
+      const loaded = new Promise(resolve => notes.addEventListener('load', resolve, { once: true }))
+      document.body.append(notes)
+      await loaded
+      return notes.contentWindow.presentationNavigation.mode
+    })()`)
+    const notesState = () => view!.evaluate(`(async () => {
+      const frame = document.querySelector('#smoke-notes')
+      const contents = frame.contentDocument
+      const nav = window.presentationNavigation
+      for (let attempt = 0; attempt < 80 && (frame.contentWindow.presentationNavigation.clicks !== nav.clicks ||
+        frame.contentWindow.presentationNavigation.currentPage !== nav.currentPage); attempt++)
+        await new Promise(resolve => setTimeout(resolve, 15))
+      const notes = frame.contentWindow.presentationNavigation
+      const visible = [...contents.querySelectorAll('#presenter-notes section:not([hidden]) [data-note-step]:not([hidden])')]
+      return [notes.currentPage, notes.clicks, contents.querySelector('#notes-position').textContent,
+        visible.map(note => note.textContent.trim()), frame.contentWindow.smokeErrors]
+    })()`)
+    expect(await view.evaluate("document.querySelector('#presenter-notes-link').href")).toBe(links[2])
+    expect(await openNotes()).toBe('notes')
+    expect(await notesState()).toEqual([2, 1, 'Slide 2 of 3 · Reveal 1 of 3', ['Review the work.', 'First note.'], []])
+    await view.press('ArrowRight')
+    expect(await notesState()).toEqual([2, 2, 'Slide 2 of 3 · Reveal 2 of 3', ['Review the work.', 'First note.', 'Second note.'], []])
+    expect(await view.evaluate(`(() => {
+      const notes = document.querySelector('#smoke-notes').contentDocument
+      const panel = notes.querySelector('#presenter-notes')
+      const initial = panel.style.getPropertyValue('--notes-font-size')
+      notes.querySelector('#notes-larger').click()
+      return [initial, panel.style.getPropertyValue('--notes-font-size'), notes.querySelector('#stage').hidden]
+    })()`)).toEqual(['22px', '24px', true])
+    await Bun.write(source, fixture.replace('Second note.', 'Revised note.'))
+    expect(await view.evaluate(`(async () => {
+      const notes = document.querySelector('#smoke-notes')
+      const active = () => notes.contentDocument.querySelector('#presenter-notes section:not([hidden])')
+      for (let attempt = 0; attempt < 200 && !active()?.textContent.includes('Revised note.'); attempt++)
+        await new Promise(resolve => setTimeout(resolve, 20))
+      return active()?.querySelector('[data-note-step="2"]:not([hidden])')?.textContent.trim()
+    })()`)).toBe('Revised note.')
+    await view.press('ArrowDown')
+    expect(await notesState()).toEqual([3, 0, 'Slide 3 of 3', ['No speaker notes for this slide.'], []])
+    expect(await openNotes()).toBe('notes')
+    expect(await view.evaluate("document.querySelector('#smoke-notes').contentDocument.querySelector('#presenter-notes').style.getPropertyValue('--notes-font-size')")).toBe('24px')
+  }
+  finally {
+    view?.close()
+    server.kill()
+    await server.exited
+    await rm(root, { recursive: true, force: true })
+  }
+}, browserTestTimeout)

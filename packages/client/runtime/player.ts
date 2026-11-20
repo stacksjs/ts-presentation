@@ -11,8 +11,10 @@ import { setupDrawings } from './drawing-player.ts'
 import type { DrawingClientConfig } from '../../types/src/drawings.ts'
 import { setupLiveCode } from './live-code.ts'
 import { createSlideMedia } from './media.ts'
+import { mountNotesPage, mountViewLinks, notesSync } from './notes-page.ts'
 import type { ClickBounds, SlideMode, SlidePosition, SlideRoute } from './navigation.ts'
 import { clickBounds, createNavigationContext, nextPosition, previousPosition, slidePosition } from './navigation.ts'
+import type { DeckPage } from './routing.ts'
 import { deckLocation, readDeckLocation, resolveRouterMode } from './routing.ts'
 import { setupOverviewGrid } from './overview.ts'
 import { setupPresenter } from './presenter.ts'
@@ -45,7 +47,9 @@ const initialLocation = readDeckLocation(new URL(location.href), routing, aliase
 const isCapture = initialLocation.page === 'export'
 const captureSteps = params.has('steps') || (isCapture && !params.has('capture') && initialLocation.click !== undefined)
 const isOverview = initialLocation.page === 'overview'
-const isPreview = initialLocation.page === 'preview' || isOverview
+const isEntry = initialLocation.page === 'entry'
+const isNotes = initialLocation.page === 'notes'
+const isPreview = initialLocation.page === 'preview' || isOverview || isEntry || isNotes
 const isPresenter = initialLocation.page === 'presenter'
 const opener: Window | null = isPresenter ? window.opener : null
 const messageOrigin = location.protocol === 'file:' ? '*' : location.origin
@@ -56,15 +60,15 @@ const noteSteps: HTMLElement[][] = []
 const defaultClickAnimation = document.documentElement.dataset.clickAnimation
 const reveals: ReturnType<typeof collectReveals>[] = []
 const bounds: ClickBounds[] = []
-const isLive = !isCapture && document.documentElement.dataset.liveCompile === 'true'
-const slideMode = (): SlideMode => isOverview ? 'overview' : isPreview ? 'preview' : isCapture ? 'export' : isPresenter || !notesPanel.hidden ? 'presenter' : 'slide'
+const isLive = !isCapture && !isEntry && document.documentElement.dataset.liveCompile === 'true'
+const slideMode = (): SlideMode => isNotes ? 'notes' : isOverview ? 'overview' : isPreview ? 'preview' : isCapture ? 'export' : isPresenter || !notesPanel.hidden ? 'presenter' : 'slide'
 const conditions = createSlideConditions(slideMode, refreshConditions)
 const currentUrl = () => new URL(location.href)
 const audienceUrl = (route: SlideRoute, click?: number) => deckLocation(currentUrl(), routing, 'slide', route, click)
 
 function writePosition(slide: number, click: number, replace: boolean): void {
   if (routing.mode === 'memory') return
-  const page = isCapture ? 'export' : isOverview ? 'overview' : isPreview ? 'preview' : isPresenter ? 'presenter' : 'slide'
+  const page = isCapture ? 'export' : isNotes ? 'notes' : isOverview ? 'overview' : isPreview ? 'preview' : isPresenter ? 'presenter' : 'slide'
   const url = deckLocation(currentUrl(), routing, page, routes[slide - 1], click)
   if (replace) history.replaceState(null, '', url)
   else history.pushState(null, '', url)
@@ -107,6 +111,39 @@ let presenterControls: ReturnType<typeof setupPresenter> | undefined
 let sideEditor: ReturnType<typeof setupSideEditor> | undefined
 const position = (): SlidePosition => ({ slide: current, click })
 
+function viewUrl(page: DeckPage): URL {
+  const url = new URL(document.baseURI)
+  url.search = ''
+  url.hash = ''
+  const ambiguous = (page === 'entry' || page === 'notes' || page === 'overview') && aliases.has(page)
+  return deckLocation(url, ambiguous ? { ...routing, mode: 'legacy' } : routing, page, routes[0])
+}
+
+if (isEntry) {
+  document.body.classList.add('entry-page')
+  const entry = document.querySelector<HTMLElement>('#deck-entry')!
+  mountViewLinks(entry, viewUrl)
+  entry.hidden = false
+}
+if (isNotes) {
+  document.body.classList.add('notes-page')
+  document.title = `Notes - ${document.title}`
+}
+else if (!isPreview && !isCapture) mountViewLinks(notesPanel, viewUrl)
+const noteView = isNotes ? mountNotesPage(notesPanel, stage, viewUrl, toggleFullscreen) : undefined
+const notesFeed = !isCapture && (!isPreview || isNotes) ? notesSync((state) => {
+  startedAt = state.startedAt
+  if (isNotes) show(state.slide, state.click, false, false)
+  if (!notesPanel.hidden) updateTimer()
+}) : undefined
+
+function publishNotes(reset = false): void {
+  if (!notesFeed || isNotes) return
+  if (!reset) startedAt = notesFeed.saved()?.startedAt ?? startedAt
+  notesFeed.publish({ ...position(), startedAt })
+}
+
+
 function resize(): void {
   const inset = isCapture || isPreview ? 0 : 24
   const width = Math.max(1, stage.clientWidth - inset)
@@ -136,16 +173,39 @@ const overviewGrid = isOverview ? setupOverviewGrid(stage, {
   },
 }) : undefined
 
+function displayNotes(selected: number, step: number, changed: boolean): void {
+  notes[selected - 1].hidden = false
+  noteSteps[selected - 1].forEach((note, index) => { note.hidden = index > step })
+  if (changed) notesPanel.scrollTop = 0
+  else if (!notesPanel.hidden && step > 0) {
+    const stepNotes = noteSteps[selected - 1][step]
+    if (stepNotes) {
+      const overflow = stepNotes.getBoundingClientRect().bottom - notesPanel.getBoundingClientRect().bottom + 14
+      if (overflow > 0) notesPanel.scrollTop += overflow
+    }
+  }
+}
+
 function show(number: number, step?: number, writeHistory = true, sync = true, refresh = false): void {
+  if (isEntry) return
   const { slide: selected, click: nextStep } = slidePosition(number, step, bounds)
   if (!overviewGrid && !refresh && selected === current && nextStep === click && !articles[current - 1].hidden) return
   const slideChanged = selected !== current
   const animate = !isCapture && !isPreview && selected === current && nextStep !== click
-  if (writeHistory && (selected !== current || nextStep !== click)) writePosition(selected, nextStep, selected === current)
+  if (!isNotes && writeHistory && (selected !== current || nextStep !== click)) writePosition(selected, nextStep, selected === current)
   if (overviewGrid) {
     current = selected
     click = nextStep
     overviewGrid.select(current)
+    return
+  }
+
+  if (noteView) {
+    if (slideChanged && notes[current - 1]) notes[current - 1].hidden = true
+    current = selected
+    click = nextStep
+    displayNotes(current, click, slideChanged)
+    noteView.update(routes[current - 1], position(), bounds[current - 1], routes.length)
     return
   }
 
@@ -163,19 +223,10 @@ function show(number: number, step?: number, writeHistory = true, sync = true, r
   for (const frame of active.querySelectorAll<HTMLIFrameElement>('iframe[data-presentation-tweet]:not([src])')) {
     if (frame.dataset.src) frame.src = frame.dataset.src
   }
-  notes[current - 1].hidden = false
   showReveals(reveals[current - 1], click, animate, Number(stage.style.getPropertyValue('--slide-scale')) || 1)
   media.show(active)
   conditions.observe(active)
-  noteSteps[current - 1].forEach((note, index) => { note.hidden = index > click })
-  if (slideChanged) notesPanel.scrollTop = 0
-  else if (!notesPanel.hidden && click > 0) {
-    const stepNotes = noteSteps[current - 1][click]
-    if (stepNotes) {
-      const overflow = stepNotes.getBoundingClientRect().bottom - notesPanel.getBoundingClientRect().bottom + 14
-      if (overflow > 0) notesPanel.scrollTop += overflow
-    }
-  }
+  displayNotes(current, click, slideChanged)
   const here = position()
   goto.value = String(current)
   previous.disabled = previousPosition(here, bounds) === undefined
@@ -186,6 +237,7 @@ function show(number: number, step?: number, writeHistory = true, sync = true, r
   window.dispatchEvent(new CustomEvent('presentation:slide', {
     detail: { ...here, title: routes[current - 1].title, route: routes[current - 1] },
   }))
+  if (!refresh) publishNotes()
   if (sync) syncPeer({ presentationSlide: current, presentationClick: click })
 }
 
@@ -233,7 +285,7 @@ window.presentationNavigation = createNavigationContext(routes, slideMode,
   })
 
 function updateTimer(): void {
-  const elapsed = Math.floor((Date.now() - startedAt) / 1000)
+  const elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000))
   timer.textContent = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')}`
 }
 
@@ -249,6 +301,7 @@ function togglePresenter(): void {
   drawing?.refresh()
   if (timerTick !== undefined) clearInterval(timerTick)
   timerTick = notesPanel.hidden ? undefined : setInterval(updateTimer, 1000)
+  if (!notesPanel.hidden) updateTimer()
   resize()
 }
 
@@ -278,6 +331,7 @@ function openOverview(): void {
 
 window.addEventListener('message', (event: MessageEvent) => {
   if (event.origin !== (location.protocol === 'file:' ? 'null' : location.origin) || !event.source) return
+  if (isEntry || isNotes) return
   if (isPreview) {
     if (event.source !== window.parent || window.parent === window) return
     const position = event.data?.presentationPreview as Partial<SlidePosition> | undefined
@@ -430,6 +484,7 @@ fullscreen.addEventListener('click', () => { void toggleFullscreen() })
 control.querySelector('#overview-button')!.addEventListener('click', openOverview)
 document.querySelector('#presenter-reset')!.addEventListener('click', () => {
   startedAt = Date.now()
+  publishNotes(true)
   updateTimer()
 })
 window.addEventListener('message', (event) => {
@@ -449,7 +504,7 @@ window.addEventListener('message', (event) => {
 })
 window.addEventListener('hashchange', readLocation)
 window.addEventListener('popstate', readLocation)
-if (!overviewGrid) new ResizeObserver(resize).observe(stage)
+if (!overviewGrid && !isEntry && !isNotes) new ResizeObserver(resize).observe(stage)
 
 window.addEventListener('keydown', (event) => {
   if (isOverview && window.parent !== window && event.key === 'Escape') {
@@ -544,7 +599,16 @@ if (overviewGrid) {
   conditions.observe(stage)
 }
 else for (const article of articles) article.hidden = true
-readLocation()
+const savedNotes = isNotes ? notesFeed?.saved() : undefined
+if (savedNotes) {
+  startedAt = savedNotes.startedAt
+  show(savedNotes.slide, savedNotes.click, false, false)
+}
+else readLocation()
+if (isNotes) {
+  updateTimer()
+  timerTick = setInterval(updateTimer, 1000)
+}
 if (isPresenter) {
   togglePresenter()
   opener?.postMessage({ presenterReady: true }, messageOrigin)
@@ -582,7 +646,8 @@ function applyLiveDeck(deck: LiveDeck, before: LiveManifest): boolean {
   aliases.clear()
   for (const route of routes) if (route.alias) aliases.set(route.alias, route.no)
   if (titlesChanged) updateSlideTitles()
-  if (document.title !== deck.title) document.title = deck.title
+  const title = isNotes ? `Notes - ${deck.title}` : deck.title
+  if (document.title !== title) document.title = title
   if (deck.deckCss !== before.deckCss) {
     document.querySelector<HTMLLinkElement>('#deck-styles')!.href = `./deck.css?revision=${encodeURIComponent(deck.deckCss)}`
   }

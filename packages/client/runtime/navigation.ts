@@ -13,7 +13,13 @@ export interface SlideRoute {
 
 export interface ClickBounds { start: number, end: number }
 export interface SlidePosition { slide: number, click: number }
-export type SlideMode = 'slide' | 'presenter' | 'export' | 'preview' | 'overview'
+export type SlideMode = 'slide' | 'presenter' | 'export' | 'preview' | 'overview' | 'notes'
+type UtilityPage = 'entry' | 'overview' | 'notes'
+
+export function matchUtilityPage(path: string, hasAlias: (key: string) => boolean): UtilityPage | undefined {
+  const page = /^\/(entry|overview|notes)\/?$/.exec(path)?.[1] as UtilityPage | undefined
+  return page && !hasAlias(page) ? page : undefined
+}
 
 const routeKey = /^(?:[a-z][a-z0-9-]*|[1-9]\d*)$/i
 const numericSlide = /^(?:slide-)?(\d+)$/
@@ -56,7 +62,7 @@ export function slideHash(route: Pick<SlideRoute, 'no' | 'alias'>, click = 0): s
 
 /** Adapted from Slidev's slidePath helpers. These paths are relative to the server base. */
 export function getSlideRoutePath(route: Pick<SlideRoute, 'no' | 'alias'>, mode: SlideMode = 'slide'): string {
-  if (mode === 'overview') return '/overview'
+  if (mode === 'overview' || mode === 'notes') return `/${mode}`
   const key = route.alias ?? String(route.no)
   return `${mode === 'presenter' || mode === 'export' ? `/${mode}` : ''}/${key}`
 }
@@ -71,10 +77,11 @@ export function readSlideHash(hash: string, aliases: ReadonlyMap<string, number>
 }
 
 export function legacySlideLocation(url: URL, aliases: ReadonlySet<string>): URL | undefined {
-  if (/^\/overview\/?$/.test(url.pathname) && !aliases.has('overview')) {
+  const page = matchUtilityPage(url.pathname, key => aliases.has(key))
+  if (page) {
     const location = new URL(url)
     location.pathname = '/'
-    location.searchParams.set('overview', '1')
+    location.searchParams.set(page, '1')
     return location
   }
   const path = url.pathname.split('/').filter(Boolean)

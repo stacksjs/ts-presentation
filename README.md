@@ -24,6 +24,9 @@ supports screen capture, **Record** saves the chosen screen or window
 as a video.
 
 Left and right move through reveals. Up and down jump between slides.
+Open `/entry` to choose a view. `/notes` follows the current slide, reveals,
+and timer across tabs in the same browser profile. In a built deck, open
+`index.html?entry=1` or `index.html?notes=1` directly.
 
 In dev, **Edit slide** or **E** opens the slide's Markdown beside the
 preview. The editor saves frontmatter, body, and speaker notes to the
