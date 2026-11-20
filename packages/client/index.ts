@@ -1,5 +1,6 @@
 import { renderTemplateString } from '@stacksjs/stx'
 import { fileURLToPath } from 'node:url'
+import { builtinLayouts } from './runtime/builtin-layouts.ts'
 
 export type { ClickBounds, PresentationNavigation, SlidePosition, SlideRoute } from './runtime/navigation.ts'
 export { clickBounds, createNavigationContext, getSlideRoutePath, readSlideHash, slideHash } from './runtime/navigation.ts'
@@ -81,27 +82,6 @@ export function renderPresentationShell(context: TemplateContext): Promise<strin
   return shell.then(render => render(context))
 }
 
-const builtinLayouts: Readonly<Record<string, string>> = {
-  default: 'content',
-  center: 'content',
-  cover: 'content',
-  intro: 'content',
-  section: 'content',
-  statement: 'content',
-  fact: 'content',
-  quote: 'content',
-  end: 'content',
-  full: 'content',
-  none: 'content',
-  image: 'image',
-  'image-left': 'image-split',
-  'image-right': 'image-split',
-  iframe: 'iframe',
-  'iframe-left': 'iframe-left',
-  'iframe-right': 'iframe-right',
-  'two-cols': 'two-cols',
-  'two-cols-header': 'two-cols-header',
-}
 const layouts = new Map<string, Promise<Template>>()
 
 export function hasBuiltinLayoutSlots(name: string): boolean {

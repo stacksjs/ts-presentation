@@ -1,54 +1,38 @@
-<br>
-<p align="center">
-<a href="https://github.com/slidevjs/slidev" target="_blank">
-<img src="https://github.com/slidevjs/slidev/blob/main/assets/logo-for-vscode.png?raw=true" alt="Slidev" width="350"/>
-</a>
-</p>
+# ts-presentation for VS Code
 
-<p align="center">
-Presentation <b>slide</b>s for <b>dev</b>elopers<br>
-<sup><del>who use VS Code 🤣</del></sup>
-</p>
+Browse slide titles in VS Code's Outline, fold individual slides in the editor,
+and use completion or hover help for top-level frontmatter. The Markdown
+grammar highlights slide syntax and embedded languages. The Command Palette
+provides **Open Audience View**, **Open Presenter View**, and **Stop Previews**.
 
-<p align="center">
-<a href="https://marketplace.visualstudio.com/items?itemName=antfu.slidev" target="__blank"><img src="https://img.shields.io/visual-studio-marketplace/v/antfu.slidev.svg?color=4EC5D4&amp;label=VS%20Code%20Marketplace&logo=visual-studio-code" alt="Visual Studio Marketplace Version" /></a>
-<a href="https://marketplace.visualstudio.com/items?itemName=antfu.slidev" target="__blank"><img src="https://img.shields.io/visual-studio-marketplace/d/antfu.slidev.svg?color=2B90B6" alt="Visual Studio Marketplace Downloads" /></a>
-<a href="https://kermanx.github.io/reactive-vscode/" target="__blank"><img src="https://img.shields.io/badge/made_with-reactive--vscode-%23007ACC?style=flat&labelColor=%23229863"  alt="Made with reacrive-vscode" /></a>
-</p>
+## Run the extension from a checkout
 
-<br>
+From the repository root, build the extension and open a VS Code development
+host with the extension loaded.
 
-### Features
+```sh
+bun run --cwd packages/vscode build
+code --extensionDevelopmentPath="$(pwd)/packages/vscode"
+```
 
-- Preview slides in the side panel
-- Slides tree view
-- Re-ordering slides
-- Folding for slide blocks
-- Multiple slides project support
-- Start dev server in one click
+Open a deck in the development host. Authoring features apply to
+`**/slides.md` by default. Add workspace-relative patterns to
+`.vscode/settings.json` for decks with other names.
 
-<img width="974" src="https://github.com/slidevjs/slidev/assets/63178754/2c9ba01a-d21f-4b33-b6b6-4e249873f865">
+```json
+{
+  "ts-presentation.include": ["**/slides.md", "talks/**/*.md"]
+}
+```
 
-## Usage
+Outline and frontmatter help work in the editor while a draft is incomplete.
+To preview a deck, make Bun available to the VS Code process and install
+`ts-presentation` in the deck project. When running the extension from this
+checkout, the preview can also use the CLI in the checkout.
 
-Click the `Slidev` icon in the activity bar to open the **Slidev panel**. In the Slidev panel, you can see the projects tree view, slides tree view, and the preview webview.
+## Credits
 
-In the **projects tree view**, you can see all the Slidev projects in your workspace. You can click the item to open the corresponding file, and click the `eye` icon over it to switch the active project. The `add` icon allows you to load a slides project that wasn't scanned automatically.
-
-In the **slides tree view**, you can see all the slides in the active project. You can click the item to move your cursor to the slide in the editor, and drag and drop to reorder the slides.
-
-In the **preview webview**, you can click the `run-all` icon to start the dev server and click the `globe` icon to open the slides in the browser. Toggle `lock` icon to sync/unsync the preview navigation with the editor cursor.
-
-There are also some **commands** you can use. Type `Slidev` in the command palette to see them.
-
-## Sponsors
-
-<p align="center">
-  <a href="https://antfu.me/sponsor">
-    <img src='https://cdn.jsdelivr.net/gh/antfu/static/sponsors.png'/>
-  </a>
-</p>
-
-## License
-
-MIT License © 2021-2025 [Anthony Fu](https://github.com/antfu)
+Adapted from Slidev's MIT-licensed VS Code extension by Anthony Fu and the
+Slidev contributors. See the [Slidev extension guide](https://sli.dev/features/vscode-extension)
+for the original extension and its capabilities. The original MIT notice is
+included in [LICENSE](LICENSE).

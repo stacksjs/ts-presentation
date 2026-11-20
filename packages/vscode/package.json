@@ -6,7 +6,7 @@
   "preview": true,
   "version": "0.1.0",
   "private": true,
-  "description": "Markdown syntax and Bun preview for ts-presentation",
+  "description": "Slide outlines, Markdown authoring, and Bun preview for ts-presentation",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -19,8 +19,20 @@
   "engines": {
     "vscode": "^1.99.0"
   },
-  "activationEvents": [],
+  "activationEvents": ["onLanguage:markdown"],
   "contributes": {
+    "configuration": {
+      "title": "ts-presentation",
+      "properties": {
+        "ts-presentation.include": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["**/slides.md"],
+          "scope": "resource",
+          "description": "Workspace-relative glob patterns for decks with slide folding, navigation, and frontmatter help."
+        }
+      }
+    },
     "languages": [
       {
         "id": "markdown",

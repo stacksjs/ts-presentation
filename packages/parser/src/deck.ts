@@ -39,6 +39,7 @@ export type PreparserSetup = (context: PreparserContext) => MaybePromise<Prepars
 export function definePreparserSetup(setup: PreparserSetup): PreparserSetup { return setup }
 
 const keyStart = /^(?:["'][^"']+["']|[\w-]+)\s*:(?:\s|$)/
+const markdownHeading = /^ {0,3}(#{1,6})[ \t]+(.+?)\s*$/m
 const imageExtension = /\.(?:png|jpe?g|gif|svg|webp|avif|ico|bmp|tiff?)(?:[?#].*)?$/i
 
 interface MarkdownScan {
@@ -115,7 +116,8 @@ export function extractImagesUsage(content: string, frontmatter: Frontmatter = {
 
 interface Matter { attributes: Frontmatter, start: number, end: number }
 
-function yamlMatter(lines: string[], index: number, end: number): Matter {
+function yamlMatter(lines: string[], index: number, end: number, parseYaml: boolean): Matter {
+  if (!parseYaml) return { attributes: {}, start: index, end }
   const value: unknown = Bun.YAML.parse(lines.slice(index + 1, end).join('\n'))
   if (value !== null && value !== undefined && (typeof value !== 'object' || Array.isArray(value))) {
     throw new Error(`Slide frontmatter must be a YAML mapping at line ${index + 1}`)
@@ -123,24 +125,27 @@ function yamlMatter(lines: string[], index: number, end: number): Matter {
   return { attributes: (value ?? {}) as Frontmatter, start: index, end }
 }
 
-function dashedMatter(lines: string[], index: number): Matter | undefined {
-  if (lines[index][3] === '-' || !lines[index + 1]?.trim()) return
+function dashedMatter(lines: string[], index: number, parseYaml = true): Matter | undefined {
+  const next = lines[index + 1]
+  if (lines[index][3] === '-' || !next?.trim()) return
   let first = index + 1
   while (lines[first]?.trimStart().startsWith('#')) first++
   if (!keyStart.test(lines[first] ?? '')) return
   let end = first + 1
   while (end < lines.length && lines[end].trimEnd() !== '---') end++
-  if (end === lines.length && first !== index + 1) return
-  if (end === lines.length) throw new Error(`Unclosed slide frontmatter at line ${index + 1}`)
-  return yamlMatter(lines, index, end)
+  if (end === lines.length && parseYaml) {
+    if (first !== index + 1) return
+    throw new Error(`Unclosed slide frontmatter at line ${index + 1}`)
+  }
+  return yamlMatter(lines, index, end, parseYaml)
 }
 
-function fencedMatter(lines: string[], index: number): Matter | undefined {
+function fencedMatter(lines: string[], index: number, parseYaml = true): Matter | undefined {
   const opening = readFenceOpening(lines[index] ?? '')
   if (!opening || !/^ya?ml$/i.test(opening.info.trim())) return
   let end = index + 1
   while (end < lines.length && !isFenceClose(lines[end], opening.marker)) end++
-  if (end < lines.length) return yamlMatter(lines, index, end)
+  if (end < lines.length || !parseYaml) return yamlMatter(lines, index, end, parseYaml)
 }
 
 export function readHeadmatter(markdown: string): Frontmatter {
@@ -173,7 +178,7 @@ export function slideSourceOf(slide: Slide): SlideSource | undefined {
   return slideSources.get(slide)
 }
 
-function splitSlides(lines: string[]): SlideDraft[] {
+function splitSlides(lines: string[], parseYaml = true): SlideDraft[] {
   const drafts: SlideDraft[] = []
   const fences = new MarkdownFenceReader()
   const scan: MarkdownScan = { commentStart: -1 }
@@ -194,7 +199,7 @@ function splitSlides(lines: string[]): SlideDraft[] {
       content,
       notes: note ? raw.slice(note.start + 4, note.end - 3).trim() : undefined,
       noteRange: note,
-      visible: visible?.join('\n') ?? content,
+      visible: visible?.join('\n') ?? raw,
       attributes: matter?.attributes ?? {},
       source: { bodyLine: start, endLine: end, leading, matter },
     })
@@ -205,9 +210,9 @@ function splitSlides(lines: string[]): SlideDraft[] {
     const fenced = scan.commentStart === -1 && !!fences.read(line)
     if (!fenced && scan.commentStart === -1 && line.startsWith('---')) {
       append(index)
-      matter = dashedMatter(lines, index)
+      matter = dashedMatter(lines, index, parseYaml)
       if (matter) index = matter.end
-      start = index + 1
+      start = Math.min(index + 1, lines.length)
       scan.lastComment = undefined
       fences.reset()
       visible = undefined
@@ -216,9 +221,9 @@ function splitSlides(lines: string[]): SlideDraft[] {
       continue
     }
     if (!hasContent && line.trim()) {
-      if (!matter && (matter = fencedMatter(lines, index))) {
+      if (!matter && (matter = fencedMatter(lines, index, parseYaml))) {
         index = matter.end
-        start = index + 1
+        start = Math.min(index + 1, lines.length)
         offset = 0
         fences.reset()
         continue
@@ -234,10 +239,34 @@ function splitSlides(lines: string[]): SlideDraft[] {
   return drafts
 }
 
+export interface DeckSourceSlide {
+  startLine: number
+  endLine: number
+  heading?: { line: number, title: string }
+  frontmatter?: { start: number, end: number }
+}
+
+/** Read zero-based slide ranges even while frontmatter is incomplete or invalid. */
+export function inspectDeckSource(markdown: string): DeckSourceSlide[] {
+  return splitSlides(splitLines(markdown), false).map(({ source, visible }) => {
+    const { bodyLine, endLine, matter } = source
+    const heading = markdownHeading.exec(visible)
+    return {
+      startLine: matter?.start ?? Math.max(0, bodyLine - 1),
+      endLine,
+      heading: heading ? {
+        line: bodyLine + visible.slice(0, heading.index).split('\n').length - 1,
+        title: heading[2].replace(/[ \t]+#+$/, '').trim(),
+      } : undefined,
+      frontmatter: matter && { start: matter.start, end: matter.end },
+    }
+  })
+}
+
 function finishDeck(drafts: SlideDraft[], keepSources = false): Deck {
   if (!drafts.length) throw new Error('The deck contains no slides')
   const slides = drafts.map(({ content, visible, notes, attributes, source }, index): Slide => {
-    const heading = /^ {0,3}(#{1,6})[ \t]+(.+?)\s*$/m.exec(visible)
+    const heading = markdownHeading.exec(visible)
     const htmlTitle = heading ? undefined : visible.match(/<h1\b[^>]*>([\s\S]+?)<\/h1>/i)?.[1]
     const titled = heading?.[2].replace(/[ \t]+#+$/, '').trim() ?? htmlTitle
     const title = attributes.title ?? attributes.name ?? (titled ? plainMarkdown(titled) : undefined)

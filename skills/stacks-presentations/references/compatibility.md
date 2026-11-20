@@ -75,8 +75,9 @@ in a new ts-presentation project.
 | Entry and live notes pages | STX view selector and a read-only speaker notes view that follows slide position, reveal steps, and timer across tabs in the same browser profile |
 | Quick overview and overview page | Rendered thumbnails, keyboard navigation, standalone reveal sliders, and read-only speaker notes |
 | Drawing and recording | Native SVG ink, mouse and stylus input, same-browser sync, SVG persistence, drawing options, and screen capture |
+| VS Code authoring | Slide outline and folding, top-level frontmatter completions and hover help, Markdown syntax highlighting, and Bun preview commands |
 
 Vue-specific component APIs, Vite integrations,
-Monaco IntelliSense, Shiki transformers, VS Code language tooling, other
+Monaco IntelliSense, Shiki transformers, advanced VS Code tooling, other
 PlantUML grammars, and the full KaTeX and Mermaid grammars still need porting. Refer to the [original Slidev skill](slidev-source/skills/slidev/SKILL.md)
 for upstream deck syntax.

@@ -4,6 +4,7 @@ import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 import * as vscode from 'vscode'
+import { registerAuthoring } from './editor.mjs'
 
 const previews = new Map()
 
@@ -41,6 +42,7 @@ function startPreview(file, cli, output) {
 }
 
 export function activate(context) {
+  registerAuthoring(context)
   const output = vscode.window.createOutputChannel('ts-presentation')
   async function open(presenter) {
     const document = vscode.window.activeTextEditor?.document
