@@ -28,30 +28,50 @@ export async function bundleExtensionClient(entry: string, root: string, observe
   return script.text()
 }
 
-export async function loadShortcutClient(
+export async function loadBrowserSetups(
   root: string,
   extensions: readonly string[],
   observe: ObserveDeckFile,
   observeOptional: (path: string) => Promise<string | undefined>,
 ): Promise<string> {
-  const setupPaths: string[] = []
+  const kinds = ['shortcuts', 'code-runners'] as const
+  const setups: Record<typeof kinds[number], string[]> = { shortcuts: [], 'code-runners': [] }
   for (const directory of new Set([...extensions.filter(directory => directory !== root), root])) {
-    const path = join(directory, 'setup', 'shortcuts.ts')
-    if (await observeOptional(path) === undefined) continue
-    const canonical = await realpath(path)
-    if (!within(directory, canonical)) throw new Error(`${path} must stay inside its deck or extension directory`)
-    setupPaths.push(canonical)
+    for (const kind of kinds) {
+      const path = join(directory, 'setup', `${kind}.ts`)
+      if (await observeOptional(path) === undefined) continue
+      const canonical = await realpath(path)
+      if (!within(directory, canonical)) throw new Error(`${path} must stay inside its deck or extension directory`)
+      setups[kind].push(canonical)
+    }
   }
-  if (!setupPaths.length) return ''
+  if (!kinds.some(kind => setups[kind].length)) return ''
 
-  const contents = setupPaths.map((path, index) => `import setup${index} from ${JSON.stringify(path)};`)
-  contents.push(`window.presentationShortcutSetups = [${setupPaths.map((_, index) => `setup${index}`).join(', ')}];`)
-  const types = fileURLToPath(new URL('../../../types/src/shortcuts.ts', import.meta.url))
-  return bundleExtensionClient('presentation:shortcuts', root, observe, 'setup/shortcuts.ts', [{
-    name: 'presentation-shortcuts',
+  const contents: string[] = []
+  function importSetups(kind: typeof kinds[number], prefix: string): string {
+    const names = setups[kind].map((path, index) => {
+      const name = `${prefix}${index}`
+      contents.push(`import ${name} from ${JSON.stringify(path)};`)
+      return name
+    })
+    return `[${names.join(', ')}]`
+  }
+  if (setups.shortcuts.length) {
+    const shortcuts = importSetups('shortcuts', 'shortcut')
+    contents.push(`window.presentationShortcutSetups = ${shortcuts};`)
+  }
+  if (setups['code-runners'].length) {
+    const runners = importSetups('code-runners', 'runner')
+    const highlight = fileURLToPath(new URL('../../../client/runtime/runner-highlight.ts', import.meta.url))
+    contents.push(`import { highlight, prepareHighlight } from ${JSON.stringify(highlight)};`)
+    contents.push(`window.presentationCodeRunners = { setups: ${runners}, highlight, prepareHighlight };`)
+  }
+  const types = fileURLToPath(new URL('../../../types/src/index.ts', import.meta.url))
+  return bundleExtensionClient('presentation:setups', root, observe, 'browser setup files', [{
+    name: 'presentation-setups',
     setup(build) {
-      build.onResolve({ filter: /^presentation:shortcuts$/ }, () => ({ path: 'shortcuts', namespace: 'presentation' }))
-      build.onLoad({ filter: /^shortcuts$/, namespace: 'presentation' }, () => ({
+      build.onResolve({ filter: /^presentation:setups$/ }, () => ({ path: 'setups', namespace: 'presentation' }))
+      build.onLoad({ filter: /^setups$/, namespace: 'presentation' }, () => ({
         contents: contents.join('\n'),
         loader: 'js',
       }))

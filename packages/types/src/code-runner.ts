@@ -1,20 +1,17 @@
-import type { Arrayable, Awaitable } from '@antfu/utils'
-import type { CodeToHastOptions } from 'shiki'
-import type { MaybeRefOrGetter } from 'vue'
-
 export interface CodeRunnerContext {
   /**
    * Options passed to runner via the `runnerOptions` prop.
    */
   options: Record<string, unknown>
   /**
-   * Highlight code with shiki.
+   * Highlight code with the browser syntax highlighter. Unsupported languages return escaped text.
    */
-  highlight: (code: string, lang: string, options?: Partial<CodeToHastOptions>) => string
+  highlight: (code: string, lang: string, options?: { theme?: string }) => string
   /**
    * Use (other) code runner to run code.
    */
   run: (code: string, lang: string) => Promise<CodeRunnerOutputs>
+  signal: AbortSignal
 }
 
 export interface CodeRunnerOutputHtml {
@@ -59,8 +56,19 @@ export type CodeRunnerOutputTextArray = CodeRunnerOutputText[]
 
 export type CodeRunnerOutput = CodeRunnerOutputHtml | CodeRunnerOutputError | CodeRunnerOutputText | CodeRunnerOutputTextArray | CodeRunnerOutputDom
 
-export type CodeRunnerOutputs = MaybeRefOrGetter<Arrayable<CodeRunnerOutput>>
+type OutputValue = CodeRunnerOutput | CodeRunnerOutput[]
+export type CodeRunnerOutputs = OutputValue | (() => OutputValue) | { readonly value: OutputValue }
 
-export type CodeRunner = (code: string, ctx: CodeRunnerContext) => Awaitable<CodeRunnerOutputs>
+export type CodeRunner = (code: string, ctx: CodeRunnerContext) => CodeRunnerOutputs | Promise<CodeRunnerOutputs>
 
 export type CodeRunnerProviders = Record<string, CodeRunner>
+export type CodeRunnersSetup = (runners: CodeRunnerProviders) => CodeRunnerProviders | void | Promise<CodeRunnerProviders | void>
+
+export function defineCodeRunnersSetup(setup: CodeRunnersSetup): CodeRunnersSetup {
+  return setup
+}
+
+export function nativeCodeLanguage(language: string): 'js' | 'ts' | undefined {
+  if (language === 'ts' || language === 'typescript') return 'ts'
+  if (language === 'js' || language === 'javascript') return 'js'
+}

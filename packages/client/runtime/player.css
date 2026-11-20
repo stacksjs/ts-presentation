@@ -893,6 +893,7 @@ math .math-xcancel {
   background: #101721;
   border-top: 1px solid #61738a;
   padding: 7px 12px;
+  font-family: var(--presentation-font-mono, ui-monospace, monospace);
   font-size: 14px;
   white-space: pre-wrap;
 }

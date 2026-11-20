@@ -111,7 +111,7 @@ the deck and style slides with an optional `style.css`.
 | Code walkthroughs | `ts [build.ts] {1\|2-3\|all}{lines:true}` for titles and click highlights, or `md magic-move` around nested fences to animate between frames |
 | Code groups | Enable `comark: true` and place titled fences between `::code-group` and `::` to create keyboard-accessible tabs |
 | Source snippets | `<<< @/snippets/build.ts#example` for a named region. Use `{monaco-write}` with a whole JavaScript or TypeScript file to allow saving from the local dev editor |
-| Live code | A `js` or `ts` fence followed by `{live-run}` or `{monaco-run}`. Use `{live}` or `{monaco}` for an editor |
+| Live code | Add `{live-run}` or `{monaco-run}` to a fence for a built-in or custom runner. Use `{live}` or `{monaco}` for editing |
 | Themes and addons | Set `theme: paper` or `theme: serif`, or load trusted local modules through `theme` and `addons` |
 | Canvas size | Set `canvasWidth: 800` and `aspectRatio: 4/3` in deck frontmatter for an 800 × 600 canvas |
 
@@ -169,6 +169,27 @@ for a named slot. STX expressions can read `title`, `slideNumber`, and
 
 TypeScript edits run when served by the Bun dev command. The offline build
 can run the original TypeScript and offers an editable JavaScript version.
+
+Register runners in `setup/code-runners.ts` in a deck, theme, or addon. This
+example runs `csv {monaco-run}` fences in both dev and static builds.
+
+```ts
+import { defineCodeRunnersSetup } from 'ts-presentation'
+
+export default defineCodeRunnersSetup(() => ({
+  csv(source, { options }) {
+    const rows = source.trim().split(/\r?\n/)
+    return { text: String(options.label ?? 'Rows') + ' ' + rows.length }
+  },
+}))
+```
+
+Pass options in a second fence group, such as
+`{runnerOptions: {label: "Entries"}}`. The runner context includes `run`
+for invoking another runner, `highlight` for code formatting, and `signal`
+for cancellation. Runners can return text, errors, trusted HTML, or DOM
+elements. Sanitize HTML derived from editable input before returning it.
+
 See the [Stacks presentations skill](skills/stacks-presentations/SKILL.md)
 for authoring, extension APIs, exports, and the preserved upstream skill bundle.
 

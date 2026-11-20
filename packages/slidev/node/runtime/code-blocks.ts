@@ -14,10 +14,21 @@ export interface CodeBlockInfo {
   maxHeight?: string
   magic: boolean
   runner?: 'run' | 'edit'
+  runnerOptions?: Record<string, unknown>
   writeToken?: string
 }
 
 const decoration = /\{(?:[^{}"']|"[^"]*"|'[^']*')*\}/y
+
+function runnerDecoration(input: string): string | undefined {
+  if (input[0] !== '{') return
+  const tokens = /[{}]|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^{}"']+/gy
+  let depth = 0
+  for (let match = tokens.exec(input); match; match = tokens.exec(input)) {
+    if (match[0] === '{') depth++
+    else if (match[0] === '}' && --depth === 0) return input.slice(0, tokens.lastIndex)
+  }
+}
 
 /** The title and range groups follow Slidev's codeblock/wrapper grammar (MIT). */
 export function parseCodeInfo(input: string): CodeBlockInfo | undefined {
@@ -34,18 +45,22 @@ export function parseCodeInfo(input: string): CodeBlockInfo | undefined {
   let runner: CodeBlockInfo['runner']
   while (info) {
     decoration.lastIndex = 0
-    const group = decoration.exec(info)?.[0]
+    const group = decoration.exec(info)?.[0] ?? (runner ? runnerDecoration(info) : undefined)
     if (!group) return
     const launch = /^\{\s*(live|monaco)(-run)?\s*\}$/i.exec(group)
     if (launch) {
-      if (runner || magic || !/^(?:js|javascript|ts|typescript)$/i.test(lang)) return
+      if (runner || magic || !lang) return
       runner = launch[2] ? 'run' : 'edit'
     }
     else if (!ranges && parseEquationOptions(group)) ranges = group
     else {
-      const fields = readFenceOptions(group)
+      let fields: unknown = readFenceOptions(group)
+      if (!fields && runner) {
+        try { fields = Bun.JSON5.parse(group) }
+        catch { return }
+      }
       if (!fields) return
-      options = { ...options, ...fields }
+      options = { ...options, ...(fields as Record<string, unknown>) }
     }
     info = info.slice(group.length).trim()
   }
@@ -60,7 +75,9 @@ export function parseCodeInfo(input: string): CodeBlockInfo | undefined {
   return {
     language: (lang || 'text').toLowerCase(), title: caption?.[1], ranges: parseEquationOptions(ranges)?.ranges ?? [],
     start: Number(first), at, final, lines: typeof props.lines === 'boolean' ? props.lines : undefined, maxHeight, magic,
-    ...(runner && { runner }),
+    ...(runner && { runner, runnerOptions: props.runnerOptions && typeof props.runnerOptions === 'object' && !Array.isArray(props.runnerOptions)
+      ? props.runnerOptions as Record<string, unknown>
+      : undefined }),
     writeToken: typeof props.tpSnippet === 'string' && /^[a-f0-9]{64}$/.test(props.tpSnippet) ? props.tpSnippet : undefined,
   }
 }

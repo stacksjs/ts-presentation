@@ -37,6 +37,8 @@ import { snippetRevision } from './snippet-write.ts'
 export { defineAddon, defineStxLayout, defineTheme } from './extensions.ts'
 export { defineShortcutsSetup } from '../../../types/src/shortcuts.ts'
 export type { NavOperations, ShortcutOptions, ShortcutsSetup } from '../../../types/src/shortcuts.ts'
+export { defineCodeRunnersSetup } from '../../../types/src/code-runner.ts'
+export type { CodeRunner, CodeRunnerContext, CodeRunnerOutput, CodeRunnerOutputDom, CodeRunnerOutputError, CodeRunnerOutputHtml, CodeRunnerOutputText, CodeRunnerOutputTextArray, CodeRunnerOutputs, CodeRunnerProviders, CodeRunnersSetup } from '../../../types/src/code-runner.ts'
 export { defineCodeHighlightSetup, defineShikiSetup, defineKatexSetup, defineMermaidRendererSetup, defineMermaidSetup } from './authoring-setup.ts'
 export type { CodeHighlightOptions, KatexOptions, KatexTrustContext, MermaidOptions, MermaidRenderer } from './authoring-setup.ts'
 export type { PresentationNavigation, SlideRoute } from '../../../client/runtime/navigation.ts'
@@ -229,9 +231,9 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
         if (custom !== undefined) return custom
       }
       const writable = info?.writeToken && options.liveCompile && options.writableSnippets?.get(info.writeToken)
-      if ((info?.runner || writable) && /^(?:js|javascript|ts|typescript)$/.test(language)) {
-        return liveBlock(decoded.replace(/\n$/, ''), language.startsWith('t') ? 'ts' : 'js', info?.runner === 'run',
-          writable && info?.writeToken ? { token: info.writeToken, revision: writable.revision } : undefined)
+      if (info?.runner || writable) {
+        return liveBlock(decoded.replace(/\n$/, ''), language, info?.runner === 'run',
+          writable && info?.writeToken ? { token: info.writeToken, revision: writable.revision } : undefined, info?.runnerOptions)
       }
       if (language === 'charts' || language === 'ts-charts') {
         return renderChart(decoded, `chart-${index}-${diagram++}`) ?? block

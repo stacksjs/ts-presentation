@@ -1,3 +1,7 @@
+import type { CodeRunnerOutput } from '../../types/src/code-runner.ts'
+import { nativeCodeLanguage } from '../../types/src/code-runner.ts'
+import { customRunner, showRunnerOutput } from './code-runners.ts'
+
 const workerBody = String.raw`
 const send = self.postMessage.bind(self)
 const format = (value) => {
@@ -52,7 +56,9 @@ const sandbox = `<!doctype html><meta charset="utf-8">
   }, { once: true })
 </script>`
 
-async function execute(program: string, append: (text: string) => void, signal: AbortSignal): Promise<boolean> {
+type WriteOutput = (text: string, error?: boolean) => void
+
+async function execute(program: string, append: WriteOutput, signal: AbortSignal): Promise<boolean> {
   if (signal.aborted) return false
   const iframe = document.createElement('iframe')
   iframe.hidden = true
@@ -70,7 +76,6 @@ async function execute(program: string, append: (text: string) => void, signal: 
     }
 
     function abort(): void {
-      append('Stopped.')
       end(false)
     }
 
@@ -83,14 +88,14 @@ async function execute(program: string, append: (text: string) => void, signal: 
         append(safe)
       }
       if (kind === 'error' && typeof text === 'string') {
-        append(text.slice(0, 800))
+        append(text.slice(0, 800), true)
         end(false)
       }
       if (kind === 'finished') end(true)
     }
 
     const timeout = window.setTimeout(() => {
-      append('Stopped after 3 seconds.')
+      append('Stopped after 3 seconds.', true)
       end(false)
     }, 3000)
     window.addEventListener('message', receive)
@@ -110,15 +115,18 @@ export function setupLiveCode(root: ParentNode = document): void {
     const editor = block.querySelector('textarea')!
     const reset = block.querySelector<HTMLButtonElement>('[data-live-reset]')!
     const run = block.querySelector<HTMLButtonElement>('[data-live-run]')
-    const output = block.querySelector<HTMLElement>('.live-output')
-    let original = editor.value
+    const output = block.querySelector<HTMLElement>('[data-live-result]')
+    const authored = editor.value
+    let original = authored
     const compiled = block.querySelector<HTMLTemplateElement>('[data-live-program]')?.content.textContent ?? ''
     const error = block.querySelector<HTMLTemplateElement>('[data-live-error]')?.content.textContent
     const switchLanguage = block.querySelector<HTMLButtonElement>('[data-live-convert]')
     const label = block.querySelector<HTMLElement>('.live-code-toolbar > span')
     const save = block.querySelector<HTMLButtonElement>('[data-live-save]')
     const status = block.querySelector('[data-snippet-status]')
-    let language = block.dataset.language === 'ts' ? 'ts' : 'js'
+    const originalLanguage = block.dataset.language ?? 'js'
+    const originalLabel = label?.textContent ?? originalLanguage
+    let language = originalLanguage
     let active: AbortController | undefined
 
     if (save && status) save.addEventListener('click', async () => {
@@ -164,8 +172,8 @@ export function setupLiveCode(root: ParentNode = document): void {
 
     reset.addEventListener('click', () => {
       active?.abort()
-      language = block.dataset.language === 'ts' ? 'ts' : 'js'
-      if (label) label.textContent = language === 'ts' ? 'TypeScript' : 'JavaScript'
+      language = originalLanguage
+      if (label) label.textContent = originalLabel
       editor.setAttribute('aria-label', `Edit ${label?.textContent ?? 'code'} example`)
       if (switchLanguage) switchLanguage.hidden = canCompile || Boolean(error)
       editor.value = original
@@ -173,40 +181,74 @@ export function setupLiveCode(root: ParentNode = document): void {
       editor.focus()
     })
     if (!run || !output) continue
+    const runnerOptions: Record<string, unknown> = JSON.parse(block.dataset.liveOptions ?? '{}')
     run.addEventListener('click', async () => {
       if (active) { active.abort(); return }
       const controller = new AbortController()
+      const { signal } = controller
       active = controller
       run.textContent = 'Stop'
       output.textContent = ''
-      const append = (text: string) => { output.textContent += `${text}\n` }
-      try {
-        let program = editor.value
-        if (language === 'ts' && editor.value === original) {
+      const append = (text: string) => {
+        if (!signal.aborted) output.textContent += `${text}\n`
+      }
+      const complete = () => {
+        if (active !== controller) return
+        active = undefined
+        run.textContent = 'Run'
+      }
+      const abort = () => {
+        output.textContent += 'Stopped.\n'
+        complete()
+      }
+      signal.addEventListener('abort', abort, { once: true })
+      async function runNative(source: string, kind: 'ts' | 'js', write: WriteOutput): Promise<boolean> {
+        signal.throwIfAborted()
+        let program = source
+        if (kind === 'ts' && nativeCodeLanguage(originalLanguage) === 'ts' && source === authored) {
           if (error) throw new Error(error)
           program = compiled
         }
-        else if (language === 'ts' && canCompile) {
+        else if (kind === 'ts' && canCompile) {
           const response = await fetch('./__presentation/compile', {
             method: 'POST',
             headers: { 'Content-Type': 'text/plain; charset=utf-8' },
             body: program,
-            signal: controller.signal,
+            signal,
           })
           program = await response.text()
           if (!response.ok) throw new Error(program)
         }
-        else if (language === 'ts') throw new Error('Use Edit as JavaScript to run edits in the static deck.')
+        else if (kind === 'ts') throw new Error('Use Edit as JavaScript to run edits in the static deck.')
         if (program.length > 64_000) throw new Error('Code sample is too large')
-        const success = await execute(program, append, controller.signal)
-        if (success && !output.textContent) append('Finished without console output.')
+        return execute(program, write, signal)
+      }
+      try {
+        const source = editor.value
+        const currentLanguage = language
+        const custom = await customRunner(currentLanguage)
+        signal.throwIfAborted()
+        if (custom) {
+          const result = await custom(source, runnerOptions, signal, async (source, kind) => {
+            const lines: CodeRunnerOutput[] = []
+            await runNative(source, kind, (text, error) => { lines.push(error ? { error: text } : { text }) })
+            return lines
+          })
+          if (!signal.aborted) await showRunnerOutput(output, result, signal)
+        }
+        else {
+          const native = nativeCodeLanguage(currentLanguage)
+          if (!native) throw new Error(`Runner for language "${currentLanguage}" not found.`)
+          const success = await runNative(source, native, append)
+          if (success && !output.textContent) append('Finished without console output.')
+        }
       }
       catch (cause) {
-        if (!controller.signal.aborted) append(cause instanceof Error ? cause.message : 'Could not run the example')
+        if (!signal.aborted) append(cause instanceof Error ? cause.message : 'Could not run the example')
       }
       finally {
-        active = undefined
-        run.textContent = 'Run'
+        signal.removeEventListener('abort', abort)
+        complete()
       }
     })
     editor.addEventListener('keydown', (event) => {
