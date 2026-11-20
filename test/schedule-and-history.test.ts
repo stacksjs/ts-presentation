@@ -395,6 +395,27 @@ test('imports GitGraph branch-only diagrams and warns while retaining repeated c
   finally { warn.mockRestore() }
 })
 
+test('renders a GitGraph header and preserves explicit IDs across the deck compiler', async () => {
+  const plans = 'gitGraph TB:\naccTitle: Planned releases'
+  const initial = mermaid(plans, 'planned', { gitGraph: { mainBranchName: 'stable', useMaxWidth: false } })
+  expect(initial).toMatch(/viewBox="0 0 ([\d.]+) ([\d.]+)" width="\1" height="\2"/)
+  expect(initial).toContain('Planned releases')
+  expect(initial).toContain('>stable</tspan>')
+  expect(initial).not.toContain('data-commit-id=')
+
+  const commits = 'gitGraph\ncommit\nbranch review\ncommit id:"c2"\ncheckout main\nmerge review id:"c1"\ncommit'
+  expect(buildGitHistory(commits)?.commits.map(commit => [commit.id, commit.parents.map(parent => parent.id)])).toEqual([
+    ['c3', []], ['c2', ['c3']], ['c1', ['c3', 'c2']], ['c4', ['c1']],
+  ])
+  const deck = parseDeck([
+    '# Planned releases', '', '~~~mermaid', plans, '~~~', '', '---', '', '# Review',
+    '', '~~~mermaid', commits, '~~~',
+  ].join('\n'))
+  const html = await renderDeck(deck)
+  expect(html.match(/data-diagram-kind="gitgraph"/g)).toHaveLength(2)
+  expect(html).toContain('data-commit-id="c1" data-parent-ids="c3, c2"')
+})
+
 test('builds GitGraph branch history with merge parents, tags, and cherry-picks', () => {
   const graph = buildGitHistory(history, { parallelCommits: true })
   expect(graph?.commits.map(commit => [commit.id, commit.rank])).toEqual([
