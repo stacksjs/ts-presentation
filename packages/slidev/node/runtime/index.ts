@@ -1,5 +1,6 @@
 import { getCachedSignalsRuntime } from '@stacksjs/stx'
 import { dirname } from 'node:path'
+import type { Grammar } from 'ts-syntax-highlighter'
 import { deckFontMarkup } from './fonts.ts'
 import { applyNotesAutoRuby } from './notes.ts'
 import { hasBuiltinLayoutSlots, renderBuiltinLayout, renderPresentationShell } from '../../../client/index.ts'
@@ -39,6 +40,7 @@ import { SlideMarkdownEdits } from './markdown-edits.ts'
 import { prefixMarkupUrls } from './base-assets.ts'
 import type { WritableSnippet } from './snippet-write.ts'
 import { snippetRevision } from './snippet-write.ts'
+import { nativeCodeLanguage } from '../../../types/src/code-runner.ts'
 
 export { defineAddon, defineStxLayout, defineTheme } from './extensions.ts'
 export { defineShortcutsSetup } from '../../../types/src/shortcuts.ts'
@@ -129,7 +131,7 @@ function resolveTimerDuration(value: unknown): number {
   return 30 * 60 * 1000
 }
 
-export async function renderPresentation(deck: Deck, options: RenderOptions = {}): Promise<{ html: string, routes: SlideRoute[], routing: Routing, live?: LiveDeck, notesMarkdown: readonly string[] }> {
+export async function renderPresentation(deck: Deck, options: RenderOptions = {}): Promise<{ html: string, routes: SlideRoute[], routing: Routing, live?: LiveDeck, notesMarkdown: readonly string[], liveHighlight: boolean }> {
   const nested = deck.headmatter?.config as Record<string, unknown> | undefined
   const mode = options.mode ?? (options.liveCompile ? 'dev' : 'build')
   const menuSetting = deck.headmatter?.contextMenu ?? nested?.contextMenu
@@ -181,6 +183,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   const languages = configuration?.codeLanguageSources
     ?? (configuration?.codeHighlight?.langs ? [configuration.codeHighlight.langs] : undefined)
   const codeRenderer = createHighlightedCodeRenderer(selectedCodeTheme, configuration?.codeHighlight?.transformers, languages)
+  const editorGrammars = new Map<string, Grammar>()
   const fontMarkup = deckFontMarkup(options.extensions?.theme.defaults?.fonts, nested?.fonts, deck.headmatter?.fonts)
   const color = deck.headmatter?.colorSchema ?? nested?.colorSchema
   const socialTheme = color === 'light' || (color !== 'dark' && options.extensions?.theme.name === 'paper') ? 'light' : 'dark'
@@ -354,8 +357,21 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
         if (diff) return diff
       }
       if (editorEnabled && info && (info.runner || writable)) {
-        return liveBlock(decoded.replace(/\n$/, ''), language, info, lineNumbers,
-          writable && info.writeToken ? { token: info.writeToken, revision: writable.revision } : undefined, options.compileExample)
+        const source = decoded.replace(/\n$/, '')
+        if (options.mode !== 'export') {
+          const grammar = await codeRenderer.resolveGrammar(language)
+          if (grammar) editorGrammars.set(language, grammar)
+          if (!options.liveCompile && info.runner === 'run' && info.editorOptions?.readonly !== true && nativeCodeLanguage(language) === 'ts') {
+            const javascript = await codeRenderer.resolveGrammar('js')
+            if (javascript) editorGrammars.set('js', javascript)
+          }
+        }
+        return liveBlock(source, language, info, {
+          lineNumbers,
+          highlighted: await codeRenderer.highlight(source, language),
+          writable: writable && info.writeToken ? { token: info.writeToken, revision: writable.revision } : undefined,
+          compile: options.compileExample,
+        })
       }
       if (language === 'charts' || language === 'ts-charts') {
         return renderChart(decoded, `chart-${index}-${diagramIndex}`) ?? block
@@ -449,6 +465,9 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   const clicksPreset = typeof preset === 'string' ? escapeHtml(preset) : ''
   const navigation = JSON.stringify(routes).replaceAll('<', '\\u003c')
   const drawingConfig = JSON.stringify(drawings).replaceAll('<', '\\u003c')
+  const liveGrammars = editorGrammars.size
+    ? JSON.stringify([...editorGrammars.keys()].sort().map(language => [language, editorGrammars.get(language)])).replaceAll('<', '\\u003c')
+    : ''
   const globalTop = baseMarkup(activeExtensions.map(extension => extension.globalTop || '').join(''))
   const globalBottom = baseMarkup(activeExtensions.map(extension => extension.globalBottom || '').join(''))
   const customControls = layers?.['custom-nav-controls']
@@ -459,7 +478,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   if (options.liveCompile) {
     const drawingOptions = [drawings.enabled, drawings.presenterOnly, drawings.syncAll, drawings.persist]
     const theme = extensions?.theme.name
-    const frame = snippetRevision(JSON.stringify([routing, width, height, clicksPreset, drawingOptions, contextMenu, theme, colorSchema, codeTheme, fontMarkup, mcpNavigation, timerMode, timerDuration, extensions?.styles, extensions?.client, globalTop, globalBottom, customControls, reactiveSlides]))
+    const frame = snippetRevision(JSON.stringify([routing, width, height, clicksPreset, drawingOptions, contextMenu, theme, colorSchema, codeTheme, fontMarkup, mcpNavigation, timerMode, timerDuration, extensions?.styles, extensions?.client, globalTop, globalBottom, customControls, reactiveSlides, liveGrammars]))
     const parts = slides.map((slide, index) => {
       const source = options.sourceBindings?.get(activeSlides[index])
       const part = { ...slide, notes: notes[index], route: routes[index], sourceToken: source?.token }
@@ -486,11 +505,13 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     extensionStyles: fontMarkup + (extensions?.styles ? '<link rel="stylesheet" href="./extensions.css">' : ''),
     scopedStyles: [codeTheme, ...slides.map(slide => slide.css)].filter(Boolean).join('\n  '),
     extensionScript: extensions?.client ? '<script defer src="./extensions.js"></script>' : '',
+    liveHighlightScript: liveGrammars ? '<script defer src="./live-highlight.js"></script>' : '',
     globalTop,
     stxRuntime: stxRuntime ? `<script>${stxRuntime}</script>` : '',
     playerScript: '<script defer src="./presentation.js"></script>',
     navigation: `<script id="presentation-navigation" type="application/json">${navigation}</script>`,
     drawingConfig: `<script id="presentation-drawings" type="application/json">${drawingConfig}</script>`,
+    liveGrammars: liveGrammars ? `<script id="presentation-live-grammars" type="application/json">${liveGrammars}</script>` : '',
     liveData,
     slideMarkup: slides.map(slide => slide.html).join('\n'),
     globalBottom,
@@ -515,5 +536,5 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     liveStatus: options.liveCompile ? '<span id="live-update-status" role="status" hidden></span>' : '',
   })
   const notesMarkdown = options.mode === 'export' && !noteClicks ? activeSlides.map(slide => slide.notes) : []
-  return { html: document, routes, routing, live, notesMarkdown }
+  return { html: document, routes, routing, live, notesMarkdown, liveHighlight: Boolean(liveGrammars) }
 }

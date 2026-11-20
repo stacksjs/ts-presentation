@@ -17,7 +17,7 @@ import { deckPath, matchDeckPath, normalizeBasePath, resolveRouterMode } from '.
 import { maxSlideEditLength, readSlideSource, saveSlideSource } from './side-editor-source.ts'
 import { saveSnippet, snippetRevision, writeDeckFile } from './snippet-write.ts'
 import { routePagePath } from './route-pages.ts'
-import { bundlePlayer, deckStyles, playerStyle, writeStaticSite } from './site-output.ts'
+import { bundleLiveHighlight, bundlePlayer, deckStyles, playerStyle, writeStaticSite } from './site-output.ts'
 import { formatDeck } from '../../../parser/src/deck.ts'
 import { version } from '../../../../package.json'
 
@@ -258,6 +258,8 @@ async function main(): Promise<void> {
             return new Response(await deckStyles(directory, base), { headers: { 'Content-Type': 'text/css' } })
           case '/presentation.js':
             return new Response(javascript, { headers: { 'Content-Type': 'text/javascript' } })
+          case '/live-highlight.js':
+            return new Response(await bundleLiveHighlight(), { headers: { 'Content-Type': 'text/javascript' } })
           default: {
             const extension = /^\/extensions\/([a-z0-9-]+)(\/.*)$/i.exec(path)
             const mounted = extension ? (await compile()).mounts[extension[1]] : undefined

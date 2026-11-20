@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { mkdtemp, realpath, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { asset } from '../packages/slidev/node/runtime/assets.ts'
@@ -33,16 +33,20 @@ test('honors deck and slide editor settings before emitting runnable markup', as
   expect(build.match(/data-live-autorun="true"/g)).toHaveLength(1)
   expect(build).toContain('language-js')
   expect(dev.match(/data-live-autorun="true"/g)).toHaveLength(2)
+  expect(await renderDeck(parseDeck('# Plain deck'))).not.toContain('live-highlight.js')
+  const exported = await renderDeck(markup, { mode: 'export' })
+  expect(exported).not.toContain('live-highlight.js')
+  expect(exported).toMatch(/live-code-static"><code><span class="tok-/)
 })
 
-test.skipIf(!chrome)('sizes live editors, synchronizes their number gutters, and runs read-only examples', async () => {
+test.skipIf(!chrome)('highlights and sizes live editors, synchronizes their gutters, and runs read-only examples', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-live-editor-'))
   let view: Bun.WebView | undefined
   let server: ReturnType<typeof Bun.serve> | undefined
   try {
     const source = join(root, 'slides.md')
     await Bun.write(source, [
-      '---', 'lineNumbers: true', '---', '', '# Automatic editor height',
+      '---', 'lineNumbers: true', 'codeTheme: nord', '---', '', '# Automatic editor height',
       '', '~~~js {monaco} {height:"auto", lineNumbers:"relative", startLine:7}', 'const first = 1', 'const second = 2', '~~~',
       '', '---', '', '# Fixed editor height',
       '', '~~~js {monaco} {height:"90px", lineNumbers:"interval", startLine:8}',
@@ -51,7 +55,18 @@ test.skipIf(!chrome)('sizes live editors, synchronizes their number gutters, and
       '', '~~~js {monaco-run} {readonly:true, autorun:false}', 'console.log("read-only result")', '~~~',
       '', '---', '', '# Hidden line numbers',
       '', '~~~js {live} {height:"initial", lines:false}', 'const fixed = 1', '~~~',
+      '', '---', '', '# Custom grammar', '',
+      '~~~probe {live}', 'advance 1', '~~~',
+      '', '---', '', '# Convertible example', '',
+      '~~~ts {live-run}', 'const typed: number = 2', 'console.log(typed)', '~~~',
     ].join('\n'))
+    await mkdir(join(root, 'setup'))
+    await Bun.write(join(root, 'setup', 'shiki.ts'), String.raw`
+      export default () => ({ langs: [{
+        name: 'probe', scopeName: 'source.probe',
+        patterns: [{ match: '\\b(?:advance|retreat)\\b', name: 'keyword.control.probe' }],
+      }] })
+    `)
     const output = join(root, 'site')
     const build = Bun.spawn([process.execPath, 'src/cli.ts', 'build', source, '--out', output], {
       cwd: join(import.meta.dir, '..'), stdout: 'ignore', stderr: 'pipe',
@@ -107,6 +122,38 @@ test.skipIf(!chrome)('sizes live editors, synchronizes their number gutters, and
     expect(geometry.scroll).toEqual([60, -60])
     expect(geometry.initial[0]).toBe(geometry.initial[1])
     expect(geometry.hidden).toBe(true)
+    expect(await browser.evaluate(`(async () => {
+      window.presentationNavigation.go(5)
+      const block = document.querySelector('#slide-5 .live-code-editor')
+      const editor = block.querySelector('textarea')
+      const layer = block.querySelector('.live-code-highlight > div')
+      const keyword = () => layer.querySelector('.tok-keyword')
+      const original = keyword()?.textContent
+      const palette = keyword() && getComputedStyle(keyword()).color
+      editor.dispatchEvent(new CompositionEvent('compositionstart'))
+      const visibleDuringComposition = block.hasAttribute('data-live-highlighted')
+      editor.value = 'retreat <img alt="literal" src="sample">\\t' + 'a'.repeat(150)
+      editor.dispatchEvent(new Event('input', { bubbles: true }))
+      editor.dispatchEvent(new CompositionEvent('compositionend'))
+      editor.scrollLeft = 100
+      editor.dispatchEvent(new Event('scroll'))
+      const offset = new DOMMatrix(getComputedStyle(layer).transform).m41
+      const edited = [keyword()?.textContent, layer.textContent === editor.value, layer.querySelector('img') === null, offset]
+      editor.value = 'advance\\t2'
+      editor.dispatchEvent(new Event('input', { bubbles: true }))
+      await new Promise(resolve => requestAnimationFrame(resolve))
+      return [original, palette, visibleDuringComposition, edited, layer.textContent]
+    })()`)).toEqual(['advance', 'rgb(129, 161, 193)', false, ['retreat', true, true, -100], 'advance\t2'])
+    expect(await browser.evaluate(`(() => {
+      window.presentationNavigation.go(6)
+      const block = document.querySelector('#slide-6 .live-code')
+      const editable = block.querySelector('textarea')
+      const highlighted = block.querySelector('.live-code-highlight > div')
+      block.querySelector('[data-live-convert]').click()
+      const converted = [!editable.value.includes(': number'), highlighted.textContent === editable.value]
+      block.querySelector('[data-live-reset]').click()
+      return [...converted, editable.value.includes(': number'), highlighted.textContent === editable.value]
+    })()`)).toEqual([true, true, true, true])
     expect(await browser.evaluate(`(() => {
       window.presentationNavigation.go(3)
       const block = document.querySelector('#slide-3 .live-code')
@@ -124,6 +171,7 @@ test.skipIf(!chrome)('sizes live editors, synchronizes their number gutters, and
     await browser.navigate(new URL('/?capture=1', server.url).href)
     expect(await browser.evaluate("getComputedStyle(document.querySelector('#slide-1 .live-code-editor')).display")).toBe('none')
     expect(await browser.evaluate("getComputedStyle(document.querySelector('#slide-1 .live-code-static')).display")).toBe('block')
+    expect(await browser.evaluate("document.querySelector('#slide-1 .live-code-static .tok-keyword').textContent")).toBe('const')
   }
   finally {
     view?.close()

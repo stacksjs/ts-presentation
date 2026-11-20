@@ -7,15 +7,28 @@ import { writeRoutePages } from './route-pages.ts'
 
 export const playerStyle: Bun.BunFile = Bun.file(new URL('../../../client/runtime/player.css', import.meta.url))
 
-export async function bundlePlayer(): Promise<string> {
-  const player = await Bun.build({
-    entrypoints: [new URL('../../../client/runtime/player.ts', import.meta.url).pathname],
+async function bundleRuntime(entry: string): Promise<string> {
+  const bundle = await Bun.build({
+    entrypoints: [new URL(`../../../client/runtime/${entry}.ts`, import.meta.url).pathname],
     target: 'browser',
     format: 'iife',
     minify: true,
   })
-  if (!player.success || !player.outputs[0]) throw new Error('Could not build the browser player')
-  return player.outputs[0].text()
+  if (!bundle.success || !bundle.outputs[0]) throw new Error(`Could not build the browser runtime "${entry}"`)
+  return bundle.outputs[0].text()
+}
+
+export function bundlePlayer(): Promise<string> {
+  return bundleRuntime('player')
+}
+
+let liveHighlight: Promise<string> | undefined
+
+export function bundleLiveHighlight(): Promise<string> {
+  return liveHighlight ??= bundleRuntime('live-highlight').catch((error) => {
+    liveHighlight = undefined
+    throw error
+  })
 }
 
 export async function deckStyles(directory: string, base: string): Promise<string | Bun.BunFile> {
@@ -46,6 +59,7 @@ export async function writeStaticSite(output: string, deck: CompiledDeck, option
     deck.client ? Bun.write(join(output, 'extensions.js'), deck.client) : undefined,
     Bun.write(join(output, 'presentation.css'), playerStyle),
     Bun.write(join(output, 'presentation.js'), javascript),
+    deck.liveHighlight ? Bun.write(join(output, 'live-highlight.js'), await bundleLiveHighlight()) : undefined,
     Bun.write(join(output, 'deck.css'), await deckStyles(directory, base)),
   ])
   await writeRoutePages(output, deck.pages)

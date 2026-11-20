@@ -13,12 +13,14 @@
   <style>:root { --slide-width: {{ width }}px; --slide-height: {{ height }}px; } @page { size: {{ width }}px {{ height }}px; margin: 0; }</style>
   {!! stxRuntime !!}
   {!! extensionScript !!}
+  {!! liveHighlightScript !!}
   {!! playerScript !!}
 </head>
 <body>
   {!! globalTop !!}
   {!! navigation !!}
   {!! drawingConfig !!}
+  {!! liveGrammars !!}
   {!! liveData !!}
   <main id="deck-entry" hidden>
     <h1>{{ title }}</h1>

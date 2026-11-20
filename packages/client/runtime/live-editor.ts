@@ -10,22 +10,25 @@ export function liveLineNumbers(count: number, start: number, mode: LiveLineNumb
   }).join('\n')
 }
 
-export function setupLiveEditor(block: HTMLElement, editor: HTMLTextAreaElement): () => void {
+export function setupLiveEditor(block: HTMLElement, editor: HTMLTextAreaElement, getLanguage: () => string): () => void {
   const wrapper = block.querySelector<HTMLElement>('.live-code-editor')
   if (!wrapper) return () => {}
   const gutter = wrapper.querySelector<HTMLElement>('[data-live-gutter]')
+  const highlight = wrapper.querySelector<HTMLElement>('.live-code-highlight > div')
   const auto = wrapper.dataset.liveHeight === 'auto'
-  if (!gutter && !auto) return () => {}
   const mode = wrapper.dataset.liveNumbering as LiveLineNumberMode
   const start = Number(wrapper.dataset.liveStart ?? 1)
   const style = wrapper.style
   let source: string | undefined
   let count = 1
   let active = -1
+  let composing = false
+  let paintFrame = 0
   function syncScroll(): void {
     if (gutter) gutter.style.transform = 'translateY(' + (-editor.scrollTop) + 'px)'
+    if (highlight) highlight.style.transform = `translate(${-editor.scrollLeft}px, ${-editor.scrollTop}px)`
   }
-  function sync(): void {
+  function syncSizeAndNumbers(): void {
     const changed = editor.value !== source
     if (changed) {
       source = editor.value
@@ -44,10 +47,38 @@ export function setupLiveEditor(block: HTMLElement, editor: HTMLTextAreaElement)
     }
     syncScroll()
   }
-  editor.addEventListener('input', sync)
+  function paint(): void {
+    cancelAnimationFrame(paintFrame)
+    if (!highlight || composing) return
+    const markup = window.presentationHighlightLiveSource?.(editor.value, getLanguage())
+    wrapper!.toggleAttribute('data-live-highlighted', markup !== undefined)
+    highlight.innerHTML = markup ?? ''
+    syncScroll()
+  }
+  function sync(): void {
+    syncSizeAndNumbers()
+    paint()
+  }
+  if (gutter || auto) editor.addEventListener('input', syncSizeAndNumbers)
+  if (gutter || highlight) editor.addEventListener('scroll', syncScroll, { passive: true })
   if (gutter) {
-    editor.addEventListener('scroll', syncScroll, { passive: true })
-    if (mode === 'relative' || mode === 'interval') editor.addEventListener('selectionchange', sync)
+    if (mode === 'relative' || mode === 'interval') editor.addEventListener('selectionchange', syncSizeAndNumbers)
+  }
+  if (highlight && window.presentationHighlightLiveSource) {
+    editor.addEventListener('input', () => {
+      wrapper.removeAttribute('data-live-highlighted')
+      if (composing) return
+      cancelAnimationFrame(paintFrame)
+      paintFrame = requestAnimationFrame(paint)
+    })
+    editor.addEventListener('compositionstart', () => {
+      composing = true
+      wrapper.removeAttribute('data-live-highlighted')
+    })
+    editor.addEventListener('compositionend', () => {
+      composing = false
+      paint()
+    })
   }
   sync()
   return sync

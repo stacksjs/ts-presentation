@@ -140,7 +140,6 @@ export function setupLiveCode(root: ParentNode = document): void {
     if (mountedEditors.has(block)) continue
     mountedEditors.add(block)
     const editor = block.querySelector('textarea')!
-    const syncEditor = setupLiveEditor(block, editor)
     const reset = block.querySelector<HTMLButtonElement>('[data-live-reset]')
     const run = block.querySelector<HTMLButtonElement>('[data-live-run]')
     const output = block.querySelector<HTMLElement>('[data-live-result]')
@@ -157,6 +156,7 @@ export function setupLiveCode(root: ParentNode = document): void {
     const originalLanguage = block.dataset.language ?? 'js'
     const originalLabel = label?.textContent ?? originalLanguage
     let language = originalLanguage
+    const syncEditor = setupLiveEditor(block, editor, () => language)
     let active: AbortController | undefined
     const autorun = block.dataset.liveAutorun
     let shown = false
@@ -196,7 +196,11 @@ export function setupLiveCode(root: ParentNode = document): void {
         block.dataset.snippetRevision = result
         original = source
         const print = block.querySelector('.live-code-static code')
-        if (print) print.textContent = source
+        if (print) {
+          const markup = window.presentationHighlightLiveSource?.(source, originalLanguage)
+          if (markup === undefined) print.textContent = source
+          else print.innerHTML = markup
+        }
         status.textContent = 'Saved.'
       }
       catch (error) {

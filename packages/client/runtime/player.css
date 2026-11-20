@@ -1045,21 +1045,58 @@ math .math-xcancel > .math-cancel-track {
 .live-code-editor {
   position: relative;
   font: 400 15px/1.5 var(--presentation-font-mono, ui-monospace, monospace);
+  color: #e9f0f8;
+  background: #13202f;
+}
+.live-code-editor textarea,
+.live-code-highlight > div {
+  padding: 10px 12px;
+  font: inherit;
+  font-variant-ligatures: none;
+  font-kerning: none;
+  tab-size: 2;
 }
 .live-code-editor textarea {
+  position: relative;
   display: block;
   width: 100%;
   height: calc(var(--live-code-rows) * 1.5em + 20px);
   min-height: 6.6em;
   max-height: var(--live-code-max-height, 15em);
   resize: vertical;
-  padding: 10px 12px;
   margin: 0;
   border: 0;
-  color: #e9f0f8;
-  background: #13202f;
-  font: inherit;
-  tab-size: 2;
+  color: inherit;
+  background: transparent;
+}
+.live-code-highlight {
+  display: none;
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+.live-code-highlight > div { white-space: pre; }
+.live-code-editor[data-live-highlighted] .live-code-highlight { display: block; }
+.live-code-editor[data-live-highlighted] textarea {
+  color: transparent;
+  caret-color: var(--tp-code-foreground, #e9f0f8);
+}
+.live-code-editor[data-live-highlighted] textarea::selection {
+  color: transparent;
+  background-color: #648dc666;
+}
+@media (forced-colors: active) {
+  .live-code-editor[data-live-highlighted] .live-code-highlight { display: none; }
+  .live-code-editor[data-live-highlighted] textarea {
+    color: CanvasText;
+    caret-color: auto;
+  }
+  .live-code-editor[data-live-highlighted] textarea::selection {
+    color: HighlightText;
+    background-color: Highlight;
+  }
 }
 .live-code-editor[data-live-height="fixed"] {
   height: var(--live-code-height);
@@ -1074,11 +1111,13 @@ math .math-xcancel > .math-cancel-track {
 .live-code-editor[data-live-numbering] {
   --live-code-gutter-width: calc(var(--live-code-digits) * 1ch + 17px);
 }
-.live-code-editor[data-live-numbering] textarea {
+.live-code-editor[data-live-numbering] textarea,
+.live-code-editor[data-live-numbering] .live-code-highlight > div {
   padding-inline-start: calc(var(--live-code-gutter-width) + 12px);
 }
 .live-code-gutter {
   position: absolute;
+  z-index: 1;
   inset-block: 0;
   inset-inline-start: 0;
   width: var(--live-code-gutter-width);

@@ -1,6 +1,7 @@
-import { getTheme, themeTokenColors, themeTokenCss, tokenClass, Tokenizer } from 'ts-syntax-highlighter/browser'
+import { getTheme, themeTokenColors, themeTokenCss, Tokenizer } from 'ts-syntax-highlighter/browser'
 import type { Grammar } from 'ts-syntax-highlighter'
 import { clickSpan } from '../../../client/runtime/clicks.ts'
+import { codeTokenMarkup } from '../../../client/runtime/code-tokens.ts'
 import { parseEquationOptions } from '../../../client/runtime/equation-steps.ts'
 import type { LiveLineNumberMode } from '../../../client/runtime/live-editor.ts'
 import { readFenceOptions } from './fence-options.ts'
@@ -167,14 +168,13 @@ export function magicFrames(source: string): CodeFrame[] | undefined {
 export function codeThemeStyles(name: unknown): string {
   const theme = typeof name === 'string' ? getTheme(name) : undefined
   if (!theme) return ''
-  const selector = '.slide :is(pre, .code-diff)'
+  const selector = '.slide :is(pre, .code-diff, .live-code-editor)'
   const css = themeTokenCss(theme, { selector, classPrefix: 'tok-', variablePrefix: '--tp-code-' })
   return `<style id="presentation-code-theme">${css}
 ${selector} { background: var(--tp-code-background); color: var(--tp-code-foreground); }</style>`
 }
 
-function createCodeTokenizer(languages?: readonly CodeHighlightLanguages[]): CodeTokenizer {
-  const resolve = createCodeLanguageResolver(languages)
+function createCodeTokenizer(resolve = createCodeLanguageResolver()): CodeTokenizer {
   const tokenizers = new WeakMap<Grammar, Tokenizer>()
   return async (source, language) => {
     const grammar = await resolve(language)
@@ -195,18 +195,19 @@ function createCodeTokenizer(languages?: readonly CodeHighlightLanguages[]): Cod
 
 export function createCodeHighlighter(tokenize: CodeTokenizer = createCodeTokenizer()): (source: string, language: string) => Promise<string[] | undefined> {
   return async (source, language) => {
-    return (await tokenize(source, language))?.map(line =>
-      line.tokens.map(token => `<span class="tok-${tokenClass(token.type)}">${escapeHtml(token.content)}</span>`).join(''),
-    )
+    const lines = await tokenize(source, language)
+    if (lines) return codeTokenMarkup(lines)
   }
 }
 
 export function createHighlightedCodeRenderer(theme: unknown, hooks?: readonly (CodeHighlightTransformer | false | null | undefined)[], languages?: readonly CodeHighlightLanguages[]): {
   highlight: ReturnType<typeof createCodeHighlighter>
+  resolveGrammar: ReturnType<typeof createCodeLanguageResolver>
   hasTransformers: boolean
   render: (source: string, language: string, rawInfo?: string, frame?: CodeBlockInfo, lineNumbers?: boolean) => Promise<string | undefined>
 } {
-  const tokenize = createCodeTokenizer(languages)
+  const resolveGrammar = createCodeLanguageResolver(languages)
+  const tokenize = createCodeTokenizer(resolveGrammar)
   const highlight = createCodeHighlighter(tokenize)
   const transformers = orderCodeHighlightTransformers(hooks)
   const themeName = typeof theme === 'string' ? theme : undefined
@@ -214,6 +215,7 @@ export function createHighlightedCodeRenderer(theme: unknown, hooks?: readonly (
   const palette = selected ? themeTokenColors(selected) : {}
   return {
     highlight,
+    resolveGrammar,
     hasTransformers: !!transformers.length,
     async render(source, language, rawInfo, frame, lineNumbers = false) {
       if (transformers.length) {

@@ -5,7 +5,13 @@ import { nativeCodeLanguage } from '../../../types/src/code-runner.ts'
 import { liveLineNumbers } from '../../../client/runtime/live-editor.ts'
 import type { CodeBlockInfo } from './code-blocks.ts'
 
-export async function liveBlock(source: string, language: string, info: CodeBlockInfo, lineNumbers: boolean, writable?: { token: string, revision: string }, compile: CompileLiveCode = compileLiveCode): Promise<string> {
+export async function liveBlock(source: string, language: string, info: CodeBlockInfo, options: {
+  lineNumbers: boolean
+  highlighted?: string[]
+  writable?: { token: string, revision: string }
+  compile?: CompileLiveCode
+}): Promise<string> {
+  const { lineNumbers, highlighted, writable, compile = compileLiveCode } = options
   const { editorOptions, runnerOptions, runnerTiming: timing, start, maxHeight } = info
   const readonly = editorOptions?.readonly === true
   const saveable = readonly ? undefined : writable
@@ -43,6 +49,7 @@ export async function liveBlock(source: string, language: string, info: CodeBloc
       ${runnable ? '<button type="button" data-live-run>Run</button>' : ''}
     </div>
     <div class="live-code-editor" data-live-height="${mode}"${gutter ? ` data-live-numbering="${numbering}" data-live-start="${start}"` : ''} style="${styles}">
+      <div class="live-code-highlight" aria-hidden="true"><div></div></div>
       ${gutter}<textarea aria-label="${readonly ? '' : 'Edit '}${label} example" wrap="off" spellcheck="false" autocapitalize="off"${readonly ? ' readonly' : ''}>
 ${escapeHtml(source)}</textarea>
     </div>
@@ -50,6 +57,6 @@ ${escapeHtml(source)}</textarea>
     ${runnable ? `<div class="live-output" data-live-result aria-live="polite"${reveal}></div>
       ${initial ? `<template data-live-program${initial.module ? ' data-live-module' : ''}>${escapeHtml(initial.code)}</template>` : ''}
       ${problem ? `<template data-live-error>${escapeHtml(problem)}</template>` : ''}` : ''}
-    <pre class="live-code-static"><code>${escapeHtml(source)}</code></pre>
+    <pre class="live-code-static"><code>${highlighted?.join('\n') ?? escapeHtml(source)}</code></pre>
   </section>`
 }

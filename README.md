@@ -281,6 +281,8 @@ presenter view and reruns after edits. Set `{autorun:false}` for manual
 execution, `{autorun:'once'}` for a single automatic run, or
 `{showOutputAt:'+1'}` to reveal the output on the next click. `{live-run}`
 uses manual execution by default and accepts the same options.
+Live editors and their preview and export views use the deck's code palette
+and the languages registered in `setup/shiki.ts`.
 Live editors inherit the deck's `lineNumbers` setting. Use
 `{lines:true, startLine:7}` for an individual fence or set
 `lineNumbers` to `'on'`, `'off'`, `'relative'`, or `'interval'`.
