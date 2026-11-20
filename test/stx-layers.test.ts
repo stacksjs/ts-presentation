@@ -52,16 +52,30 @@ test('rejects a layer template outside the deck and extension directories', asyn
 }))
 
 const chrome = await findChrome()
-test.skipIf(!chrome)('renders STX toolbar controls for the active presenter slide and follows their bound links', async () => project(async (root) => {
+test.skipIf(!chrome)('hydrates STX toolbar controls for the active presenter slide and disposes replaced scopes', async () => project(async (root) => {
   const entry = join(root, 'slides.md')
+  const counter = await Bun.file(new URL('../packages/create-app/template/components/Counter.stx', import.meta.url)).text()
   await Promise.all([
-    Bun.write(entry, '---\nrouterMode: history\nrouteAlias: intro\nnext: review/1\n---\n# Intro\n\n---\nrouteAlias: review\nnext: intro\n---\n# Review\n\n<p v-click>First reveal</p>'),
+    Bun.write(entry, '---\nrouterMode: history\nrouteAlias: intro\nnext: review/1\n---\n# Intro\n\n---\nrouteAlias: review\nnext: intro\n---\n# Review\n\n<Counter :start="10" />\n\n<p v-click>First reveal</p>'),
     Bun.write(join(root, 'custom-nav-controls.stx'), [
       '<style>#nav-title { --toolbar-style: retained; }</style>',
       '<p id="nav-title">{{ nav.currentPage }}. {{ title }} / {{ nav.total }}</p>',
       '<Toc id="nav-outline" />',
       '<Link id="nav-link" v-bind:to="frontmatter.next" title="Open slide" />',
+      '<Counter :start="nav.currentPage" />',
     ].join('\n')),
+    Bun.write(join(root, 'components', 'Counter.stx'), counter.replace('const count = state(props.start ?? 0)', [
+      'const count = state(props.start ?? 0)',
+      'const lifecycle = window.toolbarLifecycle ??= []',
+      'onMount(() => {',
+      '  if (props.start < 10) lifecycle.push("mount " + props.start)',
+      '  if (props.start === 1 && window.toolbarRedirect) {',
+      '    window.toolbarRedirect = false',
+      '    window.presentationNavigation.go(2, 1)',
+      '  }',
+      '})',
+      'onDestroy(() => { if (props.start < 10) lifecycle.push("destroy " + props.start) })',
+    ].join('\n'))),
   ])
   const cli = fileURLToPath(new URL('../src/cli.ts', import.meta.url))
   const server = Bun.spawn([process.execPath, cli, 'dev', entry, '--port', '0', '--base', '/talk/'], { stdout: 'pipe', stderr: 'pipe', timeout: 25_000 })
@@ -72,18 +86,35 @@ test.skipIf(!chrome)('renders STX toolbar controls for the active presenter slid
     if (!origin) throw new Error(await new Response(server.stderr).text())
     view = new Bun.WebView({ width: 1024, height: 660, backend: { type: 'chrome', path: chrome!, url: false } })
     await view.navigate(origin + '/talk/presenter/review')
-    const state = () => view!.evaluate(`(() => {
+    const state = () => view!.evaluate<unknown[]>(`(() => {
       const title = document.querySelector('#nav-title')
       const outline = document.querySelector('#nav-outline [aria-current="page"]')
       const link = document.querySelector('#nav-link')
-      return [title.textContent, outline.textContent, new URL(link.href).pathname, getComputedStyle(title).getPropertyValue('--toolbar-style').trim(), window.presentationNavigation.clicks]
+      const counter = document.querySelector('#presentation-custom-controls .demo-counter output')
+      return [title.textContent, outline.textContent, new URL(link.href).pathname, getComputedStyle(title).getPropertyValue('--toolbar-style').trim(), window.presentationNavigation.clicks, counter.textContent.trim()]
     })()`)
-    expect(await state()).toEqual(['2. Review / 2', 'Review', '/talk/intro', 'retained', 0])
+    expect(await state()).toEqual(['2. Review / 2', 'Review', '/talk/intro', 'retained', 0, '2'])
+    await view.evaluate("document.querySelector('#presentation-custom-controls [aria-label=\"Increase counter\"]').click()")
+    expect((await state()).at(-1)).toBe('3')
+    const clickSlideCounter = () => view!.evaluate(`(() => {
+      const counter = document.querySelector('#slide-2 .demo-counter')
+      counter.querySelector('[aria-label="Increase counter"]').click()
+      return counter.querySelector('output').textContent.trim()
+    })()`)
+    expect(await clickSlideCounter()).toBe('11')
     await view.evaluate("document.querySelector('#nav-link').click()")
-    expect(await state()).toEqual(['1. Intro / 2', 'Intro', '/talk/review', 'retained', 0])
+    expect(await state()).toEqual(['1. Intro / 2', 'Intro', '/talk/review', 'retained', 0, '1'])
     await view.evaluate("document.querySelector('#nav-link').click()")
-    expect(await state()).toEqual(['2. Review / 2', 'Review', '/talk/intro', 'retained', 1])
+    expect(await state()).toEqual(['2. Review / 2', 'Review', '/talk/intro', 'retained', 1, '2'])
+    expect(await view.evaluate('window.toolbarLifecycle')).toEqual(['mount 2', 'destroy 2', 'mount 1', 'destroy 1', 'mount 2'])
+    expect(await clickSlideCounter()).toBe('12')
     expect(await view.evaluate('location.pathname + location.search')).toBe('/talk/presenter/review?clicks=1')
+    await view.evaluate(`(() => {
+      window.toolbarRedirect = true
+      window.presentationNavigation.go(1)
+    })()`)
+    expect(await state()).toEqual(['2. Review / 2', 'Review', '/talk/intro', 'retained', 1, '2'])
+    expect(await view.evaluate('window.toolbarLifecycle.slice(-4)')).toEqual(['destroy 2', 'mount 1', 'destroy 1', 'mount 2'])
   }
   finally {
     view?.close()
@@ -101,7 +132,7 @@ test.skipIf(!chrome)('keeps equivalent STX layers and scripted controls mounted 
     Bun.write(join(root, 'layouts', 'slide-top.stx'), '<div class="lower-badge" style="position:absolute;top:310px;left:20px;width:220px">Slide top {{ nav.currentPage }}</div>'),
     Bun.write(join(root, 'global-top.stx'), '<button class="global-badge" style="position:absolute;top:310px;left:20px;width:220px">Global top</button>'),
     Bun.write(join(root, 'components', 'Counter.stx'), Bun.file(new URL('../packages/create-app/template/components/Counter.stx', import.meta.url))),
-    Bun.write(join(root, 'custom-nav-controls.stx'), '<Counter :start="nav.currentPage" />'),
+    Bun.write(join(root, 'custom-nav-controls.stx'), '<Counter :start="1" />'),
   ])
   const cli = fileURLToPath(new URL('../src/cli.ts', import.meta.url))
   const command = Bun.spawn([process.execPath, cli, 'build', entry], { stdout: 'ignore', stderr: 'pipe', timeout: 20_000 })

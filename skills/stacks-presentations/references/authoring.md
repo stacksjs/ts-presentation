@@ -64,9 +64,11 @@ Use `<Link to="review">Review</Link>` for slide aliases and `<Toc />` for
 an outline that follows the current slide. Use `#presentation-custom-controls`
 to target custom controls from your stylesheet. Deck client code can navigate
 through the browser's `presentationNavigation` API.
-Toolbars containing client scripts render once with the first slide's context
-and stay mounted during navigation. Use the navigation API to read the active
-slide from a scripted toolbar.
+Scoped STX components mount and dispose as the toolbar's rendered content
+changes. Identical toolbar content keeps its mounted state. A toolbar with a
+standalone client script renders with the first slide's context and keeps its
+document lifetime. That script can read the active slide through
+`presentationNavigation`.
 
 In slide content and layers, `Toc`, `TitleRenderer`, and `Link` accept
 frontmatter property bindings such as `:columns="frontmatter.columns"` or

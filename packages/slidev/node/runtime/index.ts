@@ -480,7 +480,6 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   const reactiveSlides = slides.flatMap((slide, index) => /<script\b[^>]*\bdata-stx-scoped(?:[\s=>]|$)/i.test(slide.html)
     ? [[index, snippetRevision(slide.html)]]
     : [])
-  const stxRuntime = reactiveSlides.length ? await getCachedSignalsRuntime() : ''
   const preset = deck.headmatter?.clickAnimation
   const clicksPreset = typeof preset === 'string' ? escapeHtml(preset) : ''
   const navigation = JSON.stringify(routes).replaceAll('<', '\\u003c')
@@ -493,32 +492,58 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   const controlsTemplate = layers?.['custom-nav-controls']
   let customControls = ''
   let controlsData = ''
+  let reactiveControls = false
   if (controlsTemplate && routes.length) {
     const renderControls = async (route: SlideRoute) => {
       const markup = await renderLayer(controlsTemplate, route, routes.length)
       return baseMarkup(prepareSlideHtml(markup, destination, route.no, route.frontmatter, socialTheme, outline, { scopeStyles: false }).html)
     }
-    const scripted = /<script(?=[\s>])/i
+    const inspectControls = (html: string) => {
+      let reactive = false
+      let pageScript = false
+      const content = !/<script[\s>]/i.test(html) ? html : new HTMLRewriter().on('script', {
+        element(script) {
+          if (script.hasAttribute('data-stx-scoped')) {
+            reactive = true
+            if (script.hasAttribute('data-stx-runtime')) script.remove()
+          }
+          else if (script.getAttribute('type')?.trim().toLowerCase() !== 'application/json') {
+            pageScript = true
+          }
+        },
+      }).transform(html)
+      return { content, reactive, pageScript }
+    }
     customControls = await renderControls(routes[0])
-    // Keep scripted controls mounted. Scripts in a swapped template
-    // fragment cannot run client setup.
-    if (routes.length > 1 && !scripted.test(customControls)) {
-      const controlsBySlide = [customControls, ...await Promise.all(routes.slice(1).map(renderControls))]
+    const first = inspectControls(customControls)
+    // Standalone page scripts retain a single document lifetime. Scoped STX
+    // components can mount and dispose with their rendered toolbar variant.
+    if (!first.pageScript) {
+      const controls = [first, ...await Promise.all(routes.slice(1).map(async route => inspectControls(await renderControls(route))))]
+      const controlsBySlide = controls.map(view => view.content)
       const variants = [...new Set(controlsBySlide)]
-      if (variants.length > 1 && !variants.some(markup => scripted.test(markup))) {
-        const byMarkup = new Map(variants.map((markup, index) => [markup, index]))
-        const indices = controlsBySlide.map(markup => byMarkup.get(markup))
-        controlsData = JSON.stringify({ variants, indices }).replaceAll('<', '\\u003c')
+      if (!controls.some(view => view.pageScript)) {
+        reactiveControls = controls.some(view => view.reactive)
+        customControls = first.content
+        if (variants.length > 1) {
+          const byMarkup = new Map(variants.map((markup, index) => [markup, index]))
+          const indices = controlsBySlide.map(markup => byMarkup.get(markup))
+          controlsData = JSON.stringify({ variants, indices, reactive: reactiveControls }).replaceAll('<', '\\u003c')
+          // A presenter URL can start on another slide. Defer the first
+          // reactive setup until the player has selected the matching variant.
+          if (reactiveControls) customControls = ''
+        }
       }
     }
   }
+  const stxRuntime = reactiveSlides.length || reactiveControls ? await getCachedSignalsRuntime() : ''
   const mcpNavigation = options.mcpNavigation && deck.headmatter?.mcp !== false
   let live: LiveDeck | undefined
   let liveData = ''
   if (options.liveCompile) {
     const drawingOptions = [drawings.enabled, drawings.presenterOnly, drawings.syncAll, drawings.persist]
     const theme = extensions?.theme.name
-    const frame = snippetRevision(JSON.stringify([routing, width, height, clicksPreset, drawingOptions, contextMenu, theme, colorSchema, codeTheme, fontMarkup, mcpNavigation, timerMode, timerDuration, extensions?.styles, extensions?.client, globalTop, globalBottom, controlsData || customControls, reactiveSlides, liveGrammars]))
+    const frame = snippetRevision(JSON.stringify([routing, width, height, clicksPreset, drawingOptions, contextMenu, theme, colorSchema, codeTheme, fontMarkup, mcpNavigation, timerMode, timerDuration, extensions?.styles, extensions?.client, globalTop, globalBottom, controlsData || customControls, reactiveControls, reactiveSlides, liveGrammars]))
     const parts = slides.map((slide, index) => {
       const source = options.sourceBindings?.get(activeSlides[index])
       const part = { ...slide, notes: notes[index], route: routes[index], sourceToken: source?.token }

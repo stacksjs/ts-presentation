@@ -43,7 +43,7 @@ const notes = [...notesPanel.querySelectorAll<HTMLElement>(':scope > section')]
 const control = document.querySelector<HTMLElement>('#controls')!
 const customControls = control.querySelector<HTMLElement>('#presentation-custom-controls')!
 const controlsData = document.querySelector('#presentation-custom-controls-data')?.textContent
-const controlsBySlide: { variants: string[], indices: number[] } | undefined = controlsData ? JSON.parse(controlsData) : undefined
+const controlsBySlide: { variants: string[], indices: number[], reactive?: boolean } | undefined = controlsData ? JSON.parse(controlsData) : undefined
 const goto = control.querySelector<HTMLSelectElement>('#goto')!
 const previous = control.querySelector<HTMLButtonElement>('#previous')!
 const next = control.querySelector<HTMLButtonElement>('#next')!
@@ -100,13 +100,27 @@ function mountSlideLinks(container: HTMLElement): void {
   }
 }
 
-let controlsVariant = 0
+interface StxToolbarRuntime {
+  hydrate: (root: HTMLElement) => void
+  hydrateHost: (root: HTMLElement, setup: () => Record<string, unknown>, manifest: null) => () => void
+}
+
+let controlsVariant = controlsBySlide?.reactive ? -1 : 0
+let disposeControls: (() => void) | undefined
 function showCustomControls(index: number, refreshLinks: boolean): void {
   const variant = controlsBySlide?.indices[index] ?? 0
   const changed = variant !== controlsVariant
   if (changed && controlsBySlide) {
+    disposeControls?.()
     customControls.replaceChildren(template(controlsBySlide.variants[variant]))
     controlsVariant = variant
+    if (controlsBySlide.reactive) {
+      const stx = window.stx as typeof window.stx & StxToolbarRuntime
+      disposeControls = stx.hydrateHost(customControls, () => {
+        stx.hydrate(customControls)
+        return {}
+      }, null)
+    }
   }
   if (changed || refreshLinks) mountSlideLinks(customControls)
 }
@@ -268,7 +282,12 @@ function show(number: number, step?: number, writeHistory = true, sync = true, r
     }
     current = selected
     click = nextStep
-    if (!isCapture && !isPreview) showCustomControls(current - 1, refresh)
+    if (!isCapture && !isPreview) {
+      // STX setup and teardown can navigate. Finish the slide commit before
+      // invoking them, and use the latest position if navigation ran again.
+      if (controlsBySlide?.reactive) queueMicrotask(() => showCustomControls(current - 1, refresh))
+      else showCustomControls(current - 1, refresh)
+    }
     const active = articles[current - 1]
     active.hidden = false
     for (const frame of active.querySelectorAll<HTMLIFrameElement>('iframe[data-presentation-tweet]:not([src])')) {
