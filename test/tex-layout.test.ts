@@ -2871,13 +2871,14 @@ test.skipIf(!chrome)('keeps tagged displays centered and supports flush-left mat
         rightTag: tag ? outer.right - tag.right : undefined,
       }
     })`)
-    expect(layout[0].center).toBeCloseTo(0)
-    expect(layout[0].rightTag).toBeCloseTo(0)
-    expect(layout[1].center).toBeCloseTo(0)
-    expect(layout[1].leftTag).toBeCloseTo(0)
-    expect(layout[2].shift).toBeCloseTo(60)
-    expect(layout[3].shift).toBeCloseTo(60)
-    expect(layout[3].rightTag).toBeCloseTo(0)
+    // Combining font widths with grid gutters can differ by a layout subpixel.
+    expect(layout[0].center).toBeCloseTo(0, 1)
+    expect(layout[0].rightTag).toBeCloseTo(0, 1)
+    expect(layout[1].center).toBeCloseTo(0, 1)
+    expect(layout[1].leftTag).toBeCloseTo(0, 1)
+    expect(layout[2].shift).toBeCloseTo(60, 1)
+    expect(layout[3].shift).toBeCloseTo(60, 1)
+    expect(layout[3].rightTag).toBeCloseTo(0, 1)
   }
   finally {
     view.close()
