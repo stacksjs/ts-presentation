@@ -173,7 +173,6 @@ export async function transformHighlightedCode(
 
   for (const [index, row] of tokens.entries()) {
     const number = index + 1
-    const visible = frame && frame.start + index
     let line = element('span', { class: frame ? 'line code-line' : 'line' })
     let column = 0
     for (const token of row) {
@@ -191,10 +190,6 @@ export async function transformHighlightedCode(
         line.properties['data-code-empty'] = true
         line.children.push(text('\u200b'))
       }
-      if (frame.lineNumbers) {
-        line.properties['data-code-number'] = visible
-        line.children.unshift(element('span', { class: 'code-line-number', 'aria-hidden': true }, [text(String(visible))]))
-      }
     }
     lines.push(line)
     if (index > 0) code.children.push(text('\n'))
@@ -208,6 +203,17 @@ export async function transformHighlightedCode(
   root.children.push(pre)
   for (const transformer of transformers)
     root = transformer.root?.call(context, root) ?? root
+  // Code transforms can remove annotation-only lines. Number the rendered
+  // rows in the same order as the player's reveal and copy controls.
+  if (frame?.lineNumbers) {
+    let number = frame.start
+    for (const line of code.children) {
+      if (line.type !== 'element' || !line.properties['data-code-line']) continue
+      line.properties['data-code-number'] = number
+      line.children.unshift(element('span', { class: 'code-line-number', 'aria-hidden': true }, [text(String(number))]))
+      number++
+    }
+  }
   let markup = serialize(root)
   for (const transformer of transformers)
     markup = transformer.postprocess?.call(common, markup, options) ?? markup

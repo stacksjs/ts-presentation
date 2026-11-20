@@ -168,6 +168,14 @@ language. Add CSS for authored classes in the deck stylesheet. In dev
 mode, edits to setup files, their local imports, and STX layouts refresh
 the preview.
 
+Import `transformerNotationDiff`, `transformerNotationFocus`,
+`transformerNotationHighlight`, `transformerNotationErrorLevel` and
+`transformerNotationWordHighlight` from `ts-presentation` to render
+`[!code …]` comments. For example, `// [!code focus:2]` on its own line
+focuses the next two rows. Inline annotations start at the current row.
+Use `transformerMetaHighlight` for ranges in fence metadata and
+`transformerMetaWordHighlight` for `/word/` markers.
+
 Use a deck directory or an entry path without the `.md` suffix on the CLI.
 Theme and addon resolution checks the deck project first, then the package
 installation that launched the CLI. Both local extensions and compatible
@@ -309,6 +317,10 @@ goes to Khan Academy and the KaTeX contributors. Their MIT notice is included in
 
 GitGraph theme colors come from Mermaid 12.3.0. The Mermaid MIT notice is
 included in [licenses/Mermaid-MIT.txt](licenses/Mermaid-MIT.txt).
+
+The highlight annotations follow Shiki's transformer syntax. Credit goes to
+Pine Wu, Anthony Fu, and the Shiki contributors. The original MIT notice is
+included in [licenses/Shiki-MIT.txt](licenses/Shiki-MIT.txt).
 
 The seven Slidev packages are carried in `packages/`. The Bun CLI and render
 pipeline are in `packages/slidev`, the STX presentation templates and player in

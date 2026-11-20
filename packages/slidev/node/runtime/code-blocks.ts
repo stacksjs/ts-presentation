@@ -5,6 +5,7 @@ import { readFenceOptions } from './fence-options.ts'
 import { escapeHtml } from './html.ts'
 import type { CodeHighlightTransformer, CodeTokenizer } from './highlight-transformers.ts'
 import { orderCodeHighlightTransformers, transformHighlightedCode } from './highlight-transformers.ts'
+import { codeWordDecoration } from './notation-transformers.ts'
 
 export interface CodeBlockInfo {
   language: string
@@ -64,6 +65,11 @@ export function parseCodeInfo(input: string): CodeBlockInfo | undefined {
   let runner: CodeBlockInfo['runner']
   let automatic = false
   while (info) {
+    const word = codeWordDecoration.exec(info)
+    if (word) {
+      info = info.slice(word[0].length).trim()
+      continue
+    }
     decoration.lastIndex = 0
     const group = decoration.exec(info)?.[0] ?? (runner ? runnerDecoration(info) : undefined)
     if (!group) return

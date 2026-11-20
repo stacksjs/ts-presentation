@@ -47,6 +47,8 @@ export type { CodeRunner, CodeRunnerContext, CodeRunnerOutput, CodeRunnerOutputD
 export { defineCodeHighlightSetup, defineShikiSetup, defineKatexSetup, defineMermaidRendererSetup, defineMermaidSetup } from './authoring-setup.ts'
 export type { CodeHighlightOptions, KatexOptions, KatexTrustContext, MermaidOptions, MermaidRenderer } from './authoring-setup.ts'
 export type { CodeHighlightBlockOptions, CodeHighlightContext, CodeHighlightContextBase, CodeHighlightElement, CodeHighlightProperty, CodeHighlightRoot, CodeHighlightText, CodeHighlightToken, CodeHighlightTransformer } from './highlight-transformers.ts'
+export { transformerCompactLineOptions, transformerMetaHighlight, transformerMetaWordHighlight, transformerNotationDiff, transformerNotationErrorLevel, transformerNotationFocus, transformerNotationHighlight, transformerNotationMap, transformerNotationWordHighlight, transformerRemoveNotationEscape } from './notation-transformers.ts'
+export type { TransformerCompactLineOption, TransformerNotationMapOptions, TransformerNotationOptions } from './notation-transformers.ts'
 export type { PresentationNavigation, SlideRoute } from '../../../client/runtime/navigation.ts'
 export type { LayoutContext, PresentationAddon, PresentationLayout, PresentationTheme } from './extensions.ts'
 export type { DrawingOptions } from '../../../types/src/drawings.ts'
