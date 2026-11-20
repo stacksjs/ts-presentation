@@ -40,8 +40,8 @@ in a new ts-presentation project.
 | Imported Slidev diagrams | Compatibility fences translate the supported syntax to `ts-charts` input |
 | XY charts | Native YAML and imported `xychart` fences render bar and line series with category or numeric axes, orientation, legends, labels, and palette overrides |
 | Sankey diagrams | Weighted links from native YAML and imported CSV fences, with four alignments, gradient or solid links, and configurable node colors and labels |
-| Gantt styles and dates | Case-insensitive directives, task status palettes, partial dates and fractional seconds, calendar-aligned UTC ticks, zero-duration fallback for invalid ends, and whole-day exclusions that preserve gaps between dependent tasks through `ts-charts` |
-| GitGraph | Named Mermaid palettes and color overrides, commit message and operation tooltips, and custom symbols on commits and merges |
+| Gantt styles and dates | Case-insensitive directives, task status palettes, seconds-only and fractional time input, calendar durations and UTC ticks, zero-duration fallback for invalid ends, and whole-day exclusions through `ts-charts` |
+| GitGraph | Named Mermaid palettes, color overrides, commit and operation tooltips, custom symbols, and visible labels for commits and explicit merge IDs |
 | PlantUML sequence diagrams | Local `ts-charts` rendering for messages, participants, notes, and groups |
 | Presenter mode | Two synced browser windows, notes, timer, resizable layouts, next-frame preview, and reveal seeking |
 | Reveal scheduling | Absolute and relative steps, hide ranges, grouped and nested lists, CSS presets, and switch slots |

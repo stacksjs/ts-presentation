@@ -117,7 +117,7 @@ function parseGitHistory(source: string, options?: unknown): GitGraphOptions | u
     mainBranchOrder: typeof config.mainBranchOrder === 'number' ? config.mainBranchOrder : undefined,
     titleTopMargin: diagramPixels(config.titleTopMargin),
     parallelCommits: Boolean(config.parallelCommits), showBranches: config.showBranches !== false, showCommitLabel: config.showCommitLabel !== false,
-    rotateCommitLabel: config.rotateCommitLabel !== false,
+    rotateCommitLabel: config.rotateCommitLabel !== false, showGeneratedOperationLabels: false,
   }
 }
 

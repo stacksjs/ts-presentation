@@ -151,7 +151,8 @@ function parseGantt(source: string, now: number, interactionsEnabled = false, co
   }
   return { sections, title: chart.title, accessibleTitle: chart.accessibleTitle, description: chart.description, dateFormat,
     axisFormat: axisFormat || configuredAxisFormat || (dateFormat === 'D' ? '%d' : ''), tickInterval: ticks,
-    weekday, weekend, topAxis, todayMarker, todayMarkerStyle, inclusiveEndDates, excludes: exclusions, includes: inclusions, exclusionMode: 'whole-days', now }
+    weekday, weekend, topAxis, todayMarker, todayMarkerStyle, inclusiveEndDates, excludes: exclusions, includes: inclusions,
+    exclusionMode: 'whole-days', durationMode: 'calendar', now }
 }
 
 export function scheduleGantt(source: string, now: number = Date.now()): GanttSchedule | undefined {

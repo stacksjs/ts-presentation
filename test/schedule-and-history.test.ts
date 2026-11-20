@@ -89,6 +89,28 @@ test('uses strict input dates, validates dependencies and supports timezone offs
   expect(mermaid('gantt\nA :a, after missing, 2d', 'missing')).toBeUndefined()
 })
 
+test('renders seconds-only Gantt input and honors fractional calendar durations', () => {
+  const timing = `gantt
+dateFormat ss
+tickInterval 10second
+todayMarker off
+Request :request, 0, 20
+Retry :retry, after request, 0.5s`
+  const now = Date.UTC(2026, 2, 6, 14)
+  const midnight = Date.UTC(2026, 2, 6)
+  const schedule = scheduleGantt(timing, now)!
+  expect(schedule.tasks.map(task => [task.start - midnight, task.end - midnight])).toEqual([[0, 20_000], [20_000, 20_500]])
+  expect(mermaid(timing, 'elapsed')).toMatch(/>00<\/tspan>.*>10<\/tspan>.*>20<\/tspan>/s)
+
+  const calendar = `gantt
+dateFormat YYYY-MM-DD
+Window :window, 2024-02-29, 1.5d
+Calendar follow-up :followup, after window, 0.5w`
+  expect(scheduleGantt(calendar)?.tasks.map(task => new Date(task.end).toISOString())).toEqual([
+    '2024-03-02T00:00:00.000Z', '2024-03-06T00:00:00.000Z',
+  ])
+})
+
 test('imports subsecond times and distinguishes literal date suffixes from durations', async () => {
   const now = Date.UTC(2026, 2, 6, 8)
   const timings = `gantt
@@ -234,6 +256,26 @@ merge "feature/review" id:"approved" type:NORMAL tag:"ready"`
   expect(html).toMatch(/data-commit-id="approved" data-parent-ids="base, fix"[^>]*><title>[^<]*<\/title><circle[^>]*\/><g transform=/)
   expect(buildGitHistory('gitGraph\ncommit msg:bare-message')).toBeUndefined()
   expect(buildGitHistory('gitGraph\ncommit "first" msg:"second"')).toBeUndefined()
+})
+
+test('imports GitGraph labels for commits and explicit merge IDs while keeping operation metadata', () => {
+  const graph = `gitGraph
+commit id:"root"
+branch review
+commit id:"patch"
+checkout main
+cherry-pick id:"patch"
+merge review
+checkout review
+commit id:"docs"
+checkout main
+merge review id:"release"`
+  const svg = mermaid(graph, 'operations')!
+  const labels = [...svg.matchAll(/class="diagram-git-label"[^>]*><tspan[^>]*>([^<]+)/g)].map(match => match[1])
+  expect(labels).toEqual(['root', 'patch', 'docs', 'release'])
+  expect(svg).toContain('>cherry-pick:patch</tspan>')
+  expect(svg).toContain('data-commit-id="c4" data-parent-ids="c3, patch"')
+  expect(svg).toContain('data-commit-id="release" data-parent-ids="c4, docs"')
 })
 
 test('native Gantt YAML and compatibility syntax render the same schedule', () => {
