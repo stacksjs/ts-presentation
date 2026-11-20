@@ -171,6 +171,48 @@ See \eqref{value}.
   }
 }, 45_000)
 
+it.skipIf(!chrome)('exports adjusted operator limits and shortened display positioning as editable equations', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-adjusted-limits-'))
+  const canvas = { width: 960, height: 540 }
+  const limit = String.raw`x&=\adjustlimits\limsup_{P}\max_{P^{\dfrac{1}{2}}}\tag{Q}`
+  try {
+    const entry = join(root, 'slides.md')
+    await Bun.write(entry, ['', '\\SwapAboveDisplaySkip'].map(skip => String.raw`# Operator limits
+
+Read the bounds.
+
+\begin{align}
+${skip}
+${limit}
+\end{align}`).join('\n\n---\n\n'))
+    const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
+    const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
+    const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
+    if (status) throw new Error(stderr)
+    const frames: PowerPointFrame[] = []
+    await captureFrames({ root: join(root, 'dist'), executable: chrome!, scale: 1, canvas, editable: true, withClicks: false }, frame => { frames.push(frame) })
+    expect(frames).toHaveLength(2)
+    const [normal, compact] = frames.map((frame) => {
+      const math = frame.editable?.nodes.find((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math')?.equation
+      expect(math?.expression.match(/<m:limLow>/g)).toHaveLength(2)
+      expect(math?.expression.match(/<m:zeroWid m:val="1"\/>/g)).toHaveLength(4)
+      expect(math?.tags?.[0].expression).toContain('>(Q)</m:t>')
+      return math!
+    })
+    expect(normal.rect.y - compact.rect.y).toBeGreaterThan(5)
+    expect(normal.rect.x).toBeCloseTo(compact.rect.x, 1)
+    expect(normal.rect.h).toBeCloseTo(compact.rect.h, 1)
+    const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Adjusted limits' }))
+    const slide = parts.get('ppt/slides/slide2.xml')?.toString() ?? ''
+    expect(slide.match(/<m:limLow>/g)).toHaveLength(2)
+    expect(slide.match(/<m:phant>/g)).toHaveLength(4)
+    expect(slide).toContain('name="Equation tag"')
+  }
+  finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}, 45_000)
+
 it.skipIf(!chrome)('keeps AMS subequation letters and reveal opacity editable in a PowerPoint range', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-subequations-'))
   const canvas = { width: 960, height: 540 }

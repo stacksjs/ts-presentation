@@ -960,6 +960,7 @@ const mathtoolsSpacingOptions = new Set([
 ])
 
 const arrowBetweenLines = '\\ArrowBetweenLines'
+const swapAboveDisplaySkip = '\\SwapAboveDisplaySkip'
 const flushSpaceAbove = '\\MTFlushSpaceAbove'
 const flushSpaceBelow = '\\MTFlushSpaceBelow'
 const alignedBox = '\\Aboxed'
@@ -971,7 +972,7 @@ const mathModeFunctions = new Set([
   ...ruledAccents, ...Array.from(infixFractions, command => command.slice(1)),
   'begin', 'end', 'right', 'middle', '@binrel', '@splitfrac', 'mathchoice', 'vcenter',
   'cancel', 'bcancel', 'xcancel', 'pmb', 'phase', 'mathreflectbox',
-  'prescript', 'mathstrut', 'xmathstrut', 'sideset', 'overset', 'underset', 'overunderset', 'stackrel',
+  'prescript', 'mathstrut', 'xmathstrut', 'sideset', 'adjustlimits', 'SwapAboveDisplaySkip', 'overset', 'underset', 'overunderset', 'stackrel',
   'shoveleft', 'shoveright', 'ArrowBetweenLines', 'MTFlushSpaceAbove', 'MTFlushSpaceBelow', 'Aboxed', '@AboxedWith', 'MakeAboxedCommand',
   ...Array.from(intertextCommands.keys(), command => command.slice(1)),
   'overline', 'operatorname', 'operatorname@', 'operatornamewithlimits', 'limits', 'nolimits', 'displaylimits',
@@ -1124,6 +1125,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   let formattingTag = false
   let nextSubequationNumber: ((key?: string, onlyReferenced?: boolean, form?: string) => string) | undefined
   let fullWidthAlignment = false
+  let shortDisplaySkip = false
   let fontScale = 1
   let textItalic = false
   let textMonospace = false
@@ -2531,6 +2533,30 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return { markup, mathClass: 'op', limits: true }
   }
 
+  function adjustLimits(): Atom {
+    function readOperator(): { base: Markup, limit: Markup } {
+      const base = stackOperator(fragmentArgument('Missing operator in \\adjustlimits').markup)
+      const marker = take()
+      if (marker !== '_' && marker !== '\\sb') throw new MathParseError('Expected a subscript in \\adjustlimits')
+      return { base, limit: inScript(scriptArgument()) }
+    }
+    const first = readOperator()
+    const second = readOperator()
+    function adjusted(base: typeof first, partner: typeof first): RowPart {
+      // Share the base depth and script ascent without adding horizontal
+      // advance. MathML and Office Math can represent both phantoms natively.
+      const depth = xml`<mpadded width="0" height="0"><mphantom>${partner.base}</mphantom></mpadded>`
+      const ascent = xml`<mpadded width="0" depth="0"><mphantom>${partner.limit}</mphantom></mpadded>`
+      return {
+        markup: xml`<munder><mrow>${base.base}${depth}</mrow><mrow>${base.limit}${ascent}</mrow></munder>`,
+        mathClass: 'op',
+        operator: true,
+      }
+    }
+    const parts = [adjusted(first, second), adjusted(second, first)]
+    return { markup: joinRow(parts), fragment: () => parts }
+  }
+
   function modulus(name: string): Markup {
     const label = '<mi mathvariant="normal">mod</mi>'
     if (name === 'bmod') return `<mrow>${muSpace(5)}${label}${muSpace(5)}</mrow>`
@@ -2863,6 +2889,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (!(stretch > 0 && stretch <= 100)) throw new MathParseError('Invalid array stretch')
     const outerTag = tagState
     const rowTags = spreadEnvironment || /^(?:align|alignat|gather)[*]?$/.test(environment)
+    if (rowTags && display && !environmentDepth && depth === 1 && peek() === swapAboveDisplaySkip) {
+      take()
+      shortDisplaySkip = true
+    }
     const allowIntertext = rowTags && display && environmentDepth === 0
     const allowArrow = /^(?:align(?:at)?\*?|aligned(?:at)?)$/.test(environment)
     const tagless = environment === 'xxalignat'
@@ -3211,7 +3241,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
       : label === undefined ? '' : 'display:block;text-align:center'
     const styles = [layoutStyle, minRule ? `--math-min-rule:${minRule}em` : ''].filter(Boolean).join(';')
     const layout = styles ? ` style="${styles}"` : ''
-    return `<math xmlns="http://www.w3.org/1998/Math/MathML"${display ? ' display="block"' : ''}${layout}><semantics>${markup}<annotation encoding="application/x-tex">${escapeHtml(tex)}</annotation></semantics></math>`
+    const formula = `<math xmlns="http://www.w3.org/1998/Math/MathML"${display ? ' display="block"' : ''}${layout}><semantics>${markup}<annotation encoding="application/x-tex">${escapeHtml(tex)}</annotation></semantics></math>`
+    return shortDisplaySkip ? `<div class="math-short-display">${formula}</div>` : formula
   }
 
   function displayGroup(environment: 'subequations' | 'spreadlines', level = 0): string {
@@ -3221,6 +3252,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const previousNumbering = nextSubequationNumber
     const previousTag = tagState
     const previousAlignment = fullWidthAlignment
+    const previousShortDisplaySkip = shortDisplaySkip
     let key: string | undefined
     let marker = ''
     const blocks: string[] = []
@@ -3269,6 +3301,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
           }
           tagState = { suppressed: false }
           fullWidthAlignment = false
+          shortDisplaySkip = false
           // Each child is a complete display, with its own tag and row layout.
           const content = inScope(() => {
             if (token === '\\[') {
@@ -3293,6 +3326,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       nextSubequationNumber = previousNumbering
       tagState = previousTag
       fullWidthAlignment = previousAlignment
+      shortDisplaySkip = previousShortDisplaySkip
     }
   }
 
@@ -3525,6 +3559,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (declareMacro(token) || equationDirective(token)) return { markup: '' }
     if (equationReferences.has(token)) return { markup: equationReference(token) }
     const name = token.slice(1)
+    if (token === swapAboveDisplaySkip) throw new MathParseError(`${token} must start a top-level align, alignat, gather, or full-width AMS alignment`)
     if (token === arrowBetweenLines) throw new MathParseError(`${token} requires an align, alignat, aligned, or alignedat environment`)
     if (token === flushSpaceAbove || token === flushSpaceBelow) throw new MathParseError(`${token} requires an alignment environment`)
     if (token === alignedBox || token === customAlignedBox) throw new MathParseError('\\Aboxed must start an alignment cell')
@@ -3654,6 +3689,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       return { markup: xml`<mmultiscripts>${argument()}<mprescripts/>${lower}${upper}</mmultiscripts>` }
     }
     if (name === 'sideset') return sidedOperator()
+    if (name === 'adjustlimits') return adjustLimits()
     if (name === 'sqrt' || name === 'root') {
       const index = name === 'root' ? delimitedArgument(['\\of']) : rawBracket()
       if (index === undefined) return { markup: xml`<msqrt>${argument(true)}</msqrt>` }

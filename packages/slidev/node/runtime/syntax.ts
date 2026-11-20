@@ -410,7 +410,7 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
       return (attrs ? attrs.restore(html) : html)
         .replace(/<p>(<tp-math data-equation="\d+"><\/tp-math>)<\/p>/g, (whole, placeholder) => {
           const index = Number(/\d+/.exec(placeholder)?.[0])
-          return /^<(?:div class="(?:equation-steps|math-subequations|math-spreadlines)"|math [^>]* display="block"|mrow data-pending-equation-pin=)/.test(math[index] ?? '') ? placeholder : whole
+          return /^<(?:div class="(?:equation-steps|math-subequations|math-spreadlines|math-short-display)"|math [^>]* display="block"|mrow data-pending-equation-pin=)/.test(math[index] ?? '') ? placeholder : whole
         })
         .replace(/<tp-math data-equation="(\d+)"><\/tp-math>/g, (whole, index: string) => math[Number(index)] ?? whole)
     },

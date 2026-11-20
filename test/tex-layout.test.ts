@@ -1434,6 +1434,45 @@ test('numbers AMS subequation groups in rendered order and links parent and chil
   expect(() => math(group.replace('\\begin{equation}', '\\begin{subequations}'), true)).toThrow('Invalid subequations display')
 })
 
+test('uses the short display skip only for the requested top-level alignment', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const source = String.raw`\begin{spreadlines}{2px}
+\begin{alignat}{1}\SwapAboveDisplaySkip a&=b\label{one}\end{alignat}
+\begin{spreadlines}{3px}
+\begin{gather*}\SwapAboveDisplaySkip c=d\end{gather*}
+\end{spreadlines}
+\begin{flalign}e&=f&&g&=h\end{flalign}
+\end{spreadlines}`
+  const html = math(source, true)
+  expect([...html.matchAll(/(<div class="math-short-display">)?<math [^>]*display="block"[^>]*>/g)].map(match => match[1] !== undefined))
+    .toEqual([true, true, false])
+  expect(html).toContain('<mtext>(1)</mtext>')
+  expect(html).toContain('<mtext>(2)</mtext>')
+  for (const invalid of [
+    String.raw`\begin{align*}a&=\SwapAboveDisplaySkip b\end{align*}`,
+    String.raw`\begin{equation}\SwapAboveDisplaySkip a=b\end{equation}`,
+    String.raw`\begin{multline*}\SwapAboveDisplaySkip a=b\end{multline*}`,
+    String.raw`\begin{aligned}\SwapAboveDisplaySkip a&=b\end{aligned}`,
+  ]) expect(() => math(invalid, true)).toThrow('must start a top-level')
+})
+
+test('parses Mathtools adjusted limits as two operators with shared measurements', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const source = String.raw`\def\op{\limsup}\def\sub{\sb}
+\adjustlimits\op\sub{P^{\mathchoice{D}{T}{S}{Q}}}{\max}_{P}x`
+  for (const display of [false, true]) {
+    const html = math(source, display).split('<annotation')[0]
+    expect(html.match(/<munder>/g)).toHaveLength(2)
+    expect(html.match(/<mpadded width="0" height="0"><mphantom>/g)).toHaveLength(2)
+    expect(html.match(/<mpadded width="0" depth="0"><mphantom>/g)).toHaveLength(2)
+    expect(html).toContain('<mi>Q</mi>')
+    expect(html).toContain('</munder>' + thin + '<munder>')
+    expect(html).toContain('</munder>' + thin + '<mi>x</mi>')
+  }
+  expect(() => math(String.raw`\adjustlimits\lim^{x}\max_{y}`, true)).toThrow('Expected a subscript')
+  expect(() => math(String.raw`\adjustlimits\lim_x`, true)).toThrow('Missing operator')
+})
+
 test('scopes Mathtools spreadlines gaps across nested displays, compact rows, and intertext', () => {
   const math = createMathRenderer({ throwOnError: true })
   const source = String.raw`\def\space{1em}
@@ -3459,6 +3498,50 @@ test.skipIf(!chrome)('places AMS corner scripts beside the operator and explicit
         limit.y >= glyph.bottom && center(limit) > lowLeft.left && center(limit) < lowRight.right,
       ]
     })()`)).toEqual([true, true, true, true])
+  }
+  finally {
+    view.close()
+    await server.stop(true)
+  }
+}, 15_000)
+
+test.skipIf(!chrome)('aligns Mathtools lower limits and reduces only the leading display gap in Chromium', async () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const normal = String.raw`\limsup_{P}\max_{P^{\dfrac{1}{2}}}`
+  const limits = [normal, '\\adjustlimits' + normal, String.raw`\adjustlimits\max_{P^{\dfrac{1}{2}}}\limsup_{P}`]
+  const shortened = [String.raw`\begin{align*}a&=b\end{align*}`, String.raw`\begin{align*}\SwapAboveDisplaySkip a&=b\end{align*}`]
+  const css = await Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url)).text()
+  const body = limits.map(source => `<section class="limits">${math(source, true)}</section>`).join('')
+    + shortened.map(source => `<section class="display-spacing" style="display:flow-root"><div>Before</div>${math(source, true)}<div>After</div></section>`).join('')
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response(`<!doctype html><meta charset="utf-8"><style>${css}</style><main class="slide" style="font-size:40px">${body}</main>`, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    }),
+  })
+  const view = new Bun.WebView({ width: 960, height: 780, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await view.navigate(server.url.href)
+    const measurements = await view.evaluate<{ offsets: number[], gaps: [number, number, number][] }>(`(async () => {
+      await document.fonts.ready
+      const offsets = Array.from(document.querySelectorAll('.limits'), section => {
+        const [first, second] = Array.from(section.querySelectorAll('munder'), node => node.children[1].querySelector('mi').getBoundingClientRect())
+        return Math.abs(first.bottom - second.bottom)
+      })
+      const gaps = Array.from(document.querySelectorAll('.display-spacing'), section => {
+        const before = section.firstElementChild.getBoundingClientRect()
+        const formula = section.querySelector('math').getBoundingClientRect()
+        const after = section.lastElementChild.getBoundingClientRect()
+        return [formula.top - before.bottom, after.top - formula.bottom, formula.height]
+      })
+      return { offsets, gaps }
+    })()`)
+    expect(measurements.offsets[0]).toBeGreaterThan(1)
+    for (const offset of measurements.offsets.slice(1)) expect(offset).toBeCloseTo(0, 1)
+    const [ordinary, compact] = measurements.gaps
+    expect(ordinary[0] - compact[0]).toBeCloseTo(16, 0)
+    expect(ordinary[1]).toBeCloseTo(compact[1], 1)
+    expect(ordinary[2]).toBeCloseTo(compact[2], 1)
   }
   finally {
     view.close()

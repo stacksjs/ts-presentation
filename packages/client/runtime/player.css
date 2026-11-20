@@ -779,6 +779,14 @@ v-switch { display: block; }
 }
 
 .slide math[display="block"] { margin-block: 0.7em; }
+/* Keep the ordinary outer margins for collapse, then remove the difference
+   inside this formatting context so preceding paragraphs cannot erase it. */
+.slide .math-short-display { display: flow-root; margin-block: 0.7em; }
+.slide .math-short-display > math[display="block"] {
+  position: relative;
+  inset-block-start: -0.4em;
+  margin-block: 0 -0.4em;
+}
 @supports (display: math) {
   math mfrac > .math-fraction-alignment {
     display: inline-grid;
