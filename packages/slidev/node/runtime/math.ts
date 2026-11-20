@@ -220,14 +220,15 @@ type ConditionalPrimitive = Exclude<ExpansionPrimitive, '\\expandafter' | '\\noe
 interface TokenMacro { body: string[], parameters: string[][], prefix: string[], optional?: string[] }
 type Macro = TokenMacro | { primitive: ExpansionPrimitive }
 interface MathState { globals: Map<string, Macro>, options: KatexOptions, inlineBreaks: boolean }
+type EquationNumberMarkup = (number: number) => string
 
 function isExpansionPrimitive(token: string | undefined): token is ExpansionPrimitive {
   return token !== undefined && expansionPrimitiveNames.has(token)
 }
 
-export function createMathRenderer(options: KatexOptions = {}, inlineBreaks = false): (source: string, display: boolean) => string {
+export function createMathRenderer(options: KatexOptions = {}, inlineBreaks = false): (source: string, display: boolean, numberMarkup?: EquationNumberMarkup) => string {
   const state: MathState = { globals: new Map(), options, inlineBreaks }
-  return (source, display) => renderMath(source, display, options.macros, state)
+  return (source, display, numberMarkup) => renderMath(source, display, options.macros, state, numberMarkup)
 }
 
 function safeColor(value: string): string {
@@ -580,7 +581,7 @@ function fractionMarkup(first: Markup, second: Markup, forced?: MathStyle, thick
 }
 
 /** Translate a bounded TeX math subset to native MathML, with the source retained for accessibility. */
-export function renderMath(source: string, display = false, configured: MathMacros = {}, state?: MathState): string {
+export function renderMath(source: string, display = false, configured: MathMacros = {}, state?: MathState, numberMarkup?: EquationNumberMarkup): string {
   let trailingComment = false
   const recordComment = () => { trailingComment = true }
   const tokens = tokenize(source, recordComment)
@@ -1238,7 +1239,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
 
   function nextTag(automatic: boolean): Markup | undefined {
     if (tagState.label !== undefined) return tagState.label
-    if (automatic && !tagState.suppressed) return tag('mtext', `(${++equationNumber})`)
+    if (automatic && !tagState.suppressed) {
+      equationNumber++
+      return numberMarkup?.(equationNumber) ?? tag('mtext', `(${equationNumber})`)
+    }
   }
 
   function unicodeScript(symbols: ReadonlyMap<string, string>): Markup {
@@ -1539,9 +1543,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
       ? Number(expandDefinition(['\\arraystretch']).join('')) : 1
     if (!(stretch > 0 && stretch <= 100)) throw new Error('Invalid array stretch')
     const outerTag = tagState
-    const automatic = display && environmentDepth === 0 && /^(?:align|alignat|gather)$/.test(environment)
+    const rowTags = /^(?:align|alignat|gather)[*]?$/.test(environment)
+    const automatic = rowTags && display && environmentDepth === 0 && !environment.endsWith('*')
     environmentDepth++
-    tagState = { suppressed: false }
+    // Embedded tables such as split and aligned share the enclosing
+    // equation's tag. Only the top-level AMS row environments collect tags.
+    if (rowTags) tagState = { suppressed: false }
     const rows: ArrayRow[] = []
     let cells: Markup[] = []
     const end = stack ? '}' : '\\end'
@@ -1569,12 +1576,13 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const extra = lineBreak && separator !== '\\newline' ? rawBracket() : undefined
       const gap = extra === undefined ? undefined : dimension(expandDefinition(extra).join(''))
       if (extra !== undefined && gap === undefined) throw new Error('Invalid array row spacing')
-      if (cells.length > 1 || cells[0] || tagState.label !== undefined || rows.length === 0 || lineBreak) {
-        rows.push({ cells, label: nextTag(automatic), before: rule, gap })
+      const label = rowTags ? nextTag(automatic) : undefined
+      if (cells.length > 1 || cells[0] || label !== undefined || rows.length === 0 || lineBreak) {
+        rows.push({ cells, label, before: rule, gap })
         rule = undefined
       }
       cells = []
-      tagState = { suppressed: false }
+      if (rowTags) tagState = { suppressed: false }
       if (separator === end && (stack || literalGroup() === environment)) {
         closed = true
         break

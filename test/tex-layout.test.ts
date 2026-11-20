@@ -1,7 +1,7 @@
 import { expect, spyOn, test } from 'bun:test'
 import { findChrome } from '../packages/slidev/node/runtime/chrome.ts'
 import { collectSnapshot } from '../packages/slidev/node/runtime/editable/walker.ts'
-import { parseDeck, renderDeck } from '../packages/slidev/node/runtime/index.ts'
+import { parseDeck, renderDeck, renderPresentation } from '../packages/slidev/node/runtime/index.ts'
 import { createMathRenderer, renderMath } from '../packages/slidev/node/runtime/math.ts'
 
 const thin = '<mspace width="0.16666666666666666em"/>'
@@ -256,6 +256,59 @@ test('renders formatted equation tags and applies them to the correct alignment 
   ])
   expect(() => math(String.raw`a\tag*{}\tag{b}`, true)).toThrow('Multiple tags')
   expect(() => math(String.raw`a\tag{b}`, false)).toThrow('Equation tags require display math')
+})
+
+test('uses nested math annotations for the enclosing equation or alignment row', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const manual = math(String.raw`\begin{equation}\begin{split}a&=b\tag{Title}\\&+c\end{split}\end{equation}`, true)
+  expect(manual).toContain('class="math-tagged-display"')
+  expect(manual.match(/class="math-equation-number"/g)).toHaveLength(1)
+  expect(manual).toContain('<mtext>(Title)</mtext>')
+  const noNumber = math(String.raw`\begin{equation}\begin{aligned}a&=b\notag\\&+c\end{aligned}\end{equation}`, true)
+  expect(noNumber).not.toContain('math-equation-number')
+  const aligned = math(String.raw`\begin{align}a&=\begin{matrix}b\tag*{Manual}\end{matrix}\\c&=d\end{align}`, true)
+  expect([...aligned.matchAll(/class="math-equation-number">(.+?)<\/mtd>/g)].map(([, label]) => label)).toEqual([
+    '<mtext>Manual</mtext>', '<mtext>(1)</mtext>',
+  ])
+  expect(() => math(String.raw`\begin{equation*}\tag{Outside}\begin{aligned}a&=b\tag{Inside}\end{aligned}\end{equation*}`, true))
+    .toThrow('Multiple tags')
+})
+
+test('counts explicit empty final rows in numbered AMS alignments', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const numbered = math(String.raw`\begin{align}a&=b\\\end{align}`, true)
+  expect(numbered.match(/<mtr>/g)).toHaveLength(2)
+  expect(numbered).toContain('<mtext>(2)</mtext>')
+  const starred = math(String.raw`\begin{align*}a&=b\\\end{align*}`, true)
+  expect(starred.match(/<mtr>/g)).toHaveLength(1)
+  const suppressed = math(String.raw`\begin{gather}a=b\\\notag\end{gather}`, true)
+  expect(suppressed.match(/<mtr>/g)).toHaveLength(1)
+})
+
+test('numbers rendered deck equations in layout order and keeps notes out of the sequence', async () => {
+  const left = String.raw`\begin{equation}l=1\end{equation}`
+  const deck = [
+    '---', 'layout: two-cols', '---', '', '# Columns', '',
+    '::right::', '', String.raw`\begin{equation}r=2\end{equation}`, '',
+    '::left::', '', left, '',
+    '---', 'hide: true', '---', '', '# Hidden', '', String.raw`\begin{equation}h=3\end{equation}`, '',
+    '---', '', '# Next', '', '$$',
+    String.raw`\begin{align}a&=b\tag*{Manual}\\c&=d\notag\\e&=f\end{align}`, '$$', '',
+    '<!--', String.raw`\begin{equation}n=4\end{equation}`, '-->',
+  ].join('\n')
+  const first = await renderPresentation(parseDeck(deck), { liveCompile: true })
+  const slides = first.live?.slides ?? []
+  expect(slides).toHaveLength(2)
+  expect(slides[0].html).toMatch(/<mi>l<\/mi>.*?<mtext>\(1\)<\/mtext>.*?<mi>r<\/mi>.*?<mtext>\(2\)<\/mtext>/s)
+  expect(slides[1].html).toContain('<mtext>Manual</mtext>')
+  expect(slides[1].html).toContain('<mtext>(3)</mtext>')
+  expect(slides[1].notes).toContain('<mtext>(1)</mtext>')
+  expect(first.html).not.toContain('data-equation-auto')
+
+  const edited = await renderPresentation(parseDeck(deck.replace(left, 'No numbered equation here.')), { liveCompile: true })
+  expect(edited.live?.slides[1].html).toContain('<mtext>(2)</mtext>')
+  expect(edited.live?.slides[1].revision).not.toBe(slides[1].revision)
+  expect(edited.live?.frame).toBe(first.live?.frame)
 })
 
 test('keeps AMS relation spacing, explicit pair counts, and tags aligned across short rows', () => {

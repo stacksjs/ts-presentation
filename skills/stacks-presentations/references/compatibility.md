@@ -35,6 +35,7 @@ in a new ts-presentation project.
 | Mathtools relations and TeX fonts | Colon relation aliases and Unicode forms, scoped legacy font declarations, upright and italic Greek variants, named spacing, and nonbreaking inline spaces |
 | KaTeX trust option | Opt-in links, URL labels, formula images, and HTML attributes through the KaTeX-shaped boolean or callback |
 | KaTeX display options | Formatted `\tag` and `\tag*` labels, `leqno` for left-side equation tags, and `fleqn` for flush-left display formulas |
+| AMS equation numbering | Automatic labels in rendered slide order, tags and suppression inside nested tables, and numbers preserved in range exports |
 | AMS alignment and arrays | Paired operator spacing, equal alignment points across rows, explicit `alignat` counts, stable tag columns on short rows, starred matrix column alignment, and scoped row rules |
 | KaTeX line breaks | Inline wrapping after outer binary operators and relations, `\allowbreak` and `\nobreak` controls, standalone `\\` and `\newline` in math and text, optional row spacing, and `strict` handling for standalone display breaks |
 | KaTeX strict diagnostics | End-of-formula comments, HTML extensions, text accents and strikeout in math, spacing units and modes, and overflowed array columns |

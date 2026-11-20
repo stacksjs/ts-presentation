@@ -150,7 +150,8 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     ...(mermaidConfig && typeof mermaidConfig === 'object' && !Array.isArray(mermaidConfig) ? mermaidConfig : {}),
   }
   const codeFences = new Map<string, MarkdownFence>()
-  const fencePrefix = `tp-fence-${Bun.randomUUIDv7().replaceAll('-', '')}-`
+  const renderToken = Bun.randomUUIDv7().replaceAll('-', '')
+  const fencePrefix = `tp-fence-${renderToken}-`
   const rawFence = new RegExp(`(?<!language-)\\b${fencePrefix}\\d+\\b`, 'g')
   const highlight = createCodeHighlighter()
   const fontMarkup = deckFontMarkup(options.extensions?.theme.defaults?.fonts, nested?.fonts, deck.headmatter?.fonts)
@@ -202,10 +203,11 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     }))
   }
   let groups = 0
+  const deckNumberMarkup = (number: number) => `<mtext data-equation-auto="${renderToken}">(${number})</mtext>`
   function markdown(content: string, comark?: boolean): string {
     const transformFences = comark !== undefined && !!transformers?.codeblocks.length
     const prepared = prepareMarkdown(content, {
-      renderMath,
+      renderMath: comark === undefined ? renderMath : (body, display) => renderMath(body, display, deckNumberMarkup),
       mathEnabled: (deck.headmatter?.math ?? deck.headmatter?.katex) !== false,
       registerFence(fence) {
         if (!transformFences && !fence.diagram && !fence.code) return
@@ -384,6 +386,13 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     }
   }))
 
+  // Layouts can reorder slots or omit their content. Count the equations in
+  // final slide order so audience, presenter and exported ranges agree.
+  let equationNumber = 0
+  const autoEquation = new RegExp(`<mtext data-equation-auto="${renderToken}">\\(\\d+\\)</mtext>`, 'g')
+  for (const slide of slides) {
+    slide.html = slide.html.replace(autoEquation, () => `<mtext>(${++equationNumber})</mtext>`)
+  }
   const choices = routes.map(({ no, title }) => `<option value="${no}">${no}. ${escapeHtml(title)}</option>`)
   const ruby = deck.headmatter?.notesAutoRuby
   const annotations = ruby && typeof ruby === 'object' && !Array.isArray(ruby)

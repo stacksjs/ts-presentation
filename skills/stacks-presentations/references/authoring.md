@@ -159,7 +159,10 @@ speaker notes. Each hook can be asynchronous.
   math operator to place scripts above and below or off to the side.
 - Use `\begin{align}`, `\begin{alignat}`, `\begin{gather}`, or
   `\begin{equation}` at the start of a line for standalone displays.
-  The starred forms omit automatic numbering.
+  Automatic numbers follow the rendered slide order. Starred environments,
+  manual tags, hidden slides, and speaker notes do not advance the sequence.
+  Use `\notag` or `\nonumber` to suppress a number. A tag or suppression
+  inside `split` or `aligned` applies to the enclosing equation or row.
   Use `alignat{2}` for two pairs of columns with explicit spacing between
   them, or `align` for an automatic one-em gap between pairs. Use `aligned`
   or `alignedat` inside inline math or an enclosing equation. Each pair
