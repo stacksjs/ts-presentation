@@ -121,13 +121,19 @@ test('loads math and Mermaid setup hooks from a standalone deck', async () => {
     await mkdir(join(directory, 'setup'))
     const entry = join(directory, 'slides.md')
     await Promise.all([
-      Bun.write(entry, ['# Standalone', '', '$\\X$', '', '```mermaid {theme:"forest", scale:0.5}', 'special', '```'].join('\n')),
-      Bun.write(join(directory, 'setup/katex.ts'), String.raw`export default () => ({ macros: { '\\X': '\\mathbb{X}' } })`),
+      Bun.write(entry, [
+        '---', 'math:', '  leqno: false', '---', '', '# Standalone', '', '$\\X$', '',
+        '$$', String.raw`x=y\tag{A}`, '$$', '',
+        '```mermaid {theme:"forest", scale:0.5}', 'special', '```',
+      ].join('\n')),
+      Bun.write(join(directory, 'setup/katex.ts'), String.raw`export default () => ({ macros: { '\\X': '\\mathbb{X}' }, fleqn: true, leqno: true })`),
       Bun.write(join(directory, 'setup/mermaid.ts'), `export default async () => ({ theme: 'dark', id: 'standalone' })`),
       Bun.write(join(directory, 'setup/mermaid-renderer.ts'), `export default () => async (code, options) => '<svg viewBox="0 0 60 40"><text>' + options.id + ' ' + code + '</text></svg>'`),
     ])
     const deck = await createDeckCompiler(entry)()
     expect(deck.html).toContain('<mi>𝕏</mi>')
+    expect(deck.html).toContain('display="block" style="display:block;padding-inline-start:2em;text-align:start"')
+    expect(deck.html).toContain('class="math-equation-number" style="display:math;padding:0;justify-self:end"><mtext>(A)</mtext>')
     expect(deck.html).toContain('data-diagram-theme="forest" height="20"')
     expect(deck.html).toContain('standalone special')
   }

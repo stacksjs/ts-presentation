@@ -86,7 +86,7 @@ the deck and style slides with an optional `style.css`.
 | Imported diagrams | Slidev diagram fences are translated to structured data and rendered by the same `ts-charts` functions |
 | PlantUML sequence diagrams | `plantuml` fences render messages, participants, notes, and groups locally through `ts-charts` |
 | Markdown alerts | Start a blockquote with `[!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, or `[!CAUTION]` |
-| Math | Native MathML with scoped macros, styled fractions, numbered equations, ruled arrays, commutative diagrams, stacked subscripts, mixed text and math, click highlighting, and chemistry notation |
+| Math | Native MathML with scoped macros, styled fractions, formatted equation tags, ruled arrays, commutative diagrams, stacked subscripts, mixed text and math, click highlighting, and chemistry notation. Set `math.fleqn` for flush-left displays and `math.leqno` for left-side tags |
 | Math links and images | `\href`, `\url`, `\includegraphics`, and `\html*` attributes honor `math.trust` in deck frontmatter or the `trust` callback in `setup/katex.ts` |
 | Code walkthroughs | `ts [build.ts] {1\|2-3\|all}{lines:true}` for titles and click highlights, or `md magic-move` around nested fences to animate between frames |
 | Code groups | Enable `comark: true` and place titled fences between `::code-group` and `::` to create keyboard-accessible tabs |

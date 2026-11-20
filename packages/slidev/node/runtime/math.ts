@@ -245,7 +245,8 @@ type Alignment = 'left' | 'center' | 'right'
 type ArrayRule = 'solid' | 'dashed' | 'double'
 const alignments: Record<string, Alignment> = { l: 'left', c: 'center', r: 'right' }
 interface ArrayColumn { align: Alignment, before?: ArrayRule }
-interface ArrayRow { cells: Markup[], label: string, before?: ArrayRule, gap?: string }
+interface ArrayRow { cells: Markup[], label?: Markup, before?: ArrayRule, gap?: string }
+interface EquationTag { label?: Markup, suppressed: boolean }
 
 // Infix fractions decide the style of both operands after the row is parsed.
 // Static fragments stay strings. Only style-dependent parts defer rendering.
@@ -253,6 +254,23 @@ type Markup = string | ((style: MathStyle) => string)
 
 function renderMarkup(markup: Markup, style: MathStyle): string {
   return typeof markup === 'string' ? markup : markup(style)
+}
+
+function equationNumberCell(label: Markup | undefined, position?: 'start' | 'end'): string {
+  const style = position ? ` style="display:math;padding:0;justify-self:${position}"` : ''
+  return `<mtd class="math-equation-number"${style}>${renderMarkup(label ?? '', 1)}</mtd>`
+}
+
+function taggedDisplay(expression: string, label: Markup, left: boolean, flush: boolean): string {
+  const number = equationNumberCell(label, left ? 'start' : 'end')
+  const spacer = flush ? '' : '<mtd aria-hidden="true" style="display:block;padding:0"></mtd>'
+  const body = `<mtd style="display:math;math-style:normal;padding:0;justify-self:start">${expression}</mtd>`
+  // Equal gutters center the formula. The tag's intrinsic width can expand
+  // its gutter when space is tight, avoiding an overlap with the formula.
+  const columns = flush
+    ? left ? 'max-content minmax(max-content,1fr)' : 'minmax(max-content,1fr) max-content'
+    : 'minmax(max-content,1fr) max-content minmax(max-content,1fr)'
+  return `<mtable class="math-tagged-display" style="display:block;width:100%"><mtr style="display:grid;grid-template-columns:${columns};align-items:center;column-gap:0.5em">${left ? number : spacer}${body}${left ? spacer : number}</mtr></mtable>`
 }
 
 function joinMarkup(parts: Markup[]): Markup {
@@ -489,7 +507,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   let cursor = 0
   let depth = 0
   let expandedCount = 0
-  let tagState = { label: '', suppressed: false }
+  let tagState: EquationTag = { suppressed: false }
   let environmentDepth = 0
   let delimiterDepth = 0
   let equationNumber = 0
@@ -782,22 +800,25 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return trustedMath(context, state?.options.trust) ? xml`<mrow ${attributes}>${content}</mrow>` : untrusted(command)
   }
 
-  function textArgument(name: string): Markup {
+  function textArgument(name: string, parentheses = false): Markup {
     if (depth++ > 100) throw new Error('Math text is nested too deeply')
     const properties = textFonts[name]
     const wrap = (markup: Markup) => properties ? xml`<mrow style="${properties}">${markup}</mrow>` : markup
+    const opening = parentheses ? '(' : ''
+    const closing = parentheses ? ')' : ''
     expand()
     if (tokens[cursor] !== '{') {
       const token = tokens[cursor++]
       if (!token || token === boundary || token === '}') throw new Error('Missing math text argument')
       depth--
-      return wrap(tag('mtext', textSymbols[token] ?? textSymbol(token) ?? token.replace(/^\\([%$#&_{} ])$/, '$1')))
+      const value = textSymbols[token] ?? textSymbol(token) ?? token.replace(/^\\([%$#&_{} ])$/, '$1')
+      return wrap(tag('mtext', opening + value + closing))
     }
     cursor++
     const sized: Markup[] = []
     const baseScale = fontScale
     let parts: Markup[] = []
-    let literal = ''
+    let literal = opening
     function flush(): void {
       if (!literal) return
       const joined = literal.replace(/\s+/g, ' ').replace(/^ | $/g, '\u00A0')
@@ -814,7 +835,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
         expand(false)
         const token = tokenValue(tokens[cursor++] ?? '')
         if (!token || token === boundary) throw new Error('Unclosed math text')
-        if (token === '}') break
+        if (token === '}') {
+          literal += closing
+          break
+        }
         if (token === '\\relax') continue
         if (Object.hasOwn(sizeCommands, token)) {
           flushSize()
@@ -884,9 +908,9 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return Number.parseFloat(thickness) > 0 ? thickness : '0'
   }
 
-  function nextTag(automatic: boolean): string {
-    if (tagState.label) return tagState.label
-    return automatic && !tagState.suppressed ? `(${++equationNumber})` : ''
+  function nextTag(automatic: boolean): Markup | undefined {
+    if (tagState.label !== undefined) return tagState.label
+    if (automatic && !tagState.suppressed) return tag('mtext', `(${++equationNumber})`)
   }
 
   function unicodeScript(symbols: ReadonlyMap<string, string>): Markup {
@@ -1137,7 +1161,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const outerTag = tagState
     const automatic = display && environmentDepth === 0 && /^(?:align|alignat|gather)$/.test(environment)
     environmentDepth++
-    tagState = { label: '', suppressed: false }
+    tagState = { suppressed: false }
     const rows: ArrayRow[] = []
     let cells: Markup[] = []
     const end = stack ? '}' : '\\end'
@@ -1162,12 +1186,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const extra = lineBreak ? bracket() : undefined
       const gap = extra === undefined ? undefined : dimension(extra)
       if (extra !== undefined && gap === undefined) throw new Error('Invalid array row spacing')
-      if (cells.length > 1 || cells[0] || tagState.label || rows.length === 0 || lineBreak) {
+      if (cells.length > 1 || cells[0] || tagState.label !== undefined || rows.length === 0 || lineBreak) {
         rows.push({ cells, label: nextTag(automatic), before: rule, gap })
         rule = undefined
       }
       cells = []
-      tagState = { label: '', suppressed: false }
+      tagState = { suppressed: false }
       if (separator === end && (stack || literalGroup() === environment)) {
         closed = true
         break
@@ -1182,7 +1206,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const alignment = layout.columns.map(column => column.align)
     const columnAlign = alignment.join(' ') || (aligned ? 'right left' : cases ? 'left left' : '')
     const align = columnAlign ? ` columnalign="${columnAlign}"` : ''
-    const tags = rows.some(entry => entry.label)
+    const tags = rows.some(entry => entry.label !== undefined)
     const columnCount = Math.max(layout.columns.length, ...rows.map(entry => entry.cells.length))
     if (columnArray && columnCount * rows.length > 6000) throw new Error('Math array has too many cells')
     const pad = compact ? '0.06' : (0.14 * stretch).toFixed(4).replace(/0+$/, '').replace(/\.$/, '')
@@ -1190,7 +1214,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return (style) => {
       const cellStyle = compact ? Math.max(2, style) as MathStyle : ordinaryCellStyle
       const markup = rows.map((entry, rowIndex) => {
-        const cell = tags ? `<mtd class="math-equation-number">${tag('mtext', entry.label)}</mtd>` : ''
+        const cell = tags ? equationNumberCell(entry.label) : ''
         // MathML Core browsers use CSS for cell alignment and visible rules.
         const content = Array.from({ length: columnArray ? columnCount : entry.cells.length }, (_, index) => {
           const align = aligned ? (index % 2 ? 'left' : 'right') : alignment[index] ?? alignment.at(-1) ?? (cases ? 'left' : '')
@@ -1336,8 +1360,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
       return { markup: argument() }
     }
     if (name === 'tag') {
-      if (peek() === '*') { take(); tagState.label = literalGroup() }
-      else tagState.label = `(${literalGroup()})`
+      if (!display) throw new Error('Equation tags require display math')
+      if (tagState.label !== undefined) throw new Error('Multiple tags for one equation')
+      const starred = peek() === '*'
+      if (starred) take()
+      tagState.label = ''
+      tagState.label = textArgument('text', !starred)
       return { markup: '' }
     }
     if (name === 'label') { literalGroup(); return { markup: '' } }
@@ -1529,11 +1557,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
 
   try {
     const expression = `<mrow>${renderMarkup(row(), display ? 0 : 1)}</mrow>`
-    const equationTag = tagState.label ? `<mtd class="math-equation-number">${tag('mtext', tagState.label)}</mtd>` : ''
-    const numbered = equationTag
-      ? `<mtable><mtr>${state?.options.leqno ? equationTag : ''}<mtd>${expression}</mtd>${state?.options.leqno ? '' : equationTag}</mtr></mtable>`
-      : expression
-    return `<math xmlns="http://www.w3.org/1998/Math/MathML"${display ? ' display="block"' : ''}><semantics>${numbered}<annotation encoding="application/x-tex">${escapeHtml(source)}</annotation></semantics></math>`
+    const flush = display && state?.options.fleqn === true
+    const label = tagState.label
+    const markup = label === undefined ? expression : taggedDisplay(expression, label, state?.options.leqno === true, flush)
+    const layout = flush ? ' style="display:block;padding-inline-start:2em;text-align:start"'
+      : label === undefined ? '' : ' style="display:block;text-align:center"'
+    return `<math xmlns="http://www.w3.org/1998/Math/MathML"${display ? ' display="block"' : ''}${layout}><semantics>${markup}<annotation encoding="application/x-tex">${escapeHtml(source)}</annotation></semantics></math>`
   }
   catch (error) {
     if (state?.options.throwOnError) throw error

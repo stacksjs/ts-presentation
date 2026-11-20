@@ -87,6 +87,22 @@ test('renders spacing and expanded symbols in named TeX operators', () => {
   expect(markup).toContain('<mo>D_α</mo>')
 })
 
+test('renders formatted equation tags and applies them to the correct alignment row', () => {
+  const math = createMathRenderer({ throwOnError: true, leqno: true })
+  const equation = math(String.raw`\def\num{VII} \sum_n x_n \tag{\num\textbf{b}, $x^2$}`, true)
+  expect(equation).toContain('<mtext>(VII</mtext><mrow style="font-weight:bold"><mtext>b</mtext>')
+  expect(equation).toContain('<msup><mi>x</mi><mn>2</mn></msup>')
+  expect(equation).toContain('<mtext>)</mtext>')
+  expect(equation.indexOf('math-equation-number')).toBeLessThan(equation.indexOf('<munder>'))
+
+  const align = math(String.raw`\begin{align} a&=b\tag*{First}\\ c&=d\notag\\ e&=f\end{align}`, true)
+  expect(Array.from(align.matchAll(/class="math-equation-number">(.*?)<\/mtd>/g), match => match[1])).toEqual([
+    '<mtext>First</mtext>', '', '<mtext>(1)</mtext>',
+  ])
+  expect(() => math(String.raw`a\tag*{}\tag{b}`, true)).toThrow('Multiple tags')
+  expect(() => math(String.raw`a\tag{b}`, false)).toThrow('Equation tags require display math')
+})
+
 test('sets spacing and fences for explicit TeX atom classes', () => {
   const math = createMathRenderer({ throwOnError: true })
   const markup = math(String.raw`a\mathbin{*}b\mathrel{:}c\mathpunct{!}\mathopen{[}d\mathclose{]}\mathord{+}\mathinner{\frac e f}`, false)
@@ -321,6 +337,46 @@ test('keeps style-dependent math in a lap and uses text mode for plain laps', ()
 })
 
 const chrome = await findChrome()
+test.skipIf(!chrome)('keeps tagged displays centered and supports flush-left math in Chromium', async () => {
+  const options = [{}, { leqno: true }, { fleqn: true }, { fleqn: true }]
+  const body = options.map((settings, index) => {
+    const source = index === 2 ? String.raw`\dfrac{x}{y}=1` : String.raw`\dfrac{x}{y}=1\tag{Taylor $k$}`
+    return `<div>${createMathRenderer(settings)(source, true)}</div>`
+  }).join('')
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response(`<!doctype html><meta charset="utf-8"><main style="width:600px;font-size:30px">${body}</main>`, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    }),
+  })
+  const view = new Bun.WebView({ width: 720, height: 400, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await view.navigate(server.url.href)
+    const layout = await view.evaluate<{ shift: number, center: number, leftTag?: number, rightTag?: number }[]>(`[...document.querySelectorAll('main div')].map(example => {
+      const outer = example.getBoundingClientRect()
+      const formula = example.querySelector('mtable mtd:not(.math-equation-number,[aria-hidden]) > mrow, semantics > mrow').getBoundingClientRect()
+      const tag = example.querySelector('.math-equation-number')?.getBoundingClientRect()
+      return {
+        shift: formula.left - outer.left,
+        center: formula.left + formula.width / 2 - (outer.left + outer.width / 2),
+        leftTag: tag ? tag.left - outer.left : undefined,
+        rightTag: tag ? outer.right - tag.right : undefined,
+      }
+    })`)
+    expect(layout[0].center).toBeCloseTo(0)
+    expect(layout[0].rightTag).toBeCloseTo(0)
+    expect(layout[1].center).toBeCloseTo(0)
+    expect(layout[1].leftTag).toBeCloseTo(0)
+    expect(layout[2].shift).toBeCloseTo(60)
+    expect(layout[3].shift).toBeCloseTo(60)
+    expect(layout[3].rightTag).toBeCloseTo(0)
+  }
+  finally {
+    view.close()
+    server.stop(true)
+  }
+}, 45000)
+
 test.skipIf(!chrome)('lays out TeX atom gaps at the expected widths in Chromium', async () => {
   const formulas = [
     String.raw`a\mathbin{+}b`,

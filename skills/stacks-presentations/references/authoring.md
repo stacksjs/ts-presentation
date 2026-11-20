@@ -104,8 +104,11 @@ speaker notes. Each hook can be asynchronous.
   run the original TypeScript or edit its compiled JavaScript.
 - Wrap inline equations in `$...$` or `\(...\)`. Use `$$...$$` or
   `\[...\]` for display equations. Native MathML handles fractions, roots,
-  sums, matrices, math alphabets, and alignments. Use `\tag{1}` for a
-  custom equation number and `\newcommand` for a formula-local macro.
+  sums, matrices, math alphabets, and alignments. Use `\tag{A $n$}` for a
+  formatted equation label or `\tag*{A $n$}` for a label without parentheses.
+  Set `math.leqno: true` in deck frontmatter to put tags on the left, or
+  `math.fleqn: true` to align displays left with a 2 em inset. The same
+  options are available through `setup/katex.ts`.
 - Put ranges after a display opener, as in `$$ {hide|1|2|all}`. Each
   additional range uses one click. Add `{at: 3, startLine: 2, finally: 'all'}`
   after the ranges to control click and line numbering and the final state.
@@ -218,6 +221,8 @@ speaker notes. Each hook can be asynchronous.
 
 ```yaml
 math:
+  fleqn: true
+  leqno: true
   macros:
     '\norm': '\left\lVert #1 \right\rVert'
 ```

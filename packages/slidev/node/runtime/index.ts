@@ -82,10 +82,12 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   }
   const configuration = options.setup
   const mathOptions = deck.headmatter?.math ?? deck.headmatter?.katex
-  const trust = mathOptions && typeof mathOptions === 'object' && 'trust' in mathOptions ? mathOptions.trust : undefined
+  const mathConfig = mathOptions && typeof mathOptions === 'object' ? mathOptions as Record<string, unknown> : {}
   const renderMath = createMathRenderer({
     ...configuration?.katex,
-    trust: typeof trust === 'boolean' ? trust : configuration?.katex?.trust,
+    trust: typeof mathConfig.trust === 'boolean' ? mathConfig.trust : configuration?.katex?.trust,
+    leqno: typeof mathConfig.leqno === 'boolean' ? mathConfig.leqno : configuration?.katex?.leqno,
+    fleqn: typeof mathConfig.fleqn === 'boolean' ? mathConfig.fleqn : configuration?.katex?.fleqn,
     macros: { ...configuration?.katex?.macros, ...resolveMathMacros(deck.headmatter) },
   })
   const mermaidConfig = deck.headmatter?.mermaid

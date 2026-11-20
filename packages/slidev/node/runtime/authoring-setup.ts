@@ -16,6 +16,7 @@ export interface KatexOptions {
   errorColor?: string
   throwOnError?: boolean
   leqno?: boolean
+  fleqn?: boolean
   trust?: boolean | ((context: KatexTrustContext) => boolean)
 }
 
