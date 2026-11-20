@@ -52,6 +52,39 @@ async function storedParts(document: Blob): Promise<Map<string, Buffer>> {
   return parts
 }
 
+it.skipIf(!chrome)('exports Chromium linear-gradient boxes as editable PowerPoint fills', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-gradients-'))
+  const canvas = { width: 960, height: 540 }
+  try {
+    const entry = join(root, 'slides.md')
+    await Bun.write(entry, [
+      '# Gradient export', '',
+      '<section style="position:absolute;left:64px;top:169px;width:384px;height:96px;background:linear-gradient(90deg,#f00 15%,#0f0 50%,#00f 85%)">',
+      '<p>Editable caption</p>',
+      '</section>', '',
+      '<div style="position:absolute;left:64px;top:295px;width:384px;height:96px;background:linear-gradient(to right,#48c,transparent)"></div>',
+    ].join('\n'))
+    const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
+    const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
+    const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
+    if (status) throw new Error(stderr)
+    const frames: PowerPointFrame[] = []
+    await captureFrames({ root: join(root, 'dist'), executable: chrome!, scale: 1, withClicks: false, canvas, editable: true }, frame => { frames.push(frame) })
+    expect(frames[0].editable?.nodes.filter(node => node.kind === 'box' && node.gradient)).toHaveLength(2)
+    const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Gradient export' }))
+    const xml = parts.get('ppt/slides/slide1.xml')?.toString()
+    expect(xml?.match(/<a:gradFill rotWithShape="1">/g)).toHaveLength(2)
+    expect(xml).toContain('<a:gs pos="50000"><a:srgbClr val="00FF00">')
+    expect(xml).toContain('<a:gs pos="100000"><a:srgbClr val="4488CC"><a:alpha val="0"/>')
+    expect(xml).toContain('<a:lin ang="0" scaled="0"/>')
+    expect(xml).toContain('<a:t xml:space="preserve">Editable caption</a:t>')
+    expect([...parts.keys()].some(name => name.startsWith('ppt/media/'))).toBe(false)
+  }
+  finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}, 45_000)
+
 it.skipIf(!chrome)('keeps original images editable and crops them in DrawingML across reveals', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-original-pictures-'))
   const canvas = { width: 960, height: 540 }

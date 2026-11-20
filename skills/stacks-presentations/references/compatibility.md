@@ -42,7 +42,7 @@ in a new ts-presentation project.
 | KaTeX macro and color settings | Deck-scoped `globalGroup`, per-formula `maxExpand` including eager definitions, and two-argument `\color` via `colorIsTextColor` |
 | KaTeX sizing settings | `maxSize` for explicit dimensions and `minRuleThickness` for fraction bars, array rules, box borders, and overlines or underlines |
 | KaTeX text-mode boxes | Phantom space, selective height and depth removal, raised boxes and rules, and escaped verbatim text inside `\text{…}` |
-| PowerPoint export | Image slides or editable text and boxes with separate artwork |
+| PowerPoint export | Image slides or editable text and boxes, including supported linear-gradient fills, with separate artwork |
 | First-party diagram authoring | YAML `charts` fences through `ts-charts` for flowcharts, sequence, state, class, ER, pie, timeline, journey, Gantt, Git history, XY charts, and Sankey diagrams |
 | Draggable elements | Inline directives, drag and arrow components, frontmatter positions, scaled editing, and local Markdown saves |
 | Imported Slidev diagrams | Compatibility fences translate the supported syntax to `ts-charts` input |

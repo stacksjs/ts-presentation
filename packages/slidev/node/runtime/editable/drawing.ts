@@ -1,5 +1,5 @@
 import { escapeHtml } from '../html.ts'
-import type { Border, IrBox, IrImage, IrRun, IrText, Rect, Rgba, SlideIr } from './ir.ts'
+import type { Border, IrBox, IrImage, IrRun, IrText, LinearGradient, Rect, Rgba, SlideIr } from './ir.ts'
 import { EMU_PER_PX, PT_PER_PX } from './ir.ts'
 
 export function xml(text: string): string {
@@ -19,6 +19,13 @@ function rgb(color: Rgba): string {
 
 function fill(color?: Rgba): string {
   return color ? `<a:solidFill>${rgb(color)}</a:solidFill>` : '<a:noFill/>'
+}
+
+function gradientFill(gradient: LinearGradient): string {
+  const stops = gradient.stops.map(({ position, color }) =>
+    `<a:gs pos="${Math.round(position * 100000)}">${rgb(color)}</a:gs>`).join('')
+  const angle = Math.round(gradient.angle * 60000) % 21600000
+  return `<a:gradFill rotWithShape="1"><a:gsLst>${stops}</a:gsLst><a:lin ang="${angle}" scaled="0"/></a:gradFill>`
 }
 
 function line(border?: Border): string {
@@ -49,10 +56,11 @@ function drawBox(box: IrBox, nextId: () => number): string {
     border?.width === first.width && border.style === first.style && rgb(border.color) === rgb(first.color))
   const { x, y, w, h } = box.rect
   let result = ''
-  if (box.fill || uniform || box.shadow) {
+  if (box.fill || box.gradient || uniform || box.shadow) {
     const shadow = box.shadow
     const effects = shadow ? `<a:effectLst><a:outerShdw blurRad="${Math.round(shadow.blur * EMU_PER_PX)}" dist="${Math.round(shadow.offset * EMU_PER_PX)}" dir="${Math.round((shadow.angle + 360) % 360 * 60000)}">${rgb(shadow.color)}</a:outerShdw></a:effectLst>` : ''
-    result += shape(nextId(), 'Box', transform(box.rect) + rectShape(box.radius ?? 0, box.rect) + fill(box.fill) + line(uniform ? first : undefined) + effects)
+    const paint = box.gradient ? gradientFill(box.gradient) : fill(box.fill)
+    result += shape(nextId(), 'Box', transform(box.rect) + rectShape(box.radius ?? 0, box.rect) + paint + line(uniform ? first : undefined) + effects)
   }
   if (!uniform) {
     borders.forEach((border, side) => {

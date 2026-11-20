@@ -49,9 +49,10 @@ and slide links. It includes each reveal by default. Pass `--without-clicks` for
 frame per slide, or `--with-clicks` to include reveals in a PNG export.
 
 `pptx-editable` rebuilds text, backgrounds, and boxes as PowerPoint
-objects. Diagrams, formulas, and other browser artwork are embedded
-as separate pictures. Eligible deck-local PNG and JPEG images retain their
-source bytes and slide-edge crops. Browser capture preserves effects like
+objects, including supported CSS linear-gradient fills. Diagrams, formulas,
+and other browser artwork are embedded as separate pictures. Eligible
+deck-local PNG and JPEG images retain their source bytes and slide-edge
+crops. Browser capture preserves effects like
 image opacity and rotation. The exporter reports slides that require a
 full-frame image. It references fonts by name, so recipients may see font
 substitutions.

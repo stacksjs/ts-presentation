@@ -6,6 +6,7 @@ import type {
   IrNode,
   IrRun,
   IrText,
+  LinearGradient,
   RasterReason,
   RawNode,
   RawSlide,
@@ -15,6 +16,7 @@ import type {
   SlideIr,
 } from './ir.ts'
 import { isVisible, parseColor, withOpacity } from './color.ts'
+import { linearBackground } from './gradient.ts'
 
 /**
  * `RawSnapshot` to `SlideIr`: every judgement in the exporter, in one pure module with
@@ -397,6 +399,7 @@ function buildSlideIr(
   let rasterArea = 0
   const pageRects = new Map<number, Rect | undefined>()
   const boxed = new Set<number>()
+  const gradients = new Map<number, LinearGradient | undefined>()
   /** Paint layer per emitted node, parallel to `nodes`. */
   const layers: { tier: number, z: number }[] = []
   /** Pseudo-element id to the id of the element it belongs to. */
@@ -469,9 +472,26 @@ function buildSlideIr(
     const style = styleOf(node)
     if (!style)
       return false
-    if (isVisible(withOpacity(parseColor(style.backgroundColor, unparsed), node.opacity)))
+    if (gradientOf(node, style) || isVisible(withOpacity(parseColor(style.backgroundColor, unparsed), node.opacity)))
       return true
     return (['Top', 'Right', 'Bottom', 'Left'] as const).some(side => borderOf(style, side, unparsed))
+  }
+
+  function gradientOf(node: RawNode, style: RawStyle): LinearGradient | undefined {
+    if (!style.backgroundImage.startsWith('linear-gradient(')) return
+    if (!gradients.has(node.id)) {
+      const { x, y, w, h } = node.rect
+      // Clipping a fragment to a smaller shape would shift its gradient stops.
+      const whole = !node.fragments?.length && x >= 0 && y >= 0 && x + w <= size.w && y + h <= size.h
+      gradients.set(node.id, whole ? linearBackground(style, node.rect, node.opacity, node.paintScale) : undefined)
+    }
+    return gradients.get(node.id)
+  }
+
+  function rasterReason(node: RawNode, style: RawStyle | undefined): RasterReason | undefined {
+    const reason = rasterReasonFor(node, style)
+    if (reason === 'background-image' && style && gradientOf(node, style)) return
+    return reason
   }
 
   function isInline(node: RawNode): boolean {
@@ -610,6 +630,7 @@ function buildSlideIr(
       return
     boxed.add(node.id)
     const fill = withOpacity(parseColor(style.backgroundColor, unparsed), node.opacity)
+    const gradient = gradientOf(node, style)
     const borders: [Border?, Border?, Border?, Border?] = [
       borderOf(style, 'Top', unparsed),
       borderOf(style, 'Right', unparsed),
@@ -620,7 +641,7 @@ function buildSlideIr(
     // Chromium keeps `border-radius` percentages in the computed value, so a
     // basis is needed: `border-radius: 50%` on a 200px box is 100px, not 50px.
     const radius = parseLength(style.borderTopLeftRadius, Math.min(node.rect.w, node.rect.h))
-    if (!isVisible(fill) && !hasBorder)
+    if (!gradient && !isVisible(fill) && !hasBorder)
       return
     const shadow = parseShadow(style.boxShadow, unparsed)
     // One shape per line fragment for a wrapped inline element, as the browser
@@ -633,7 +654,9 @@ function buildSlideIr(
       if (!rect)
         continue
       const box: IrBox = { kind: 'box', sourceId: node.id, rect }
-      if (isVisible(fill))
+      if (gradient)
+        box.gradient = gradient
+      else if (isVisible(fill))
         box.fill = fill
       if (hasBorder)
         box.borders = borders
@@ -651,7 +674,7 @@ function buildSlideIr(
       const style = styleOf(node)
       if (!style)
         return
-      const reason = rasterReasonFor(node, style)
+      const reason = rasterReason(node, style)
       if (reason && emitRaster(node, reason))
         return
       emitBox(node, style)
@@ -680,7 +703,7 @@ function buildSlideIr(
     }
 
     const style = styleOf(node)
-    const reason = rasterReasonFor(node, style)
+    const reason = rasterReason(node, style)
     // Treat the element as rasterized only when a picture was actually placed:
     // a zero-sized wrapper has no box of its own while its positioned
     // descendants do, and dropping the subtree would lose them.
@@ -813,7 +836,7 @@ function buildSlideIr(
       return
     }
     const style = styleOf(node)
-    const reason = rasterReasonFor(node, style)
+    const reason = rasterReason(node, style)
     // An inline <svg> icon still becomes a picture, but only if it has a box;
     // otherwise its subtree is walked as usual rather than dropped.
     if (reason && emitRaster(node, reason)) {

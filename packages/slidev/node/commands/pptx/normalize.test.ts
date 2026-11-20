@@ -813,6 +813,58 @@ describe('a picture with content over it is captured in isolation', () => {
   })
 })
 
+describe('editable gradient fills', () => {
+  it('preserves the angle, interpolated stops and hard stops of a CSS gradient', () => {
+    const gradient = style({
+      backgroundImage: 'linear-gradient(to bottom right, rgb(240, 0, 0) -20%, rgb(0, 0, 240) 20%, rgb(0, 100, 0), rgb(0, 0, 0) 80% 100%)',
+    })
+    const result = run([el(0, -1, 'DIV', 1, { rect: { x: 20, y: 30, w: 200, h: 100 } }), text(1, 0, 'Caption')], [BASE_STYLE, gradient])
+    const [box] = boxes(result.slides[0].nodes)
+    expect(box.gradient?.angle).toBeCloseTo(63.4349488)
+    expect(box.gradient?.stops.map(({ position }) => position)).toEqual([0, 0.2, 0.5, 0.8, 1])
+    expect(box.gradient?.stops[0].color).toEqual({ r: 120, g: 0, b: 120, a: 1 })
+    expect(texts(result.slides[0].nodes).map(t => t.runs[0].text)).toEqual(['Caption'])
+    expect(result.rasterRequests).toHaveLength(0)
+  })
+
+  it('uses the measured scale for pixel stops and preserves a fade to transparent', () => {
+    const gradient = style({ backgroundImage: 'linear-gradient(90deg, rgb(40, 80, 120) 20px, transparent)' })
+    const result = run([el(0, -1, 'DIV', 1, { paintScale: 2, opacity: 0.5 })], [BASE_STYLE, gradient])
+    const [box] = boxes(result.slides[0].nodes)
+    expect(box.gradient?.stops).toEqual([
+      { position: 0, color: { r: 40, g: 80, b: 120, a: 0.5 } },
+      { position: 0.4, color: { r: 40, g: 80, b: 120, a: 0.5 } },
+      { position: 1, color: { r: 40, g: 80, b: 120, a: 0 } },
+    ])
+  })
+
+  it('combines translucent stops with the box’s opaque background color', () => {
+    const gradient = style({
+      backgroundImage: 'linear-gradient(rgba(200, 40, 100, 0.5), rgba(100, 120, 80, 0.25))',
+      backgroundColor: 'rgb(20, 40, 180)',
+    })
+    const result = run([el(0, -1, 'DIV', 1)], [BASE_STYLE, gradient])
+    expect(boxes(result.slides[0].nodes)[0].gradient?.stops).toEqual([
+      { position: 0, color: { r: 110, g: 40, b: 140, a: 1 } },
+      { position: 1, color: { r: 40, g: 60, b: 155, a: 1 } },
+    ])
+    expect(result.rasterRequests).toHaveLength(0)
+  })
+
+  it('keeps raster capture for layers, custom sizes, and clipped gradient boxes', () => {
+    const image = 'linear-gradient(rgb(255, 0, 0), rgb(0, 0, 255))'
+    const styling = [BASE_STYLE, style({ backgroundImage: image }), style({ backgroundImage: image, backgroundSize: '50% 50%' }),
+      style({ backgroundImage: image + ', url(cover.png)' })]
+    const result = run([
+      el(0, -1, 'DIV', 1, { rect: { ...RECT, x: -10 } }),
+      el(1, -1, 'DIV', 2),
+      el(2, -1, 'DIV', 3),
+    ], styling)
+    expect(result.rasterRequests.map(request => request.sourceId)).toEqual([0, 1, 2])
+    expect(boxes(result.slides[0].nodes)).toHaveLength(0)
+  })
+})
+
 describe('only backdrops need their descendants hidden', () => {
   it('isolates a backdrop but not a leaf picture', () => {
     const backdrop = run(

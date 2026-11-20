@@ -26,6 +26,11 @@ export function collectSnapshot(options: {
     'color',
     'backgroundColor',
     'backgroundImage',
+    'backgroundSize',
+    'backgroundPosition',
+    'backgroundOrigin',
+    'backgroundAttachment',
+    'backgroundBlendMode',
     'fontFamily',
     'fontSize',
     'fontWeight',
@@ -407,6 +412,8 @@ export function collectSnapshot(options: {
       }
       if (effectiveOpacity < 1)
         record.opacity = effectiveOpacity
+      if (scale !== 1 && computed.backgroundImage.startsWith('linear-gradient('))
+        record.paintScale = scale
       // An inline box that wraps paints once per line, so backgrounds belong to
       // the fragments. Only `inline` proper: an inline-block has one rect.
       if (computed.display === 'inline') {

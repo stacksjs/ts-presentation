@@ -39,6 +39,11 @@ export interface RawStyle {
   color: string
   backgroundColor: string
   backgroundImage: string
+  backgroundSize?: string
+  backgroundPosition?: string
+  backgroundOrigin?: string
+  backgroundAttachment?: string
+  backgroundBlendMode?: string
   fontFamily: string
   fontSize: string
   fontWeight: string
@@ -114,6 +119,8 @@ export interface RawNode {
   fromShadowRoot?: boolean
   /** Opacity compounded from every ancestor, present only when below 1. DrawingML has no group opacity, so a wrapper's transparency is folded into each descendant's colors. */
   opacity?: number
+  /** Transform scale applied to gradient stops expressed in CSS pixels. */
+  paintScale?: number
   /** A `::marker` list bullet, which is a pseudo-element and has no text node. */
   marker?: string
   /** Page coordinates. A `::before` or `::after` has no element of its own, so a screenshot clips the page instead of targeting a locator. */
@@ -160,6 +167,12 @@ export interface Border {
   style: 'solid' | 'dashed' | 'dotted'
 }
 
+export interface LinearGradient {
+  /** Clockwise degrees from the positive x axis in slide coordinates. */
+  angle: number
+  stops: { position: number, color: Rgba }[]
+}
+
 interface IrBase {
   rect: Rect
   /** The `RawNode.id` this came from. Only for diagnostics. */
@@ -169,6 +182,7 @@ interface IrBase {
 export interface IrBox extends IrBase {
   kind: 'box'
   fill?: Rgba
+  gradient?: LinearGradient
   /**
    * Top, right, bottom, left; a side is undefined when it has no visible border.
    * `pptxgenjs` gives a shape a single uniform `line`, so the builder emits
