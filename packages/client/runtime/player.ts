@@ -11,7 +11,8 @@ import type { DrawingClientConfig } from '../../types/src/drawings.ts'
 import { setupLiveCode } from './live-code.ts'
 import { createSlideMedia } from './media.ts'
 import type { ClickBounds, SlideMode, SlidePosition, SlideRoute } from './navigation.ts'
-import { clickBounds, createNavigationContext, nextPosition, previousPosition, readSlideHash, slideHash, slidePosition } from './navigation.ts'
+import { clickBounds, createNavigationContext, nextPosition, previousPosition, slidePosition } from './navigation.ts'
+import { deckLocation, readDeckLocation, resolveRouterMode } from './routing.ts'
 import { setupOverviewGrid } from './overview.ts'
 import { setupPresenter } from './presenter.ts'
 import { collectReveals, prepareSwitchPrint, showReveals } from './reveals.ts'
@@ -36,15 +37,17 @@ const imageView = document.querySelector<HTMLDialogElement>('#image-view')!
 const detail = imageView.querySelector('img')!
 const timer = document.querySelector<HTMLElement>('#presenter-time')!
 const routes: SlideRoute[] = JSON.parse(document.querySelector('#presentation-navigation')!.textContent ?? '[]')
+const aliases = new Map(routes.flatMap(route => route.alias ? [[route.alias, route.no]] : []))
+const routing = { base: document.documentElement.dataset.presentationBase ?? '/', mode: resolveRouterMode(document.documentElement.dataset.routerMode) }
 const params = new URLSearchParams(location.search)
-const isCapture = params.has('capture')
-const captureSteps = params.has('steps')
-const isOverview = !isCapture && params.has('overview')
-const isPreview = params.has('preview') || isOverview
-const isPresenter = !isPreview && !isCapture && params.has('presenter')
+const initialLocation = readDeckLocation(new URL(location.href), routing, aliases)
+const isCapture = initialLocation.page === 'export'
+const captureSteps = params.has('steps') || (isCapture && !params.has('capture') && initialLocation.click !== undefined)
+const isOverview = initialLocation.page === 'overview'
+const isPreview = initialLocation.page === 'preview' || isOverview
+const isPresenter = initialLocation.page === 'presenter'
 const opener: Window | null = isPresenter ? window.opener : null
 const messageOrigin = location.protocol === 'file:' ? '*' : location.origin
-const aliases = new Map(routes.flatMap(route => route.alias ? [[route.alias, route.no]] : []))
 const disclosures: HTMLDetailsElement[][] = []
 const screenshots: HTMLImageElement[][] = []
 const noteSteps: HTMLElement[][] = []
@@ -55,8 +58,24 @@ const bounds: ClickBounds[] = []
 const isLive = !isCapture && document.documentElement.dataset.liveCompile === 'true'
 const slideMode = (): SlideMode => isOverview ? 'overview' : isPreview ? 'preview' : isCapture ? 'export' : isPresenter || !notesPanel.hidden ? 'presenter' : 'slide'
 const conditions = createSlideConditions(slideMode, refreshConditions)
+const currentUrl = () => new URL(location.href)
+const audienceUrl = (route: SlideRoute, click?: number) => deckLocation(currentUrl(), routing, 'slide', route, click)
+
+function writePosition(slide: number, click: number, replace: boolean): void {
+  if (routing.mode === 'memory') return
+  const page = isCapture ? 'export' : isOverview ? 'overview' : isPreview ? 'preview' : isPresenter ? 'presenter' : 'slide'
+  const url = deckLocation(currentUrl(), routing, page, routes[slide - 1], click)
+  if (replace) history.replaceState(null, '', url)
+  else history.pushState(null, '', url)
+}
 
 function mountSlide(article: HTMLElement, index: number): void {
+  if (!isCapture && (routing.mode === 'hash' || routing.mode === 'history')) {
+    for (const link of article.querySelectorAll<HTMLElement>('a[data-slide-link]')) {
+      const target = routes[Number(link.dataset.slideLink) - 1]
+      if (target) link.setAttribute('href', audienceUrl(target, Number(link.dataset.slideClick) || undefined).href)
+    }
+  }
   conditions.update(article)
   reveals[index] = collectReveals(article, routes[index].frontmatter.clickAnimation || defaultClickAnimation, conditions.update)
   disclosures[index] = [...article.querySelectorAll('details')]
@@ -109,7 +128,7 @@ const drags = !isCapture && !isPreview ? setupDrags(stage, (slide, presentationD
 const media = createSlideMedia(!isCapture && !isPreview)
 if (isCapture) window.presentationMediaReady = media.ready
 const overviewGrid = isOverview ? setupOverviewGrid(stage, {
-  routes, articles, notes, bounds, width: canvasWidth, height: canvasHeight, origin: messageOrigin,
+  routes, articles, notes, bounds, width: canvasWidth, height: canvasHeight, origin: messageOrigin, audienceUrl,
   render(index, step, nearViewport) {
     showReveals(reveals[index], step, false, 1)
     if (nearViewport) media.show(articles[index])
@@ -121,11 +140,7 @@ function show(number: number, step?: number, writeHistory = true, sync = true, r
   if (!overviewGrid && !refresh && selected === current && nextStep === click && !articles[current - 1].hidden) return
   const slideChanged = selected !== current
   const animate = !isCapture && !isPreview && selected === current && nextStep !== click
-  if (writeHistory && (selected !== current || nextStep !== click)) {
-    const hash = slideHash(routes[selected - 1], nextStep)
-    if (selected === current) history.replaceState(null, '', hash)
-    else history.pushState(null, '', hash)
-  }
+  if (writeHistory && (selected !== current || nextStep !== click)) writePosition(selected, nextStep, selected === current)
   if (overviewGrid) {
     current = selected
     click = nextStep
@@ -194,7 +209,11 @@ function readLocation(): void {
   const id = location.hash.slice(1)
   const key = id.replace(/^\//, '').split('/')[0]
   if (id && !aliases.has(key) && !/^(?:slide-)?\d+$/.test(key) && document.getElementById(id) && !articles[current - 1].hidden) return
-  const target = readSlideHash(location.hash, aliases)
+  const target = readDeckLocation(currentUrl(), routing, aliases)
+  if (routing.mode === 'hash' && target.page !== initialLocation.page) {
+    location.reload()
+    return
+  }
   const click = isCapture && !captureSteps ? Number.POSITIVE_INFINITY : target.click
   show(target.slide, click, false)
 }
@@ -221,7 +240,8 @@ function togglePresenter(): void {
   document.body.classList.toggle('presenting', !notesPanel.hidden)
   presenter.setAttribute('aria-pressed', String(!notesPanel.hidden))
   refreshConditions()
-  if (!notesPanel.hidden) presenterControls ??= setupPresenter(routes, bounds, step => show(current, step))
+  if (!notesPanel.hidden) presenterControls ??= setupPresenter(routes, bounds, step => show(current, step), (route, click) =>
+    deckLocation(currentUrl(), routing, 'preview', route, click))
   presenterControls?.setActive(!notesPanel.hidden)
   presenterControls?.update(position())
   drawing?.refresh()
@@ -235,10 +255,8 @@ function openPresenter(): void {
     togglePresenter()
     return
   }
-  const url = new URL(location.href)
+  const url = deckLocation(currentUrl(), routing, 'presenter', routes[current - 1], click)
   url.searchParams.delete('editor')
-  url.searchParams.set('presenter', '1')
-  url.hash = slideHash(routes[current - 1], click)
   popup = window.open(url, 'ts-presentation-presenter', 'popup,width=1130,height=750')
   if (!popup) togglePresenter()
 }
@@ -248,10 +266,8 @@ function sendOverviewPosition(): void {
 }
 
 function openOverview(): void {
-  const url = new URL(location.href)
-  for (const name of ['editor', 'presenter', 'resume']) url.searchParams.delete(name)
-  url.searchParams.set('overview', '1')
-  url.hash = slideHash(routes[current - 1])
+  const url = deckLocation(currentUrl(), routing, 'overview', routes[current - 1])
+  for (const name of ['editor', 'resume']) url.searchParams.delete(name)
   overviewLink.href = url.href
   if (!overviewFrame.hasAttribute('src')) overviewFrame.src = url.href
   overview.showModal()
@@ -369,9 +385,24 @@ stage.addEventListener('click', event => zoom(event.target))
 if (!isCapture && !isPreview) setupDiagramActions(stage)
 stage.addEventListener('click', (event) => {
   if (isCapture || isPreview || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
-  const link = event.target instanceof Element ? event.target.closest<HTMLAnchorElement | SVGAElement>('a[data-slide-link]') : null
+  const link = event.target instanceof Element ? event.target.closest<HTMLAnchorElement | SVGAElement>('a') : null
   const target = link?.getAttribute('target')
   if (!link || (target && target !== '_self') || link.hasAttribute('download')) return
+  if (!link.hasAttribute('data-slide-link')) {
+    const href = link.getAttribute('href')
+    if (routing.mode !== 'history' || !href?.startsWith('#') || href.length === 1) return
+    let id: string
+    try { id = decodeURIComponent(href.slice(1)) }
+    catch { return }
+    const anchor = articles[current - 1].querySelector(`#${CSS.escape(id)}`)
+    if (!anchor) return
+    const url = currentUrl()
+    url.hash = href
+    event.preventDefault()
+    if (url.href !== location.href) history.pushState(null, '', url)
+    anchor.scrollIntoView()
+    return
+  }
   const slide = Number(link.dataset.slideLink)
   const click = link.dataset.slideClick === undefined ? undefined : Number(link.dataset.slideClick)
   if (!Number.isInteger(slide) || slide < 1 || slide > articles.length || (click !== undefined && !Number.isSafeInteger(click))) return
@@ -503,7 +534,7 @@ function refreshConditions(): void {
   drags?.updateElements()
   const previousClick = click
   show(current, click, false, false, true)
-  if (click !== previousClick) history.replaceState(null, '', slideHash(routes[current - 1], click))
+  if (click !== previousClick) writePosition(current, click, true)
 }
 
 if (overviewGrid) {
@@ -594,8 +625,8 @@ function applyLiveDeck(deck: LiveDeck, before: LiveManifest): boolean {
   current = Math.min(current, length)
   const selected = previous.alias ? aliases.get(previous.alias) ?? current : current
   show(selected, previousClick, false, false, true)
-  if (location.hash && (selected !== previous.no || click !== previousClick || previous.alias !== routes[selected - 1].alias))
-    history.replaceState(null, '', slideHash(routes[selected - 1], click))
+  if ((location.hash || routing.mode === 'history') && (selected !== previous.no || click !== previousClick || previous.alias !== routes[selected - 1].alias))
+    writePosition(selected, click, true)
   return true
 }
 

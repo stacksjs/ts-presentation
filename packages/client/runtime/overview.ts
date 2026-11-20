@@ -1,5 +1,4 @@
 import type { ClickBounds, SlideRoute } from './navigation.ts'
-import { slideHash } from './navigation.ts'
 
 interface Card {
   container: HTMLElement
@@ -25,14 +24,13 @@ interface OverviewOptions {
   width: number
   height: number
   origin: string
+  audienceUrl(route: SlideRoute): URL
   render(index: number, step: number, nearViewport: boolean): void
 }
 
 export function setupOverviewGrid(stage: HTMLElement, options: OverviewOptions): OverviewGrid {
   const { routes, articles, notes, bounds, width, height, origin } = options
   const embedded = parent !== window
-  const audienceUrl = new URL(location.href)
-  audienceUrl.searchParams.delete('overview')
   const cards: Card[] = []
   const indexes = new WeakMap<Element, number>()
   const visible = new Set<HTMLElement>()
@@ -143,8 +141,7 @@ export function setupOverviewGrid(stage: HTMLElement, options: OverviewOptions):
     for (const [index, article] of articles.entries()) {
       const card = cards[index] ?? (cards[index] = createCard(index))
       const route = routes[index]
-      audienceUrl.hash = slideHash(route)
-      card.link.href = audienceUrl.href
+      card.link.href = options.audienceUrl(route).href
       const label = `${route.no}. ${route.title}`
       if (card.link.textContent !== label) card.link.textContent = label
       if (article.parentElement !== card.viewport) card.viewport.replaceChildren(article)

@@ -19,11 +19,14 @@ import { liveBlock } from './live-markup.ts'
 import { createMathRenderer, resolveMathMacros } from './math.ts'
 import type { SlideRoute } from '../../../client/runtime/navigation.ts'
 import { slideAlias } from '../../../client/runtime/navigation.ts'
+import type { RouterMode, Routing } from '../../../client/runtime/routing.ts'
+import { normalizeBasePath, resolveRouterMode } from '../../../client/runtime/routing.ts'
 import { createTocTree } from '../../../client/runtime/toc.ts'
 import type { Deck, PreparserContext, Slide } from '../../../parser/src/deck.ts'
 import { plainMarkdown } from '../../../parser/src/plain-markdown.ts'
 import { createSlideDestinations, firstSlideHeading, prepareSlideHtml, titleLabel } from './slide-html.ts'
 import { prepareMarkdown, renderAlerts, splitSlots } from './syntax.ts'
+import { prefixMarkupUrls } from './base-assets.ts'
 import type { WritableSnippet } from './snippet-write.ts'
 import { snippetRevision } from './snippet-write.ts'
 
@@ -40,6 +43,8 @@ export type { Deck, PreparserContext, PreparserExtension, PreparserSetup, Slide 
 const escapedCode = /<pre><code(?: class="language-([\w+#.-]+)")?>([\s\S]*?)<\/code><\/pre>/g
 
 export interface RenderOptions {
+  base?: string
+  routerMode?: RouterMode
   liveCompile?: boolean
   mcpNavigation?: boolean
   mode?: PreparserContext['mode']
@@ -70,7 +75,14 @@ export async function renderDeck(deck: Deck, options?: RenderOptions): Promise<s
   return (await renderPresentation(deck, options)).html
 }
 
-export async function renderPresentation(deck: Deck, options: RenderOptions = {}): Promise<{ html: string, routes: SlideRoute[], live?: LiveDeck }> {
+export async function renderPresentation(deck: Deck, options: RenderOptions = {}): Promise<{ html: string, routes: SlideRoute[], routing: Routing, live?: LiveDeck }> {
+  const nested = deck.headmatter?.config as Record<string, unknown> | undefined
+  const routing: Routing = options.mode === 'export' ? { base: '/', mode: 'legacy' } : {
+    base: normalizeBasePath(options.base),
+    mode: resolveRouterMode(options.routerMode ?? deck.headmatter?.routerMode ?? nested?.routerMode),
+  }
+  const { base, mode: routerMode } = routing
+  const baseMarkup = (markup: string) => prefixMarkupUrls(markup, base)
   const { width, height } = resolveCanvas(deck.headmatter)
   const drawSettings = resolveDrawings(deck.headmatter, options.extensions?.theme.defaults?.drawings)
   const drawings: DrawingClientConfig = {
@@ -105,7 +117,6 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   const diagramFences = new Map<string, { type: 'mermaid' | 'plantuml', options: MermaidOptions }>()
   const codeFences = new Map<string, CodeBlockInfo>()
   const highlight = createCodeHighlighter()
-  const nested = deck.headmatter?.config as Record<string, unknown> | undefined
   const fontMarkup = deckFontMarkup(options.extensions?.theme.defaults?.fonts, nested?.fonts, deck.headmatter?.fonts)
   const color = deck.headmatter?.colorSchema ?? nested?.colorSchema
   const socialTheme = color === 'light' || (color !== 'dark' && options.extensions?.theme.name === 'paper') ? 'light' : 'dark'
@@ -261,8 +272,8 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     const magic = (slide.frontmatter?.magicMoveCopy ?? deck.headmatter?.magicMoveCopy ?? settings?.magicMoveCopy) === false ? ' data-magic-copy-disabled' : ''
     const builtin = builtInBody === undefined ? '' : ' data-builtin-layout'
     return {
-      html: `<article id="slide-${index + 1}" class="slide slidev-layout layout-${escapeHtml(layout)} ${escapeHtml(className)}" aria-label="${escapeHtml(title)}"${route}${motion}${copy}${magic}${builtin}>${prepared.html}${overlay}</article>`,
-      css: prepared.css,
+      html: `<article id="slide-${index + 1}" class="slide slidev-layout layout-${escapeHtml(layout)} ${escapeHtml(className)}" aria-label="${escapeHtml(title)}"${route}${motion}${copy}${magic}${builtin}>${baseMarkup(prepared.html)}${overlay}</article>`,
+      css: baseMarkup(prepared.css),
     }
   }))
 
@@ -273,22 +284,22 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     : undefined
   const notes = activeSlides.map((slide) => {
     const segments = (slide.notes || 'No speaker notes for this slide.').split(/^\[click\]\s*$/m)
-    return `<section hidden${slide.notes ? ' data-has-notes="true"' : ''}>${segments.map((text, index) => `<div data-note-step="${index}">${markdown(annotations ? applyNotesAutoRuby(text, annotations) : text)}</div>`).join('')}</section>`
+    return `<section hidden${slide.notes ? ' data-has-notes="true"' : ''}>${segments.map((text, index) => `<div data-note-step="${index}">${baseMarkup(markdown(annotations ? applyNotesAutoRuby(text, annotations) : text))}</div>`).join('')}</section>`
   })
 
   const preset = deck.headmatter?.clickAnimation
   const clicksPreset = typeof preset === 'string' ? escapeHtml(preset) : ''
   const navigation = JSON.stringify(routes).replaceAll('<', '\\u003c')
   const drawingConfig = JSON.stringify(drawings).replaceAll('<', '\\u003c')
-  const globalTop = activeExtensions.map(extension => extension.globalTop || '').join('')
-  const globalBottom = activeExtensions.map(extension => extension.globalBottom || '').join('')
+  const globalTop = baseMarkup(activeExtensions.map(extension => extension.globalTop || '').join(''))
+  const globalBottom = baseMarkup(activeExtensions.map(extension => extension.globalBottom || '').join(''))
   const mcpNavigation = options.mcpNavigation && deck.headmatter?.mcp !== false
   let live: LiveDeck | undefined
   let liveData = ''
   if (options.liveCompile) {
     const drawingOptions = [drawings.enabled, drawings.presenterOnly, drawings.syncAll, drawings.persist]
     const theme = extensions?.theme.name
-    const frame = snippetRevision(JSON.stringify([width, height, clicksPreset, drawingOptions, theme, colorSchema, codeTheme, fontMarkup, mcpNavigation, extensions?.styles, extensions?.client, globalTop, globalBottom]))
+    const frame = snippetRevision(JSON.stringify([routing, width, height, clicksPreset, drawingOptions, theme, colorSchema, codeTheme, fontMarkup, mcpNavigation, extensions?.styles, extensions?.client, globalTop, globalBottom]))
     const parts = slides.map((slide, index) => {
       const source = options.sourceBindings?.get(activeSlides[index])
       const part = { ...slide, notes: notes[index], route: routes[index], sourceToken: source?.token }
@@ -301,6 +312,8 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     liveData = `<script id="presentation-live" type="application/json">${JSON.stringify({ revision, frame, deckCss, revisions })}</script>`
   }
   const document = await renderPresentationShell({
+    routeAttributes: base !== '/' || routerMode !== 'legacy' ? ` data-presentation-base="${escapeHtml(base)}" data-router-mode="${routerMode}"` : '',
+    baseTag: base !== '/' || routerMode === 'history' ? `<base href="${escapeHtml(base)}">` : '',
     clickAnimation: clicksPreset ? ` data-click-animation="${clicksPreset}"` : '',
     width,
     height,
@@ -327,5 +340,5 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     drawHidden: !drawings.enabled || drawings.presenterOnly ? ' hidden' : '',
     liveStatus: options.liveCompile ? '<span id="live-update-status" role="status" hidden></span>' : '',
   })
-  return { html: document, routes, live }
+  return { html: document, routes, routing, live }
 }

@@ -55,6 +55,19 @@ The `export` mapping accepts `format`, `range`, and `withClicks`.
 PNG and PowerPoint can also set `scale`. CLI options override the deck defaults. With PDF
 `--with-clicks`, each selected reveal becomes a page with selectable text.
 
+## Host under a subpath
+
+```sh
+bun src/cli.ts build slides.md --base /talks/demo/ --router-mode hash
+```
+
+Mount the build output at `/talks/demo/`. Use the same `--base` with
+`dev` to preview it locally. Choose `hash` for static hosts, or
+`history` for clean slide URLs when the host can serve `index.html`
+for slide routes. Set `routerMode` in the deck headmatter or override it
+with `--router-mode`. Deck resources such as `/image.png` resolve under
+the configured base.
+
 ## Write a deck
 
 Run `bun src/cli.ts dev path/to/slides.md`. Put a blank line after

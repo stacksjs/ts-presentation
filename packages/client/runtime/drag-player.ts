@@ -240,7 +240,7 @@ export function setupDrags(stage: HTMLElement, onChange: (slide: HTMLElement, ed
       if (!position || !revision) return
       if (selected?.element === element) status.textContent = 'Saving…'
       try {
-        const response = await fetch('/__presentation/drag', {
+        const response = await fetch('./__presentation/drag', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ token, revision, position }),
         })

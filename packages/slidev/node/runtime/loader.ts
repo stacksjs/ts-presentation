@@ -27,6 +27,8 @@ import { bindSlideSource } from './side-editor-source.ts'
 import type { WritableSnippet } from './snippet-write.ts'
 import { snippetRevision, snippetToken } from './snippet-write.ts'
 import { maxCodeLength } from './compile-code.ts'
+import { prefixCssUrls } from './base-assets.ts'
+import type { Routing } from '../../../client/runtime/routing.ts'
 import { expandSnippets } from './snippets.ts'
 
 export interface CompiledDeck extends ExtensionAssets {
@@ -35,6 +37,7 @@ export interface CompiledDeck extends ExtensionAssets {
   author?: string
   headmatter?: Record<string, unknown>
   canvas: SlideCanvas
+  routing: Routing
   routeAliases: ReadonlySet<string>
   writableSnippets: ReadonlyMap<string, WritableSnippet>
   writableDrags: ReadonlyMap<string, WritableDrag>
@@ -43,7 +46,7 @@ export interface CompiledDeck extends ExtensionAssets {
   drawingStore?: DrawingStore
 }
 
-export interface CompileOptions extends Pick<RenderOptions, 'liveCompile' | 'mode' | 'mcpNavigation'> {
+export interface CompileOptions extends Pick<RenderOptions, 'base' | 'routerMode' | 'liveCompile' | 'mode' | 'mcpNavigation'> {
   theme?: string
 }
 
@@ -211,8 +214,8 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
     const deckCss = options.liveCompile ? await observe(join(directory, 'style.css')).catch(() => undefined) : undefined
     if (options.liveCompile && deckCss === undefined) files.set(join(directory, 'style.css'), undefined)
     const layoutRoots = [directory, ...(extensions.roots ?? []).filter(root => root !== directory).reverse()]
-    const { html, routes, live } = await renderPresentation(deck, {
-      liveCompile: options.liveCompile, mcpNavigation: options.mcpNavigation, mode, extensions, setup, writableSnippets, savedDrawings, saveDrawings,
+    const { html, routes, routing, live } = await renderPresentation(deck, {
+      base: options.base, routerMode: options.routerMode, liveCompile: options.liveCompile, mcpNavigation: options.mcpNavigation, mode, extensions, setup, writableSnippets, savedDrawings, saveDrawings,
       deckCssRevision: deckCss && snippetRevision(deckCss), sourceBindings,
       async resolveFileLayout(name, registered) {
         if (!/^[\w-]+$/.test(name)) return
@@ -228,7 +231,7 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
     const author = typeof deck.headmatter?.author === 'string' ? deck.headmatter.author : undefined
     const routeAliases = new Set(routes.flatMap(route => route.alias ? [route.alias] : []))
     const drawingStore = saveDrawings ? { ...store, slideCount: routes.length } : undefined
-    const compiled = { title: deck.title, author, headmatter: deck.headmatter, canvas, html, styles: extensions.styles, client: extensions.client, mounts: extensions.mounts, writableSnippets, writableDrags, writableSlides, routeAliases, drawingStore, live }
+    const compiled = { title: deck.title, author, headmatter: deck.headmatter, canvas, routing, html, styles: prefixCssUrls(extensions.styles, routing.base), client: extensions.client, mounts: extensions.mounts, writableSnippets, writableDrags, writableSlides, routeAliases, drawingStore, live }
     cached = { files, deck: compiled }
     return compiled
   }

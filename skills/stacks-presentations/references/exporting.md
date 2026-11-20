@@ -27,3 +27,8 @@ fallback messages and confirm the recipient has the fonts used by the deck.
 Inspect exported slides at presentation size. Check math, fonts, notes,
 number of steps, and intended links. If an Office-compatible viewer is
 available, open the actual PowerPoint file and inspect its slide count.
+
+For deployment below a URL prefix, pass `--base /talks/demo/` to
+`build` and mount the output there. Use `--router-mode hash` on a static
+host. With `history` routing, serve the built `index.html` for slide and
+presenter routes under the same base. The `dev` command accepts both flags.

@@ -1,5 +1,5 @@
 import type { ClickBounds, SlidePosition, SlideRoute } from './navigation.ts'
-import { nextPosition, slideHash } from './navigation.ts'
+import { nextPosition } from './navigation.ts'
 
 type Layout = '1' | '2' | '3'
 type PanelAxis = 'width' | 'height'
@@ -30,6 +30,7 @@ export function setupPresenter(
   routes: SlideRoute[],
   bounds: ClickBounds[],
   seekTo: (click: number) => void,
+  previewUrl: (route: SlideRoute, click: number) => URL,
 ): PresenterControls {
   const body = document.body
   const panels = {
@@ -122,11 +123,8 @@ export function setupPresenter(
     if (!next) return
     const route = routes[next.slide - 1]
     if (!frame.hasAttribute('src')) {
-      const url = new URL(location.href)
-      url.searchParams.delete('presenter')
+      const url = previewUrl(route, next.click)
       url.searchParams.delete('embedded')
-      url.searchParams.set('preview', '1')
-      url.hash = slideHash(route, next.click)
       frame.src = url.href
     }
     else sendPreview()

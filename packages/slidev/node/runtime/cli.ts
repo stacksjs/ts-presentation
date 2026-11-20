@@ -14,6 +14,8 @@ import type { CompiledDeck } from './loader.ts'
 import type { PowerPointFrame } from './powerpoint.ts'
 import { createDeckCompiler } from './loader.ts'
 import { legacySlideLocation } from '../../../client/runtime/navigation.ts'
+import { deckPath, matchDeckPath, normalizeBasePath, resolveRouterMode } from '../../../client/runtime/routing.ts'
+import { prefixCssUrls } from './base-assets.ts'
 import { maxSlideEditLength, readSlideSource, saveSlideSource } from './side-editor-source.ts'
 import { saveSnippet } from './snippet-write.ts'
 import { version } from '../../../../package.json'
@@ -29,6 +31,8 @@ const options = {
   mcp: { type: 'boolean' },
   format: { type: 'string' },
   theme: { type: 'string' },
+  base: { type: 'string' },
+  'router-mode': { type: 'string' },
   'executable-path': { type: 'string' },
   help: { type: 'boolean', short: 'h' },
 } as const
@@ -43,6 +47,8 @@ const help = `ts-presentation <dev|build|export|mcp> [slides.md]
           PNG/PPTX also support --scale.
   mcp     Serve deck editing tools over stdio.
   --theme   Override the deck's theme for any command.
+  --base    Serve or build under a deployment path such as /talks/demo/.
+  --router-mode  Override the deck's history, hash, or memory mode.
 `
 
 function localAuthorRequest(request: Request, url: URL): boolean {
@@ -68,6 +74,8 @@ async function main(): Promise<void> {
     return
   }
   const directory = dirname(source)
+  const base = command === 'export' ? '/' : normalizeBasePath(values.base)
+  const routerMode = values['router-mode'] === undefined ? undefined : resolveRouterMode(values['router-mode'])
   const publicDir = join(directory, 'public')
   const baseStyle = Bun.file(new URL('../../../client/runtime/player.css', import.meta.url))
   const customStyle = join(directory, 'style.css')
@@ -80,12 +88,21 @@ async function main(): Promise<void> {
   if (!player.success || !player.outputs[0]) throw new Error('Could not build the browser player')
   const javascript = await player.outputs[0].text()
   const emptyStyle = '/* This deck has no custom styles. */\n'
-  const compile = createDeckCompiler(source, { liveCompile: command === 'dev', mcpNavigation: command === 'dev' && values.mcp, mode: command, theme: values.theme })
+  const compile = createDeckCompiler(source, { base, routerMode, liveCompile: command === 'dev', mcpNavigation: command === 'dev' && values.mcp, mode: command, theme: values.theme })
+
+  async function deckStyles(): Promise<string | Bun.BunFile> {
+    const css = Bun.file(customStyle)
+    if (!await css.exists()) return emptyStyle
+    return base === '/' ? css : prefixCssUrls(await css.text(), base)
+  }
+
+  function deckPage(deck: CompiledDeck): Response {
+    return new Response(deck.html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+  }
 
   async function writeSite(output: string, compiled?: CompiledDeck): Promise<CompiledDeck> {
     if (within(publicDir, output)) throw new Error('Build output must be outside the deck’s public directory')
     const deck = compiled ?? await compile()
-    const css = Bun.file(customStyle)
     await mkdir(output, { recursive: true })
     if (await realpath(publicDir).catch(() => undefined)) {
       await cp(publicDir, output, { recursive: true })
@@ -101,7 +118,7 @@ async function main(): Promise<void> {
       deck.client ? Bun.write(join(output, 'extensions.js'), deck.client) : undefined,
       Bun.write(join(output, 'presentation.css'), baseStyle),
       Bun.write(join(output, 'presentation.js'), javascript),
-      Bun.write(join(output, 'deck.css'), await css.exists() ? css : emptyStyle),
+      Bun.write(join(output, 'deck.css'), await deckStyles()),
     ])
     return deck
   }
@@ -117,7 +134,7 @@ async function main(): Promise<void> {
     const handleMcp = mcp ? (await import('../mcp/server.ts')).createSlidevMcpServer({
       entry: source,
       version,
-      getServerUrl: (): string => server.url.href,
+      getServerUrl: (): string => new URL(base, server.url).href,
       getData: async () => (await import('../mcp/operations.ts')).loadEditingDeck(source),
       nav: {
         getState: () => position,
@@ -134,8 +151,15 @@ async function main(): Promise<void> {
       async fetch(request) {
         let path: string
         const url = new URL(request.url)
+        const navigable = request.method === 'GET' || request.method === 'HEAD'
+        if (navigable && base !== '/' && url.pathname === base.slice(0, -1)) {
+          url.pathname = base
+          return Response.redirect(url, 307)
+        }
+        const mounted = deckPath(url.pathname, base)
+        if (mounted === undefined) return new Response('Not found', { status: 404 })
         try {
-          path = decodeURIComponent(url.pathname)
+          path = decodeURIComponent(mounted)
         }
         catch {
           return new Response('Invalid URL', { status: 400 })
@@ -143,7 +167,7 @@ async function main(): Promise<void> {
         switch (path) {
           case '/':
           case '/index.html':
-            return new Response((await compile()).html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+            return deckPage(await compile())
           case '/extensions.css':
             return new Response((await compile()).styles, { headers: { 'Content-Type': 'text/css; charset=utf-8' } })
           case '/extensions.js':
@@ -221,10 +245,8 @@ async function main(): Promise<void> {
           }
           case '/presentation.css':
             return new Response(baseStyle, { headers: { 'Content-Type': 'text/css' } })
-          case '/deck.css': {
-            const css = Bun.file(customStyle)
-            return new Response(await css.exists() ? css : emptyStyle, { headers: { 'Content-Type': 'text/css' } })
-          }
+          case '/deck.css':
+            return new Response(await deckStyles(), { headers: { 'Content-Type': 'text/css' } })
           case '/presentation.js':
             return new Response(javascript, { headers: { 'Content-Type': 'text/javascript' } })
           default: {
@@ -233,16 +255,22 @@ async function main(): Promise<void> {
             if (mounted && extension) return asset(mounted, extension[2], request)
             const found = root ? await asset(root, path.endsWith('/') ? `${path}index.html` : path, request) : undefined
             if (found && found.status !== 404) return found
-            if ((request.method === 'GET' || request.method === 'HEAD') && /^\/(?:[a-z0-9-]+\/?){1,2}$/i.test(path)) {
-              const destination = legacySlideLocation(url, (await compile()).routeAliases)
-              if (destination) return Response.redirect(destination, 307)
+            if (navigable && /^\/(?:[a-z0-9-]+\/?){1,2}$/i.test(path)) {
+              const deck = await compile()
+              if (deck.routing.mode === 'history' && matchDeckPath(path, key => deck.routeAliases.has(key))) return deckPage(deck)
+              url.pathname = path
+              const destination = legacySlideLocation(url, deck.routeAliases)
+              if (destination) {
+                destination.pathname = base
+                return Response.redirect(destination, 307)
+              }
             }
             return found ?? new Response('Not found', { status: 404 })
           }
         }
       },
     })
-    console.log(`Presentation running at ${server.url}`)
+    console.log(`Presentation running at ${new URL(base, server.url)}`)
     return
   }
   if (command === 'build') {

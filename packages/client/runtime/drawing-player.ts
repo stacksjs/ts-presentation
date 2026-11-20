@@ -145,7 +145,7 @@ export function setupDrawings(config: DrawingClientConfig, options: DrawingPlaye
   let channel: BroadcastChannel | undefined
   if (location.protocol !== 'file:' && typeof BroadcastChannel !== 'undefined') {
     try {
-      channel = new BroadcastChannel(`ts-presentation-drawings:${new URL('.', location.href).href}`)
+      channel = new BroadcastChannel(`ts-presentation-drawings:${new URL('.', document.baseURI).href}`)
       channel.addEventListener('message', event => receive(event.data))
     }
     catch {
@@ -156,7 +156,7 @@ export function setupDrawings(config: DrawingClientConfig, options: DrawingPlaye
 
   async function persist(slide: number, patch: DrawingSketch): Promise<void> {
     try {
-      const response = await fetch(new URL('__presentation/drawing', location.href), {
+      const response = await fetch('./__presentation/drawing', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ slide, patch }),

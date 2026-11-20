@@ -1,8 +1,9 @@
 <!doctype html>
-<html lang="en"{!! clickAnimation !!} data-slide-width="{{ width }}" data-slide-height="{{ height }}" data-theme="{{ theme }}" data-color-schema="{{ colorSchema }}"{!! liveAttribute !!}>
+<html lang="en"{!! clickAnimation !!} data-slide-width="{{ width }}" data-slide-height="{{ height }}" data-theme="{{ theme }}" data-color-schema="{{ colorSchema }}"{!! liveAttribute !!}{!! routeAttributes !!}>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  {!! baseTag !!}
   <link rel="icon" href="data:,">
   <title>{{ title }}</title>
   <link rel="stylesheet" href="./presentation.css">
