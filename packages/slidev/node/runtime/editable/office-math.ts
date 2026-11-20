@@ -19,6 +19,12 @@ const accents: Readonly<Record<string, string>> = {
 }
 const stretchMarks = new Set(['⏞', '⏟', '←', '→', '↔', '⇐', '⇒', '⇔', '↼', '⇀'])
 const spaces = [[0.17, '\u2009'], [2 / 9, '\u205f'], [5 / 18, '\u2005'], [0.5, '\u2002'], [1, '\u2003'], [2, '\u2003\u2003']] as const
+const strikeProperties: Readonly<Record<string, readonly string[]>> = {
+  'math-cancel': ['strikeBLTR'],
+  'math-bcancel': ['strikeTLBR'],
+  'math-xcancel': ['strikeBLTR', 'strikeTLBR'],
+  'math-sout': ['strikeH'],
+}
 const alignmentCellStyles = new Set([
   'text-align:left', 'text-align:right', 'text-align:center', '--math-cell-align:end', '--math-cell-align:center',
   'padding-inline:0', 'padding-inline-start:1em', 'math-style:normal', 'padding-block:0.125em',
@@ -27,6 +33,10 @@ const measuredCellSpacing = /^(?:padding-block:\d+(?:\.\d+)?em|padding-bottom:ma
 
 function only(node: RawMathElement, ...names: string[]): boolean {
   return Object.keys(node.attributes).every(name => names.includes(name))
+}
+
+function emptyElement(node: RawMathElement | undefined, name: string): boolean {
+  return !!node && node.name === name && !node.children.length && !node.text.trim() && only(node)
 }
 
 function stretchyFence(node: RawMathElement | undefined, fences: ReadonlySet<string>): node is RawMathElement {
@@ -136,6 +146,65 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba):
     const upper = convert(last)
     if (upper !== undefined) return limit('limUpp', limit('limLow', body, label), upper)
   }
+  function enclosure(node: RawMathElement): string | undefined {
+    const style = node.attributes.class
+    const strikes = Object.hasOwn(strikeProperties, style) ? strikeProperties[style] : undefined
+    if (!strikes && style !== 'math-color-box math-frame') return
+    let children = node.children
+    if (strikes && style !== 'math-sout') {
+      const track = children.at(-1)
+      if (track?.name !== 'mspace' || track.attributes.class !== 'math-cancel-track'
+        || track.attributes['aria-hidden'] !== 'true' || !only(track, 'class', 'aria-hidden')
+        || track.children.length || track.text.trim()) return
+      children = children.slice(0, -1)
+    }
+    const body = sequence(children)
+    if (!body) return
+    const options = strikes
+      ? ['hideTop', 'hideBot', 'hideLeft', 'hideRight', ...strikes].map(property => setting(property, '1')).join('')
+      : ''
+    return wrap('borderBox', (options ? wrap('borderBoxPr', options) : '') + wrap('e', body))
+  }
+  function phantom(node: RawMathElement): string | undefined {
+    const padded = node.name === 'mpadded'
+    const { width, height, depth } = node.attributes
+    if (padded) {
+      const dimensions = Object.values(node.attributes)
+      if (!only(node, 'width', 'height', 'depth') || !dimensions.length || dimensions.some(value => value !== '0')) return
+    }
+    else if (!only(node)) return
+    const [child] = node.children
+    const hiddenChild = padded && node.children.length === 1 && child.name === 'mphantom'
+    if (hiddenChild && (!only(child) || child.text.trim())) return
+    const hidden = !padded || hiddenChild
+    const body = sequence(hiddenChild ? child.children : node.children)
+    if (!body) return body
+    const options = setting('show', hidden ? '0' : '1')
+      + (width ? setting('zeroWid', '1') : '')
+      + (height ? setting('zeroAsc', '1') : '')
+      + (depth ? setting('zeroDesc', '1') : '')
+    return wrap('phant', wrap('phantPr', options) + wrap('e', body))
+  }
+  function prescript(node: RawMathElement): string | undefined {
+    const { children } = node
+    if (children.length !== 4 && children.length !== 6) return
+    const marker = children.length - 3
+    if (!emptyElement(children[marker], 'mprescripts')) return
+    const index = (child: RawMathElement) => emptyElement(child, 'none') ? '' : convert(child)
+    const leftSub = index(children[marker + 1])
+    const leftSup = index(children[marker + 2])
+    const base = convert(children[0])
+    if (leftSub === undefined || leftSup === undefined || !base) return
+    let body = base
+    if (marker === 3) {
+      const sub = index(children[1])
+      const sup = index(children[2])
+      if (sub === undefined || sup === undefined) return
+      const script = sub && sup ? 'sSubSup' : sub ? 'sSub' : 'sSup'
+      if (sub || sup) body = wrap(script, wrap('e', base) + (sub ? wrap('sub', sub) : '') + (sup ? wrap('sup', sup) : ''))
+    }
+    return leftSub || leftSup ? wrap('sPre', wrap('sub', leftSub) + wrap('sup', leftSup) + wrap('e', body)) : body
+  }
   function equationArray(table: RawMathElement, environment: string): string | undefined {
     if (!/^(?:align(?:ed|at|edat)?|gather(?:ed)?|split)[*]?$/.test(environment)
       || !only(table, 'class', 'style', 'columnalign', 'data-equation-lines', 'data-equation-environment', 'data-equation-tags', 'data-equation-flush')) return
@@ -187,6 +256,8 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba):
       return
     }
     if (name === 'munder' || name === 'mover' || name === 'munderover') return underOver(node)
+    if (name === 'mphantom' || name === 'mpadded') return phantom(node)
+    if (name === 'mmultiscripts' && only(node)) return prescript(node)
     if (name === 'mspace' && only(node, 'width') && !children.length && /^\d+(?:\.\d+)?em$/.test(attributes.width ?? '')) {
       const width = Number.parseFloat(attributes.width)
       if (width === 0) return ''
@@ -194,18 +265,23 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba):
       if (space) return run(space[1])
       return
     }
-    if (name === 'mrow' && only(node, 'class') && children.length === 1
-      && (attributes.class === 'math-overline' || attributes.class === 'math-underline')) {
-      const body = convert(children[0])
-      if (body === undefined) return
-      const options = setting('pos', attributes.class === 'math-overline' ? 'top' : 'bot')
-      return wrap('bar', wrap('barPr', options) + wrap('e', body))
+    if (name === 'mrow' && attributes.class && only(node, 'class')) {
+      if (attributes.class === 'math-chemistry') return sequence(children)
+      if (children.length === 1 && (attributes.class === 'math-overline' || attributes.class === 'math-underline')) {
+        const body = convert(children[0])
+        if (body === undefined) return
+        const options = setting('pos', attributes.class === 'math-overline' ? 'top' : 'bot')
+        return wrap('bar', wrap('barPr', options) + wrap('e', body))
+      }
+      return enclosure(node)
     }
-    if (name === 'mrow' && only(node, 'style') && attributes.style) {
+    const upright = attributes.class === 'math-normal' && attributes.mathvariant === 'normal' && only(node, 'class', 'mathvariant')
+    if (name === 'mrow' && (upright || (only(node, 'style') && attributes.style))) {
       const previousBold = bold
       const previousItalic = italicText
       try {
-        for (const style of attributes.style.split(';').filter(Boolean)) {
+        const styles = upright ? ['font-weight:normal', 'font-style:normal'] : attributes.style.split(';').filter(Boolean)
+        for (const style of styles) {
           if (style === 'font-weight:bold' || style === 'font-weight:normal') bold = style.endsWith('bold')
           else if (style === 'font-style:italic' || style === 'font-style:normal') italicText = style.endsWith('italic')
           else return

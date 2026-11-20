@@ -103,7 +103,7 @@ $$
 $$
 
 $$
-\cancel{z}
+\colorbox{yellow}{z}
 $$
 
 ---
@@ -121,6 +121,38 @@ $$
 $$
 \lim_{x\to 0}f(x)=\overbrace{\widehat{ab}+\underline{cd}}^{n}
   +\underbrace{x+y}_{q}+\overline{z}
+$$
+
+---
+
+# Frames and cancellation
+
+$$
+\boxed{\frac{x}{y}}+\fbox{proof}
+$$
+
+$$
+\cancel{z}+\bcancel{\frac{x}{y}}+\xcancel{q}+\text{\sout{old}}
+$$
+
+---
+
+# Spacing and left scripts
+
+$$
+x+\phantom{M}+\hphantom{N}+\vphantom{P}
+$$
+
+$$
+\smash[t]{\sqrt{t}}+\smash[b]{v}+\smash{x}
+$$
+
+$$
+\prescript{14}{6}{\mathrm C}\quad\ce{^{14}_{6}C^-}
+$$
+
+$$
+\hphantom{A\kern{-1em}}+b
 $$`)
     const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
     const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
@@ -128,7 +160,7 @@ $$`)
     if (status) throw new Error(stderr)
     const frames: PowerPointFrame[] = []
     await captureFrames({ root: join(root, 'dist'), executable: chrome!, scale: 1, canvas, editable: true, withClicks: false }, frame => { frames.push(frame) })
-    expect(frames).toHaveLength(2)
+    expect(frames).toHaveLength(4)
     const equations = frames[0].editable?.nodes.filter((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math') ?? []
     expect(equations).toHaveLength(4)
     expect(equations.filter(node => node.equation)).toHaveLength(3)
@@ -165,7 +197,36 @@ $$`)
     expect(advanced).toContain('<m:limUpp>')
     expect(advanced).toContain('<m:groupChrPr><m:chr m:val="⏞"/><m:pos m:val="top"/><m:vertJc m:val="bot"/>')
     expect(advanced).toContain('<m:groupChrPr><m:chr m:val="⏟"/><m:pos m:val="bot"/><m:vertJc m:val="top"/>')
-    expect([...parts.keys()].filter(name => name.startsWith('ppt/media/'))).toHaveLength(7)
+    const enclosures = parts.get('ppt/slides/slide3.xml')?.toString()
+    expect(enclosures?.match(/<a14:m>/g)).toHaveLength(2)
+    expect(enclosures?.match(/<mc:Fallback><p:sp>/g)).toHaveLength(2)
+    expect(enclosures).toContain('<m:borderBox><m:e><m:f>')
+    expect(enclosures).toMatch(/<m:borderBox><m:e><m:r>.*?>proof<\/m:t>/)
+    const hideEdges = '<m:hideTop m:val="1"/><m:hideBot m:val="1"/><m:hideLeft m:val="1"/><m:hideRight m:val="1"/>'
+    for (const strikes of [
+      '<m:strikeBLTR m:val="1"/>',
+      '<m:strikeTLBR m:val="1"/>',
+      '<m:strikeBLTR m:val="1"/><m:strikeTLBR m:val="1"/>',
+      '<m:strikeH m:val="1"/>',
+    ]) expect(enclosures).toContain(`<m:borderBoxPr>${hideEdges}${strikes}</m:borderBoxPr>`)
+
+    const spacing = parts.get('ppt/slides/slide4.xml')?.toString()
+    expect(spacing?.match(/<a14:m>/g)).toHaveLength(3)
+    expect(spacing?.match(/<mc:Fallback><p:sp>/g)).toHaveLength(3)
+    expect(spacing?.match(/<p:pic>/g)).toHaveLength(1)
+    const hide = '<m:show m:val="0"/>'
+    const show = '<m:show m:val="1"/>'
+    const zeroAsc = '<m:zeroAsc m:val="1"/>'
+    const zeroDesc = '<m:zeroDesc m:val="1"/>'
+    for (const properties of [hide, hide + zeroAsc + zeroDesc, hide + '<m:zeroWid m:val="1"/>', show + zeroAsc, show + zeroDesc, show + zeroAsc + zeroDesc])
+      expect(spacing).toContain(`<m:phantPr>${properties}</m:phantPr>`)
+    const prescripts = [...(spacing ?? '').matchAll(/<m:sPre>(.*?)<\/m:sPre>/g)].map(([, expression]) => expression)
+    expect(prescripts).toHaveLength(2)
+    for (const script of prescripts)
+      expect(script).toMatch(/^<m:sub>.*?>6<\/m:t>.*?<\/m:sub><m:sup>.*?>14<\/m:t>.*?<\/m:sup><m:e>/)
+    expect(prescripts[0]).toContain('<m:sty m:val="p"/>')
+    expect(prescripts[1]).toMatch(/<m:e><m:sSup><m:e>.*?>C<\/m:t>.*?<\/m:e><m:sup>.*?>−<\/m:t>/)
+    expect([...parts.keys()].filter(name => name.startsWith('ppt/media/'))).toHaveLength(13)
   }
   finally {
     await rm(root, { recursive: true, force: true })
