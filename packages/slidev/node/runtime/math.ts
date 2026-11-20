@@ -5,7 +5,7 @@ import { styledMathAlphabets } from './math-alphabets.ts'
 import { MathParseError } from './math-error.ts'
 import { chemicalFormula, physicalUnits } from './math-chemistry.ts'
 import type { Markup, MathStyle } from './math-markup.ts'
-import { joinMarkup, renderMarkup, xml } from './math-markup.ts'
+import { fractionStyle, joinMarkup, renderMarkup, scriptStyle, xml } from './math-markup.ts'
 import { fractionRule, mathDimension, nullDelimiterWidth } from './math-sizing.ts'
 import { resolveRowClasses, rowSpacing } from './math-spacing.ts'
 import type { MathClass } from './math-spacing.ts'
@@ -524,14 +524,6 @@ function taggedDisplay(expression: string, label: Markup, left: boolean, flush: 
     ? left ? 'max-content minmax(max-content,1fr)' : 'minmax(max-content,1fr) max-content'
     : 'minmax(max-content,1fr) max-content minmax(max-content,1fr)'
   return `<mtable class="math-tagged-display" style="display:block;width:100%"><mtr style="display:grid;grid-template-columns:${columns};align-items:center;column-gap:0.5em">${left ? number : spacer}${body}${left ? spacer : number}</mtr></mtable>`
-}
-
-function fractionStyle(style: MathStyle): MathStyle {
-  return Math.min(3, style + 1) as MathStyle
-}
-
-function scriptStyle(style: MathStyle): MathStyle {
-  return style < 2 ? 2 : 3
 }
 
 function inScript(markup: Markup): Markup {
@@ -2478,7 +2470,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const centered = grid && style !== 0
         ? `<mtable class="math-alignment-axis"><mtr><mtd>${table}</mtd></mtr></mtable>`
         : table
-      return `<mrow>${fence(left)}${centered}${fence(right)}</mrow>`
+      const caseBrace = cases ? ` data-math-cases="${left ? 'left' : 'right'}"` : ''
+      return `<mrow${caseBrace}>${fence(left)}${centered}${fence(right)}</mrow>`
     }
   }
 

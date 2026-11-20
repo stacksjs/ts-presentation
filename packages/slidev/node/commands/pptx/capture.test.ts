@@ -403,6 +403,94 @@ $$`)
   }
 }, 45_000)
 
+it.skipIf(!chrome)('exports compact TeX arrays and piecewise formulas as native Office Math', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-math-arrays-'))
+  try {
+    const entry = join(root, 'slides.md')
+    const output = join(root, 'arrays.pptx')
+    await Bun.write(entry, String.raw`# Compact arrays
+
+$$
+\sum_{\substack{i>0\\j<n}} x_{ij}
+$$
+
+$$
+A+\begin{smallmatrix}a&b\\c&d\end{smallmatrix}+B
+$$
+
+$$
+Q_{z_{\substack{i\\j}}}+{\scriptscriptstyle k}+n^{\textstyle m}
+$$
+
+$$
+\lim_{\begin{subarray}{l}i=0\\j=1\end{subarray}} y
+$$
+
+---
+
+# Piecewise definitions
+
+$$
+f(x)=\begin{cases}-x&\text{if }x<0\\x&\text{otherwise}\end{cases}
+$$
+
+$$
+\begin{rcases}u&\text{given }a\\v&\text{given }b\end{rcases}\Rightarrow w
+$$
+
+$$
+\begin{cases}2x&\text{a \& b}\\y&c\end{cases}
+$$
+
+---
+
+# Centered arrays
+
+$$
+\left[\begin{array}{cc}1 & 0\\0 & 1\end{array}\right]
+$$
+
+$$
+\begin{array}{c|c}a&b\\c&d\end{array}
+$$`)
+    const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
+    const exportDeck = Bun.spawn([process.execPath, cli, 'export', entry, '--format', 'pptx-editable', '--output', output, '--executable-path', chrome!], {
+      stderr: 'pipe', stdout: 'ignore', timeout: 30_000,
+    })
+    const [status, stderr] = await Promise.all([exportDeck.exited, new Response(exportDeck.stderr).text()])
+    if (status) throw new Error(stderr)
+
+    const parts = await storedParts(Bun.file(output))
+    const compact = parts.get('ppt/slides/slide1.xml')?.toString() ?? ''
+    const cases = parts.get('ppt/slides/slide2.xml')?.toString() ?? ''
+    const arrays = parts.get('ppt/slides/slide3.xml')?.toString() ?? ''
+    expect(compact.match(/<a14:m>/g)).toHaveLength(4)
+    expect(compact.match(/<mc:Fallback><p:sp>/g)).toHaveLength(4)
+    expect(compact).toMatch(/<m:nary>.*?<m:sub><m:m><m:mr>/)
+    expect(compact).toContain('<m:box><m:e><m:argPr><m:argSz m:val="-1"/></m:argPr><m:m>')
+    expect(compact).toContain('<m:box><m:e><m:argPr><m:argSz m:val="1"/></m:argPr><m:m>')
+    expect(compact).toMatch(/<m:argSz m:val="-2"\/><\/m:argPr><m:r>.*?>k<\/m:t>/)
+    expect(compact).toMatch(/<m:sup><m:box><m:e><m:argPr><m:argSz m:val="1"\/>.*?>m<\/m:t>/)
+    expect(compact).toMatch(/<m:limLow>.*?<m:lim><m:eqArr><m:e><m:r>.*?>&amp;<\/m:t>.*?>i<\/m:t>/)
+
+    expect(cases.match(/<a14:m>/g)).toHaveLength(2)
+    expect(cases.match(/<mc:Fallback><p:sp>/g)).toHaveLength(2)
+    expect(cases.match(/<p:pic>/g)).toHaveLength(1)
+    expect(cases).toContain('<m:dPr><m:begChr m:val="{"/><m:endChr/></m:dPr><m:e><m:eqArr>')
+    expect(cases).toContain('<m:dPr><m:begChr/><m:endChr m:val="}"/></m:dPr><m:e><m:eqArr>')
+    const first = /<m:eqArr>(.*?)<\/m:eqArr>/.exec(cases)?.[1] ?? ''
+    expect(first.match(/>&amp;<\/m:t>/g)).toHaveLength(6)
+    expect(first).toContain('>otherwise</m:t>')
+    expect(arrays.match(/<a14:m>/g)).toHaveLength(1)
+    expect(arrays.match(/<p:pic>/g)).toHaveLength(1)
+    expect(arrays).toContain('<m:dPr><m:begChr m:val="["/><m:endChr m:val="]"/></m:dPr><m:e><m:m>')
+    expect(arrays.match(/<m:mr>/g)).toHaveLength(2)
+  }
+  finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}, 45_000)
+
 it.skipIf(!chrome)('keeps AMS rows, tags, and click highlights editable in PowerPoint', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-ams-'))
   const canvas = { width: 960, height: 540 }

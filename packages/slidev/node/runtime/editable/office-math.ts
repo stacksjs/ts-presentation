@@ -1,5 +1,7 @@
 import { escapeHtml } from '../html.ts'
 import { baseMathLetters } from '../math-alphabets.ts'
+import type { MathStyle } from '../math-markup.ts'
+import { fractionStyle, scriptStyle } from '../math-markup.ts'
 import { nullDelimiterWidth } from '../math-sizing.ts'
 import { parseColor } from './color.ts'
 import type { RawMathElement, Rgba } from './ir.ts'
@@ -34,6 +36,12 @@ const alignmentCellStyles = new Set([
   'text-align:left', 'text-align:right', 'text-align:center', '--math-cell-align:end', '--math-cell-align:center',
   'padding-inline:0', 'padding-inline-start:1em', 'math-style:normal', 'padding-block:0.125em',
 ])
+const compactCellStyles = new Set([
+  'text-align:left', 'text-align:center', '--math-cell-align:center',
+  'padding-inline:0', 'padding-inline-start:0.2778em', 'padding-block:0.06em',
+])
+const centeredCellStyles = new Set(['text-align:center', '--math-cell-align:center', 'math-style:normal'])
+const caseCellStyles = new Set(['text-align:left', 'padding-inline:0', 'padding-inline-start:1em', 'math-style:normal', 'padding-block:0.125em'])
 const measuredCellSpacing = /^(?:padding-block:\d+(?:\.\d+)?em|padding-bottom:max\(0px,calc\(\d+(?:\.\d+)?em \+ [+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:em|ex|px|pt|pc|cm|mm|in)\)\))$/
 const mathTypeface = 'Cambria Math'
 const textTypefaces: Readonly<Record<string, string>> = {
@@ -116,17 +124,27 @@ function mathInk({ r, g, b, a }: Rgba): { hex: string, alpha: number } {
 /** Convert presentation MathML to the structures in the Office Math schema.
  * Decline formulas whose presentation would be lost in the editable shape.
  */
-export function officeMath(root: RawMathElement, fontSize: number, color: Rgba, fragmentOpacity: number): string | undefined {
+export function officeMath(root: RawMathElement, fontSize: number, color: Rgba, fragmentOpacity: number, display: boolean): string | undefined {
   const baseInk = mathInk(color)
   let localSize = fontSize
   let ink = baseInk
   let opacity = fragmentOpacity
   let font: Readonly<EquationFont> = defaultMathFont
+  let mathStyle: MathStyle = display ? 0 : 1
   function inFont(next: Readonly<EquationFont>, render: () => string | undefined): string | undefined {
     const previous = font
     font = next
     try { return render() }
     finally { font = previous }
+  }
+  function inMathStyle(next: MathStyle, render: () => string | undefined): string | undefined {
+    const previous = mathStyle
+    mathStyle = next
+    try { return render() }
+    finally { mathStyle = previous }
+  }
+  function script(node: RawMathElement): string | undefined {
+    return inMathStyle(scriptStyle(mathStyle), () => convert(node))
   }
   const properties = (normalText: boolean, italic: boolean) => {
     const size = Math.max(100, Math.min(400000, Math.round(localSize * PT_PER_PX * 100)))
@@ -155,8 +173,8 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba, 
         const end = followingTerm(nodes, index + 1)
         if (end > index + 1) {
           const body = sequence(nodes.slice(index + 1, end))
-          const sub = limits.sub ? convert(limits.sub) : ''
-          const sup = limits.sup ? convert(limits.sup) : ''
+          const sub = limits.sub ? script(limits.sub) : ''
+          const sup = limits.sup ? script(limits.sup) : ''
           if (body === undefined || sub === undefined || sup === undefined) return
           if (body) {
             const options = setting('chr', limits.glyph) + setting('limLoc', limits.location)
@@ -194,11 +212,11 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba, 
       return wrap('acc', wrap('accPr', setting('chr', accent) + control()) + wrap('e', body))
     }
     if (!only(node)) return
-    const label = convert(first)
+    const label = script(first)
     if (label === undefined) return
     const limit = (tag: string, content: string, value: string) => wrap(tag, wrap('e', content) + wrap('lim', value))
     if (!both) return limit(name === 'munder' ? 'limLow' : 'limUpp', body, label)
-    const upper = convert(last)
+    const upper = script(last)
     if (upper !== undefined) return limit('limUpp', limit('limLow', body, label), upper)
   }
   function enclosure(node: RawMathElement): string | undefined {
@@ -246,7 +264,7 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba, 
     if (children.length !== 4 && children.length !== 6) return
     const marker = children.length - 3
     if (!emptyElement(children[marker], 'mprescripts')) return
-    const index = (child: RawMathElement) => emptyElement(child, 'none') ? '' : convert(child)
+    const index = (child: RawMathElement) => emptyElement(child, 'none') ? '' : script(child)
     const leftSub = index(children[marker + 1])
     const leftSup = index(children[marker + 2])
     const base = convert(children[0])
@@ -291,6 +309,78 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba, 
       finally { opacity = previous }
     }
     if (rows) return wrap('eqArr', rows)
+  }
+  function tableRows(table: RawMathElement, cellStyles?: ReadonlySet<string>): string[][] | undefined {
+    if (table.name !== 'mtable' || table.text.trim()) return
+    const rows: string[][] = []
+    for (const row of table.children) {
+      if (row.name !== 'mtr' || row.text.trim() || !only(row) || !row.children.length) return
+      const cells: string[] = []
+      for (const cell of row.children) {
+        if (cell.name !== 'mtd' || cell.text.trim()) return
+        if (cellStyles) {
+          const styles = (cell.attributes.style ?? '').split(';').filter(Boolean)
+          if (!only(cell, 'style') || !styles.every(style => cellStyles.has(style))) return
+        }
+        else if (!only(cell)) return
+        const expression = sequence(cell.children)
+        if (expression === undefined) return
+        cells.push(expression)
+      }
+      rows.push(cells)
+    }
+    if (rows.length) return rows
+  }
+  function matrix(rows: readonly string[][]): string {
+    const width = Math.max(...rows.map(row => row.length))
+    const body = rows.map(row => {
+      const cells = Array.from({ length: width }, (_, column) => wrap('e', row[column] ?? '')).join('')
+      return wrap('mr', cells)
+    }).join('')
+    return wrap('m', body)
+  }
+  function centeredArray(table: RawMathElement): string | undefined {
+    const { columnalign, style } = table.attributes
+    if (!only(table, 'class', 'style', 'columnalign', 'data-equation-lines', 'data-math-array')) return
+    const columns = (columnalign ?? '').split(' ')
+    if (!columns.every(align => align === 'center') || style !== `--math-columns:${columns.length}`) return
+    const rows = tableRows(table, centeredCellStyles)
+    if (rows && rows.every(row => row.length === columns.length)) return matrix(rows)
+  }
+  function compactArray(table: RawMathElement): string | undefined {
+    const { class: kind, columnalign, style } = table.attributes
+    if (!only(table, 'class', 'style', 'columnalign', 'data-math-array')) return
+    if (kind === 'math-compact-array math-alignment-grid') {
+      if ((columnalign !== 'left' && columnalign !== 'center') || style !== '--math-columns:1') return
+    }
+    else if (kind !== 'math-compact-array' || columnalign || style) return
+    const rows = tableRows(table, compactCellStyles)
+    if (!rows) return
+    if (columnalign !== 'left') return matrix(rows)
+    if (rows.some(row => row.length !== 1 || row[0].includes('&amp;'))) return
+    const mark = run('&')
+    return wrap('eqArr', rows.map(([content]) => wrap('e', mark + content)).join(''))
+  }
+  function caseArray(node: RawMathElement, side: string): string | undefined {
+    if (node.children.length !== 2 || (side !== 'left' && side !== 'right')) return
+    const [first, second] = node.children
+    const left = side === 'left'
+    const brace = left ? first : second
+    const table = left ? second : first
+    if (!stretchyFence(brace, left ? leftFences : rightFences) || brace.text !== (left ? '{' : '}')
+      || !only(table, 'columnalign', 'data-equation-lines', 'data-math-array')) return
+    const array = inFont(defaultMathFont, () => {
+      const rows = tableRows(table, caseCellStyles)
+      if (!rows || rows.some(row => row.length > 2 || row.some(cell => cell.includes('&amp;')))) return
+      const mark = run('&')
+      // The first and third markers align each column's left edge. The second
+      // marker separates the expression column from the condition column.
+      const condition = mark + mark + run('\u2003')
+      const body = rows.map(([value, test]) => wrap('e', mark + value + (test === undefined ? '' : condition + test))).join('')
+      return wrap('eqArr', body)
+    })
+    if (array === undefined) return
+    return delimiter(left ? '{' : '', left ? '' : '}', [array])
   }
   function delimiter(left: string, right: string, expressions: readonly string[], separator?: string): string {
     const begin = left ? setting('begChr', left) : '<m:begChr/>'
@@ -396,6 +486,7 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba, 
     }
     if (name === 'mrow') {
       if (attributes['data-math-delimiters'] === '' && only(node, 'data-math-delimiters')) return pairedDelimiters(children)
+      if (attributes['data-math-cases'] && only(node, 'data-math-cases')) return caseArray(node, attributes['data-math-cases'])
       const variant = attributes.mathvariant
       if (variant && attributes.class === `math-${variant}` && only(node, 'class', 'mathvariant') && Object.hasOwn(mathFonts, variant))
         return inFont({ ...defaultMathFont, ...mathFonts[variant] }, () => sequence(children))
@@ -432,8 +523,15 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba, 
       }
       return sequence(children)
     }
-    if (name === 'mstyle' && only(node, 'displaystyle', 'scriptlevel') && attributes.scriptlevel === '0')
-      return sequence(children)
+    if (name === 'mstyle' && only(node, 'displaystyle', 'scriptlevel') && /^[012]$/.test(attributes.scriptlevel ?? '')
+      && /^(?:true|false)$/.test(attributes.displaystyle ?? '')) {
+      const level = Number(attributes.scriptlevel)
+      const target = (level ? level + 1 : attributes.displaystyle === 'true' ? 0 : 1) as MathStyle
+      const adjustment = Math.max(0, mathStyle - 1) - level
+      const content = inMathStyle(target, () => sequence(children))
+      if (!adjustment || !content) return content
+      return wrap('box', wrap('e', wrap('argPr', setting('argSz', String(adjustment))) + content))
+    }
     if (name === 'mstyle' && only(node, 'mathsize') && /^\d+(?:\.\d+)?em$/.test(attributes.mathsize ?? '')) {
       const previous = localSize
       localSize *= Number.parseFloat(attributes.mathsize)
@@ -442,6 +540,8 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba, 
     }
     if (name === 'mtable' && attributes['data-equation-environment'])
       return equationArray(node, attributes['data-equation-environment'])
+    if (name === 'mtable' && attributes.class?.startsWith('math-compact-array')) return compactArray(node)
+    if (name === 'mtable' && attributes.class === 'math-alignment-grid') return centeredArray(node)
     if (name === 'mtable' && attributes.class === 'math-alignment-axis' && only(node, 'class') && children.length === 1) {
       const [row] = children
       const [cell] = row.children
@@ -450,25 +550,15 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba, 
       return
     }
     if (name === 'mtable' && only(node, 'data-equation-lines', 'data-math-array')) {
-      const columns = children[0]?.children.length
-      if (!columns || !children.every(row => row.name === 'mtr' && !row.text.trim() && only(row)
-        && row.children.length === columns && row.children.every(cell => cell.name === 'mtd' && !cell.text.trim() && only(cell)))) return
-      let rows = ''
-      for (const row of children) {
-        let entries = ''
-        for (const cell of row.children) {
-          const expression = sequence(cell.children)
-          if (expression === undefined) return
-          entries += wrap('e', expression)
-        }
-        rows += wrap('mr', entries)
-      }
-      return wrap('m', rows)
+      const rows = tableRows(node)
+      if (rows && rows.every(row => row.length === rows[0].length)) return matrix(rows)
+      return
     }
     if (name === 'mfrac' && only(node, 'linethickness') && children.length === 2) {
       if (attributes.linethickness !== undefined && !/^0(?:em|px)?$/.test(attributes.linethickness)) return
-      const numerator = convert(children[0])
-      const denominator = convert(children[1])
+      const style = fractionStyle(mathStyle)
+      const numerator = inMathStyle(style, () => convert(children[0]))
+      const denominator = inMathStyle(style, () => convert(children[1]))
       if (numerator === undefined || denominator === undefined) return
       const options = (attributes.linethickness === undefined ? '' : setting('type', 'noBar')) + control()
       return wrap('f', (options ? wrap('fPr', options) : '') + wrap('num', numerator) + wrap('den', denominator))
@@ -481,16 +571,16 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba, 
     }
     if (name === 'mroot' && children.length === 2) {
       const radicand = convert(children[0])
-      const index = convert(children[1])
+      const index = inMathStyle(3, () => convert(children[1]))
       if (radicand === undefined || index === undefined) return
       const options = control()
       return wrap('rad', (options ? wrap('radPr', options) : '') + wrap('deg', index) + wrap('e', radicand))
     }
-    const script = Object.hasOwn(scriptProperties, name) ? scriptProperties[name] : undefined
-    if (script && children.length === script.length) {
-      const expressions = children.map(convert)
+    const wrapper = Object.hasOwn(scriptProperties, name) ? scriptProperties[name] : undefined
+    if (wrapper && children.length === wrapper.length) {
+      const expressions = children.map((child, index) => index ? script(child) : convert(child))
       if (expressions.some(value => value === undefined)) return
-      const [element, ...positions] = script
+      const [element, ...positions] = wrapper
       return wrap(element, wrap('e', expressions[0]!) + positions.map((position, index) => wrap(position, expressions[index + 1]!)).join(''))
     }
   }

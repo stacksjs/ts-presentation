@@ -1,5 +1,13 @@
 export type MathStyle = 0 | 1 | 2 | 3
 
+export function fractionStyle(style: MathStyle): MathStyle {
+  return Math.min(3, style + 1) as MathStyle
+}
+
+export function scriptStyle(style: MathStyle): MathStyle {
+  return style < 2 ? 2 : 3
+}
+
 // Infix fractions decide the style of both operands after the row is parsed.
 // Static fragments stay strings. Only style-dependent parts defer rendering.
 export type Markup = string | ((style: MathStyle) => string)
