@@ -213,11 +213,12 @@ function tokenize(source: string, onTrailingComment?: () => void): string[] {
 }
 
 type MathMode = 'math' | 'text'
-const expansionPrimitives = ['\\expandafter', '\\noexpand', '\\@firstoftwo', '\\@secondoftwo', '\\@ifnextchar', '\\@ifstar', '\\TextOrMath', '\\html@mathml', '\\long', '\\message', '\\errmessage'] as const
+const expansionPrimitives = ['\\expandafter', '\\noexpand', '\\@firstoftwo', '\\@secondoftwo', '\\@ifnextchar', '\\@ifstar', '\\TextOrMath', '\\html@mathml', '\\message', '\\errmessage'] as const
 const expansionPrimitiveNames = new Set<string>(expansionPrimitives)
-const macroDeclaration = /^\\(?:[gex]?def|(?:future)?let|(?:new|renew|provide)command|global)$/
+const macroDeclaration = /^\\(?:[gex]?def|(?:future)?let|(?:new|renew|provide)command|global|long)$/
+const assignmentCommand = /^\\(?:[gex]?def|(?:future)?let)$/
 type ExpansionPrimitive = typeof expansionPrimitives[number]
-type ConditionalPrimitive = Exclude<ExpansionPrimitive, '\\expandafter' | '\\noexpand' | '\\long' | '\\message' | '\\errmessage'>
+type ConditionalPrimitive = Exclude<ExpansionPrimitive, '\\expandafter' | '\\noexpand' | '\\message' | '\\errmessage'>
 interface TokenMacro { body: string[], parameters: string[][], prefix: string[], optional?: string[], unexpandable?: boolean }
 type DelimitedNotation = 'Braket' | 'Set' | 'set'
 type Macro = TokenMacro | { primitive: ExpansionPrimitive } | { notation: DelimitedNotation } | { separator: () => string[] }
@@ -919,7 +920,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
         else console.error(message)
         replaceExpansion(start, [])
       }
-      else replaceExpansion(start, primitive === '\\long' ? [] : chooseBranch(primitive))
+      else replaceExpansion(start, chooseBranch(primitive))
       return true
     }
     if (!macro) return false
@@ -966,9 +967,9 @@ export function renderMath(source: string, display = false, configured: MathMacr
   const peek = () => { expand(); return tokenValue(tokens[cursor] ?? '') }
   const take = () => { expand(); return tokenValue(tokens[cursor++] ?? '') }
 
-  function rawGroup(): string[] {
+  function rawGroup(missing = 'Missing math argument'): string[] {
     space()
-    if (tokens[cursor] === undefined || tokens[cursor] === boundary || tokens[cursor] === '}') throw new Error('Missing math argument')
+    if (tokens[cursor] === undefined || tokens[cursor] === boundary || tokens[cursor] === '}') throw new Error(missing)
     if (tokens[cursor] !== '{') return [tokens[cursor++]]
     cursor++
     let level = 1
@@ -984,7 +985,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   }
 
   function literalGroup(): string {
-    return rawGroup().join('')
+    return rawGroup().map(tokenValue).join('')
   }
 
   function delimitedArgument(delimiter: string[], unwrapGroup = false): string[] {
@@ -1013,9 +1014,9 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return delimitedArgument([']'])
   }
 
-  function withTokens<T>(body: string[], read: () => T): T {
-    const begin = cursor
-    tokens.splice(begin, 0, ...body, boundary)
+  function withTokens<T>(body: string[], read: () => T, begin = cursor): T {
+    tokens.splice(begin, cursor - begin, ...body, boundary)
+    cursor = begin
     try { return read() }
     finally {
       const end = tokens.indexOf(boundary, begin)
@@ -1205,7 +1206,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
     else {
       for (let end = cursor + 1; end <= Math.min(cursor + 15, tokens.length); end++) {
-        const candidate = tokens.slice(cursor, end).join('')
+        const candidate = tokens.slice(cursor, end).map(tokenValue).join('')
         if (!/[a-z]$/i.test(candidate)) continue
         const value = parseLength(candidate)
         if (value !== undefined) {
@@ -1352,7 +1353,16 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const font = name === 'emph' ? (textItalic ? 'textup' : 'textit') : name
     if (font === 'textit') textItalic = true
     else if (font === 'textup' || font === 'textnormal') textItalic = false
-    try { return inMode('text', () => parseTextArgument(font, parentheses, capture)) }
+    try {
+      space()
+      const start = cursor
+      const word = controlWord.test(tokens[cursor] ?? '')
+      const body = rawGroup('Missing math text argument')
+      if (word) space()
+      // Scan the argument before expansion so a token's whole expansion
+      // stays in text mode and stops at the boundary of this argument.
+      return inMode('text', () => withTokens(body, () => parseTextArgument(font, parentheses, capture), start))
+    }
     finally { textItalic = previousItalic }
   }
 
@@ -1397,31 +1407,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return xml`<mrow style="color:${color}">${content}</mrow>`
   }
 
-  function parseTextArgument(name: string, parentheses: boolean, capture?: (parts: Markup[]) => void): Markup {
+  function parseTextArgument(name: string, parentheses: boolean, capture?: (parts: Markup[]) => void, end = boundary): Markup {
     if (depth++ > 100) throw new Error('Math text is nested too deeply')
     const properties = textFonts[name]
     const wrap = (markup: Markup) => properties ? xml`<mrow style="${properties}">${markup}</mrow>` : markup
     const opening = parentheses ? '(' : ''
     const closing = parentheses ? ')' : ''
-    expand()
-    if (tokens[cursor] !== '{') {
-      const token = tokenValue(tokens[cursor++] ?? '')
-      if (!token || token === boundary || token === '}') throw new Error('Missing math text argument')
-      depth--
-      if (token.startsWith('\\') && typesettingNames.has(token.slice(1)))
-        return wrap(typesettingName(opening + token.slice(1) + closing))
-      const width = token.startsWith('\\') && spacing[token.slice(1)]
-      if (width) {
-        const markup = spaceMarkup(width)
-        capture?.([markup])
-        return wrap(parentheses ? `<mrow>${tag('mtext', opening)}${markup}${tag('mtext', closing)}</mrow>` : markup)
-      }
-      const value = textCharacter(token)
-      if (value !== undefined) return wrap(tag('mtext', opening + value + closing))
-      const unknown = unsupportedCommand(token)
-      return wrap(parentheses ? xml`<mrow>${tag('mtext', opening)}${unknown}${tag('mtext', closing)}</mrow>` : unknown)
-    }
-    cursor++
     const sized: Markup[] = []
     const lines: MathLine[] = []
     const baseScale = fontScale
@@ -1447,12 +1438,15 @@ export function renderMath(source: string, display = false, configured: MathMacr
     inScope(() => {
       while (true) {
         expand(false)
-        const token = tokenValue(tokens[cursor++] ?? '')
-        if (!token || token === boundary) throw new Error('Unclosed math text')
-        if (token === '}') {
+        const token = tokenValue(tokens[cursor] ?? '')
+        if (token === end) {
+          if (end !== boundary) cursor++
+          if (end === '\\endgroup') space()
           literal += closing
           break
         }
+        if (!token || token === boundary || token === '}' || token === '\\endgroup') throw new Error('Unclosed math text')
+        cursor++
         if (token === '\\relax' || declareMacro(token) || equationDirective(token)) continue
         const command = token.startsWith('\\') ? token.slice(1) : ''
         const verbatim = verbatimMarkup(token)
@@ -1481,7 +1475,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
           flush()
           const close = token === '$' ? '$' : '\\)'
           const value = inMode('math', () => {
-            const content = inScope(() => row([close, '}']))
+            const content = inScope(() => row([close, '}', '\\endgroup', boundary]))
             if (take() !== close) throw new Error('Unclosed inline math in text')
             return content
           })
@@ -1490,10 +1484,14 @@ export function renderMath(source: string, display = false, configured: MathMacr
             return `<mrow style="font-style:normal;font-weight:normal">${style === 0 ? mathSize(1, content) : content}</mrow>`
           })
         }
-        else if (token === '{' || Object.hasOwn(textFonts, command)) {
+        else if (token === '{' || token === '\\begingroup') {
           flush()
-          if (token === '{') cursor--
-          parts.push(textArgument(token === '{' ? 'text' : command))
+          if (token === '\\begingroup') space()
+          parts.push(parseTextArgument('text', false, undefined, token === '{' ? '}' : '\\endgroup'))
+        }
+        else if (Object.hasOwn(textFonts, command)) {
+          flush()
+          parts.push(textArgument(command))
         }
         else if (textBoxes.has(command)) {
           flush()
@@ -1684,6 +1682,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       return lines ? lineTable([...lines, { content }], display && exposeLines, !display || options?.fleqn === true) : content
     }
     for (let token = peek(); token && !stop.includes(token); token = peek()) {
+      if (token === boundary) throw new Error('Unclosed math argument')
       if (breakOnInfix && infixFractions.has(token)) break
       cursor++
       if (infixFractions.has(token)) {
@@ -2049,8 +2048,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const digits = radix === 16 ? /^[0-9a-f]$/i : radix === 8 ? /^[0-7]$/ : /^\d$/
       space()
       const start = cursor
-      while (cursor - start < 16 && digits.test(tokens[cursor] ?? '')) cursor++
-      code = Number.parseInt(tokens.slice(start, cursor).join(''), radix)
+      while (cursor - start < 16 && digits.test(tokenValue(tokens[cursor] ?? ''))) cursor++
+      code = Number.parseInt(tokens.slice(start, cursor).map(tokenValue).join(''), radix)
     }
     if (!Number.isInteger(code) || code < 0x20 || code > 0x10FFFF || (code >= 0xD800 && code <= 0xDFFF))
       throw new Error('Invalid math character code')
@@ -2060,10 +2059,13 @@ export function renderMath(source: string, display = false, configured: MathMacr
   function declareMacro(token: string): boolean {
     if (!macroDeclaration.test(token)) return false
     let global = false
-    while (token === '\\global') {
-      global = true
+    const prefixed = token === '\\global' || token === '\\long'
+    while (token === '\\global' || token === '\\long') {
+      global ||= token === '\\global'
       token = take()
     }
+    if (prefixed && !assignmentCommand.test(token))
+      throw new Error('Invalid token after math macro prefix')
     const name = token.slice(1)
     function definitionTarget(grouped = false): string {
       space()
@@ -2126,7 +2128,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
       }
       const existing = macroFor(value)
       const command = value.startsWith('\\')
-      const snapshot = { ...plainMacro([command ? literalToken + value : value]), unexpandable: !command || !defined(value) }
+      const literal = command || activeCharacter.test(value) ? literalToken + value : value
+      const snapshot = { ...plainMacro([literal]), unexpandable: !command || !defined(value) }
       assign(target, existing ?? (isExpansionPrimitive(value) ? { primitive: value } : snapshot), global)
       return true
     }
@@ -2144,7 +2147,6 @@ export function renderMath(source: string, display = false, configured: MathMacr
       if (name !== 'providecommand' || !exists) assign(command, plainMacro(body, arity, optional), global)
       return true
     }
-    if (global) throw new Error('Global macro prefix requires a definition')
     return false
   }
 

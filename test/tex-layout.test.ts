@@ -127,6 +127,38 @@ test('matches expanded brace pairs and scopes semisimple groups without changing
   expect(() => math(String.raw`\begingroup x\egroup`, false)).toThrow('Unexpected math token')
 })
 
+// Macro argument and prefix cases adapted from KaTeX v0.19.1 (MIT).
+test('expands the whole unbraced text argument inside its own scope', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  expect(math(String.raw`\gdef\phrase{hi}\phrase+\text\phrase`, false))
+    .toContain('<mi>h</mi><mi>i</mi><mo>+</mo><mtext>hi</mtext>')
+  expect(math(String.raw`\def\mode{\TextOrMath{text}{math}}\textbf\mode + \mode`, false))
+    .toContain('<mrow style="font-weight:bold"><mtext>text</mtext></mrow><mo>+</mo><mi>m</mi><mi>a</mi><mi>t</mi><mi>h</mi>')
+  expect(math(String.raw`\def\nested{a\textbf{b}c}\text\nested+d`, false))
+    .toContain('<mrow><mtext>a</mtext><mrow style="font-weight:bold"><mtext>b</mtext></mrow><mtext>c</mtext></mrow><mo>+</mo><mi>d</mi>')
+  expect(math(String.raw`\def\letter{a}\def\change{\def\letter{b}\letter}\text\change\letter`, false))
+    .toContain('<mtext>b</mtext><mi>a</mi>')
+  expect(math(String.raw`\text{a\begingroup\bf bold\endgroup c}`, false))
+    .toContain('<mtext>a</mtext><mrow class="math-bold" mathvariant="bold"><mtext>bold</mtext></mrow><mtext>c</mtext>')
+  expect(() => math(String.raw`\def\arg#1{hi #1}\text\arg{you}`, false)).toThrow('Missing math argument')
+  expect(() => math(String.raw`\text\bgroup x\egroup`, false)).toThrow('Unclosed math text')
+  expect(() => math(String.raw`\def\open{$x}\text\open+y$`, false)).toThrow('Unclosed inline math in text')
+  const longText = createMathRenderer({ macros: { '\\tail': 'b'.repeat(260) }, throwOnError: true })
+  const prefix = 'a'.repeat(5930)
+  expect(longText(String.raw`\text{${prefix}\tail}`, false)).toContain(`<mtext>${prefix}${'b'.repeat(260)}</mtext>`)
+})
+
+test('checks assignment prefixes and freezes active characters copied by let', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  math(String.raw`\def\assign{\def}\long\global\assign\shared{x}`, false)
+  expect(math(String.raw`\shared`, false)).toContain('<mi>x</mi>')
+  expect(math(String.raw`\let\saved=x\def x{y}\saved x`, false)).toContain('<mi>x</mi><mi>y</mi>')
+  expect(math(String.raw`\let\digit=1\def1{y}\kern\digit em+\char\digit02`, false))
+    .toContain('<mspace width="1em"/><mo>+</mo><mi>f</mi>')
+  for (const source of [String.raw`\long x`, String.raw`\global\long`, String.raw`\global\newcommand\broken{x}`])
+    expect(() => math(source, false)).toThrow('Invalid token after math macro prefix')
+})
+
 test('accepts signed TeX dimensions with separating spaces and trailing decimal points', () => {
   const math = createMathRenderer({ throwOnError: true })
   expect(math(String.raw`\rule{-1em}{- 0.2em}X`, false))

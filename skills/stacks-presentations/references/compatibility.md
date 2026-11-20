@@ -49,8 +49,8 @@ in a new ts-presentation project.
 | KaTeX strict diagnostics | Unicode text and unrecognized characters, end-of-formula comments, HTML extensions, text accents and strikeout in math, spacing units and modes, and overflowed array columns |
 | Unicode math and text | Combining accents attached to math atoms and scripts, text-mode shaping of accented words, Unicode script and symbol validation, and original tokens in strict callbacks |
 | KaTeX accents and annotations | Stacked overbracket and underbracket labels, scalable line segments, text-mode underbars, circled text, and macro-expanded accent arguments |
-| KaTeX conditional macros | Mode-aware `\TextOrMath`, starred forms, token lookahead, and branch expansion in formulas, text, and `\edef` |
-| KaTeX legacy macros | Khan Academy color names and shades, literal token assignment with `\let`, whitespace-aware `\futurelet` lookahead, multi-digit macro arity, and `\message` or `\errmessage` output during expansion |
+| KaTeX conditional macros | Mode-aware `\TextOrMath`, starred forms, token lookahead, and branch expansion in formulas, text, and `\edef`. Unbraced text commands keep the complete expansion of their argument in a local text scope |
+| KaTeX legacy macros | Khan Academy color names and shades, literal token and active character snapshots with `\let`, whitespace-aware `\futurelet` lookahead, `\long` and `\global` assignment prefixes, multi-digit macro arity, and `\message` or `\errmessage` output during expansion |
 | KaTeX math choices | `\mathchoice` selects display, text, script, and scriptscript branches with operator spacing from the enclosing row |
 | KaTeX parser diagnostics | Macro declaration and scope checks, undefined commands in eager expansion, unexpected delimiters, text-mode command checks, and validation of expanded colors |
 | KaTeX macro and color settings | Deck-scoped `globalGroup`, per-formula `maxExpand` including eager definitions, and two-argument `\color` via `colorIsTextColor` |
