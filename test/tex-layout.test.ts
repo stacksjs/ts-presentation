@@ -304,7 +304,7 @@ test('caps positive TeX dimensions in ems, including TeX-only units', () => {
   const math = createMathRenderer({ maxSize: 2, throwOnError: true })
   const html = math(String.raw`a\hspace{1500em}\rule[40pt]{10pc}{1pc}\mkern{27mu}\kern{-4em}b`, false)
   expect(html).toContain('<mspace width="2em"/>')
-  expect(html).toContain('<mpadded voffset="2em"><mspace width="2em" height="1.2em" style="background:currentColor"/>')
+  expect(html).toMatch(/<mpadded voffset="2em" [^>]+><mspace width="2em" height="1\.2em" style="background:currentColor"\/>/)
   expect(html).toContain('<mspace width="1.5em"/>')
   expect(html).toContain('<mspace width="0" style="margin-inline-end:-4em"/>')
   expect(renderMath(String.raw`\hspace{65536sp}`)).toContain('<mspace width="1pt"/>')
@@ -547,9 +547,34 @@ test('handles general fractions, TeX math styles, and continued fractions', () =
   expect(html).toContain('<mo stretchy="true">]</mo>')
   expect(html).toContain('<mfrac numalign="right"><mrow><mspace width="0" height="0.85em" depth="0.35em"/>')
   const choices = String.raw`\mathchoice{D}{T}{S}{s} + x^{\mathchoice{D}{T}{S}{s}}`
-  expect(renderMath(choices)).toContain('<mrow><mi>T</mi></mrow>')
-  expect(renderMath(choices, true)).toContain('<mrow><mi>D</mi></mrow>')
+  expect(renderMath(choices)).toContain('<semantics><mrow><mi>T</mi>')
+  expect(renderMath(choices, true)).toContain('<semantics><mrow><mi>D</mi>')
   expect(renderMath(choices)).toContain('<mrow><mi>S</mi></mrow>')
+})
+
+test('spaces math choice branches in the surrounding row at the selected style', () => {
+  const choices = String.raw`a\mathchoice{=}{+}{\sin}{\cos}b`
+  const neighbors = (space: string, glyph: string) => `<mi>a</mi>${space}${operator(glyph)}${space}<mi>b</mi>`
+  expect(renderMath(choices, true)).toContain(neighbors(thick, '='))
+  expect(renderMath(choices)).toContain(neighbors(medium, '+'))
+  expect(renderMath(`x^{${choices}}`)).toContain(neighbors(thin, 'sin'))
+  expect(renderMath(`x^{y_{${choices}}}`)).toContain(neighbors(thin, 'cos'))
+  expect(renderMath(String.raw`a\mathchoice{\mathchoice{+}{}{}{}}{}{}{}+b`, true))
+    .toContain(`<mi>a</mi>${medium}${operator('+')}${medium}${operator('+')}<mi>b</mi>`)
+  expect(renderMath(String.raw`a\mathchoice{+}{}{}{}=b`))
+    .toContain(neighbors(thick, '='))
+  expect(renderMath(String.raw`a\mathchoice{c=}{+}{}{}_ib`, true))
+    .toContain(`<mi>a</mi>${thick}<msub><mrow><mi>c</mi><mo>=</mo></mrow><mi>i</mi></msub>${thick}<mi>b</mi>`)
+})
+
+test('keeps phantom atoms invisible with the spacing of their visible equivalents', () => {
+  const phantom = (content: string) => `<mphantom>${content}</mphantom>`
+  expect(renderMath(String.raw`a\phantom{=+}b`))
+    .toContain(`<mi>a</mi>${thick}${phantom(operator('='))}${thick}${phantom(operator('+'))}<mi>b</mi>`)
+  expect(renderMath(String.raw`a\phantom{\mathchoice{=}{+}{\sin}{s}}b`))
+    .toContain(`<mi>a</mi>${medium}${phantom(operator('+'))}${medium}<mi>b</mi>`)
+  expect(renderMath(String.raw`a\phantom{\kern-.25em}b`))
+    .toContain('<mi>a</mi><mspace width="0" style="margin-inline-end:-.25em"/><mi>b</mi>')
 })
 
 test('positions boxes and prescripts with bounded MathML dimensions', () => {
@@ -557,7 +582,7 @@ test('positions boxes and prescripts with bounded MathML dimensions', () => {
   const html = renderMath(formula)
   expect(html).toContain('<mpadded voffset="2pt" height="1ex" depth="0pt">')
   expect(html).toContain('<mspace width="0.3888888888888889em"/>')
-  expect(html).toContain('<mpadded voffset="-1pt"><mspace width="1em" height=".5pt"')
+  expect(html).toMatch(/<mpadded voffset="-1pt" [^>]+><mspace width="1em" height="\.5pt"/)
   expect(html).toContain('<mpadded depth="0">')
   expect(html).toContain('<mmultiscripts><mrow><mi>C</mi></mrow><mprescripts/>')
   const unsafe = renderMath(String.raw`\hspace{2em" onclick="oops}`)
@@ -575,7 +600,7 @@ test('renders phantom space, smashed dimensions, raised boxes, rules, and verbat
   expect(html).toContain('<mpadded width="0"><mphantom><mtext>tall</mtext></mphantom></mpadded>')
   expect(html).toContain('<mpadded height="0" depth="0"><mtext>flat</mtext></mpadded>')
   expect(html).toContain('<mpadded voffset="2pt"><mtext>up</mtext></mpadded>')
-  expect(html).toContain('<mpadded voffset="2pt"><mspace width="1em" height=".5pt"')
+  expect(html).toMatch(/<mpadded voffset="2pt" [^>]+><mspace width="1em" height="\.5pt"/)
   expect(html).toContain('>&lt;a␣$␣b&gt;%{}</mtext><mtext>Z</mtext>')
   expect(html).toContain(' stays inline.')
 })
@@ -659,7 +684,7 @@ test('lays out AMS arrays with solid and dashed rules, row gaps, and scoped cell
   expect(html).toContain('border-top:1px dashed currentColor')
   expect(html).toContain('border-bottom:1px solid currentColor')
   expect(html).toContain('padding-bottom:max(0px,calc(0.21em + 1ex))')
-  expect(html).toContain('<mrow><mi>D</mi></mrow>')
+  expect(html).toContain('<mstyle displaystyle="true" scriptlevel="0"><mi>D</mi></mstyle>')
   expect(html).toContain('<mtext>\\value</mtext>')
   const array = html.match(/<mtable data-equation-lines[^>]*>.*?<\/mtable>/)?.[0]
   expect(array?.match(/<mtr>/g)).toHaveLength(2)
@@ -799,7 +824,7 @@ test('places arrow, accent, and stretchy brace labels with the expected math sty
   \overbrace{a+b}^{n} \quad \underbrace{c+d}_{m}
   \quad \widecheck{fg}+\underleftharpoon{h}`
   const html = renderMath(input, true)
-  expect(html).toContain('<munderover><mrow class="math-arrow-body" style="min-width:1.75em"><mo stretchy="true" movablelimits="false" minsize="1.75em">⇌</mo><mspace class="math-arrow-track" data-lane="upper" data-right="upper" aria-hidden="true"/><mspace class="math-arrow-track" data-lane="lower" data-left="lower" aria-hidden="true"/></mrow><mrow><mi>s</mi><mi>l</mi><mi>o</mi><mi>w</mi></mrow><mrow><mrow><mi>S</mi></mrow></mrow></munderover>')
+  expect(html).toContain('<munderover><mrow class="math-arrow-body" style="min-width:1.75em"><mo stretchy="true" movablelimits="false" minsize="1.75em">⇌</mo><mspace class="math-arrow-track" data-lane="upper" data-right="upper" aria-hidden="true"/><mspace class="math-arrow-track" data-lane="lower" data-left="lower" aria-hidden="true"/></mrow><mrow><mi>s</mi><mi>l</mi><mi>o</mi><mi>w</mi></mrow><mrow><mi>S</mi></mrow></munderover>')
   expect(html).toContain('<mover><mover accent="true">')
   expect(html).toContain('<munder><munder accentunder="true">')
   expect(html).toContain('<mo stretchy="true">ˇ</mo>')
@@ -829,7 +854,7 @@ test('sets text and mixed math in framed, raised, and centered boxes', () => {
 test('keeps style-dependent math in a lap and uses text mode for plain laps', () => {
   const html = renderMath(String.raw`\sum_{\mathclap{\mathchoice{D}{T}{S}{s}}}+\text{\rlap{test}}`, true)
   expect(html).toContain('<munder>')
-  expect(html).toContain('<mpadded width="0"><mrow class="math-overlap-c"><mrow><mrow><mi>S</mi></mrow>')
+  expect(html).toContain('<mpadded width="0"><mrow class="math-overlap-c"><mrow><mi>S</mi></mrow>')
   expect(html).toContain('<mpadded width="0"><mrow class="math-overlap-r"><mtext>test</mtext>')
 })
 
@@ -1005,6 +1030,83 @@ test('enforces KaTeX strict settings for comments, markup, text commands, spacin
 })
 
 const chrome = await findChrome()
+
+test.skipIf(!chrome)('matches visible atom positions for math choices and phantoms in Chromium', async () => {
+  const cases = [
+    String.raw`a\mathrel{=}+b`,
+    String.raw`a\mathchoice{=}{+}{-}{}+b`,
+    String.raw`a\phantom{=+}b`,
+  ]
+  const body = cases.map(source => `<div>${renderMath(source, true)}</div>`).join('')
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response(`<!doctype html><main style="font-size:40px">${body}</main>`, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    }),
+  })
+  const view = new Bun.WebView({ backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await view.navigate(server.url.href)
+    const positions = await view.evaluate<number[][]>(`[...document.querySelectorAll('math')].map(math => {
+      const left = math.querySelector('mi').getBoundingClientRect().left
+      return [...math.querySelectorAll('mi, mo')].map(atom => atom.getBoundingClientRect().left - left)
+    })`)
+    expect(positions[0]).toHaveLength(4)
+    for (const [index, left] of positions[0].entries()) {
+      expect(positions[1][index]).toBeCloseTo(left)
+      expect(positions[2][index]).toBeCloseTo(left)
+    }
+  }
+  finally {
+    view.close()
+    await server.stop(true)
+  }
+}, 45_000)
+
+test.skipIf(!chrome)('reserves ascent and descent for shifted TeX rules in Chromium', async () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const formulas = [
+    String.raw`\rule{1em}{.5em}`,
+    String.raw`\rule[+.5em]{1em}{.5em}`,
+    String.raw`\rule[-8px]{1em}{.5em}`,
+    String.raw`\rule[-1em]{1em}{.5em}`,
+    String.raw`\rule{}{.5em}`,
+    String.raw`\rule[.5em]{1em}{}`,
+  ]
+  const baseline = '<mspace class="baseline" width="0" height="0" depth="0"/>'
+  const body = formulas.map(formula => math(formula, false).replace('</mrow><annotation', `${baseline}</mrow><annotation`)).join('')
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response(`<!doctype html><main style="font-size:40px">${body}</main>`, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    }),
+  })
+  const view = new Bun.WebView({ backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await view.navigate(server.url.href)
+    const geometry = await view.evaluate<number[][]>(`[...document.querySelectorAll('math')].map(math => {
+      const baseline = math.querySelector('.baseline').getBoundingClientRect().top
+      const box = math.getBoundingClientRect()
+      const ink = math.querySelector('mspace').getBoundingClientRect()
+      return [baseline - box.top, box.bottom - baseline, baseline - ink.top, ink.bottom - baseline, ink.width]
+    })`)
+    const expected = [
+      [20, 0, 20, 0, 40],
+      [40, 0, 40, -20, 40],
+      [12, 8, 12, 8, 40],
+      [0, 40, -20, 40, 40],
+      [20, 0, 20, 0, 0],
+      [20, 0, 20, -20, 40],
+    ]
+    for (const [index, dimensions] of expected.entries())
+      for (const [metric, dimension] of dimensions.entries())
+        expect(geometry[index][metric]).toBeCloseTo(dimension)
+  }
+  finally {
+    view.close()
+    await server.stop(true)
+  }
+}, 45_000)
 
 test.skipIf(!chrome)('paints mixed array rules as separate strokes on all sides in Chromium', async () => {
   const math = createMathRenderer({ minRuleThickness: 0.08, throwOnError: true })
@@ -1750,7 +1852,7 @@ test('honors custom generalized fraction bars, delimiters, and explicit styles',
 test('resolves math choice and limit placement once the fraction style is known', () => {
   const source = String.raw`\def\pick{\mathchoice{D}{T}{S}{s}}\pick\over\pick`
   for (const [display, choice] of [[true, 'T'], [false, 'S']] as const) {
-    const selected = `<mrow><mrow><mi>${choice}</mi></mrow></mrow>`
+    const selected = `<mrow><mi>${choice}</mi></mrow>`
     expect(formula(source, display)).toContain(`<mfrac>${selected}${selected}</mfrac>`)
   }
   expect(formula(String.raw`x^{\mathchoice{D}{T}{S}{s}\over 2}`, true)).toContain('<mrow><mi>s</mi></mrow>')
@@ -1777,7 +1879,7 @@ test('accepts macro-generated infix syntax without leaking group-local definitio
   const html = formula(source)
   expect(html).toContain('<mfrac linethickness="0"><mrow><mi>A</mi></mrow><mrow><mi>A</mi></mrow>')
   expect(() => formula(source + String.raw`\x`)).toThrow('Unsupported math command')
-  expect(formula(String.raw`\sqrt[\mathchoice{D}{T}{S}{s}]{27}`)).toContain('<mroot><mrow><mn>27</mn></mrow><mrow><mrow><mi>s</mi>')
+  expect(formula(String.raw`\sqrt[\mathchoice{D}{T}{S}{s}]{27}`)).toContain('<mroot><mrow><mn>27</mn></mrow><mrow><mi>s</mi></mrow></mroot>')
 })
 
 test('applies the last operator limit control even after scripts', () => {

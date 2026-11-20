@@ -340,6 +340,7 @@ const operatorSpaceGlyphs: Readonly<Record<string, string>> = {
 
 interface Atom {
   markup: Markup
+  fragment?: MathFragment
   mathClass?: MathClass
   limits?: boolean
   forceLimits?: boolean
@@ -349,10 +350,13 @@ interface Atom {
 
 interface RowPart {
   markup: Markup
+  fragment?: MathFragment
   token?: string
   mathClass?: MathClass
   operator?: boolean
 }
+
+type MathFragment = (style: MathStyle) => RowPart[]
 
 type Alignment = 'left' | 'center' | 'right'
 type ArrayRule = 'solid' | 'dashed'
@@ -531,9 +535,9 @@ function rowClass({ markup, token = '', mathClass, operator }: RowPart): MathCla
 function neutralizeOperator(markup: string): string {
   // MathML propagates a glyph's native spacing through scripts and singleton
   // rows. Preserve spacing within a group that has several children.
-  const operator = /^((?:<(?:msub|msup|msubsup|mover|munder|munderover)(?: [^>]*)?>)*)((?:<mrow(?: [^>]*)?>)*)<mo([^>]*)>([^<]*<\/mo>)((?:<\/mrow>)*)/
+  const operator = /^((?:<(?:msub|msup|msubsup|mover|munder|munderover)(?: [^>]*)?>)*)((?:<(?:mrow|mphantom)(?: [^>]*)?>)*)<mo([^>]*)>([^<]*<\/mo>)((?:<\/(?:mrow|mphantom)>)*)/
   return markup.replace(operator, (match, scripts: string, groups: string, attrs: string, glyph: string, ends: string) => {
-    if ((groups.match(/<mrow\b/g)?.length ?? 0) !== ends.length / '</mrow>'.length) return match
+    if ((groups.match(/</g)?.length ?? 0) !== (ends.match(/</g)?.length ?? 0)) return match
     const attributes = attrs.replace(/ (?:lspace|rspace)="[^"]*"/g, '')
     return `${scripts}${groups}<mo${attributes} lspace="0em" rspace="0em">${glyph}${ends}`
   })
@@ -558,8 +562,14 @@ function inlineBreaksBefore(parts: readonly RowPart[], classes: readonly (MathCl
   return offsets
 }
 
-function joinRow(parts: RowPart[], wrap = false, followsOrdinary = false): Markup {
-  const explicit = followsOrdinary || parts.some(part => part.mathClass)
+function expandRow(parts: RowPart[], style: MathStyle): RowPart[] {
+  return parts.flatMap(part => part.fragment ? expandRow(part.fragment(style), style) : part)
+}
+
+function joinRow(parts: RowPart[], wrap = false, followsOrdinary = false, explicitSpacing = false): Markup {
+  if (parts.some(part => part.fragment))
+    return style => renderMarkup(joinRow(expandRow(parts, style), wrap, followsOrdinary, true), style)
+  const explicit = explicitSpacing || followsOrdinary || parts.some(part => part.mathClass)
   if (!explicit && !wrap) return joinMarkup(parts.map(part => part.markup))
   const categories = parts.map(rowClass)
   // AMS alignment prepends an empty ordinary group in every right-hand cell.
@@ -1045,6 +1055,20 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return argumentAtom(false, primitive).markup
   }
 
+  function fragmentArgument(): { markup: Markup, parts: RowPart[] } {
+    const token = peek()
+    if (token !== '{' && token !== '\\begingroup' && token !== '\\bgroup') {
+      const part = argumentAtom(true)
+      return { markup: part.markup, parts: [{ ...part, token }] }
+    }
+    take()
+    const close = token === '{' ? '}' : token === '\\begingroup' ? '\\endgroup' : '\\egroup'
+    let parts: RowPart[] | undefined
+    const content = inScope(() => row([close], false, false, value => { parts = value }))
+    if (take() !== close) throw new Error('Unclosed math group')
+    return { markup: xml`<mrow>${content}</mrow>`, parts: parts ?? [{ markup: content }] }
+  }
+
   function bracket(): string | undefined {
     return rawBracket()?.join('')
   }
@@ -1174,10 +1198,14 @@ export function renderMath(source: string, display = false, configured: MathMacr
   function verticalBox(name: string, readBody: () => Markup): Markup {
     if (name === 'rule') {
       const offset = optionalBoxDimension()
-      const width = readDimension()
-      const height = readDimension()
+      const width = readDimension('0px')
+      const height = readDimension('0px')
       const rule = `<mspace width="${width}" height="${height}" style="background:currentColor"/>`
-      return offset ? `<mpadded voffset="${offset}">${rule}</mpadded>` : rule
+      if (!offset || Number.parseFloat(offset) === 0) return rule
+      const ascent = `max(0px,calc((${height}) + (${offset})))`
+      const descent = `max(0px,calc(-1 * (${offset})))`
+      // A MathML vertical offset moves the ink independently of layout.
+      return `<mpadded voffset="${offset}" height="0" style="padding-top:${ascent};padding-bottom:${descent}">${rule}</mpadded>`
     }
     if (name === 'raisebox') {
       if (peek() !== '{') throw new Error('Raised math box requires a grouped dimension')
@@ -1573,7 +1601,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
   }
 
-  function row(stop: string[] = [], breakOnInfix = false, exposeLines = false, firstClass?: (value: MathClass | undefined) => void, followsOrdinary = false): Markup {
+  function row(stop: string[] = [], breakOnInfix = false, exposeLines = false, capture?: (parts: RowPart[]) => void, followsOrdinary = false): Markup {
     if (depth++ > 100) throw new Error('Math groups are nested too deeply')
     const softWrap = !display && depth === 1 && state?.inlineBreaks === true
     let parts: RowPart[] = []
@@ -1678,6 +1706,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
         lower = ''
       }
       let content = part.markup
+      let fragment = part.fragment
       if (lower || upper) {
         const normal = lower && upper ? 'msubsup' : lower ? 'msub' : 'msup'
         const stacked = lower && upper ? 'munderover' : lower ? 'munder' : 'mover'
@@ -1691,14 +1720,20 @@ export function renderMath(source: string, display = false, configured: MathMacr
           const inline = wrap(normal)
           content = style => renderMarkup(style === 0 ? display : inline, style)
         }
+        if (fragment) {
+          const select = fragment
+          fragment = (style) => {
+            // Scripts attach to the full branch. Its final atom supplies the
+            // spacing class for the resulting script box.
+            const mathClass = expandRow(select(style), style).map(rowClass).findLast(Boolean) ?? 'ord'
+            return [{ markup: content, mathClass }]
+          }
+        }
       }
-      parts.push({ markup: content, token, mathClass: part.mathClass, operator: part.limits !== undefined })
+      parts.push({ markup: content, token, mathClass: part.mathClass, operator: part.limits !== undefined, fragment })
     }
     depth--
-    if (firstClass && !infix && !lines) {
-      const first = parts.find(part => part.markup !== '')
-      firstClass(first && rowClass(first))
-    }
+    if (!infix && !lines) capture?.(parts)
     const result = finish(softWrap && !infix)
     if (!infix) return result
     const fences = fractionFences[infix]
@@ -2030,7 +2065,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
   function atom(token: string, classifyGroup = false): Atom {
     if (token === '{') {
       let mathClass: MathClass | undefined
-      const captureClass = classifyGroup ? (value: MathClass | undefined) => { mathClass = value } : undefined
+      const captureClass = classifyGroup
+        ? (parts: RowPart[]) => {
+            const first = parts.find(part => part.markup !== '')
+            mathClass = first && rowClass(first)
+          }
+        : undefined
       const content = inScope(() => row(['}'], false, false, captureClass))
       if (take() !== '}') throw new Error('Unclosed math group')
       return { markup: xml`<mrow>${content}</mrow>`, mathClass }
@@ -2086,9 +2126,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const choices = Array.from({ length: 4 }, () => {
         const next = peek()
         if (!next || next === '}') throw new Error('Missing math choice')
-        return argument()
+        return fragmentArgument()
       })
-      return { markup: style => renderMarkup(choices[style], style) }
+      return {
+        markup: style => renderMarkup(choices[style].markup, style),
+        fragment: style => choices[style].parts,
+      }
     }
     if (name === 'boxed' || name === 'cancel' || name === 'bcancel' || name === 'xcancel') {
       return { markup: xml`<mrow class="math-${name}">${argument()}</mrow>` }
@@ -2145,6 +2188,17 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (name === 'cfrac') {
       const align = bracket()
       return { markup: fraction({ forced: 0, continued: true, align: align === 'l' ? 'left' : align === 'r' ? 'right' : undefined }) }
+    }
+    if (name === 'phantom') {
+      const { markup, parts } = fragmentArgument()
+      return {
+        markup: xml`<mphantom>${markup}</mphantom>`,
+        fragment: style => expandRow(parts, style).map(part => {
+          const mathClass = rowClass(part)
+          if (!mathClass) return part
+          return { ...part, mathClass, markup: xml`<mphantom>${part.markup}</mphantom>` }
+        }),
+      }
     }
     if (verticalBoxCommands.has(name)) return { markup: verticalBox(name, argument) }
     if (spacingCommands.has(name)) return { markup: spacingMarkup(name) }
