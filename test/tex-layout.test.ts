@@ -1240,6 +1240,107 @@ Ref. \ref{parent} and \eqref{child}.`
   expect(renamed.live!.slides[1].html).toMatch(/<mi>a<\/mi>[^]*?<mtd class="math-equation-number"><mtext>\(1\)/)
 })
 
+test('formats equation references with the active tag form and keeps target labels and starred tags intact', async () => {
+  const source = String.raw`# References
+
+\newtagform{local}[\textit]{\{}{\}}
+\usetagform{local}
+
+See \eqref{value}, \eqref{manual}, \ref{value}, \refeq{star}, and \eqref{missing}.
+
+\begin{spreadlines}{8px}
+\renewtagform{local}[\texttt]{<}{>}
+
+Nested: \eqref{value}.
+\end{spreadlines}
+
+Outer: \eqref{member}.
+
+\usetagform{default}
+
+Default: \eqref{value} and \eqref{manual}.
+
+---
+
+# Equations
+
+\newtagform{boxed}[\textbf]{[}{]}
+\usetagform{boxed}
+
+\begin{align}
+a&=b\label{value}\\
+c&=d\tag{Rate $k^2$}\label{manual}\\
+e&=f\tag*{Star}\label{star}
+\end{align}
+
+\mathtoolsset{showonlyrefs}
+\begin{subequations}\label{group}
+\begin{gather}x=y\label{omitted}\\w=z\label{member}\end{gather}
+\end{subequations}
+
+---
+
+# Later
+
+See \eqref{group}.`
+  const deck = await renderPresentation(parseDeck(source), { liveCompile: true })
+  const [refs, target, later] = deck.live!.slides
+  const format = (left: string, style: string, body: string, right: string) =>
+    `<mrow><mtext>${left}</mtext><mrow style="${style}"><mtext>${body}</mtext></mrow><mtext>${right}</mtext></mrow>`
+  expect(refs.html).toContain(format('{', 'font-style:italic', '1', '}'))
+  expect(refs.html).toContain(format('&lt;', 'font-family:monospace', '1', '&gt;'))
+  expect(refs.html).toContain(format('{', 'font-style:italic', '2a', '}'))
+  expect(refs.html).toContain(format('{', 'font-style:italic', '??', '}'))
+  expect(refs.html).toContain('data-slide-link="2"><math><mrow><mtext>1</mtext>')
+  expect(refs.html).toContain('data-slide-link="2"><math><mrow style="font-style:normal"><mtext>Star</mtext>')
+  expect(refs.html).toContain('data-slide-link="2"><math><mrow><mtext>(1)</mtext>')
+  expect(refs.html).toContain('<msup><mi>k</mi><mn>2</mn></msup>')
+  expect(target.html).toContain(format('[', 'font-weight:bold', '1', ']'))
+  expect(target.html).toContain(format('[', 'font-weight:bold', '2a', ']'))
+  expect(target.html).toContain('<mtd class="math-equation-number"><mtext>Star</mtext></mtd>')
+  expect(target.html).not.toContain('2b')
+  expect(later.html).toContain('data-slide-link="2"><math><mrow><mtext>(2)</mtext>')
+  expect(deck.html).not.toContain('data-equation-tag-value')
+})
+
+test('supports scoped and macro-driven tag forms in a single display', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const source = String.raw`\newtagform{colored}[\textcolor{blue}]{\lefttag}{!}
+\usetagform{colored}
+\begin{spreadlines}{3px}
+\def\lefttag{ID:}
+\begin{equation}a=b\label{a}\end{equation}
+\begin{spreadlines}{4px}
+\renewtagform{default}{[}{]}
+\usetagform{default}
+\begin{equation}c=\eqref{a}\end{equation}
+\end{spreadlines}
+\begin{equation}d=e\end{equation}
+\end{spreadlines}`
+  const html = math(source, true).replace(/<annotation[^>]*>.*?<\/annotation>/gs, '')
+  expect(html).toContain('<mtext>ID:</mtext><mrow style="color:blue"><mtext>1</mtext></mrow><mtext>!</mtext>')
+  expect(html).toContain('<mtext>[</mtext><mtext>1</mtext><mtext>]</mtext>')
+  expect(html).toContain('<mtext>[</mtext><mtext>2</mtext><mtext>]</mtext>')
+  expect(html).toContain('<mtext>ID:</mtext><mrow style="color:blue"><mtext>3</mtext></mrow><mtext>!</mtext>')
+  expect(() => math(String.raw`\newtagform{default}{}{} x`, true)).toThrow('already defined')
+  expect(() => math(String.raw`\renewtagform{missing}{}{} x`, true)).toThrow('Unknown equation tag form')
+  expect(() => math(String.raw`\usetagform{missing} x`, true)).toThrow('Unknown equation tag form')
+
+  const filtered = String.raw`\newtagform{linked}{\eqref{dependency}:}{}
+\usetagform{linked}
+\mathtoolsset{showonlyrefs}
+\begin{spreadlines}{0pt}
+\noeqref{selected}
+\begin{equation}a=b\label{selected}\end{equation}
+\usetagform{default}
+\begin{equation}c=d\label{dependency}\end{equation}
+\end{spreadlines}`
+  const numbers = math(filtered, true).replace(/<annotation[^>]*>.*?<\/annotation>/gs, '')
+  expect(numbers).toContain('<mrow><mtext>(2)</mtext></mrow><mtext>:</mtext><mtext>1</mtext>')
+  expect(numbers).toContain('<mtd class="math-equation-number" style="display:math;padding:0;justify-self:end"><mtext>(2)</mtext>')
+  expect(numbers).not.toContain('data-pending-equation-')
+})
+
 test('scopes reference-only numbering across display groups and discovers references in selected tags', () => {
   const math = createMathRenderer({ throwOnError: true })
   const source = String.raw`\begin{spreadlines}{0pt}

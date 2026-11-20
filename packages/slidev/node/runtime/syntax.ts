@@ -18,6 +18,7 @@ const slotMarker = /^::\s*([\w.:-]+?)\s*::\s*$/
 const bareDisplay = /^ {0,3}\\begin\{((?:equation|align|alignat|flalign|xalignat|gather|multline)\*?|xxalignat|CD|subequations|spreadlines)\}/
 const openSpreadlines = /^ {0,3}\\begin\{spreadlines\}[ \t]*\{/
 const mathtoolsSettings = /^ {0,3}\\mathtoolsset[ \t]*\{/
+const tagFormStart = /^ {0,3}\\(newtagform|renewtagform|usetagform)(?=[ \t{])/
 const closeSpreadlines = /^ {0,3}\\end\{spreadlines\}[ \t]*(?:%.*)?$/
 
 function inlineMathEnd(line: string, start: number, delimiter: string): number {
@@ -33,6 +34,26 @@ function inlineMathEnd(line: string, start: number, delimiter: string): number {
     else if (token === '}' && braces) braces--
   }
   return -1
+}
+
+function tagFormLine(line: string): string | undefined {
+  const opening = tagFormStart.exec(line)
+  if (!opening) return
+  let at = opening[0].length
+  function nextArgument(open: string, close: string): boolean {
+    while (line[at] === ' ' || line[at] === '\t') at++
+    if (line[at] !== open) return false
+    const end = inlineMathEnd(line, at + 1, close)
+    if (end < 0) return false
+    at = end + 1
+    return true
+  }
+  if (!nextArgument('{', '}')) return
+  if (opening[1] !== 'usetagform') {
+    if (/^[ \t]*\[/.test(line.slice(at)) && !nextArgument('[', ']')) return
+    if (!nextArgument('{', '}') || !nextArgument('{', '}')) return
+  }
+  if (/^[ \t]*(?:%.*)?$/.test(line.slice(at))) return line.slice(0, at)
 }
 
 function closeRevealTag(markup: string): string {
@@ -119,15 +140,17 @@ function tabsMarkup(id: string, tabs: GroupFence[]): string {
 
 export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): PreparedMarkdown {
   const attrs = syntax.comark && source.includes('{') ? createComarkAttributes() : undefined
-  if (!attrs && !source.includes('$') && !source.includes('\\(') && !source.includes('\\[') && !source.includes('\\begin{') && !source.includes('\\mathtoolsset') && !source.includes('\\ref') && !source.includes('\\eqref') && !source.includes('\\noeqref') && !source.includes('{monaco') && !source.includes('{live') && !source.includes('mermaid') && !source.includes('v-click') && !source.includes('v-after') && !source.includes('```') && !source.includes('~~~')) {
+  if (!attrs && !source.includes('$') && !source.includes('\\(') && !source.includes('\\[') && !source.includes('\\begin{') && !source.includes('\\mathtoolsset') && !source.includes('tagform') && !source.includes('\\ref') && !source.includes('\\eqref') && !source.includes('\\noeqref') && !source.includes('{monaco') && !source.includes('{live') && !source.includes('mermaid') && !source.includes('v-click') && !source.includes('v-after') && !source.includes('```') && !source.includes('~~~')) {
     return { source, restore: html => html }
   }
 
   const math: string[] = []
   const displayCommands: string[] = []
-  const spacingScopes: number[] = []
+  const tagFormCommands: string[] = []
+  const mathScopes: [number, number][] = []
   function registerMath(body: string, display: boolean, options?: EquationOptions): number {
-    const formula = display && displayCommands.length ? `${displayCommands.join('\n')}\n${body.trim()}` : body.trim()
+    const commands = display ? displayCommands : tagFormCommands
+    const formula = commands.length ? `${commands.join('\n')}\n${body.trim()}` : body.trim()
     const content = (syntax.renderMath ?? renderMath)(formula, display)
     const block = options
       ? `<div class="equation-steps" data-equation-steps="${options.ranges.join('|')}" data-equation-at="${options.at}" data-equation-first="${options.startLine}" data-equation-finally="${options.finally}">${content}</div>`
@@ -308,7 +331,7 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
         const end = inlineMathEnd(content, opening.length, '}')
         if (end >= 0 && /^[ \t]*(?:%.*)?$/.test(content.slice(end + 1))) {
           if (spreadlines) {
-            spacingScopes.push(displayCommands.length)
+            mathScopes.push([displayCommands.length, tagFormCommands.length])
             displayCommands.push(`\\setlength\\jot${content.slice(opening.length - 1, end + 1)}`)
           }
           else displayCommands.push(content.slice(0, end + 1))
@@ -316,8 +339,17 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
           continue
         }
       }
-      if (spacingScopes.length && closeSpreadlines.test(content)) {
-        displayCommands.length = spacingScopes.pop()!
+      if (mathScopes.length && closeSpreadlines.test(content)) {
+        const [displayLength, formLength] = mathScopes.pop()!
+        displayCommands.length = displayLength
+        tagFormCommands.length = formLength
+        output.push('')
+        continue
+      }
+      const form = tagFormLine(content)
+      if (form !== undefined) {
+        displayCommands.push(form)
+        tagFormCommands.push(form)
         output.push('')
         continue
       }

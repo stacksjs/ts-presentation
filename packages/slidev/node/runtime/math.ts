@@ -1,5 +1,5 @@
 import { escapeHtml, unescapeHtml } from './html.ts'
-import { createEquationReferences } from './equation-references.ts'
+import { applyEquationTagForm, createEquationReferences, equationTagValue } from './equation-references.ts'
 import type { EquationReferenceMarkup } from './equation-references.ts'
 import type { KatexOptions, KatexTrustContext } from './authoring-setup.ts'
 import { mathArrowBody, stackMathArrow, texArrowMinWidth, verticalMathArrow } from './math-arrow.ts'
@@ -310,7 +310,9 @@ function tokenize(source: string, onTrailingComment?: () => void): string[] {
 type MathMode = 'math' | 'text'
 const expansionPrimitives = ['\\expandafter', '\\noexpand', '\\@firstoftwo', '\\@secondoftwo', '\\@ifnextchar', '\\@ifstar', '\\TextOrMath', '\\html@mathml', '\\message', '\\errmessage', '\\char', '\\MoveEqLeft'] as const
 const expansionPrimitiveNames = new Set<string>(expansionPrimitives)
-const macroDeclaration = /^\\(?:[gex]?def|(?:future)?let|(?:new|renew|provide)command|DeclarePairedDelimiter(?:X(?:PP)?)?|MakeAboxedCommand|mathtoolsset|setlength|global|long)$/
+const macroDeclaration = /^\\(?:[gex]?def|(?:future)?let|(?:new|renew|provide)command|DeclarePairedDelimiter(?:X(?:PP)?)?|MakeAboxedCommand|mathtoolsset|(?:new|renew|use)tagform|setlength|global|long)$/
+const tagFormDeclaration = /^\\(?:new|renew|use)tagform$/
+const tagValueToken = '\u0000equation-tag-value'
 const assignmentCommand = /^\\(?:[gex]?def|(?:future)?let)$/
 type ExpansionPrimitive = typeof expansionPrimitives[number]
 type ConditionalPrimitive = Exclude<ExpansionPrimitive, '\\expandafter' | '\\noexpand' | '\\message' | '\\errmessage' | '\\char' | '\\MoveEqLeft'>
@@ -529,7 +531,8 @@ interface ArrayRow { cells: ArrayCell[], columns: number, label?: Markup, before
 interface MathLine { content: Markup, gap?: string }
 interface MultlineRow extends MathLine { align?: 'left' | 'right', inset?: string }
 type MultlinedPosition = 't' | 'c' | 'b'
-interface EquationTag { label?: Markup, key?: string, starred?: boolean, suppressed: boolean, raise?: string, finalized?: boolean }
+interface EquationTag { label?: Markup, key?: string, starred?: boolean, suppressed: boolean, raise?: string, finalized?: boolean, bareMarkup?: string }
+interface TagForm { left: string[], right: string[], inner: string[] }
 
 function equationNumberCell(label: Markup | undefined, position?: 'start' | 'end', raise?: string, padding: readonly string[] = []): string {
   const styles = [
@@ -1116,7 +1119,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
   let filteredNumbering = false
   let equationJot: string | undefined
   let mathtoolsOptions: ReadonlyMap<string, string> | undefined
-  let nextSubequationNumber: ((key?: string, onlyReferenced?: boolean) => string) | undefined
+  let tagForms: ReadonlyMap<string, TagForm> | undefined
+  let tagFormName = 'default'
+  let formattingTag = false
+  let nextSubequationNumber: ((key?: string, onlyReferenced?: boolean, form?: string) => string) | undefined
   let fullWidthAlignment = false
   let fontScale = 1
   let textItalic = false
@@ -1169,6 +1175,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const previousMonospace = textMonospace
     const previousJot = equationJot
     const previousMathtoolsOptions = mathtoolsOptions
+    const previousTagForms = tagForms
+    const previousTagFormName = tagFormName
     scopes.push({ undo: new Map() })
     try { return render() }
     finally {
@@ -1177,6 +1185,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
       textMonospace = previousMonospace
       equationJot = previousJot
       mathtoolsOptions = previousMathtoolsOptions
+      tagForms = previousTagForms
+      tagFormName = previousTagFormName
       while (scopes.length > before) restoreScope()
     }
   }
@@ -2208,7 +2218,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
         cursor++
         if (token === '\\relax' || declareMacro(token) || equationDirective(token)) continue
         const command = token.startsWith('\\') ? token.slice(1) : ''
-        const verbatim = verbatimMarkup(token)
+        const verbatim = token === tagValueToken ? equationTagValue : verbatimMarkup(token)
         if (verbatim !== undefined) {
           flush()
           parts.push(verbatim)
@@ -2363,6 +2373,25 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return Number.parseFloat(thickness) > 0 ? thickness : '0'
   }
 
+  function selectedTagForm(): string | undefined {
+    const form = tagForms?.get(tagFormName)
+    if (!form || formattingTag) return
+    const previousTag = tagState
+    tagState = { suppressed: false }
+    formattingTag = true
+    linkDepth++
+    try {
+      const tokens = [...form.left, '{', ...form.inner, '{', tagValueToken, '}', '}', ...form.right]
+      const template = withTokens(tokens, () => inMode('text', () => parseTextArgument('', false)))
+      return renderMarkup(template, 1)
+    }
+    finally {
+      linkDepth--
+      formattingTag = false
+      tagState = previousTag
+    }
+  }
+
   function nextTag(automatic: boolean): Markup | undefined {
     const { key, label, starred } = tagState
     if (tagState.finalized) return label
@@ -2371,16 +2400,21 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (label !== undefined) {
       const optional = onlyReferenced && mathtoolsOptions?.get('showmanualtags') !== 'true'
       if (!key) return optional ? undefined : label
-      const definition = referenceMarkup().label?.(key, { markup: renderMarkup(label, 1), starred: starred === true }, optional)
+      const definition = referenceMarkup().label?.(key, {
+        markup: renderMarkup(label, 1), starred: starred === true, bareMarkup: tagState.bareMarkup,
+      }, optional)
       return definition ?? (optional ? undefined : label)
     }
     if (automatic && !tagState.suppressed) {
-      if (nextSubequationNumber) return nextSubequationNumber(key, onlyReferenced)
+      const form = selectedTagForm()
+      if (nextSubequationNumber) return nextSubequationNumber(key, onlyReferenced, form)
       equationNumber++
       filteredNumbering ||= onlyReferenced
-      const registry = key || filteredNumbering ? referenceMarkup() : references
-      return registry?.number?.(equationNumber, key, onlyReferenced)
-        ?? (onlyReferenced ? undefined : numberMarkup?.(equationNumber) ?? tag('mtext', `(${equationNumber})`))
+      const registry = key || filteredNumbering || form ? referenceMarkup() : references
+      const numbered = registry?.number?.(equationNumber, key, onlyReferenced, form)
+      if (numbered !== undefined || onlyReferenced) return numbered
+      return form ? applyEquationTagForm(form, tag('mtext', String(equationNumber)))
+        : numberMarkup?.(equationNumber) ?? tag('mtext', `(${equationNumber})`)
     }
   }
 
@@ -2394,7 +2428,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const starred = peek() === '*'
     if (starred) take()
     const kind = token === '\\eqref' ? 'eqref' : token === '\\refeq' ? 'refeq' : 'ref'
-    return referenceMarkup().reference(equationKey(), kind, !starred && linkDepth === 0)
+    const key = equationKey()
+    return referenceMarkup().reference(key, kind, !starred && linkDepth === 0, kind === 'eqref' ? selectedTagForm() : undefined)
   }
 
   function equationDirective(token: string): boolean {
@@ -2403,9 +2438,15 @@ export function renderMath(source: string, display = false, configured: MathMacr
       if (tagState.label !== undefined) throw new MathParseError('Multiple tags for one equation')
       const starred = peek() === '*'
       if (starred) take()
+      const form = starred ? undefined : selectedTagForm()
       tagState.starred = starred
       tagState.label = ''
-      tagState.label = textArgument(undefined, !starred)
+      const content = textArgument(undefined, !starred && !form)
+      if (form) {
+        tagState.bareMarkup = renderMarkup(content, 1)
+        tagState.label = applyEquationTagForm(form, tagState.bareMarkup)
+      }
+      else tagState.label = content
     }
     else if (token === '\\label') {
       const key = equationKey()
@@ -3189,10 +3230,13 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const numbering = referenceMarkup().group?.(parent, key)
       let member = 0
       marker = numbering?.marker ?? ''
-      nextSubequationNumber = (key, onlyReferenced) => {
+      nextSubequationNumber = (key, onlyReferenced, form) => {
         if (member === 26) throw new MathParseError('Too many numbered subequations')
         const suffix = String.fromCharCode(97 + member++)
-        return numbering?.member(suffix, key, onlyReferenced) ?? (onlyReferenced ? '' : tag('mtext', `(${parent}${suffix})`))
+        const numbered = numbering?.member(suffix, key, onlyReferenced, form)
+        if (numbered !== undefined || onlyReferenced) return numbered ?? ''
+        const value = `${parent}${suffix}`
+        return form ? applyEquationTagForm(form, tag('mtext', value)) : tag('mtext', `(${value})`)
       }
     }
     try {
@@ -3291,6 +3335,23 @@ export function renderMath(source: string, display = false, configured: MathMacr
     mathtoolsOptions = selected
   }
 
+  function declareTagForm(command: string): void {
+    const name = equationKey()
+    if (!name || /\s/.test(name)) throw new MathParseError('Invalid equation tag form name')
+    const exists = name === 'default' || tagForms?.has(name)
+    if (command === '\\usetagform') {
+      if (!exists) throw new MathParseError(`Unknown equation tag form: ${name}`)
+      tagFormName = name
+      return
+    }
+    if (exists && command === '\\newtagform') throw new MathParseError(`Equation tag form is already defined: ${name}`)
+    if (!exists && command === '\\renewtagform') throw new MathParseError(`Unknown equation tag form: ${name}`)
+    const inner = rawBracket() ?? []
+    const left = rawGroup('Missing left equation tag delimiter')
+    const right = rawGroup('Missing right equation tag delimiter')
+    tagForms = new Map(tagForms).set(name, { left, right, inner })
+  }
+
   function declareMacro(token: string): boolean {
     if (!macroDeclaration.test(token)) return false
     let global = false
@@ -3302,6 +3363,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (prefixed && !assignmentCommand.test(token))
       throw new MathParseError('Invalid token after math macro prefix')
     const name = token.slice(1)
+    if (tagFormDeclaration.test(token)) {
+      declareTagForm(token)
+      return true
+    }
     if (name === 'mathtoolsset') {
       setMathtoolsOptions()
       return true
@@ -3420,6 +3485,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   }
 
   function atom(token: string): Atom {
+    if (token === tagValueToken) return { markup: equationTagValue }
     if (token === '{') {
       const content = inScope(() => row(['}']))
       if (take() !== '}') throw new MathParseError('Unclosed math group')
@@ -3693,7 +3759,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   try {
     if (trailingComment) strictViolation('commentAtEnd', 'A TeX comment at the end of the formula needs a terminating newline')
     let first = peek()
-    while (display && (first === '\\relax' || macroDeclaration.test(first))) {
+    while ((display && (first === '\\relax' || macroDeclaration.test(first))) || tagFormDeclaration.test(first)) {
       take()
       if (first !== '\\relax') declareMacro(first)
       first = peek()

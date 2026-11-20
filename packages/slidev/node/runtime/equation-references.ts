@@ -1,21 +1,28 @@
 interface ManualTag {
   markup: string
   starred: boolean
+  bareMarkup?: string
+}
+
+export const equationTagValue = '<mrow data-equation-tag-value=""></mrow>'
+
+export function applyEquationTagForm(form: string, markup: string): string {
+  return form.replaceAll(equationTagValue, () => markup)
 }
 
 export type EquationReferenceKind = 'ref' | 'eqref' | 'refeq'
 
 export interface EquationReferenceMarkup {
-  number?: (number: number, key?: string, onlyReferenced?: boolean) => string
-  group?: (parent: number, key?: string) => { marker: string, member: (suffix: string, key?: string, onlyReferenced?: boolean) => string }
+  number?: (number: number, key?: string, onlyReferenced?: boolean, form?: string) => string
+  group?: (parent: number, key?: string) => { marker: string, member: (suffix: string, key?: string, onlyReferenced?: boolean, form?: string) => string }
   label?: (key: string, tag: ManualTag, onlyReferenced?: boolean) => string
-  reference: (key: string, kind: EquationReferenceKind, link: boolean) => string
+  reference: (key: string, kind: EquationReferenceKind, link: boolean, form?: string) => string
   pin: (key: string) => string
 }
 
 interface EquationGroup { parent: number }
-type Definition = ({ number: number } | { tag: ManualTag } | { group: EquationGroup, suffix?: string }) & { key?: string, onlyReferenced?: boolean }
-type Reference = { key: string, kind: EquationReferenceKind | 'pin', link: boolean }
+type Definition = ({ number: number } | { tag: ManualTag } | { group: EquationGroup, suffix?: string }) & { key?: string, onlyReferenced?: boolean, form?: string }
+type Reference = { key: string, kind: EquationReferenceKind | 'pin', link: boolean, form?: string }
 type Resolved = { slide: number, tag: ManualTag }
 
 function unparenthesize(markup: string): string {
@@ -24,6 +31,11 @@ function unparenthesize(markup: string): string {
   const start = markup.replace(/(<mtext>)\(/, '$1')
   const end = start.lastIndexOf(')</mtext>')
   return (end < 0 ? start : start.slice(0, end) + start.slice(end + 1)).replaceAll('<mtext></mtext>', '')
+}
+
+function parenthesize(markup: string): string {
+  const text = /^<mtext>([^<]*)<\/mtext>$/.exec(markup)?.[1]
+  return text === undefined ? `<mtext>(</mtext>${markup}<mtext>)</mtext>` : `<mtext>(${text})</mtext>`
 }
 
 export function createEquationReferences(token: string, deck = false): {
@@ -45,12 +57,14 @@ export function createEquationReferences(token: string, deck = false): {
   const referencePattern = new RegExp(`<mrow data-pending-equation-(?:ref|pin)="${token}-(\\d+)"></mrow>`, 'g')
   let filtering = false
   let conditionalManualTags = false
+  let formattedNumbers = false
   let counter = 0
   let skipped = 0
 
   function define(definition: Definition): string {
     const index = definitions.push(definition) - 1
     filtering ||= definition.onlyReferenced === true
+    formattedNumbers ||= definition.form !== undefined
     if ('tag' in definition && definition.onlyReferenced) {
       conditionalManualTags = true
       return `<mrow ${manualMarker}${index}"></mrow>${definition.tag.markup}<mrow data-pending-equation-manual-end="${token}-${index}"></mrow>`
@@ -66,6 +80,7 @@ export function createEquationReferences(token: string, deck = false): {
     for (const [, index] of html.matchAll(referencePattern)) {
       const reference = references[Number(index)]
       if (reference.kind !== 'ref') referenced.add(reference.key)
+      if (reference.form) collectReferences(reference.form)
     }
   }
 
@@ -75,12 +90,24 @@ export function createEquationReferences(token: string, deck = false): {
       // slides never activate an equation. References inside optional manual
       // tags activate only after their enclosing tag has been selected.
       const pendingTags = new Map<string, string[]>()
-      for (const html of slides) {
-        collectReferences(conditionalManualTags ? html.replace(manualPattern, (_, index: string, content: string) => {
-          const key = definitions[Number(index)].key!
+      function collectTag(definition: Definition, content: string): void {
+        const key = definition.key
+        if (!definition.onlyReferenced) collectReferences(content)
+        else if (key) {
           const entries = pendingTags.get(key) ?? []
           entries.push(content)
           pendingTags.set(key, entries)
+        }
+      }
+      for (const html of slides) {
+        if (formattedNumbers) {
+          for (const [, , , index] of html.matchAll(definitionPattern)) {
+            const definition = definitions[Number(index)]
+            if (definition?.form) collectTag(definition, definition.form)
+          }
+        }
+        collectReferences(conditionalManualTags ? html.replace(manualPattern, (_, index: string, content: string) => {
+          collectTag(definitions[Number(index)], content)
           return ''
         }) : html)
       }
@@ -114,7 +141,7 @@ export function createEquationReferences(token: string, deck = false): {
       }
       else if ('number' in definition) value = deck ? ++counter : definition.number - skipped
       const tag = 'tag' in definition ? definition.tag
-        : { markup: `<mtext>(${value})</mtext>`, starred: false }
+        : definition.form ? formattedNumberTag(value, definition.form) : { markup: `<mtext>(${value})</mtext>`, starred: false }
       const { key } = definition
       if (key) {
         if (!labels.has(key)) labels.set(key, { slide, tag })
@@ -129,13 +156,18 @@ export function createEquationReferences(token: string, deck = false): {
     })
   }
 
+  function formattedNumberTag(value: string | number, form: string): ManualTag {
+    const bareMarkup = `<mtext>${value}</mtext>`
+    return { markup: applyEquationTagForm(form, bareMarkup), bareMarkup, starred: false }
+  }
+
   function resolve(html: string): string {
     return html.replace(referencePattern, (_, index: string) => resolveReference(Number(index), new Set(), { remaining: 64 }))
   }
 
   function resolveReference(index: number, visiting: Set<string>, budget: { remaining: number }): string {
     const reference = references[index]
-    const { key, kind } = reference
+    const { key, kind, form } = reference
     const target = labels.get(key)
     if (kind === 'pin') {
       if (deck && !target && !unresolvedPins.has(key)) {
@@ -145,13 +177,29 @@ export function createEquationReferences(token: string, deck = false): {
       return ''
     }
     const parenthesized = kind === 'eqref'
-    if (!target || visiting.has(key) || visiting.size >= 32 || --budget.remaining < 0)
-      return `<mtext>${parenthesized ? '(??)' : '??'}</mtext>`
+    const unresolved = `<mtext>${parenthesized ? '(??)' : '??'}</mtext>`
+    if (visiting.has(key) || visiting.size >= 32 || --budget.remaining < 0) return unresolved
+    const resolveNested = (content: string) => content.replace(referencePattern, (_, nested: string) =>
+      resolveReference(Number(nested), visiting, budget))
+    if (!target) {
+      if (!form) return unresolved
+      visiting.add(key)
+      const formatted = resolveNested(applyEquationTagForm(form, '<mtext>??</mtext>'))
+      visiting.delete(key)
+      return formatted
+    }
     const { tag, slide } = target
-    const content = parenthesized === !tag.starred ? tag.markup
-      : parenthesized ? `<mtext>(</mtext>${tag.markup}<mtext>)</mtext>` : unparenthesize(tag.markup)
+    let content: string
+    if (form || tag.bareMarkup !== undefined) {
+      const bare = tag.bareMarkup ?? (tag.starred ? tag.markup : unparenthesize(tag.markup))
+      content = form ? applyEquationTagForm(form, bare) : parenthesized ? parenthesize(bare) : bare
+    }
+    else {
+      content = parenthesized === !tag.starred ? tag.markup
+        : parenthesized ? `<mtext>(</mtext>${tag.markup}<mtext>)</mtext>` : unparenthesize(tag.markup)
+    }
     visiting.add(key)
-    const resolved = content.replace(referencePattern, (_, nested: string) => resolveReference(Number(nested), visiting, budget))
+    const resolved = resolveNested(content)
     visiting.delete(key)
     const upright = kind === 'refeq' ? ' style="font-style:normal"' : ''
     const expression = `<mrow${upright}>${resolved}</mrow>`
@@ -160,17 +208,17 @@ export function createEquationReferences(token: string, deck = false): {
       : expression
   }
 
-  function reference(key: string, kind: Reference['kind'], link: boolean): string {
-    const index = references.push({ key, kind, link }) - 1
+  function reference(key: string, kind: Reference['kind'], link: boolean, form?: string): string {
+    const index = references.push({ key, kind, link, form }) - 1
     return `<mrow data-pending-equation-${kind === 'pin' ? 'pin' : 'ref'}="${token}-${index}"></mrow>`
   }
 
   return {
     markup: {
-      number: (number, key, onlyReferenced) => define({ number, key, onlyReferenced }),
+      number: (number, key, onlyReferenced, form) => define({ number, key, onlyReferenced, form }),
       group: (parent, key) => {
         const group = { parent }
-        return { marker: define({ group, key }), member: (suffix, key, onlyReferenced) => define({ group, suffix, key, onlyReferenced }) }
+        return { marker: define({ group, key }), member: (suffix, key, onlyReferenced, form) => define({ group, suffix, key, onlyReferenced, form }) }
       },
       label: (key, tag, onlyReferenced) => define({ key, tag, onlyReferenced }) + (onlyReferenced ? '' : tag.markup),
       reference,

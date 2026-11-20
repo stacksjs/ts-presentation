@@ -130,6 +130,47 @@ $$`)
   }
 }, 45_000)
 
+it.skipIf(!chrome)('exports formatted equation tags and cross-slide references as editable Office Math', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-tag-form-'))
+  const canvas = { width: 960, height: 540 }
+  try {
+    const entry = join(root, 'slides.md')
+    await Bun.write(entry, String.raw`# References
+
+\newtagform{reference}[\textit]{<}{>}
+\usetagform{reference}
+
+See \eqref{value}.
+
+---
+
+# Calculation
+
+\newtagform{result}[\textbf]{[}{]}
+\usetagform{result}
+\mathtoolsset{showonlyrefs}
+
+\begin{equation}x=1\label{value}\end{equation}`)
+    const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
+    const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
+    const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
+    if (status) throw new Error(stderr)
+    const frames: PowerPointFrame[] = []
+    await captureFrames({ root: join(root, 'dist'), executable: chrome!, scale: 1, canvas, editable: true, withClicks: false }, frame => { frames.push(frame) })
+    expect(frames).toHaveLength(2)
+    const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Tag forms' }))
+    const ref = parts.get('ppt/slides/slide1.xml')?.toString() ?? ''
+    const eq = parts.get('ppt/slides/slide2.xml')?.toString() ?? ''
+    for (const marker of ['>&lt;</m:t>', '>&gt;</m:t>', '<m:sty m:val="i"/>']) expect(ref).toContain(marker)
+    for (const marker of ['>[</m:t>', '>1</m:t>', '>]</m:t>', '<m:sty m:val="b"/>']) expect(eq).toContain(marker)
+    expect(eq.match(/name="Equation tag"/g)).toHaveLength(1)
+    expect(ref).toContain('<a:hlinkClick')
+  }
+  finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}, 45_000)
+
 it.skipIf(!chrome)('keeps AMS subequation letters and reveal opacity editable in a PowerPoint range', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-subequations-'))
   const canvas = { width: 960, height: 540 }
