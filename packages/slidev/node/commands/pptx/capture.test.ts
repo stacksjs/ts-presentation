@@ -525,6 +525,54 @@ $$`)
   }
 }, 45_000)
 
+it.skipIf(!chrome)('exports signed spreadlines spacing and nested reveals as editable equations', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-spreadlines-'))
+  const canvas = { width: 960, height: 540 }
+  try {
+    const entry = join(root, 'slides.md')
+    await Bun.write(entry, String.raw`# Row distances
+
+$$ {1|2|3|4|all}
+\begin{spreadlines}{14px}
+\begin{align}
+X&=Y\\[4px]
+X&=Y
+\end{align}
+\begin{spreadlines}{-2px}
+\begin{align}
+X&=Y\\
+X&=Y
+\end{align}
+\end{spreadlines}
+\end{spreadlines}
+$$`)
+    const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
+    const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
+    const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
+    if (status) throw new Error(stderr)
+    const frames: PowerPointFrame[] = []
+    await captureFrames({ root: join(root, 'dist'), executable: chrome!, scale: 1, canvas, editable: true, withClicks: true }, frame => { frames.push(frame) })
+    expect(frames.map(frame => frame.position?.click)).toEqual([0, 1, 2, 3, 4])
+    for (const [step, frame] of frames.entries()) {
+      const equations = frame.editable?.nodes.filter((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math').map(node => node.equation) ?? []
+      expect(equations).toHaveLength(2)
+      const left = equations.flatMap(equation => equation
+        ? [equation, ...(equation.cells ?? [])].filter(cell => cell.expression.includes('>X</m:t>'))
+        : [])
+      expect(left).toHaveLength(4)
+      const [a, b, c, d] = left
+      expect((b.rect.y - a.rect.y) - (d.rect.y - c.rect.y)).toBeCloseTo(20, 1)
+      expect(left.map(cell => cell.expression.includes('<a:alpha val="24000"/>'))).toEqual(left.map((_, index) => step < 4 && step !== index))
+      expect(equations.flatMap(equation => equation?.tags ?? [])).toHaveLength(4)
+    }
+    const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Row distances' }))
+    expect(parts.get('ppt/slides/slide5.xml')?.toString().match(/<a14:m>/g)).toHaveLength(12)
+  }
+  finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}, 45_000)
+
 it.skipIf(!chrome)('exports AMS full-width alignments with editable columns and tags', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-flalign-'))
   const canvas = { width: 960, height: 540 }

@@ -310,7 +310,7 @@ function tokenize(source: string, onTrailingComment?: () => void): string[] {
 type MathMode = 'math' | 'text'
 const expansionPrimitives = ['\\expandafter', '\\noexpand', '\\@firstoftwo', '\\@secondoftwo', '\\@ifnextchar', '\\@ifstar', '\\TextOrMath', '\\html@mathml', '\\message', '\\errmessage', '\\char', '\\MoveEqLeft'] as const
 const expansionPrimitiveNames = new Set<string>(expansionPrimitives)
-const macroDeclaration = /^\\(?:[gex]?def|(?:future)?let|(?:new|renew|provide)command|DeclarePairedDelimiter(?:X(?:PP)?)?|MakeAboxedCommand|global|long)$/
+const macroDeclaration = /^\\(?:[gex]?def|(?:future)?let|(?:new|renew|provide)command|DeclarePairedDelimiter(?:X(?:PP)?)?|MakeAboxedCommand|setlength|global|long)$/
 const assignmentCommand = /^\\(?:[gex]?def|(?:future)?let)$/
 type ExpansionPrimitive = typeof expansionPrimitives[number]
 type ConditionalPrimitive = Exclude<ExpansionPrimitive, '\\expandafter' | '\\noexpand' | '\\message' | '\\errmessage' | '\\char' | '\\MoveEqLeft'>
@@ -552,16 +552,21 @@ function taggedDisplay(expression: string, label: Markup, left: boolean, flush: 
   return `<mtable class="math-tagged-display" data-equation-tags="${left ? 'left' : 'right'}"${flush ? ' data-equation-flush' : ''} style="display:block;width:100%"><mtr style="display:grid;grid-template-columns:${columns};align-items:center;column-gap:0.5em">${left ? number : spacer}${body}${left ? spacer : number}</mtr></mtable>`
 }
 
-function multlineTable(rows: readonly MultlineRow[], label: Markup | undefined, left: boolean, flush: boolean, environment: string, raise?: string): string {
+function equationRowGap(base?: string, extra?: string): string | undefined {
+  return base && extra ? `calc(${base} + ${extra})` : base ?? extra
+}
+
+function multlineTable(rows: readonly MultlineRow[], label: Markup | undefined, left: boolean, flush: boolean, environment: string, raise?: string, jot?: string): string {
   const tagRow = left ? 0 : rows.length - 1
   const markup = rows.map(({ content, gap, align }, index) => {
     const first = index === 0
     const last = index === rows.length - 1
     const placement = align ?? (last && !first ? 'right' : flush || (first && !last) ? 'left' : 'center')
     const number = label === undefined ? '' : equationNumberCell(index === tagRow ? label : undefined, undefined, raise)
-    const rowSpacing = gap ? `;padding-bottom:max(0px,calc(0.125em + ${gap}))` : ''
-    const body = `<mtd style="math-style:normal;padding-block:0.125em${rowSpacing}"><mrow>${renderMarkup(content, 0)}</mrow></mtd>`
-    return `<mtr data-multline-align="${placement}">${left ? number : ''}${body}${left ? '' : number}</mtr>`
+    const rowSpacing = jot === undefined && gap ? `;padding-bottom:max(0px,calc(0.125em + ${gap}))` : ''
+    const body = `<mtd style="math-style:normal;padding-block:${jot === undefined ? '0.125em' : '0em'}${rowSpacing}"><mrow>${renderMarkup(content, 0)}</mrow></mtd>`
+    const margin = jot === undefined ? undefined : equationRowGap(last || rows.length === 1 ? undefined : jot, gap)
+    return `<mtr data-multline-align="${placement}"${margin ? ` style="margin-block-end:${margin}"` : ''}>${left ? number : ''}${body}${left ? '' : number}</mtr>`
   }).join('')
   const tags = label === undefined ? '' : ` data-equation-tags="${left ? 'left' : 'right'}"`
   // Office Math uses one alignment for an array. Measure each row's position
@@ -569,16 +574,18 @@ function multlineTable(rows: readonly MultlineRow[], label: Markup | undefined, 
   return `<mtable class="math-multline" data-equation-lines data-math-array data-equation-environment="${environment}" data-equation-row-spacing${tags}${flush ? ' data-equation-flush' : ''}>${markup}</mtable>`
 }
 
-function multlinedTable(rows: readonly MultlineRow[], position: MultlinedPosition, width?: string): string {
+function multlinedTable(rows: readonly MultlineRow[], position: MultlinedPosition, width?: string, jot?: string): string {
   const markup = rows.map(({ content, gap, align, inset }, index) => {
     const first = index === 0 && rows.length > 1
     const last = index > 0 && index === rows.length - 1
     const placement = align ?? (first ? 'left' : last ? 'right' : 'center')
-    const spacing = gap ? ` style="padding-bottom:max(0px,calc(0.125em + ${gap}))"` : ''
+    const spacing = jot !== undefined ? ' style="padding-block:0em"'
+      : gap ? ` style="padding-bottom:max(0px,calc(0.125em + ${gap}))"` : ''
     const before = (last ? spaceMarkup('1em') : '') + (inset && align === 'left' ? spaceMarkup(inset) : '')
     const after = (inset && align === 'right' ? spaceMarkup(inset) : '') + (first ? spaceMarkup('1em') : '')
     const strut = '<mspace width="0" height="0.7em" depth="0.3em"/>'
-    return `<mtr data-multline-align="${placement}"><mtd${spacing}><mrow>${before}${renderMarkup(content, 0)}${after}${strut}</mrow></mtd></mtr>`
+    const margin = jot === undefined ? undefined : equationRowGap(index < rows.length - 1 ? jot : undefined, gap)
+    return `<mtr data-multline-align="${placement}"${margin ? ` style="margin-block-end:${margin}"` : ''}><mtd${spacing}><mrow>${before}${renderMarkup(content, 0)}${after}${strut}</mrow></mtd></mtr>`
   }).join('')
   const size = width ? ` style="min-inline-size:${width}"` : ''
   const alignment = position === 't' ? 'baseline 1' : position === 'b' ? 'baseline -1' : 'axis'
@@ -1090,6 +1097,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   let delimiterDepth = 0
   let currentColor = ''
   let equationNumber = 0
+  let equationJot: string | undefined
   let nextSubequationNumber: ((key?: string) => string) | undefined
   let fullWidthAlignment = false
   let fontScale = 1
@@ -1141,12 +1149,14 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const previousColor = currentColor
     const previousItalic = textItalic
     const previousMonospace = textMonospace
+    const previousJot = equationJot
     scopes.push({ undo: new Map() })
     try { return render() }
     finally {
       currentColor = previousColor
       textItalic = previousItalic
       textMonospace = previousMonospace
+      equationJot = previousJot
       while (scopes.length > before) restoreScope()
     }
   }
@@ -2693,7 +2703,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     environmentDepth++
     try {
       const rows = readMultlineRows(environment)
-      return multlineTable(rows, nextTag(environment === 'multline'), options?.leqno === true, options?.fleqn === true, environment, tagState.raise)
+      return multlineTable(rows, nextTag(environment === 'multline'), options?.leqno === true, options?.fleqn === true, environment, tagState.raise, equationJot)
     }
     finally {
       environmentDepth--
@@ -2722,7 +2732,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     try {
       const rows = readMultlineRows('multlined')
       if (tagState.label !== undefined) throw new MathParseError('Equation tags belong outside multlined')
-      return multlinedTable(rows, position, width)
+      return multlinedTable(rows, position, width, equationJot)
     }
     finally {
       environmentDepth--
@@ -2771,6 +2781,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const compact = subarray || smallMatrix
     const aligned = spreadEnvironment || environment.startsWith('align') || environment === 'split'
     const gathered = /^(?:gather[*]?|[lr]?gathered)$/.test(environment)
+    const jot = aligned || gathered ? equationJot : undefined
     const gatherAlignment = environment === 'lgathered' ? 'left' : environment === 'rgathered' ? 'right' : ''
     const cases = environment.endsWith('cases') || environment.endsWith('cases*')
     const proseCases = cases && environment.endsWith('*')
@@ -2975,8 +2986,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
     // A single alignment pair has no intercolumn space to distribute.
     const spread = spreadEnvironment && columnCount > 2 ? environment.startsWith('xalignat') ? 'balanced' : 'full' : ''
     if (spread === 'full') fullWidthAlignment = true
-    const displayRows = (tags || hasIntertext || hasArrows || hasContinuations || hasFrames || spread) && rowTags && display && depth === 1
-    const grid = aligned || cases || alignment.length > 0 || displayRows || gatherAlignment !== '' || position !== 'c'
+    const displayRows = (tags || hasIntertext || hasArrows || hasContinuations || hasFrames || spread || jot !== undefined) && rowTags && display && depth === 1
+    const grid = aligned || cases || alignment.length > 0 || displayRows || gatherAlignment !== '' || position !== 'c' || jot !== undefined
     const rowRules = rows.reduce((count, entry) => count + entry.before.length, rules.length)
     const columnRules = layout.columns.reduce((count, column) => count + column.before.length, layout.after.length)
     const rectangular = grid || columnArray || tags || rowRules > 0 || rows.some(row => row.columns > row.cells.length)
@@ -2991,12 +3002,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
     const align = aligned || cases || alignment.length || tags || gatherAlignment ? ` columnalign="${columnAlignment.join(' ')}"` : ''
     const moreRowSpace = aligned || gathered || cases
-    const pad = compact ? '0.06' : ((moreRowSpace ? 0.125 : 0.14) * stretch).toFixed(4).replace(/0+$/, '').replace(/\.$/, '')
+    const pad = jot !== undefined ? '0' : compact ? '0.06' : ((moreRowSpace ? 0.125 : 0.14) * stretch).toFixed(4).replace(/0+$/, '').replace(/\.$/, '')
     const lines = compact ? '' : ' data-equation-lines'
     const classes = [compact && 'math-compact-array', grid && 'math-alignment-grid', displayRows && 'math-display-grid'].filter(Boolean).join(' ')
     const layoutClass = classes ? ` class="${classes}"` : ''
     const amsAlignment = (aligned || gathered) ? ` data-equation-environment="${environment}"` : ''
-    const rowSpacing = amsAlignment && (hasIntertext || (hasArrows && displayRows) || hasContinuations || hasFrames || stretch !== 1 || rows.some(row => row.gap !== undefined)) ? ' data-equation-row-spacing' : ''
+    const rowSpacing = amsAlignment && (hasIntertext || (hasArrows && displayRows) || hasContinuations || hasFrames || jot !== undefined || stretch !== 1 || rows.some(row => row.gap !== undefined)) ? ' data-equation-row-spacing' : ''
     const tagPlacement = tags ? ` data-equation-tags="${leqno ? 'left' : 'right'}"` : ''
     const spreadLayout = spread ? ` data-equation-spread="${spread}"` : ''
     const gridTracks = spread ? `--math-pair-gaps:${columnCount / 2 - 1}` : `--math-columns:${columnCount}`
@@ -3011,6 +3022,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
         const flushTop = entry.flushAbove || (!intertexts.has(rowIndex) && rows[rowIndex - 1]?.flushBelow)
         const flushBottom = entry.flushBelow || (!intertexts.has(rowIndex + 1) && rows[rowIndex + 1]?.flushAbove)
         const trim: string[] = []
+        if (jot !== undefined) trim.push('padding-block:0em')
         if (flushTop) trim.push('padding-top:0em')
         if (flushBottom) trim.push('padding-bottom:0em')
         const cell = tags ? equationNumberCell(entry.label, undefined, entry.raise, trim) : ''
@@ -3064,8 +3076,9 @@ export function renderMath(source: string, display = false, configured: MathMacr
           if (framing) styling.push(...framing.style)
           if (frameStart) styling.push(`padding-inline-start:${pairedGap ? `calc(1em + ${inset})` : inset}`)
           if (framing) styling.push(`padding-block:calc(${pad}em + ${inset})`)
-          styling.push(...trim)
-          if (entry.gap) styling.push(`padding-bottom:max(0px,calc(${flushBottom ? '0' : pad}em${framing && !flushBottom ? ` + ${inset}` : ''} + ${entry.gap}))`)
+          if (flushTop) styling.push('padding-top:0em')
+          if (flushBottom) styling.push('padding-bottom:0em')
+          if (jot === undefined && entry.gap) styling.push(`padding-bottom:max(0px,calc(${flushBottom ? '0' : pad}em${framing && !flushBottom ? ` + ${inset}` : ''} + ${entry.gap}))`)
           const settings = styling.length ? ` style="${styling.join(';')}"` : ''
           const cellAttrs = dots ? ` class="math-array-dots" columnspan="${span}"` : ''
           const markup = dots ? '<mo>…</mo>' : renderMarkup(typeof value === 'object' ? '' : value ?? '', cellStyle)
@@ -3076,7 +3089,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
         const arrow = entry.arrow ? ` data-equation-arrow="${entry.arrow}"` : ''
         const continuation = entry.flushAbove || entry.flushBelow ? ' data-equation-continuation' : ''
         const frameRow = entry.frames ? ' data-equation-frame-row' : ''
-        return `${prose(rowIndex)}<mtr${arrow}${continuation}${frameRow}>${leqno ? cell : ''}${content}${leqno ? '' : cell}</mtr>`
+        const following = rows[rowIndex + 1]
+        const spreadGap = following && !flushBottom && !entry.arrow && !following.arrow && !intertexts.has(rowIndex + 1) ? jot : undefined
+        const margin = jot === undefined ? undefined : equationRowGap(spreadGap, entry.gap)
+        return `${prose(rowIndex)}<mtr${arrow}${continuation}${frameRow}${margin ? ` style="margin-block-end:${margin}"` : ''}>${leqno ? cell : ''}${content}${leqno ? '' : cell}</mtr>`
       }).join('') + prose(rows.length)
       const baseline = position === 't' ? ' align="baseline 1"' : position === 'b' ? ' align="baseline -1"' : ''
       const matrix = `<mtable${lines} data-math-array${align}${layoutClass}${gridLayout}${amsAlignment}${rowSpacing}${baseline}>${markup}</mtable>`
@@ -3104,8 +3120,13 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return `<math xmlns="http://www.w3.org/1998/Math/MathML"${display ? ' display="block"' : ''}${layout}><semantics>${markup}<annotation encoding="application/x-tex">${escapeHtml(tex)}</annotation></semantics></math>`
   }
 
-  function subequations(): string {
-    if (!display) throw new MathParseError('subequations requires display math')
+  function displayGroup(environment: 'subequations' | 'spreadlines', level = 0): string {
+    if (!display) throw new MathParseError(`${environment} requires display math`)
+    if (level > 100) throw new MathParseError('Display math groups are nested too deeply')
+    const numbered = environment === 'subequations'
+    const previousNumbering = nextSubequationNumber
+    const previousTag = tagState
+    const previousAlignment = fullWidthAlignment
     let key: string | undefined
     let marker = ''
     const blocks: string[] = []
@@ -3120,46 +3141,57 @@ export function renderMath(source: string, display = false, configured: MathMacr
         return numbering?.member(suffix, key) ?? tag('mtext', `(${parent}${suffix})`)
       }
     }
-    return inScope(() => {
-      while (peek()) {
-        const start = cursor
-        const token = take()
-        if (token === '\\relax' || declareMacro(token)) continue
-        if (token === '\\label' && !blocks.length) {
-          const label = equationKey()
-          key ??= label || undefined
-          continue
-        }
-        if (token === '\\end') {
-          if (literalGroup() !== 'subequations') break
-          if (peek()) throw new MathParseError('subequations must occupy the display')
-          if (!nextSubequationNumber) begin()
-          return `<div class="math-subequations">${marker}${blocks.join('')}</div>`
-        }
-        if (!nextSubequationNumber) begin()
-        tagState = { suppressed: false }
-        fullWidthAlignment = false
-        // Each child is a complete display, with its own tag and row layout.
-        const content = inScope(() => {
-          if (token === '\\[') {
-            const expression = row(['\\]'], false, true)
-            if (take() !== '\\]') throw new MathParseError('Unclosed display inside subequations')
-            return expression
+    try {
+      return inScope(() => {
+        if (!numbered) equationJot = readDimension()
+        while (peek()) {
+          const start = cursor
+          const token = take()
+          if (token === '\\relax' || declareMacro(token)) continue
+          if (numbered && token === '\\label' && !blocks.length) {
+            const label = equationKey()
+            key ??= label || undefined
+            continue
           }
-          if (token !== '\\begin') throw new MathParseError('Expected a display environment inside subequations')
-          const environment = literalGroup()
-          if (!/^(?:(?:equation|align|alignat|flalign|xalignat|gather|multline)\*?|xxalignat|CD)$/.test(environment))
-            throw new MathParseError(`Invalid subequations display: ${environment}`)
-          depth++
-          const expression = matrix(environment)
-          depth--
-          return expression
-        })
-        const tex = tokens.slice(start, cursor).map(tokenText).join('')
-        blocks.push(formulaMarkup(`<mrow>${renderMarkup(content, 0)}</mrow>`, tex))
-      }
-      throw new MathParseError('Unclosed math environment: subequations')
-    })
+          if (token === '\\end') {
+            if (literalGroup() !== environment) break
+            if (!level && peek()) throw new MathParseError(`${environment} must occupy the display`)
+            if (numbered && !nextSubequationNumber) begin()
+            return `<div class="math-${environment}">${marker}${blocks.join('')}</div>`
+          }
+          if (numbered && !nextSubequationNumber) begin()
+          const child = token === '\\begin' ? literalGroup() : undefined
+          if (child === 'spreadlines' || (child === 'subequations' && !nextSubequationNumber)) {
+            blocks.push(displayGroup(child, level + 1))
+            continue
+          }
+          tagState = { suppressed: false }
+          fullWidthAlignment = false
+          // Each child is a complete display, with its own tag and row layout.
+          const content = inScope(() => {
+            if (token === '\\[') {
+              const expression = row(['\\]'], false, true)
+              if (take() !== '\\]') throw new MathParseError(`Unclosed display inside ${environment}`)
+              return expression
+            }
+            if (child === undefined) throw new MathParseError(`Expected a display environment inside ${environment}`)
+            if (!/^(?:(?:equation|align|alignat|flalign|xalignat|gather|multline)\*?|xxalignat|CD)$/.test(child))
+              throw new MathParseError(`Invalid ${environment} display: ${child}`)
+            depth++
+            try { return matrix(child) }
+            finally { depth-- }
+          })
+          const tex = tokens.slice(start, cursor).map(tokenText).join('')
+          blocks.push(formulaMarkup(`<mrow>${renderMarkup(content, 0)}</mrow>`, tex))
+        }
+        throw new MathParseError(`Unclosed math environment: ${environment}`)
+      })
+    }
+    finally {
+      nextSubequationNumber = previousNumbering
+      tagState = previousTag
+      fullWidthAlignment = previousAlignment
+    }
   }
 
   function explicitCharacter(): string {
@@ -3182,6 +3214,11 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (prefixed && !assignmentCommand.test(token))
       throw new MathParseError('Invalid token after math macro prefix')
     const name = token.slice(1)
+    if (name === 'setlength') {
+      if (literalGroup() !== '\\jot') throw new MathParseError('Unsupported math length register')
+      equationJot = readDimension()
+      return true
+    }
     function definitionTarget(grouped = false): string {
       space()
       const target = grouped ? literalGroup().trim() : tokenText(tokens[cursor++] ?? '')
@@ -3570,9 +3607,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
       first = peek()
     }
     const start = cursor
-    const group = first === '\\begin' && (take(), literalGroup() === 'subequations')
+    const environment = first === '\\begin' ? (take(), literalGroup()) : undefined
+    const group = environment === 'subequations' || environment === 'spreadlines'
     if (!group) cursor = start
-    const content = group ? subequations() : formulaMarkup(`<mrow>${renderMarkup(row([], false, true), display ? 0 : 1)}</mrow>`, source)
+    const content = group ? displayGroup(environment) : formulaMarkup(`<mrow>${renderMarkup(row([], false, true), display ? 0 : 1)}</mrow>`, source)
     return localReferences ? localReferences.resolve(localReferences.numberSlide(content, 1)) : content
   }
   catch (error) {

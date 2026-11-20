@@ -48,13 +48,21 @@ export interface EquationReveal {
   advance: number
 }
 
+function displayGroup(element: Element): boolean {
+  return element.classList.contains('math-subequations') || element.classList.contains('math-spreadlines')
+}
+
+function groupedFormulas(group: Element): Element[] {
+  return Array.from(group.children).flatMap(child => child.localName === 'math' ? [child] : displayGroup(child) ? groupedFormulas(child) : [])
+}
+
 export function equationReveal(element: HTMLElement, cursor: number): EquationReveal {
   const ranges = (element.dataset.equationSteps ?? '').split('|')
   const at = parseClickPosition(element.dataset.equationAt ?? null) ?? { value: 1, relative: true }
   const span = clickSequence(at, cursor, ranges.length - 1)
   const first = element.firstElementChild
-  const group = first?.classList.contains('math-subequations') ? first : undefined
-  const formulas = group ? [...group.children].filter(child => child.localName === 'math') : [element]
+  const group = first && displayGroup(first) ? first : undefined
+  const formulas = group ? groupedFormulas(group) : [element]
   const lines: Element[] = []
   const continuations: EquationReveal['continuations'] = []
   for (const formula of formulas) {

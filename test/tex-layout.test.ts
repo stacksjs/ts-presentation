@@ -1238,6 +1238,78 @@ test('numbers AMS subequation groups in rendered order and links parent and chil
   expect(() => math(group.replace('\\begin{equation}', '\\begin{subequations}'), true)).toThrow('Invalid subequations display')
 })
 
+test('scopes Mathtools spreadlines gaps across nested displays, compact rows, and intertext', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const source = String.raw`\def\space{1em}
+\begin{spreadlines}{\space}
+\begin{align}
+a&=b\\[2px]
+b&=c\\
+\shortvdotswithin{=}
+&=d\\
+\intertext{Then}
+e&=f\\
+g&=h
+\end{align}
+\begin{spreadlines}{-.1em}
+\begin{subequations}\begin{gather}u=v\\w=x\end{gather}\end{subequations}
+\end{spreadlines}
+\begin{multline}a+b\\c+d\\e+f\end{multline}
+\end{spreadlines}`
+  const html = math(source, true).replace(/<annotation[^>]*>.*?<\/annotation>/gs, '')
+  expect(html.match(/margin-block-end:[^"]+/g)).toEqual([
+    'margin-block-end:calc(1em + 2px)', 'margin-block-end:1em', 'margin-block-end:-.1em',
+    'margin-block-end:1em', 'margin-block-end:1em',
+  ])
+  expect([...html.matchAll(/<mtext>\(([^<]+)\)<\/mtext>/g)].map(match => match[1])).toEqual(['1', '2', '3', '4', '5', '6a', '6b', '7'])
+  expect(html.match(/class="math-spreadlines"/g)).toHaveLength(2)
+  expect(html).toContain('data-equation-intertext="normal"')
+  expect(html).toContain('<mtr data-equation-continuation>')
+  expect(() => math(String.raw`\begin{spreadlines}{2em}\end{spreadlines}`, false)).toThrow('requires display math')
+  expect(() => math(String.raw`\begin{spreadlines}{bad}\end{spreadlines}`, true)).toThrow('Invalid math dimension')
+  expect(() => math(String.raw`\begin{spreadlines}{2em}\begin{gather}a=b\end{gather}`, true)).toThrow('Unclosed math environment: spreadlines')
+})
+
+test('passes bare spreadlines scopes through Markdown and restores spacing after each group', async () => {
+  const source = String.raw`# Display spacing
+
+\begin{spreadlines}{12px} % opening {comment}
+**Grouped prose** stays in the deck.
+
+\begin{gather}
+a=b\\ c=d
+\end{gather}
+
+\begin{spreadlines}{3px}
+$$
+\begin{aligned} u&=v\\w&=x\end{aligned}
+$$
+\end{spreadlines}
+
+\begin{gather}
+e=f\\ g=h
+\end{gather}
+\end{spreadlines}
+
+~~~tex
+\begin{spreadlines}{99px}
+\end{spreadlines}
+~~~
+
+\begin{gather}
+i=j\\ k=l
+\end{gather}
+
+\begin{spreadlines}{5px}\begin{multline*}m+n\\o+p\end{multline*}\end{spreadlines}`
+  const html = (await renderPresentation(parseDeck(source))).html
+    .replace(/<annotation[^>]*>.*?<\/annotation>/gs, '')
+  expect(html.match(/margin-block-end:(?:12|3|5|99)px/g)).toEqual(['margin-block-end:12px', 'margin-block-end:3px', 'margin-block-end:12px', 'margin-block-end:5px'])
+  expect(html).toContain('<strong>Grouped prose</strong>')
+  expect(html).toContain('data-equation-environment="gather"')
+  expect(html).toContain('0.125em')
+  expect(html).toContain('99')
+})
+
 test('keeps AMS relation spacing, explicit pair counts, and tags aligned across short rows', () => {
   const math = createMathRenderer({ throwOnError: true })
   const source = String.raw`\def\pairs{2}\def\extra{.4em}

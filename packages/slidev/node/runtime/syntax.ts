@@ -15,7 +15,9 @@ const inlineCode = /^`+/
 const protectedHtml = /^<(pre|code|script|style)(?:\s[^>]*)?>[\s\S]*?<\/\1\s*>/i
 const htmlTag = /^<(?:[^>"']|"[^"]*"|'[^']*')+>/
 const slotMarker = /^::\s*([\w.:-]+?)\s*::\s*$/
-const bareDisplay = /^ {0,3}\\begin\{((?:equation|align|alignat|flalign|xalignat|gather|multline)\*?|xxalignat|CD|subequations)\}/
+const bareDisplay = /^ {0,3}\\begin\{((?:equation|align|alignat|flalign|xalignat|gather|multline)\*?|xxalignat|CD|subequations|spreadlines)\}/
+const openSpreadlines = /^ {0,3}\\begin\{spreadlines\}[ \t]*\{/
+const closeSpreadlines = /^ {0,3}\\end\{spreadlines\}[ \t]*(?:%.*)?$/
 
 function inlineMathEnd(line: string, start: number, delimiter: string): number {
   let braces = 0
@@ -121,8 +123,11 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
   }
 
   const math: string[] = []
+  const lineSpacing: string[] = []
   function registerMath(body: string, display: boolean, options?: EquationOptions): number {
-    const content = (syntax.renderMath ?? renderMath)(body.trim(), display)
+    const jot = display ? lineSpacing.at(-1) : undefined
+    const formula = jot === undefined ? body.trim() : `\\setlength\\jot${jot}\n${body.trim()}`
+    const content = (syntax.renderMath ?? renderMath)(formula, display)
     const block = options
       ? `<div class="equation-steps" data-equation-steps="${options.ranges.join('|')}" data-equation-at="${options.at}" data-equation-first="${options.startLine}" data-equation-finally="${options.finally}">${content}</div>`
       : content
@@ -295,14 +300,32 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
       output.push(line)
       continue
     }
+    if (syntax.mathEnabled !== false && !prefix) {
+      const opening = openSpreadlines.exec(content)?.[0]
+      if (opening) {
+        const end = inlineMathEnd(content, opening.length, '}')
+        if (end >= 0 && /^[ \t]*(?:%.*)?$/.test(content.slice(end + 1))) {
+          lineSpacing.push(content.slice(opening.length - 1, end + 1))
+          output.push('')
+          continue
+        }
+      }
+      if (lineSpacing.length && closeSpreadlines.test(content)) {
+        lineSpacing.pop()
+        output.push('')
+        continue
+      }
+    }
     const environment = syntax.mathEnabled !== false && bareDisplay.exec(content)
     if (environment) {
-      const closing = `\\end{${environment[1]}}`
+      const name = environment[1]
+      const group = name === 'subequations' || name === 'spreadlines'
+      const closing = `\\end{${name}}`
       const body = [content]
       let end = index
       while (!body.at(-1)!.trimEnd().endsWith(closing)) {
         const next = mathContinuation(++end)
-        if (next === undefined || (environment[1] !== 'subequations' && bareDisplay.test(next))) break
+        if (next === undefined || (!group && bareDisplay.test(next))) break
         body.push(next)
       }
       if (body.at(-1)!.trimEnd().endsWith(closing)) {
@@ -349,7 +372,7 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
       return (attrs ? attrs.restore(html) : html)
         .replace(/<p>(<tp-math data-equation="\d+"><\/tp-math>)<\/p>/g, (whole, placeholder) => {
           const index = Number(/\d+/.exec(placeholder)?.[0])
-          return /^<div class="(?:equation-steps|math-subequations)"|^<math [^>]* display="block"/.test(math[index] ?? '') ? placeholder : whole
+          return /^<div class="(?:equation-steps|math-subequations|math-spreadlines)"|^<math [^>]* display="block"/.test(math[index] ?? '') ? placeholder : whole
         })
         .replace(/<tp-math data-equation="(\d+)"><\/tp-math>/g, (whole, index: string) => math[Number(index)] ?? whole)
     },
