@@ -5,6 +5,7 @@ import { gantt, isGanttHeader } from './mermaid/gantt.ts'
 import { gitGraph } from './mermaid/gitgraph.ts'
 import { journey } from './mermaid/journey.ts'
 import { pieDiagram } from './mermaid/pie.ts'
+import { quadrantDiagram } from './mermaid/quadrant.ts'
 import { relationshipsDiagram } from './mermaid/relationships.ts'
 import { sankey } from './mermaid/sankey.ts'
 import { sequence } from './mermaid/sequence.ts'
@@ -17,7 +18,7 @@ function mapping(value: unknown): MermaidOptions {
 
 function mergeDiagramOptions(base: MermaidOptions = {}, override: MermaidOptions = {}): MermaidOptions {
   const result = { ...base, ...override }
-  for (const key of ['flowchart', 'gantt', 'gitGraph', 'journey', 'pie', 'sankey', 'timeline', 'xyChart', 'themeVariables']) {
+  for (const key of ['flowchart', 'gantt', 'gitGraph', 'journey', 'pie', 'quadrantChart', 'sankey', 'timeline', 'xyChart', 'themeVariables']) {
     if (base[key] && override[key] && typeof base[key] === 'object' && typeof override[key] === 'object')
       result[key] = { ...mapping(base[key]), ...mapping(override[key]) }
   }
@@ -44,18 +45,18 @@ function prepare(source: string, options?: MermaidOptions): { code: string, opti
   let code = source.trim()
   let inline: MermaidOptions = {}
   const fields = /^---[ \t]*\r?\n([\s\S]+?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(code)
-  const init = !fields && /^%%\{\s*(?:init|initialize)\s*:\s*(\{[\s\S]*?\})\s*\}%%/.exec(code)
-  const header = fields || init
-  if (header) {
-    const defined = mapping(Bun.YAML.parse(header[1]))
-    if (fields) {
-      const config = { ...mapping(defined.config) }
-      if (typeof defined.title === 'string') config.title = defined.title
-      if (defined.displayMode === 'compact') config.gantt = { ...mapping(config.gantt), displayMode: defined.displayMode }
-      inline = config
-    }
-    else inline = defined
-    code = code.slice(header[0].length).trimStart()
+  if (fields) {
+    const defined = mapping(Bun.YAML.parse(fields[1]))
+    const config = { ...mapping(defined.config) }
+    if (typeof defined.title === 'string') config.title = defined.title
+    if (defined.displayMode === 'compact') config.gantt = { ...mapping(config.gantt), displayMode: defined.displayMode }
+    inline = config
+    code = code.slice(fields[0].length).trimStart()
+  }
+  const init = /^%%\{\s*(?:init|initialize)\s*:\s*(\{[\s\S]*?\})\s*\}%%/.exec(code)
+  if (init) {
+    inline = mergeDiagramOptions(inline, mapping(Bun.YAML.parse(init[1])))
+    code = code.slice(init[0].length).trimStart()
   }
   return { code, options: mergeDiagramOptions(options, inline) }
 }
@@ -72,6 +73,7 @@ function render(code: string, marker: string, options: MermaidOptions): string |
   if (header === 'sequenceDiagram') return sequence(code, marker)
   if (header === 'classDiagram' || header === 'erDiagram') return relationshipsDiagram(code, marker)
   if (/^pie(?:\s|$)/.test(header ?? '')) return pieDiagram(code, marker, options.pie, title)
+  if (/^quadrantChart(?:\s|;|$)/i.test(header ?? '')) return quadrantDiagram(code, marker, options)
   return flowchart(code, marker)
 }
 

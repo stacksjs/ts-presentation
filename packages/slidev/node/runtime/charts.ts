@@ -1,5 +1,5 @@
-import type { FlowchartDiagramOptions, GanttChartOptions, GitGraphOptions, JourneyChartOptions, PieChartOptions, RelationshipChartOptions, SankeyChartOptions, SequenceChartOptions, TimelineChartOptions, XYChartOptions } from 'ts-charts/diagrams'
-import { flowchartDiagram, ganttChart, gitGraphChart, journeyChart, pieChart, relationshipChart, sankeyChart, sequenceChart, timelineChart, xyChart } from 'ts-charts/diagrams'
+import type { FlowchartDiagramOptions, GanttChartOptions, GitGraphOptions, JourneyChartOptions, PieChartOptions, QuadrantChartOptions, RelationshipChartOptions, SankeyChartOptions, SequenceChartOptions, TimelineChartOptions, XYChartOptions } from 'ts-charts/diagrams'
+import { flowchartDiagram, ganttChart, gitGraphChart, journeyChart, pieChart, quadrantChart, relationshipChart, sankeyChart, sequenceChart, timelineChart, xyChart } from 'ts-charts/diagrams'
 import { optionsForSvg } from './diagram-svg.ts'
 
 type Chart =
@@ -8,6 +8,7 @@ type Chart =
   | ({ type: 'gitgraph' } & GitGraphOptions)
   | ({ type: 'journey' } & JourneyChartOptions)
   | ({ type: 'pie' } & PieChartOptions)
+  | ({ type: 'quadrant' } & QuadrantChartOptions)
   | ({ type: 'class' | 'er' } & RelationshipChartOptions)
   | ({ type: 'sequence' } & SequenceChartOptions)
   | ({ type: 'timeline' } & TimelineChartOptions)
@@ -22,6 +23,7 @@ function chartSvg(chart: Chart): string | undefined {
     case 'gitgraph': return gitGraphChart(chart)
     case 'journey': return journeyChart(chart)
     case 'pie': return pieChart(chart)
+    case 'quadrant': return quadrantChart(chart)
     case 'class':
     case 'er': return relationshipChart({ ...chart, kind: chart.type })
     case 'sequence': return sequenceChart(chart)

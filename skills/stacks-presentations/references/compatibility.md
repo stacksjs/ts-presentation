@@ -52,6 +52,7 @@ in a new ts-presentation project.
 | Draggable elements | Inline directives, drag and arrow components, frontmatter positions, scaled editing, and local Markdown saves |
 | Imported Slidev diagrams | Compatibility fences translate the supported syntax to `ts-charts` input |
 | XY charts | Native YAML and imported `xychart` fences render bar and line series with category or numeric axes, orientation, legends, labels, and palette overrides |
+| Quadrant charts | Native YAML and imported `quadrantChart` fences render labeled quadrants, normalized points, point style classes and overrides, named themes, and accessible descriptions |
 | Sankey diagrams | Weighted links from native YAML and imported CSV fences, with four alignments, gradient or solid links, and configurable node colors and labels |
 | Gantt styles and dates | Task labels in or beside bars, task status palettes, multiline section headings, case-insensitive directives, fractional times, calendar durations and UTC ticks, short ISO start dates, and fixed SVG dimensions via `useMaxWidth: false` |
 | Gantt markers and exclusions | Repeated markers with the same ID, time, and label share one visible marker. Invalid ends warn and keep the task at its start. Whole-day exclusions ignore unmatched calendar tokens |

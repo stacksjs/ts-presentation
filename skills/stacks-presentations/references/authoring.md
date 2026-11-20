@@ -275,8 +275,13 @@ speaker notes. Each hook can be asynchronous.
   `fontSize`.
 - Imported Slidev diagram fences pass through a compatibility parser.
   Styled flowchart groups, sequence and state diagrams, relationships,
-  pie charts, XY charts, Sankey diagrams, Gantt schedules, Git histories, timelines, and journeys use
+  pie charts, quadrant charts, XY charts, Sankey diagrams, Gantt schedules, Git histories, timelines, and journeys use
   the same `ts-charts` renderers as `charts` fences.
+- In a `charts` fence with `type: quadrant`, list `quadrants` in top-right,
+  top-left, bottom-left, bottom-right order. Use `xAxis` and `yAxis` for one
+  or two labels in low-to-high order. Each point has a `label` and `x` and
+  `y` coordinates from 0 to 1. Imported `quadrantChart` fences also accept
+  `classDef` and inline point styles.
 - Imported Gantt schedules support date and axis formats, exclusions, task
   dependencies, milestones, today-marker styling, and chart spacing. Enable
   imported `href` and `call` interactions with `securityLevel: loose` in diagram
