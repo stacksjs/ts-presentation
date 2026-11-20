@@ -514,7 +514,9 @@ test('renders phase angles, actuarial notation, pseudo-bold, and strikeout as Ma
   const html = math(String.raw`\phase{-78^\circ} + a_{\angl{n+1}}+b_\angln + \pmb{\mu} + \text{old \sout{term $x^2$}}`, true)
   expect(html).toContain('<mrow class="math-phase">')
   expect(html.match(/class="math-angl"/g)).toHaveLength(2)
-  expect(html).toContain('<mrow class="math-angl"><mi>n</mi></mrow>')
+  expect(html).toContain('<mrow class="math-angl"><mstyle displaystyle="false" scriptlevel="0"><mtext>n</mtext>')
+  expect(html).toContain('<mrow class="math-angl"><mstyle displaystyle="false" scriptlevel="0"><mtext>n+1</mtext>')
+  expect(math(String.raw`\edef\year{\angln}\year+\angl{$n+1$}`, false)).toContain('<mi>n</mi><mo>+</mo><mn>1</mn>')
   expect(html).toContain('<mrow class="math-pmb"><mrow><mi>μ</mi>')
   expect(html).toContain('<mrow class="math-sout"><mrow><mtext>term')
   expect(html).toContain('<msup><mi>x</mi><mn>2</mn></msup>')
@@ -528,6 +530,49 @@ test('scopes TeX font sizing across groups, text, and nested math', () => {
   expect(markup).toContain('<mstyle mathsize="1.44em"><mtext>Wide')
   expect(markup).toContain('<mstyle mathsize="0.625em"><mtext>note</mtext></mstyle>')
   expect(markup).toContain('<mo>+</mo><mi>E</mi></mrow>')
+})
+
+// Typography and font-scope cases adapted from KaTeX's mathml-spec.ts (MIT).
+test('shapes TeX text punctuation in proportional fonts and preserves typewriter ligatures', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const sample = "\x60\x60ready'' -- ---"
+  const proportional = '<mtext>\u201cready\u201d \u2013 \u2014'
+  const mono = '<mtext>\x60\x60ready&#39;&#39; -- ---'
+  expect(math(`\\text{${sample}}`, false)).toContain(proportional + '</mtext>')
+  expect(math(`\\texttt{${sample}}`, false)).toContain(mono + '</mtext>')
+  const nested = math(`\\text{\\tt ${sample}{---} \\textsf{${sample}} ---}{\\text{---}}`, false)
+  expect(nested).toContain(mono + '</mtext><mtext>---</mtext>')
+  expect(nested).toContain(proportional + '</mtext>')
+  expect(nested).toContain('<mtext>\u00a0---</mtext>')
+  expect(nested).toContain('<mtext>\u2014</mtext>')
+  expect(math("\\text{\x60x' \\verb|\x60x'---|}", false)).toContain('<mtext>\u2018x\u2019\u00a0</mtext>')
+  expect(math("\\text{\x60x' \\verb|\x60x'---|}", false)).toContain(">\x60x&#39;---</mtext>")
+})
+
+test('resets horizontal box text style independently of the surrounding scripts', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const source = String.raw`x_{\scriptstyle \hbox{$\sum^a_b$}\fbox{$z$}\colorbox{red}{$y$}}`
+  const markup = math(source, false).split('<annotation')[0]
+  expect(markup).toContain('<msub><mi>x</mi><mrow><mstyle displaystyle="false" scriptlevel="1">')
+  expect(markup.match(/<mstyle displaystyle="false" scriptlevel="0">/g)).toHaveLength(3)
+  expect(markup).toContain('<msubsup><mo>∑</mo><mi>b</mi><mi>a</mi></msubsup>')
+})
+
+test('keeps surrounding fonts out of array cells and commutative diagram labels', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const formula = String.raw`\mathcal{A\begin{matrix}x&\mathbb{N}\end{matrix}B}`
+  const markup = math(formula, false).split('<annotation')[0]
+  expect(markup).toContain('<mi>𝒜</mi>')
+  expect(markup).toContain('<mtable data-equation-lines data-math-array><mtr><mtd><mi>x</mi>')
+  expect(markup).toContain('<mi>ℕ</mi>')
+  expect(markup).toContain('<mi>ℬ</mi>')
+  const cd = math(String.raw`\mathsf{\begin{CD}A @>x>> B\end{CD}}`, true)
+  expect(cd).toContain('<mtd><mi>A</mi></mtd>')
+  expect(cd).toContain('<mrow><mi>x</mi></mrow></mover>')
+  expect(cd).toContain('<mtd><mi>B</mi></mtd>')
+  const fraction = math(String.raw`\mathsf{\dfrac{A123}{x456}}`, false)
+  expect(fraction).toContain('<mfrac><mrow><mi mathvariant="normal">A</mi><mn>123</mn>')
+  expect(fraction).toContain('<mi mathvariant="normal">x</mi><mn>456</mn>')
 })
 
 // Operator and emphasis cases adapted from KaTeX v0.19.1 (licenses/KaTeX-MIT.txt).
@@ -561,6 +606,8 @@ test('toggles nested TeX emphasis in the active text shape', () => {
     [String.raw`\textit{${nested}}`, String.raw`\textit{${italic}}`],
     [String.raw`\text{\it italic {\emph{up}} \emph{still up} {\rm \emph{italic again}}}`,
       String.raw`\text{\it italic {\textup{up}} \textup{still up} {\rm \textit{italic again}}}`],
+    [String.raw`\text{{\it italic} \emph{also italic}}`,
+      String.raw`\text{{\it italic} \textit{also italic}}`],
   ]
   for (const [source, reference] of formulas)
     expect(math(source, false).split('<annotation')[0]).toBe(math(reference, false).split('<annotation')[0])
@@ -1040,8 +1087,8 @@ test('sets text and mixed math in framed, raised, and centered boxes', () => {
   expect(html).toContain('<mfrac><mrow><mi>a</mi></mrow><mrow><mi>b</mi></mrow></mfrac>')
   expect(html).toContain('<mtext> result</mtext>')
   expect(html).toMatch(/vertical-align:\.3em"><math[^>]* scriptlevel="0" displaystyle="false"><mrow><mrow style="font-style:normal;font-weight:normal"><msup><mi>y<\/mi><mn>2<\/mn><\/msup>/)
-  expect(html).toContain('class="math-color-box math-frame"><mtext>check</mtext>')
-  expect(html).toContain('style="background-color:yellow"><mtext>draft</mtext>')
+  expect(html).toContain('class="math-color-box math-frame"><mstyle displaystyle="false" scriptlevel="0"><mtext>check</mtext>')
+  expect(html).toContain('style="background-color:yellow"><mstyle displaystyle="false" scriptlevel="0"><mtext>draft</mtext>')
   expect(html).toContain('style="color:#228B22"')
   expect(html.match(/class="math-reflect"/g)).toHaveLength(2)
   expect(() => math(String.raw`\colorbox{red;display:none}{x}`, true)).toThrow('Invalid math box color')
@@ -1508,7 +1555,9 @@ test.skipIf(!chrome)('uses continued fraction struts and styles both generalized
 
 test.skipIf(!chrome)('renders legacy font boundaries and colon relation gaps in Chromium', async () => {
   const source = String.raw`{\bf A{\tt B}C} \Gamma\varGamma + a\coloneqq b`
-  const body = renderMath(source)
+  const matrix = String.raw`\mathbf{a\begin{matrix}x&\mathbf{y}\end{matrix}b}`
+  const scripts = String.raw`x_{\hbox{Box}}+y_{\text{Script}}`
+  const body = `<div>${renderMath(source)}</div><div id="matrix-fonts">${renderMath(matrix)}</div><div id="box-style">${renderMath(scripts)}</div>`
   const stylesheet = await Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url)).text()
   const server = Bun.serve({
     hostname: '127.0.0.1', port: 0,
@@ -1519,7 +1568,7 @@ test.skipIf(!chrome)('renders legacy font boundaries and colon relation gaps in 
   const view = new Bun.WebView({ backend: { type: 'chrome', path: chrome!, url: false } })
   try {
     await view.navigate(server.url.href)
-    const geometry = await view.evaluate<{ weights: string[], family: string, transforms: string[], gaps: number[] }>(`(() => {
+    const geometry = await view.evaluate<{ weights: string[], family: string, transforms: string[], gaps: number[], matrix: string[], sizes: number[] }>(`(() => {
       const bold = document.querySelector('.math-bold')
       const [a, b, c] = bold.querySelectorAll('mi')
       const capitals = [...document.querySelectorAll('mi')].filter(letter => letter.textContent === 'Γ')
@@ -1529,12 +1578,16 @@ test.skipIf(!chrome)('renders legacy font boundaries and colon relation gaps in 
         family: getComputedStyle(b).fontFamily,
         transforms: capitals.map(letter => getComputedStyle(letter).textTransform),
         gaps: [relation.previousElementSibling, relation.nextElementSibling].map(space => space.getBoundingClientRect().width),
+        matrix: [...document.querySelectorAll('#matrix-fonts mi')].map(letter => getComputedStyle(letter).fontWeight),
+        sizes: [...document.querySelectorAll('#box-style mtext')].map(text => parseFloat(getComputedStyle(text).fontSize)),
       }
     })()`)
     expect(geometry.weights).toEqual(['700', '400', '700'])
     expect(geometry.family).toContain('monospace')
     expect(geometry.transforms[0]).not.toBe(geometry.transforms[1])
     expect(geometry.gaps.map(Math.round)).toEqual([10, 10])
+    expect(geometry.matrix).toEqual(['700', '400', '700', '700'])
+    expect(geometry.sizes[0]).toBeGreaterThan(geometry.sizes[1])
   }
   finally {
     view.close()

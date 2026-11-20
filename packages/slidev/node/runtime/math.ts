@@ -340,6 +340,7 @@ for (const [name, shades] of Object.entries(legacyColorShades)) {
 const builtinMacros = new Map<string, Macro>(Object.entries(legacyColors).map(([name, value]) =>
   [`\\${name}`, { body: ['\\textcolor', '{', value, '}', '{', '#1', '}'], parameters: [[]], prefix: [] }]))
 builtinMacros.set('\\boxed', { body: tokenize('\\fbox{$\\displaystyle{#1}$}'), parameters: [[]], prefix: [] })
+builtinMacros.set('\\angln', { body: tokenize('{\\angl n}'), parameters: [], prefix: [] })
 for (const [name, brace] of [['\\bgroup', '{'], ['\\egroup', '}']])
   builtinMacros.set(name, { body: [brace], parameters: [], prefix: [] })
 
@@ -374,15 +375,15 @@ function applyVariant(content: string, variant: string): string {
   const style = styledLetters[variant]
   const uprightFont = variant === 'normal' || variant === 'bold' || variant === 'sans-serif' || variant === 'monospace'
   if (!style && !uprightFont && variant !== 'italic') return content
-  // A nested font command owns its subtree, even when the outer font rewrites glyphs.
+  // Explicit fonts and array cells own their glyphs independently of surrounding fonts.
   const groups: boolean[] = []
   let innerFont = 0
-  return content.replace(/<mrow(?: [^>]*?)?>|<\/mrow>|<(mi|mn)( mathvariant="normal")?>([^<]+)<\/\1>/g,
+  return content.replace(/<m(?:row|table)(?: [^>]*?)?>|<\/m(?:row|table)>|<(mi|mn)( mathvariant="normal")?>([^<]+)<\/\1>/g,
     (markup, element: string | undefined, upright: string | undefined, letters: string | undefined) => {
       if (!element) {
-        if (markup === '</mrow>') innerFont -= Number(groups.pop() ?? false)
+        if (markup.startsWith('</')) innerFont -= Number(groups.pop() ?? false)
         else if (!markup.endsWith('/>')) {
-          const explicit = markup.includes(' mathvariant="')
+          const explicit = markup.includes(' mathvariant="') || markup.includes(' data-math-array') || markup.includes(' class="math-cd"')
           groups.push(explicit)
           innerFont += Number(explicit)
         }
@@ -415,6 +416,11 @@ const textFonts: Record<string, string> = {
   textbf: 'font-weight:bold', textmd: 'font-weight:normal', textup: 'font-style:normal',
   textit: 'font-style:italic', emph: 'font-style:italic',
 }
+const textLigatures: Readonly<Record<string, string>> = {
+  '---': '\u2014', '--': '\u2013', '\x60\x60': '\u201c', "''": '\u201d',
+  '\x60': '\u2018', "'": '\u2019',
+}
+const proportionalTextFonts = new Set(['textnormal', 'textrm', 'textsf'])
 const typesettingNames = new Set(['TeX', 'LaTeX', 'KaTeX'])
 const textBoxes = new Set(['colorbox', 'fcolorbox', 'fbox', 'reflectbox'])
 const verticalBoxCommands = new Set(['phantom', 'hphantom', 'vphantom', 'smash', 'raisebox', 'rule'])
@@ -785,13 +791,13 @@ const sizeCommands: Readonly<Record<string, number>> = {
 }
 const infixFractions = new Set(['\\over', '\\atop', '\\choose', '\\brace', '\\brack', '\\above'])
 const primitiveArgumentFunctions = new Set(['frac', 'dfrac', 'tfrac', 'binom', 'dbinom', 'tbinom', 'genfrac', 'cfrac', ...Object.keys(variants)])
-const groupedArgumentFunctions = new Set(['sqrt', 'left', 'mathllap', 'mathclap', 'mathrlap'])
+const groupedArgumentFunctions = new Set(['sqrt', 'left', 'mathllap', 'mathclap', 'mathrlap', 'angl'])
 const mathModeFunctions = new Set([
   ...groupedArgumentFunctions, ...primitiveArgumentFunctions, ...Object.keys(mathClasses), ...Object.keys(accents),
   ...Object.keys(stretchedAccents), ...Object.keys(extensibleArrows),
   ...ruledAccents, ...Array.from(infixFractions, command => command.slice(1)),
   'begin', 'end', 'right', 'middle', '@binrel', 'mathchoice', 'vcenter', 'substack',
-  'cancel', 'bcancel', 'xcancel', 'pmb', 'phase', 'angl', 'angln', 'mathreflectbox',
+  'cancel', 'bcancel', 'xcancel', 'pmb', 'phase', 'mathreflectbox',
   'prescript', 'mathstrut', 'overset', 'underset', 'stackrel',
   'overline', 'operatorname', 'operatorname@', 'operatornamewithlimits', 'limits', 'nolimits', 'displaylimits',
   'not', 'mod', 'bmod', 'pmod', 'pod', 'ce', 'pu', 'allowbreak',
@@ -927,6 +933,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   let equationNumber = 0
   let fontScale = 1
   let textItalic = false
+  let textMonospace = false
   let linkDepth = 0
   let context: MathMacroContext | undefined
 
@@ -964,10 +971,14 @@ export function renderMath(source: string, display = false, configured: MathMacr
   function inScope<T>(render: () => T): T {
     const before = scopes.length
     const previousColor = currentColor
+    const previousItalic = textItalic
+    const previousMonospace = textMonospace
     scopes.push({ undo: new Map() })
     try { return render() }
     finally {
       currentColor = previousColor
+      textItalic = previousItalic
+      textMonospace = previousMonospace
       while (scopes.length > before) restoreScope()
     }
   }
@@ -1506,11 +1517,11 @@ export function renderMath(source: string, display = false, configured: MathMacr
   }
 
   function textBox(name: string): Markup {
-    if (name === 'reflectbox') return xml`<mrow class="math-reflect">${textArgument('text')}</mrow>`
-    if (name === 'fbox') return xml`<mrow class="math-color-box math-frame">${textArgument('text')}</mrow>`
+    if (name === 'reflectbox') return xml`<mrow class="math-reflect">${textArgument('hbox')}</mrow>`
+    if (name === 'fbox') return xml`<mrow class="math-color-box math-frame">${textArgument('hbox')}</mrow>`
     const frame = name === 'fcolorbox' ? readColor('Invalid math box color') : ''
     const background = readColor('Invalid math box color')
-    const content = textArgument('text')
+    const content = textArgument('hbox')
     return xml`<mrow class="math-color-box${frame ? ' math-frame' : ''}" style="background-color:${background}${frame ? `;border-color:${frame}` : ''}">${content}</mrow>`
   }
 
@@ -1623,9 +1634,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
 
   function textArgument(name: string, parentheses = false, capture?: (parts: Markup[]) => void): Markup {
     const previousItalic = textItalic
+    const previousMonospace = textMonospace
     const font = name === 'emph' ? (textItalic ? 'textup' : 'textit') : name
     if (font === 'textit') textItalic = true
     else if (font === 'textup' || font === 'textnormal') textItalic = false
+    if (font === 'texttt') textMonospace = true
+    else if (proportionalTextFonts.has(font)) textMonospace = false
     try {
       space()
       const start = cursor
@@ -1634,9 +1648,15 @@ export function renderMath(source: string, display = false, configured: MathMacr
       if (word) space()
       // Scan the argument before expansion so a token's whole expansion
       // stays in text mode and stops at the boundary of this argument.
-      return inMode('text', () => withTokens(body, () => parseTextArgument(font, parentheses, capture), start))
+      const content = inMode('text', () => withTokens(body, () => parseTextArgument(font, parentheses, capture), start))
+      if (name !== 'hbox') return content
+      const sized = renderMarkup(content, 1)
+      return style => style === 1 ? sized : mathSize(1, sized)
     }
-    finally { textItalic = previousItalic }
+    finally {
+      textItalic = previousItalic
+      textMonospace = previousMonospace
+    }
   }
 
   function unsupportedCommand(token: string): string {
@@ -1696,6 +1716,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     function flush(): void {
       if (!literal) return
       const joined = literal.replace(/[ \t\r\n]+/g, ' ').replace(/^ | $/g, '\u00A0')
+        .replace(/-{2,3}|\x60{1,2}|'{1,2}/g, glyph => textMonospace && glyph.length > 1 ? glyph : textLigatures[glyph])
       parts.push(tag('mtext', joined))
       literal = ''
     }
@@ -1742,6 +1763,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
           flushFormatting()
           legacyFont = legacyFonts[token]
           textItalic = legacyFont === 'italic'
+          textMonospace = legacyFont === 'monospace'
           space()
         }
         else if (token === '$' || token === '\\(') {
@@ -1833,13 +1855,13 @@ export function renderMath(source: string, display = false, configured: MathMacr
           }
         }
       }
+      if (sized.length || fontScale !== baseScale || legacyFont || textColor) {
+        flushFormatting()
+        parts = sized
+      }
+      flush()
     })
-    if (sized.length || fontScale !== baseScale || legacyFont || textColor) {
-      flushFormatting()
-      parts = sized
-    }
     fontScale = baseScale
-    flush()
     depth--
     const content = joinMarkup(parts)
     if (lines.length) return wrap(lineTable([...lines, { content }], false, true))
@@ -2297,7 +2319,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
         }).join('')
         return `<mtr>${leqno ? cell : ''}${content}${leqno ? '' : cell}</mtr>`
       }).join('')
-      const table = `<mtable${lines}${align}${gridLayout}${amsAlignment}${rowSpacing}>${markup}</mtable>`
+      const table = `<mtable${lines} data-math-array${align}${gridLayout}${amsAlignment}${rowSpacing}>${markup}</mtable>`
       if (displayRows) return table
       // Center the whole grid on the math axis beside surrounding inline atoms.
       const centered = grid && style !== 0
@@ -2507,10 +2529,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const { mathClass, markup } = binRelArgument()
       return { mathClass, markup: xml`<mrow class="math-pmb">${markup}</mrow>` }
     }
-    if (name === 'phase' || name === 'angl') {
-      return { markup: xml`<mrow class="math-${name}">${argument()}</mrow>` }
-    }
-    if (name === 'angln') return { markup: '<mrow class="math-angl"><mi>n</mi></mrow>' }
+    if (name === 'phase') return { markup: xml`<mrow class="math-phase">${argument()}</mrow>` }
+    if (name === 'angl') return { markup: xml`<mrow class="math-angl">${textArgument('hbox')}</mrow>` }
     if (name === 'textcolor' || (name === 'color' && options?.colorIsTextColor)) return { markup: coloredArgument(false) }
     if (textBoxes.has(name)) return { markup: textBox(name) }
     if (name === 'mathreflectbox') return { markup: xml`<mrow class="math-reflect">${argument()}</mrow>` }

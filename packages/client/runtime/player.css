@@ -781,6 +781,7 @@ v-switch { display: block; }
 .slide math :is(.math-normal, .math-italic, .math-sans-serif, .math-monospace, .math-script) { font-weight: normal; }
 .slide math :is(.math-sans-serif, .math-sans-serif-italic) { font-family: sans-serif; }
 .slide math .math-monospace { font-family: monospace; }
+math mtable:is([data-math-array], .math-cd) { font-family: math; font-style: normal; font-weight: normal; }
 math .math-overline { border-top: max(0.06em, var(--math-min-rule, 0px)) solid currentColor; }
 math .math-underline { border-bottom: max(0.06em, var(--math-min-rule, 0px)) solid currentColor; }
 math .math-text-circled {
@@ -892,8 +893,8 @@ math .math-phase {
 math .math-angl {
   padding-block-start: 0.08em;
   padding-inline-end: 0.12em;
-  border-block-start: 0.06em solid currentColor;
-  border-inline-end: 0.06em solid currentColor;
+  border-block-start: max(0.06em, var(--math-min-rule, 0px)) solid currentColor;
+  border-inline-end: max(0.06em, var(--math-min-rule, 0px)) solid currentColor;
 }
 math .math-cd mtd { padding: 0.12em 0.28em; math-style: normal; }
 math .math-cd-vertical {

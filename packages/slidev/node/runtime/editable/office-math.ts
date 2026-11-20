@@ -149,7 +149,8 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba):
   function enclosure(node: RawMathElement): string | undefined {
     const style = node.attributes.class
     const strikes = Object.hasOwn(strikeProperties, style) ? strikeProperties[style] : undefined
-    if (!strikes && style !== 'math-color-box math-frame') return
+    const actuarial = style === 'math-angl'
+    if (!strikes && !actuarial && style !== 'math-color-box math-frame') return
     let children = node.children
     if (strikes && style !== 'math-sout') {
       const track = children.at(-1)
@@ -160,9 +161,9 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba):
     }
     const body = sequence(children)
     if (!body) return
-    const options = strikes
-      ? ['hideTop', 'hideBot', 'hideLeft', 'hideRight', ...strikes].map(property => setting(property, '1')).join('')
-      : ''
+    const properties = strikes ? ['hideTop', 'hideBot', 'hideLeft', 'hideRight', ...strikes]
+      : actuarial ? ['hideBot', 'hideLeft'] : []
+    const options = properties.map(property => setting(property, '1')).join('')
     return wrap('borderBox', (options ? wrap('borderBoxPr', options) : '') + wrap('e', body))
   }
   function phantom(node: RawMathElement): string | undefined {
@@ -207,7 +208,7 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba):
   }
   function equationArray(table: RawMathElement, environment: string): string | undefined {
     if (!/^(?:align(?:ed|at|edat)?|gather(?:ed)?|split)[*]?$/.test(environment)
-      || !only(table, 'class', 'style', 'columnalign', 'data-equation-lines', 'data-equation-environment', 'data-equation-tags', 'data-equation-flush')) return
+      || !only(table, 'class', 'style', 'columnalign', 'data-equation-lines', 'data-math-array', 'data-equation-environment', 'data-equation-tags', 'data-equation-flush')) return
     const aligned = !environment.startsWith('gather')
     let rows = ''
     for (const row of table.children) {
@@ -314,7 +315,7 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba):
         && cell.name === 'mtd' && only(cell) && !cell.text.trim()) return sequence(cell.children)
       return
     }
-    if (name === 'mtable' && only(node, 'data-equation-lines')) {
+    if (name === 'mtable' && only(node, 'data-equation-lines', 'data-math-array')) {
       const columns = children[0]?.children.length
       if (!columns || !children.every(row => row.name === 'mtr' && !row.text.trim() && only(row)
         && row.children.length === columns && row.children.every(cell => cell.name === 'mtd' && !cell.text.trim() && only(cell)))) return

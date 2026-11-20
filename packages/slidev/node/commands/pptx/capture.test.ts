@@ -128,7 +128,7 @@ $$
 # Frames and cancellation
 
 $$
-\boxed{\frac{x}{y}}+\fbox{proof}
+\boxed{\frac{x}{y}}+\fbox{proof}+a_{\angln}
 $$
 
 $$
@@ -202,6 +202,7 @@ $$`)
     expect(enclosures?.match(/<mc:Fallback><p:sp>/g)).toHaveLength(2)
     expect(enclosures).toContain('<m:borderBox><m:e><m:f>')
     expect(enclosures).toMatch(/<m:borderBox><m:e><m:r>.*?>proof<\/m:t>/)
+    expect(enclosures).toContain('<m:borderBoxPr><m:hideBot m:val="1"/><m:hideLeft m:val="1"/></m:borderBoxPr>')
     const hideEdges = '<m:hideTop m:val="1"/><m:hideBot m:val="1"/><m:hideLeft m:val="1"/><m:hideRight m:val="1"/>'
     for (const strikes of [
       '<m:strikeBLTR m:val="1"/>',
