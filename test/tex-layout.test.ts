@@ -577,6 +577,15 @@ test('keeps phantom atoms invisible with the spacing of their visible equivalent
     .toContain('<mi>a</mi><mspace width="0" style="margin-inline-end:-.25em"/><mi>b</mi>')
 })
 
+test('retains signed horizontal phantoms as ordinary atoms in math and text', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const phantom = '<mpadded height="0" depth="0" style="margin-inline-end:-0.17em"><mphantom>'
+  expect(math(String.raw`\hphantom{\!}+x`, false)).toContain(`${phantom}</mphantom></mpadded>${medium}${operator('+')}${medium}<mi>x</mi>`)
+  expect(math(String.raw`\hphantom{\hphantom{X\!}}`, false)).toContain(`${phantom}<mpadded height="0" depth="0"><mphantom><mi>X</mi>`)
+  expect(math(String.raw`\text{A\hphantom\!B}`, false)).toContain(`<mtext>A</mtext>${phantom}</mphantom></mpadded><mtext>B</mtext>`)
+  expect(math(String.raw`\text\quad`, false)).toContain('<mspace width="1em"/>')
+})
+
 test('positions boxes and prescripts with bounded MathML dimensions', () => {
   const formula = String.raw`\raisebox{2pt}[1ex][0pt]{x}\kern7mu \rule[-1pt]{1em}{.5pt}\smash[b]{y} \prescript{14}{6}{C}`
   const html = renderMath(formula)
@@ -1031,6 +1040,37 @@ test('enforces KaTeX strict settings for comments, markup, text commands, spacin
 })
 
 const chrome = await findChrome()
+
+test.skipIf(!chrome)('preserves the horizontal advance of negative kerns in invisible boxes in Chromium', async () => {
+  const comparisons = [
+    [String.raw`x\,\hphantom{\!}x`, 'xx'],
+    [String.raw`x\hphantom{\kern{-1em}X\mkern{-9mu}}x`, String.raw`x\hphantom{X}\kern{-1em}\mkern{-9mu}x`],
+    [String.raw`x\hphantom{\mathchoice{D}{\!\kern{-.2em}}{S}{s}}x`, String.raw`x\!\kern{-.2em}x`],
+    [String.raw`\text{A\hphantom{T\kern{-.3em}}B}`, String.raw`\text{A\hphantom{T}\kern{-.3em}B}`],
+  ]
+  const rows = comparisons.flat().map(tex => `<div>${renderMath(tex)}</div>`).join('')
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response(`<!doctype html><meta charset="utf-8"><main style="font-size:40px">${rows}</main>`, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    }),
+  })
+  const view = new Bun.WebView({ backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await view.navigate(server.url.href)
+    const gaps = await view.evaluate<number[]>(`[...document.querySelectorAll('main > div > math')].map(math => {
+      const glyphs = [...math.querySelectorAll('mi, mtext')].filter(node => !node.closest('mphantom'))
+      return glyphs[1].getBoundingClientRect().left - glyphs[0].getBoundingClientRect().right
+    })`)
+    for (let index = 0; index < gaps.length; index += 2)
+      expect(gaps[index]).toBeCloseTo(gaps[index + 1], 1)
+    expect(gaps[2]).toBeLessThan(0)
+  }
+  finally {
+    view.close()
+    await server.stop(true)
+  }
+}, 45_000)
 
 test.skipIf(!chrome)('sizes raised text boxes from their shifted baseline in Chromium', async () => {
   const math = createMathRenderer({ throwOnError: true })

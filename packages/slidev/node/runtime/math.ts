@@ -588,6 +588,40 @@ function joinRow(parts: RowPart[], wrap = false, followsOrdinary = false, explic
   }).join('')
 }
 
+function horizontalPhantom(body: Markup, parts: RowPart[], mode: 'math' | 'text'): Markup {
+  const padded = (content: Markup, margin = '') =>
+    xml`<mpadded height="0" depth="0"${margin ? ` style="margin-inline-end:${margin}"` : ''}><mphantom>${content}</mphantom></mpadded>`
+
+  function measure(children: RowPart[]): Markup {
+    const kerns: string[] = []
+    const remainder: RowPart[] = []
+    for (const part of children) {
+      const markup = part.markup
+      const kern = typeof markup === 'string' && /^(?:<mrow>)*<mspace width="0" style="margin-inline-end:(-[^"]+)"\/>(?:<\/mrow>)*$/.exec(markup)
+      if (kern) {
+        kerns.push(kern[1])
+        continue
+      }
+      const nested = typeof markup === 'string' && /^((?:<mrow>)*<mpadded height="0" depth="0") style="margin-inline-end:([^"]+)">/.exec(markup)
+      if (nested) {
+        kerns.push(nested[2])
+        remainder.push({ ...part, markup: `${nested[1]}>${markup.slice(nested[0].length)}` })
+      }
+      else remainder.push(part)
+    }
+    if (!kerns.length) return padded(body)
+    // MathML clamps a box's measured width at zero. Apply signed kerns to
+    // the outer margin so they still affect the next atom's position.
+    const margin = kerns.length === 1 ? kerns[0] : `calc(${kerns.map(kern => `(${kern})`).join(' + ')})`
+    const content = mode === 'math' ? joinRow(remainder) : joinMarkup(remainder.map(part => part.markup))
+    return padded(content, margin)
+  }
+
+  return parts.some(part => part.fragment)
+    ? style => renderMarkup(measure(expandRow(parts, style)), style)
+    : measure(parts)
+}
+
 function lineTable(lines: MathLine[], exposeRows: boolean, alignStart: boolean): Markup {
   // MathML Core browsers need separate rows to show a line break.
   return (style) => {
@@ -1227,8 +1261,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
       if (!/^[tb]+$/.test(sides)) return content
       return xml`<mpadded${sides.includes('t') ? ' height="0"' : ''}${sides.includes('b') ? ' depth="0"' : ''}>${content}</mpadded>`
     }
+    if (name === 'hphantom') {
+      let parts: Markup[] = []
+      const body = textArgument('text', false, value => { parts = value })
+      return horizontalPhantom(body, parts.map(markup => ({ markup })), 'text')
+    }
     const invisible = xml`<mphantom>${readBody()}</mphantom>`
-    if (name === 'hphantom') return xml`<mpadded height="0" depth="0">${invisible}</mpadded>`
     if (name === 'vphantom') return xml`<mpadded width="0">${invisible}</mpadded>`
     return invisible
   }
@@ -1290,12 +1328,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return trustedMath(context, state?.options.trust) ? xml`<mrow ${attributes}>${content}</mrow>` : untrusted(command)
   }
 
-  function textArgument(name: string, parentheses = false): Markup {
+  function textArgument(name: string, parentheses = false, capture?: (parts: Markup[]) => void): Markup {
     const previousItalic = textItalic
     const font = name === 'emph' ? (textItalic ? 'textup' : 'textit') : name
     if (font === 'textit') textItalic = true
     else if (font === 'textup' || font === 'textnormal') textItalic = false
-    try { return inMode('text', () => parseTextArgument(font, parentheses)) }
+    try { return inMode('text', () => parseTextArgument(font, parentheses, capture)) }
     finally { textItalic = previousItalic }
   }
 
@@ -1340,7 +1378,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return xml`<mrow style="color:${color}">${content}</mrow>`
   }
 
-  function parseTextArgument(name: string, parentheses: boolean): Markup {
+  function parseTextArgument(name: string, parentheses: boolean, capture?: (parts: Markup[]) => void): Markup {
     if (depth++ > 100) throw new Error('Math text is nested too deeply')
     const properties = textFonts[name]
     const wrap = (markup: Markup) => properties ? xml`<mrow style="${properties}">${markup}</mrow>` : markup
@@ -1353,6 +1391,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
       depth--
       if (token.startsWith('\\') && typesettingNames.has(token.slice(1)))
         return wrap(typesettingName(opening + token.slice(1) + closing))
+      const width = token.startsWith('\\') && spacing[token.slice(1)]
+      if (width) {
+        const markup = spaceMarkup(width)
+        capture?.([markup])
+        return wrap(parentheses ? `<mrow>${tag('mtext', opening)}${markup}${tag('mtext', closing)}</mrow>` : markup)
+      }
       const value = textCharacter(token)
       if (value !== undefined) return wrap(tag('mtext', opening + value + closing))
       const unknown = unsupportedCommand(token)
@@ -1509,6 +1553,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     depth--
     const content = joinMarkup(parts)
     if (lines.length) return wrap(lineTable([...lines, { content }], false, true))
+    capture?.(parts)
     return properties || parts.length === 1 ? wrap(content) : xml`<mrow>${content}</mrow>`
   }
 
@@ -2205,6 +2250,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
           return { ...part, mathClass, markup: xml`<mphantom>${part.markup}</mphantom>` }
         }),
       }
+    }
+    if (name === 'hphantom') {
+      const { markup, parts } = fragmentArgument()
+      return { markup: horizontalPhantom(markup, parts, 'math'), mathClass: 'ord' }
     }
     if (verticalBoxCommands.has(name)) return { markup: verticalBox(name, argument) }
     if (spacingCommands.has(name)) return { markup: spacingMarkup(name) }
