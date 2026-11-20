@@ -6,7 +6,7 @@ const pointsPerUnit: Readonly<Record<string, number>> = {
 }
 
 const nativeUnits = new Set(['px', 'em', 'ex', 'pt', 'cm', 'mm', 'in', 'pc'])
-const dimensionPattern = /^([+-]?(?:\d+(?:\.\d+)?|\.\d+))\s*(px|em|ex|pt|bp|cm|mm|in|mu|pc|dd|cc|nd|nc|sp)?$/
+const dimensionPattern = /^([+-]?)\s*(\d+(?:\.\d*)?|\.\d+)\s*(px|em|ex|pt|bp|cm|mm|in|mu|pc|dd|cc|nd|nc|sp)?$/
 
 function toEm(value: number, unit: string): number {
   if (unit === 'em') return value
@@ -16,8 +16,9 @@ function toEm(value: number, unit: string): number {
 }
 
 export function mathDimension(source: string, maximum: number): string | undefined {
-  const [, amount, unit] = dimensionPattern.exec(source.trim()) ?? []
-  if (amount === undefined) return
+  const [, sign, magnitude, unit] = dimensionPattern.exec(source.trim()) ?? []
+  if (magnitude === undefined) return
+  const amount = (sign === '-' ? sign : '') + magnitude.replace(/\.$/, '')
   const value = Number(amount)
   if (!Number.isFinite(value) || (!unit && value !== 0)) return
   const em = toEm(value, unit ?? 'px')

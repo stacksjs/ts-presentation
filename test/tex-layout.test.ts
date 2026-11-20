@@ -100,15 +100,42 @@ test('keeps a snapshot of the lookahead and primitive meanings when using let', 
   const primitive = math(String.raw`\let\oldfrac=\frac\edef\copy{\oldfrac}\def\frac{X}\copy{1}{2}\frac`, false)
   expect(primitive).toContain('<mfrac><mrow><mn>1</mn></mrow><mrow><mn>2</mn></mrow></mfrac><mi>X</mi>')
   expect(math(String.raw`\let\word=\textunderscore\text{literal: \word.}`, false)).toContain('literal: _.')
+  expect(math(String.raw`\futurelet\next a b\text{[\next]}`, false)).toContain('<mi>a</mi><mi>b</mi><mtext>[ ]</mtext>')
+  expect(math(String.raw`\futurelet\next\relax b\text{[\next]}`, false)).toContain('<mi>b</mi><mtext>[b]</mtext>')
+  expect(math(String.raw`\let\deferred=\undefined\edef\saved{\deferred}\def\deferred{x}\saved`, false)).toContain('<mi>x</mi>')
 })
 
 // Parser cases adapted from KaTeX v0.19.1 (licenses/KaTeX-MIT.txt).
 test('assigns whitespace and brace tokens with let and preserves literal meanings during expansion', () => {
   const math = createMathRenderer({ throwOnError: true })
   expect(math(String.raw`\def\:{\let\space= }\: \text{\space}`, false)).toContain('<mtext>\u00A0</mtext>')
+  expect(math(String.raw`\def\bold{\bgroup\bf\let\next= }\bold{a}b`, false))
+    .toContain('<mrow class="math-bold" mathvariant="bold"><mi mathvariant="normal">a</mi></mrow></mrow><mi>b</mi>')
   expect(math(String.raw`\let\open{\sqrt\open1}`, false)).toContain('<msqrt><mrow><mn>1</mn></mrow></msqrt>')
   expect(math(String.raw`\let\foo=x\noexpand\foo`, false)).toContain('<mi>x</mi>')
   expect(math(String.raw`\let\foo=x\edef\saved{\foo}\def\foo{y}\saved`, false)).toContain('<mi>y</mi>')
+})
+
+test('matches expanded brace pairs and scopes semisimple groups without changing relation spacing', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const braces = math(String.raw`\def\grouped{\bgroup} \grouped a}+{b\egroup`, false)
+  expect(braces).toContain('<mrow><mi>a</mi></mrow><mo>+</mo><mrow><mi>b</mi></mrow>')
+  const text = math(String.raw`\text{outer \bgroup\bf bold\egroup\ rest}`, false)
+  expect(text).toContain('<mrow class="math-bold" mathvariant="bold"><mtext>bold</mtext></mrow><mtext>\u00A0rest</mtext>')
+  const group = math(String.raw`\def\term{x}\term\begingroup\def\term{y}+\term\endgroup=\term`, false)
+  expect(group).toContain('<mi>x</mi>' + medium + operator('+') + medium + '<mi>y</mi>' + thick + operator('=') + thick + '<mi>x</mi>')
+  expect(() => math(String.raw`\begingroup x\egroup`, false)).toThrow('Unexpected math token')
+})
+
+test('accepts signed TeX dimensions with separating spaces and trailing decimal points', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  expect(math(String.raw`\rule{-1em}{- 0.2em}X`, false))
+    .toContain('<mspace width="-1em" height="-0.2em" style="background:currentColor"/><mi>X</mi>')
+  expect(math(String.raw`\kern+ 1.em X\mkern- .9mu Y`, false))
+    .toContain('<mspace width="1em"/><mi>X</mi><mspace width="0" style="margin-inline-end:-0.05em"/><mi>Y</mi>')
+  expect(math(String.raw`\begin{array}{r}a\\[- .2em]b\end{array}`, true))
+    .toContain('padding-bottom:max(0px,calc(0.14em + -.2em))')
+  expect(() => math(String.raw`\rule{1em}{+ -.2em}`, false)).toThrow('Invalid math dimension')
 })
 
 test('reads multi-digit and expanded argument counts in macro declarations', () => {

@@ -35,7 +35,7 @@ in a new ts-presentation project.
 | mhchem notation | Native MathML hydrate dots, isotopes, charges, oxidation states, labelled reaction arrows, embedded TeX, and physical quantities with grouped digits, uncertainties, standalone powers, and nested unit fractions |
 | Extensible arrows | Label-sized shafts for TeX, chemistry, and horizontal commutative diagram arrows, including distinct forward- and reverse-biased equilibria |
 | AMS commutative diagrams | Centered vertical arrows with side labels, vertical parallel lines, extensible horizontal arrows, and row-local macros |
-| Macro parameters and operator wrappers | Delimited and nested TeX parameters, inherited binary and relation spacing in bold symbols and stacked labels, and sans-serif italic math |
+| Macro parameters and operator wrappers | Delimited and nested TeX parameters, expandable brace groups, semisimple groups that preserve surrounding operator spacing, inherited binary and relation spacing in bold symbols and stacked labels, and sans-serif italic math |
 | Bra-ket and fraction layout | Scoped bar expansion for bra-ket notation and set builders, directional generalized fraction fences, nested unbraced fractions, and continued fraction numerator struts |
 | Paired TeX delimiters | Macro-defined closing delimiters, invisible delimiters with TeX spacing, tight spacing and row-height stretch for middle delimiters under color declarations, closing-fence colors, and multiline formula bodies that honor the display break policy |
 | Logical TeX relations | Expandable `\iff`, `\implies`, and `\impliedby` macros with spaced long arrows |
@@ -50,11 +50,11 @@ in a new ts-presentation project.
 | Unicode math and text | Combining accents attached to math atoms and scripts, text-mode shaping of accented words, Unicode script and symbol validation, and original tokens in strict callbacks |
 | KaTeX accents and annotations | Stacked overbracket and underbracket labels, scalable line segments, text-mode underbars, circled text, and macro-expanded accent arguments |
 | KaTeX conditional macros | Mode-aware `\TextOrMath`, starred forms, token lookahead, and branch expansion in formulas, text, and `\edef` |
-| KaTeX legacy macros | Khan Academy color names and shades, literal token assignment with `\let`, multi-digit macro arity, and `\message` or `\errmessage` output during expansion |
+| KaTeX legacy macros | Khan Academy color names and shades, literal token assignment with `\let`, whitespace-aware `\futurelet` lookahead, multi-digit macro arity, and `\message` or `\errmessage` output during expansion |
 | KaTeX math choices | `\mathchoice` selects display, text, script, and scriptscript branches with operator spacing from the enclosing row |
 | KaTeX parser diagnostics | Macro declaration and scope checks, undefined commands in eager expansion, unexpected delimiters, text-mode command checks, and validation of expanded colors |
 | KaTeX macro and color settings | Deck-scoped `globalGroup`, per-formula `maxExpand` including eager definitions, and two-argument `\color` via `colorIsTextColor` |
-| KaTeX sizing settings | `maxSize` for explicit dimensions and `minRuleThickness` for fraction bars, array rules, box borders, and overlines or underlines |
+| KaTeX sizing settings | Signed TeX dimensions with optional spaces and trailing decimal points, `maxSize` for explicit dimensions, and `minRuleThickness` for fraction bars, array rules, box borders, and overlines or underlines |
 | KaTeX text-mode boxes | Phantom space, selective height and depth removal, shifted line dimensions for `\raisebox`, text-style box contents in scripts, and escaped verbatim text inside `\text{…}` |
 | KaTeX math-mode boxes | `\phantom` retains atom spacing. `\hphantom` preserves signed kerns in math and text. Shifted `\rule` reserves space above and below the baseline, including zero-width struts |
 | KaTeX enclosures | `\boxed` expands in math, text, and macro definitions with display-style contents. Framed and colored boxes use TeX padding. Diagonal cancellation strokes preserve the subject's layout and use a fixed thickness for each font size |

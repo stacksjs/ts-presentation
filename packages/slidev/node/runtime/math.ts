@@ -147,6 +147,7 @@ const styledLetters: Record<string, { upper: number, lower: number, digits?: num
 
 export type MathMacros = Readonly<Record<string, string>>
 const controlSequence = /^\\(?:[A-Za-z@]+|[^\s])$/u
+const controlWord = /^\\[A-Za-z@]+$/
 const activeCharacter = /^[^\s\\{}$&#^_]$/u
 
 export function resolveMathMacros(headmatter?: Record<string, unknown>): MathMacros {
@@ -245,6 +246,8 @@ for (const [name, shades] of Object.entries(legacyColorShades)) {
 const builtinMacros = new Map<string, Macro>(Object.entries(legacyColors).map(([name, value]) =>
   [`\\${name}`, { body: ['\\textcolor', '{', value, '}', '{', '#1', '}'], parameters: [[]], prefix: [] }]))
 builtinMacros.set('\\boxed', { body: tokenize('\\fbox{$\\displaystyle{#1}$}'), parameters: [[]], prefix: [] })
+for (const [name, brace] of [['\\bgroup', '{'], ['\\egroup', '}']])
+  builtinMacros.set(name, { body: [brace], parameters: [], prefix: [] })
 
 // Bra-ket expansions follow braket.sty as documented by KaTeX (MIT).
 for (const [name, expansion] of Object.entries({
@@ -701,7 +704,7 @@ const mathModeFunctions = new Set([
 ])
 const sharedFunctions = new Set([
   ...Object.keys(textFonts), ...typesettingNames, ...textBoxes, ...verticalBoxCommands, ...spacingCommands,
-  'begingroup', 'endgroup', 'bgroup', 'egroup', 'relax', 'newline', 'cr', 'color', 'textcolor',
+  'begingroup', 'endgroup', 'relax', 'newline', 'cr', 'color', 'textcolor',
   'sout', 'underline', 'underbar', 'textcircled', 'llap', 'clap', 'rlap', 'char',
   'tag', 'label', 'notag', 'nonumber', 'nobreak', 'hline', 'hdashline',
 ])
@@ -921,7 +924,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
     if (!macro) return false
     const start = cursor++
-    if (/^\\[A-Za-z@]+$/.test(token)) space()
+    if (controlWord.test(token)) space()
     for (const token of macro.prefix) {
       if (tokens[cursor++] !== token) throw new Error('Missing macro prefix')
     }
@@ -1105,12 +1108,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
 
   function fragmentArgument(): { markup: Markup, parts: RowPart[] } {
     const token = peek()
-    if (token !== '{' && token !== '\\begingroup' && token !== '\\bgroup') {
+    if (token !== '{' && token !== '\\begingroup') {
       const part = argumentAtom(true)
       return { markup: part.markup, parts: [{ ...part, token }] }
     }
     take()
-    const close = token === '{' ? '}' : token === '\\begingroup' ? '\\endgroup' : '\\egroup'
+    const close = token === '{' ? '}' : '\\endgroup'
     let parts: RowPart[] | undefined
     const content = inScope(() => row([close], false, false, value => { parts = value }))
     if (take() !== close) throw new Error('Unclosed math group')
@@ -2100,16 +2103,20 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
     if (name === 'let' || name === 'futurelet') {
       const target = definitionTarget()
-      space()
       let value: string
       if (name === 'futurelet') {
+        if (controlWord.test(target)) space()
+        const middle = tokens[cursor]
         let following = cursor + 1
-        while (texWhitespace.test(tokens[following] ?? '')) following++
-        if (!tokens[cursor] || tokens[cursor] === boundary || !tokens[following] || tokens[following] === boundary)
-          throw new Error('Missing math lookahead token')
+        if (controlWord.test(middle ?? '')) {
+          while (texWhitespace.test(tokens[following] ?? '')) following++
+        }
         value = tokens[following]
+        if (!middle || middle === boundary || !value || value === boundary)
+          throw new Error('Missing math lookahead token')
       }
       else {
+        space()
         if (tokens[cursor] === '=') {
           cursor++
           if (texWhitespace.test(tokens[cursor] ?? '')) cursor++
@@ -2119,7 +2126,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       }
       const existing = macroFor(value)
       const command = value.startsWith('\\')
-      const snapshot = { ...plainMacro([command ? literalToken + value : value]), unexpandable: !command }
+      const snapshot = { ...plainMacro([command ? literalToken + value : value]), unexpandable: !command || !defined(value) }
       assign(target, existing ?? (isExpansionPrimitive(value) ? { primitive: value } : snapshot), global)
       return true
     }
@@ -2187,11 +2194,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
 
     if (declareMacro(token) || equationDirective(token)) return { markup: '' }
     const name = token.slice(1)
-    if (name === 'begingroup' || name === 'bgroup') {
-      const close = name === 'begingroup' ? '\\endgroup' : '\\egroup'
-      const content = inScope(() => row([close]))
-      if (take() !== close) throw new Error('Unclosed math group')
-      return { markup: xml`<mrow>${content}</mrow>` }
+    if (name === 'begingroup') {
+      let parts: RowPart[] | undefined
+      const content = inScope(() => row(['\\endgroup'], false, false, value => { parts = value }))
+      if (take() !== '\\endgroup') throw new Error('Unclosed math group')
+      const inner = parts
+      return { markup: xml`<mrow>${content}</mrow>`, fragment: inner && (() => inner) }
     }
     if (name === 'ce') return { markup: chemicalFormula(literalGroup(), chemistryMath) }
     if (name === 'pu') return { markup: physicalUnits(literalGroup()) }
@@ -2252,7 +2260,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       if (take() !== '{') throw new Error('Expected a grouped math stack')
       return { markup: inScope(() => matrix('substack')) }
     }
-    if (name === 'end' || name === 'endgroup' || name === 'egroup') throw new Error(`Unexpected math token: ${token}`)
+    if (name === 'end' || name === 'endgroup') throw new Error(`Unexpected math token: ${token}`)
     if (['frac', 'dfrac', 'tfrac', 'binom', 'dbinom', 'tbinom'].includes(name)) {
       const binomial = name.endsWith('binom')
       const forced = name.startsWith('d') ? 0 : name.startsWith('t') ? 1 : undefined
