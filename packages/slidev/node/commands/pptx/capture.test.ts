@@ -350,6 +350,65 @@ From $\begin{alignedat}{2}&&x&=y\\\ArrowBetweenLines[\uparrow]&&y&=z\end{aligned
   }
 }, 45_000)
 
+it.skipIf(!chrome)('preserves compact continuation geometry, reveals, and editable dots in PowerPoint', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-continuations-'))
+  const canvas = { width: 960, height: 540 }
+  try {
+    const entry = join(root, 'slides.md')
+    await Bun.write(entry, String.raw`# Regular continuation
+
+\begin{align}
+a&=b\\
+&\vdotswithin{=}\notag\\
+&=c
+\end{align}
+
+---
+
+# Compact continuation
+
+$$ {1|2|all}
+\begin{align}
+a&=b\\
+\shortvdotswithin{=}
+&=c
+\end{align}
+$$`)
+    const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
+    const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
+    const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
+    if (status) throw new Error(stderr)
+    const frames: PowerPointFrame[] = []
+    await captureFrames({ root: join(root, 'dist'), executable: chrome!, scale: 1, canvas, editable: true, withClicks: true }, frame => { frames.push(frame) })
+    expect(frames.map(frame => [frame.position?.slide, frame.position?.click])).toEqual([[1, 0], [2, 0], [2, 1], [2, 2]])
+    const math = frames.map(frame => frame.editable?.nodes.find((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math'))
+    expect(math[0]?.rect.h).toBeGreaterThan(math[1]!.rect.h + 4)
+    for (const [step, raster] of math.slice(1).entries()) {
+      const cells = raster?.equation?.cells ?? []
+      const dots = cells.find(cell => cell.expression.includes('>⋮</m:t>'))
+      const first = cells.find(cell => cell.expression.includes('>b</m:t>'))
+      const second = cells.find(cell => cell.expression.includes('>c</m:t>'))
+      expect(dots).toBeDefined()
+      expect(first).toBeDefined()
+      expect(second).toBeDefined()
+      expect(dots!.rect.y).toBeGreaterThan(first!.rect.y)
+      expect(dots!.rect.y).toBeLessThan(second!.rect.y)
+      expect(first!.rect.x).toBeCloseTo(second!.rect.x)
+      expect(dots!.rect.x + dots!.rect.w / 2).toBeGreaterThan(first!.rect.x)
+      expect(dots!.rect.x + dots!.rect.w / 2).toBeLessThan(first!.rect.x + first!.rect.w / 2)
+      const dim = '<a:alpha val="24000"/>'
+      expect([first, dots, second].map(cell => cell!.expression.includes(dim)))
+        .toEqual([step === 1, step === 0, step === 0])
+      expect(raster?.equation?.tags?.map(tag => tag.expression.match(/>\(\d+\)<\/m:t>/)?.[0])).toEqual(['>(3)</m:t>', '>(4)</m:t>'])
+    }
+    const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Compact continuation' }))
+    expect(parts.get('ppt/slides/slide4.xml')?.toString()).toContain('>⋮</m:t>')
+  }
+  finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}, 45_000)
+
 it.skipIf(!chrome)('exports AMS full-width alignments with editable columns and tags', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-flalign-'))
   const canvas = { width: 960, height: 540 }

@@ -37,6 +37,7 @@ const strikeProperties: Readonly<Record<string, readonly string[]>> = {
 const alignmentCellStyles = new Set([
   'text-align:left', 'text-align:right', 'text-align:center', '--math-cell-align:end', '--math-cell-align:center',
   'padding-inline:0', 'padding-inline-start:1em', 'math-style:normal', 'padding-block:0.125em',
+  'padding-top:0em', 'padding-bottom:0em',
 ])
 const compactCellStyles = new Set([
   'text-align:left', 'text-align:center', '--math-cell-align:center',

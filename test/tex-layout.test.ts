@@ -942,6 +942,43 @@ c&=d&&
   expect(() => math(String.raw`a\ArrowBetweenLines b`, true)).toThrow('requires an align')
 })
 
+test('creates unnumbered Mathtools continuation rows, including explicit flush commands', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const source = String.raw`\begin{align}
+a&=b\\
+\shortvdotswithin{=}
+&=c
+\shortvdotswithin*{+}
+{}+{}&=d
+\end{align}`
+  const html = math(source, true).split('<annotation')[0]
+  const rows = [...html.matchAll(/<mtr([^>]*)>(.*?)<\/mtr>/g)]
+  expect(rows.map(([, attributes]) => attributes.trim())).toEqual([
+    '', 'data-equation-continuation', '', 'data-equation-continuation', '',
+  ])
+  expect([...html.matchAll(/<mtext>\((\d+)\)<\/mtext>/g)].map(match => match[1])).toEqual(['1', '2', '3'])
+  const contents = (index: number) => [...rows[index][2].matchAll(/<mtd[^>]*>(.*?)<\/mtd>/g)].map(match => match[1])
+  expect(contents(1)[0]).not.toContain('⋮')
+  expect(contents(1)[1]).toContain('⋮')
+  expect(contents(3)[0]).toContain('⋮')
+  expect(contents(3)[1]).not.toContain('⋮')
+  expect(rows[1][2]).toContain('padding-top:0em;padding-bottom:0em')
+  const explicit = math(String.raw`\begin{alignat*}{2}
+a&=b & c&=d\\[1em]
+\MTFlushSpaceAbove
+&\vdotswithin{=} &&\vdotswithin{=}
+\MTFlushSpaceBelow
+a&=x & c&=y
+\end{alignat*}`, true).split('<annotation')[0]
+  expect(explicit.match(/data-equation-continuation/g)).toHaveLength(1)
+  expect(explicit.match(/>⋮<\/mo>/g)).toHaveLength(2)
+  expect(explicit).toContain('padding-bottom:max(0px,calc(0em + 1em))')
+  expect(math(String.raw`\begin{aligned}a&=b\\\shortvdotswithin{=}\end{aligned}`, false).match(/data-equation-continuation/g)).toHaveLength(1)
+  expect(() => math(String.raw`\begin{align}a&=b\\\MTFlushSpaceAbove&z\tag{invalid}\MTFlushSpaceBelow\end{align}`, true))
+    .toThrow('Equation tags belong on an equation line')
+  expect(() => math(String.raw`a\shortvdotswithin{=}b`, true)).toThrow('requires an alignment environment')
+})
+
 test('parses AMS full-width alignments and applies their tag and column rules', async () => {
   const flalign = String.raw`\begin{flalign}
 a&=b\label{first} & c&=d\\

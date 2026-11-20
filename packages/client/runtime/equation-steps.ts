@@ -39,7 +39,7 @@ export function lineMatches(range: string, line: number): boolean {
 export interface EquationReveal {
   element: HTMLElement
   lines: Element[]
-  arrows: { row: Element, offset: number }[]
+  continuations: { row: Element, offset: number }[]
   ranges: string[]
   final: string
   firstLine: number
@@ -56,7 +56,7 @@ export function equationReveal(element: HTMLElement, cursor: number): EquationRe
   const group = first?.classList.contains('math-subequations') ? first : undefined
   const formulas = group ? [...group.children].filter(child => child.localName === 'math') : [element]
   const lines: Element[] = []
-  const arrows: EquationReveal['arrows'] = []
+  const continuations: EquationReveal['continuations'] = []
   for (const formula of formulas) {
     // A separately tagged equation represents one step, even with a matrix.
     if (group && formula.querySelector(':scope > semantics > .math-tagged-display')) {
@@ -70,18 +70,19 @@ export function equationReveal(element: HTMLElement, cursor: number): EquationRe
       continue
     }
     const rows = [...table.children].filter(child => child.localName === 'mtr' && !child.hasAttribute('data-equation-intertext'))
-    const equationRows = rows.filter(row => !row.hasAttribute('data-equation-arrow'))
+    const isContinuation = (row: Element) => row.hasAttribute('data-equation-arrow') || row.hasAttribute('data-equation-continuation')
+    const equationRows = rows.filter(row => !isContinuation(row))
     let offset = lines.length
     // A connector takes the highlight of the next line, or the last line if it ends the alignment.
     const last = Math.max(offset, offset + equationRows.length - 1)
     for (const row of rows) {
-      if (row.hasAttribute('data-equation-arrow')) arrows.push({ row, offset: Math.min(offset, last) })
+      if (isContinuation(row)) continuations.push({ row, offset: Math.min(offset, last) })
       else offset++
     }
     lines.push(...equationRows)
   }
   const final = element.dataset.equationFinally
-  return { element, lines, arrows, ranges, final: !final || final === 'last' ? ranges.at(-1) ?? 'all' : final, firstLine: Number(element.dataset.equationFirst) || 1, start: span.start - 1, step: span.step, advance: span.advance }
+  return { element, lines, continuations, ranges, final: !final || final === 'last' ? ranges.at(-1) ?? 'all' : final, firstLine: Number(element.dataset.equationFirst) || 1, start: span.start - 1, step: span.step, advance: span.advance }
 }
 
 export function showEquation(reveal: EquationReveal, click: number): void {
@@ -90,5 +91,5 @@ export function showEquation(reveal: EquationReveal, click: number): void {
   reveal.element.toggleAttribute('data-equation-hidden', range === 'hide')
   const highlight = range === 'hide' ? reveal.ranges[index + 1] ?? reveal.final : range
   reveal.lines.forEach((line, offset) => line.toggleAttribute('data-equation-dim', !lineMatches(highlight, reveal.firstLine + offset)))
-  for (const { row, offset } of reveal.arrows) row.toggleAttribute('data-equation-dim', !lineMatches(highlight, reveal.firstLine + offset))
+  for (const { row, offset } of reveal.continuations) row.toggleAttribute('data-equation-dim', !lineMatches(highlight, reveal.firstLine + offset))
 }

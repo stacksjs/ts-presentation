@@ -458,6 +458,25 @@ export function collectSnapshot(options: {
           else {
             body.push(cell.getBoundingClientRect())
             if (!positionedCells) continue
+            // Cells already have independent coordinates. For a measured box
+            // that fills a continuation cell, place only its visible content.
+            if (row.hasAttribute('data-equation-continuation')) {
+              let box = cell.firstElementChild
+              let boxData = cellData.children[0]
+              while (box?.localName === 'mrow' && box.children.length === 1
+                && Object.keys(boxData.attributes).length === 0 && !boxData.text.trim()) {
+                box = box.firstElementChild
+                boxData = boxData.children[0]
+              }
+              if (cell.children.length === 1 && box?.getAttribute('class') === 'math-measured-box') {
+                const ink = box.children[1]?.firstElementChild
+                const inkData = boxData.children[1]?.children[0]
+                if (!ink || !inkData || !/^math-overlap-[lcr]$/.test(inkData.attributes.class ?? '')) return
+                const rect = mathBounds([ink.getBoundingClientRect()])
+                if (rect) measuredCells.push(fragment(ink, { ...inkData, attributes: {} }, rowOpacity, rect))
+                continue
+              }
+            }
             const boxes = Array.from(cell.children, child => child.getBoundingClientRect())
             const rect = mathBounds(boxes)
             if (rect) measuredCells.push(fragment(cell, cellData, rowOpacity, rect))
