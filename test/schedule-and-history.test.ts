@@ -765,6 +765,52 @@ test('applies Mermaid Gantt status colors, reference labels, and full date axis 
   expect(svg).toContain('data-task-id="activeTask" data-task-start="2026-01-05T00:00:00.000Z"')
 })
 
+test('preserves literal percent axis formats and imports Gantt marker stroke properties', () => {
+  const now = spyOn(Date, 'now').mockReturnValue(Date.UTC(2026, 2, 9))
+  const source = `gantt
+axisFormat %Y-%%-%d
+tickInterval 1day
+%% Skip this whole line
+todayMarker stroke:rgb(16, 128, 90), stroke-width:1.5px, opacity:80%, stroke-opacity:.6, stroke-dasharray:5, 3px, stroke-dashoffset:-1px, stroke-linecap:round
+Build : build, 2026-03-06, 8d`
+  try {
+    const svg = mermaid(source, 'styled-today')!
+    expect(svg).toContain('>2026-%-09</tspan>')
+    expect(svg).toMatch(/class="diagram-gantt-today"[^>]*style="stroke:rgb\(16, 128, 90\);stroke-width:1.5px;opacity:0.8;stroke-opacity:0.6;stroke-dasharray:5 3;stroke-dashoffset:-1;stroke-linecap:round"/)
+    expect(svg).not.toContain('Skip this whole line')
+    const off = mermaid(source.replace(/^todayMarker.*$/m, 'todayMarker off'), 'no-today')
+    expect(off).toContain('>2026-%-09</tspan>')
+    expect(off).not.toContain('diagram-gantt-today')
+  }
+  finally { now.mockRestore() }
+})
+
+// Adapted from Mermaid's GitGraph parser recovery fixtures (MIT).
+test('reports unknown GitGraph properties and retains known commit and merge fields', () => {
+  const warning = spyOn(console, 'warn').mockImplementation(() => {})
+  const source = `gitGraph
+commit id:"A" msg:"Root" oops:"ignored; %% comment"
+branch feature
+commit id:"B"
+checkout main
+merge feature random:"ignored" id:"M" tag:"release" type:HIGHLIGHT`
+  try {
+    const history = buildGitHistory(source)
+    expect(history?.commits.map(commit => [commit.id, commit.message, commit.symbol, commit.tags])).toEqual([
+      ['A', 'Root', 'NORMAL', []], ['B', undefined, 'NORMAL', []],
+      ['M', 'merged branch feature into main', 'HIGHLIGHT', ['release']],
+    ])
+    expect(warning.mock.calls).toEqual([
+      ['GitGraph commit ignores unknown property "oops"'], ['GitGraph merge ignores unknown property "random"'],
+    ])
+    expect(mermaid(source, 'recovered-graph')).toContain('data-commit-id="M"')
+    expect(buildGitHistory('gitGraph\ncommit id::')).toBeUndefined()
+    expect(buildGitHistory('gitGraph\ncommit id:"one" id:"two"')).toBeUndefined()
+    expect(buildGitHistory('gitGraph\nbranch feature order:xyz')).toBeUndefined()
+  }
+  finally { warning.mockRestore() }
+})
+
 const themedSchedule = `gantt
 title Delivery schedule
 todayMarker off

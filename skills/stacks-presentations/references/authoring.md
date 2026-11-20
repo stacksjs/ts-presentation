@@ -305,7 +305,9 @@ speaker notes. Each hook can be asynchronous.
   individual dates.
   Time-only dates use the UTC date of the build. Use `S`, `SS`, or `SSS`
   for fractional seconds in `dateFormat` and `%L` for milliseconds in
-  `axisFormat`. Multi-unit ticks follow the calendar. For example,
+  `axisFormat`. Use `%%` for a literal percent in an axis label and
+  `todayMarker stroke-dasharray:5 3,stroke-linecap:round` for a dashed marker.
+  Multi-unit ticks follow the calendar. For example,
   `tickInterval 3month` places ticks at the start of each quarter.
   An imported task with an invalid end date or duration has zero duration.
   Imported GitGraph diagrams support branch ordering, checkout, merges, tags,
@@ -315,7 +317,8 @@ speaker notes. Each hook can be asynchronous.
   Use `commit id:"abc" msg:"Describe the change"` to keep a message in the
   commit tooltip. Merge and cherry-pick tooltips describe the operation.
   Set `type:REVERSE`, `type:HIGHLIGHT`, or `type:NORMAL`
-  on a commit or merge to choose its symbol.
+  on a commit or merge to choose its symbol. Unknown commit and merge
+  properties generate a warning and leave the recognized fields intact.
   Imported Gantt tasks without IDs receive `task1`, `task2`, and so on for
   dependencies, links, and callbacks.
 - Imported `xychart` or `xychart-beta` supports named `bar` and `line`

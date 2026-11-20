@@ -18,14 +18,32 @@ function isWeekday(value: unknown): value is GanttWeekday {
   return typeof value === 'string' && weekdays.has(value)
 }
 
+function markerNumber(value: string, unit: 'px' | '%'): number | undefined {
+  const numeric = value.endsWith(unit) ? value.slice(0, -unit.length) : value
+  if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(numeric)) return
+  return Number(numeric) / (unit === '%' && numeric !== value ? 100 : 1)
+}
+
 function markerStyle(text: string): GanttMarkerStyle {
   const style: GanttMarkerStyle = {}
-  for (const field of text.split(',')) {
-    const [key, value] = field.split(':').map(part => part.trim())
+  for (const field of text.split(/[,;](?=\s*[\w-]+\s*:)/)) {
+    const [, key, value] = /^\s*([\w-]+)\s*:\s*(.+?)\s*$/.exec(field) ?? []
     if (!value) continue
-    if (key === 'stroke') style.stroke = value
-    if (key === 'stroke-width' && /^\d+(?:\.\d+)?(?:px)?$/.test(value)) style.strokeWidth = Number.parseFloat(value)
-    if (key === 'opacity' && /^(?:\d+(?:\.\d+)?|\.\d+)$/.test(value)) style.opacity = Number(value)
+    switch (key.toLowerCase()) {
+      case 'stroke': style.stroke = value; break
+      case 'stroke-width': style.strokeWidth = markerNumber(value, 'px'); break
+      case 'opacity': style.opacity = markerNumber(value, '%'); break
+      case 'stroke-opacity': style.strokeOpacity = markerNumber(value, '%'); break
+      case 'stroke-dashoffset': style.strokeDashoffset = markerNumber(value, 'px'); break
+      case 'stroke-linecap':
+        if (value === 'round' || value === 'square' || value === 'butt') style.strokeLinecap = value
+        break
+      case 'stroke-dasharray': {
+        const dash = value.split(/[\s,]+/).map(part => markerNumber(part, 'px') ?? NaN)
+        if (value === 'none' || dash.every(Number.isFinite)) style.strokeDasharray = value === 'none' ? value : dash
+        break
+      }
+    }
   }
   return style
 }
@@ -72,7 +90,7 @@ function parseClick(line: string): { ids: string[], interaction: TaskInteraction
 }
 
 function parseGantt(source: string, now: number, interactionsEnabled = false, configuredAxisFormat = ''): GanttChartOptions | undefined {
-  const chart = readChronology(source, '', { hashTaskNames: true })
+  const chart = readChronology(source, '', { gantt: true })
   if (!chart || !isGanttHeader(chart.header)) return
 
   let dateFormat = 'YYYY-MM-DD'

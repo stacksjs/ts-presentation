@@ -39,7 +39,7 @@ interface Token { value: string, quoted: boolean }
 function lex(source: string): Token[] | undefined {
   const parts: Token[] = []
   const piece = /\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([^\s:"']+)|(:))/gy
-  while (source.slice(piece.lastIndex).trim()) {
+  while (piece.lastIndex < source.length) {
     const value = piece.exec(source)
     if (!value) return
     const [, quoted, single, keyword, separator] = value
@@ -49,7 +49,7 @@ function lex(source: string): Token[] | undefined {
   return parts
 }
 
-function fields(raw: Token[], permitted: string[]): Map<string, string[]> | undefined {
+function fields(raw: Token[], permitted: string[], recover?: 'commit' | 'merge'): Map<string, string[]> | undefined {
   const result = new Map<string, string[]>()
   const allowMessage = permitted.includes('msg')
   for (let cursor = 0; cursor < raw.length;) {
@@ -62,7 +62,13 @@ function fields(raw: Token[], permitted: string[]): Map<string, string[]> | unde
     const key = token.value
     const separator = raw[cursor++]
     const value = raw[cursor++]
-    if (token.quoted || !permitted.includes(key) || separator?.quoted || separator?.value !== ':' || !value) return
+    if (token.quoted || !/^[\w-]+$/.test(key) || separator?.quoted || separator?.value !== ':' || !value
+      || (!value.quoted && value.value === ':')) return
+    if (!permitted.includes(key)) {
+      if (!recover) return
+      console.warn(`GitGraph ${recover} ignores unknown property "${key}"`)
+      continue
+    }
     if ((result.has(key) && key !== 'tag') || (key === 'msg' && !value.quoted)) return
     const values = result.get(key) ?? []
     values.push(value.value)
@@ -87,7 +93,7 @@ function parseGitHistory(source: string, config: Record<string, unknown>): GitGr
     if (!fieldsForLine?.length || fieldsForLine[0].quoted) return
     const [command, argument, ...rest] = fieldsForLine
     const op = command.value
-    const first = argument?.value
+    const first = argument?.value === ':' && !argument.quoted ? undefined : argument?.value
     if (op === 'branch') {
       const attrs = fields(rest, ['order'])
       const order = attrs?.get('order')?.[0]
@@ -109,8 +115,8 @@ function parseGitHistory(source: string, config: Record<string, unknown>): GitGr
     }
     if (op === 'commit' || op === 'merge') {
       const attrs = op === 'commit'
-        ? fields(fieldsForLine.slice(1), ['id', 'tag', 'type', 'msg'])
-        : fields(rest, ['id', 'tag', 'type'])
+        ? fields(fieldsForLine.slice(1), ['id', 'tag', 'type', 'msg'], op)
+        : fields(rest, ['id', 'tag', 'type'], op)
       if (!attrs) return
       const commit = { id: attrs.get('id')?.[0] || undefined, tags: attrs.get('tag'), style: attrs.get('type')?.[0] as GitCommitStyle | undefined }
       if (op === 'merge') {
