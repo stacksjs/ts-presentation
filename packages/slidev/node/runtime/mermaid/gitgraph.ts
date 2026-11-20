@@ -2,7 +2,7 @@ import type { GitCommitStyle, GitGraphDirection, GitGraphOperation, GitGraphOpti
 import { buildGitHistory as buildHistory, gitGraphChart } from 'ts-charts/diagrams'
 import type { MermaidOptions } from '../authoring-setup.ts'
 import { diagramPixels, readChronology, sizeChronologySvg } from './chronology.ts'
-import { gitGraphPreset } from './gitgraph-themes.ts'
+import { gitGraphPreset, gitGraphStyleIndex, gitGraphThemeFamily, reduxBranchColors, usesReduxBranchColors } from './gitgraph-themes.ts'
 import { syntaxMask } from './syntax.ts'
 
 function logicalLines(source: string): string[] {
@@ -158,32 +158,62 @@ export function gitGraph(source: string, idPrefix: string, options: MermaidOptio
   if (!chart) return
   const variables = settings(options.themeVariables)
   const preset = gitGraphPreset(options.theme)
+  const family = gitGraphThemeFamily(options.theme)
+  const coloredBranches = usesReduxBranchColors(options.theme)
+  const dark = options.theme === 'redux-dark-color'
   const color = (key: string) => typeof variables[key] === 'string' ? variables[key] as string : undefined
-  const palette = (prefix: string, defaults?: readonly string[], fallback?: string) =>
-    Array.from({ length: 8 }, (_, index) => color(`${prefix}${index}`) ?? fallback ?? defaults?.[index])
-  const colors = palette('git', preset?.branches)
+  const borderColors = Array.isArray(variables.borderColorArray) && variables.borderColorArray.length
+    ? variables.borderColorArray : reduxBranchColors
+  const laneColor = (slot: number) => {
+    const border = borderColors[slot % borderColors.length]
+    return typeof border === 'string' ? border : reduxBranchColors[slot % reduxBranchColors.length]
+  }
+  const laneCount = 1 + chart.operations.filter(operation => operation.op === 'branch').length
+  const palette = (paint: (slot: number) => string | undefined, labels = false) => Array.from({ length: laneCount }, (_, lane) =>
+    paint(gitGraphStyleIndex(lane, options.theme, labels, variables.THEME_COLOR_LIMIT)))
+  const nodeBorder = color('nodeBorder') ?? preset?.nodeBorder
+  const symbolDetail = color(family === 'classic' ? 'primaryColor' : 'mainBkg') ?? preset?.symbolDetailColor
+  const strokeWidth = diagramPixels(variables.strokeWidth) ?? preset?.strokeWidth
+  const themedColor = (slot: number) => family === 'redux' ? coloredBranches && slot ? laneColor(slot) : nodeBorder
+    : family === 'neo' && slot === 0 ? nodeBorder : undefined
+  const colors = palette(slot => color(`git${slot}`) ?? themedColor(slot) ?? preset?.branches[slot])
   const labelBackground = typeof options.themeCSS === 'string' && options.themeCSS.trim() ? 'transparent' : undefined
   const svg = gitGraphChart({
     ...chart, idPrefix, title: chart.title || (typeof options.title === 'string' ? options.title : ''),
+    diagramPadding: chart.diagramPadding ?? (preset ? 8 : undefined),
     truncateLabels: false,
     edgeLayout: 'orthogonal',
     tagLayout: 'stacked',
+    geometry: preset ? family === 'redux' ? 'compact' : 'classic' : undefined,
+    branchLine: {
+      color: color('commitLineColor') ?? color('lineColor') ?? preset?.railColor,
+      width: strokeWidth ?? (preset ? 1 : undefined),
+      pattern: preset ? family === 'classic' ? 'dotted' : 'dashed' : undefined,
+    },
+    edgeWidth: family === 'redux' ? strokeWidth ?? 2 : preset ? 8 : undefined,
+    symbolDetailColor: symbolDetail,
     colors,
-    branchLabelColors: palette('gitBranchLabel', preset?.branchText, color('branchLabelColor')),
-    branchLabelBackgrounds: preset ? colors : labelBackground ? colors.map(color => color ?? labelBackground) : undefined,
-    highlightColors: palette('gitInv', preset?.highlights),
+    branchLabelColors: palette(slot => color(`gitBranchLabel${slot}`) ?? color('branchLabelColor')
+      ?? (family === 'redux' || (family === 'neo' && slot === 0) ? nodeBorder : preset?.branchText[slot % 8]), true),
+    branchLabelBackgrounds: family === 'redux'
+      ? palette(slot => coloredBranches && !dark && slot ? laneColor(slot) : symbolDetail, true)
+      : family === 'neo' ? palette(() => symbolDetail, true)
+        : preset ? colors : labelBackground ? colors.map(color => color ?? labelBackground) : undefined,
+    branchLabelBorders: family === 'redux' ? palette(slot => themedColor(slot), true)
+      : family === 'neo' ? palette(() => nodeBorder, true) : undefined,
+    highlightColors: palette(slot => color(`gitInv${slot}`) ?? themedColor(slot) ?? preset?.highlights[slot]),
     background: color('background') ?? preset?.background,
     titleColor: color('titleColor') ?? color('textColor') ?? preset?.title,
     commitLabel: {
-      color: color('commitLabelColor') ?? preset?.commit.color,
-      background: color('commitLabelBackground') ?? preset?.commit.background ?? labelBackground,
+      color: color('commitLabelColor') ?? (family === 'classic' ? preset?.commit.color : nodeBorder),
+      background: color('commitLabelBackground') ?? (family === 'classic' ? preset?.commit.background ?? labelBackground : labelBackground),
       fontSize: diagramPixels(variables.commitLabelFontSize) ?? preset?.commit.fontSize,
     },
     tagLabel: {
       shape: 'tag',
       color: color('tagLabelColor') ?? preset?.tag.color,
-      background: color('tagLabelBackground') ?? preset?.tag.background ?? labelBackground,
-      border: color('tagLabelBorder') ?? preset?.tag.border,
+      background: color('tagLabelBackground') ?? (family === 'classic' ? preset?.tag.background ?? labelBackground : symbolDetail),
+      border: color('tagLabelBorder') ?? (family === 'classic' ? preset?.tag.border : nodeBorder),
       fontSize: diagramPixels(variables.tagLabelFontSize) ?? preset?.tag.fontSize,
       holeColor: color('textColor') ?? preset?.tag.holeColor,
     },

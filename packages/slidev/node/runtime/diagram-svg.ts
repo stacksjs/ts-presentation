@@ -1,5 +1,5 @@
 import { escapeHtml } from './html.ts'
-import { gitGraphPreset } from './mermaid/gitgraph-themes.ts'
+import { gitGraphPreset, gitGraphStyleIndex } from './mermaid/gitgraph-themes.ts'
 import { diagramThemeSelector } from './mermaid/theme-selectors.ts'
 import { scopeDiagramStyles } from './scoped-style.ts'
 
@@ -22,12 +22,7 @@ export function applyDiagramTheme(svg: string, marker: string, options: Readonly
   // Keep the renderer's palette above deck defaults while letting an author
   // override it using ordinary selectors and the normal CSS cascade.
   const paint = new Map<string, number>()
-  const theme = typeof options.theme === 'string' ? options.theme : ''
   const variables = options.themeVariables as { THEME_COLOR_LIMIT?: unknown } | undefined
-  const customLimit = variables?.THEME_COLOR_LIMIT
-  const redux = /^redux(?:-dark)?(?:-color)?$/.test(theme)
-  const railLimit = redux ? (typeof customLimit === 'number' && Number.isSafeInteger(customLimit) && customLimit > 1 ? customLimit : 12) : 8
-  const reserveFirst = redux && theme.endsWith('-color')
   let root = true
   let task: string | null = null
   const markup = new HTMLRewriter().on('*', {
@@ -44,9 +39,8 @@ export function applyDiagramTheme(svg: string, marker: string, options: Readonly
       }
       const branch = git ? element.getAttribute('data-git-branch-index') : null
       if (branch !== null) {
-        const index = Number(branch)
-        const limit = element.getAttribute('class') === 'diagram-git-branch' ? railLimit : 8
-        const slot = reserveFirst && index > 0 ? (index - 1) % (limit - 1) + 1 : index % limit
+        const label = element.getAttribute('class') === 'diagram-git-branch'
+        const slot = gitGraphStyleIndex(Number(branch), options.theme, label, variables?.THEME_COLOR_LIMIT)
         element.setAttribute('data-git-style-index', String(slot))
       }
       if (!gantt) return

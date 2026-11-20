@@ -718,6 +718,8 @@ test('uses theme-specific indices for GitGraph rails and commit symbols', () => 
   expect(stock).toMatch(/data-commit-id="work8"[^>]*data-git-style-index="0"/)
   expect(redux).toMatch(/data-git-branch-index="8" data-git-style-index="8"><title>lane8/)
   expect(redux).toMatch(/data-commit-id="work8"[^>]*data-git-style-index="1"/)
+  expect(redux).toMatch(/<title>lane8<\/title>.*?class="diagram-git-branch-label-box"[^>]*fill="#818cf8"/)
+  expect(redux).toMatch(/data-commit-id="work8"[^>]*>.*?<circle class="diagram-git-dot"[^>]*fill="#2dd4bf"/)
 })
 
 test('applies Mermaid Gantt status colors, reference labels, and full date axis directives', () => {
@@ -874,16 +876,17 @@ test('applies every named Mermaid GitGraph preset and lets diagram colors overri
     ['forest', '#ffffff', '#9bc834'],
     ['neutral', '#ffffff', '#b4b4b4'],
     ['dark', '#333333', '#797d7d'],
-    ['neo', '#ffffff', '#7373f8'],
-    ['neo-dark', '#333333', '#8b0000'],
-    ['redux', '#ffffff', '#7373f8'],
-    ['redux-color', '#ffffff', '#7373f8'],
-    ['redux-dark', '#333333', '#000000'],
-    ['redux-dark-color', '#333333', '#000000'],
+    ['neo', '#ffffff', '#ffffff'],
+    ['neo-dark', '#333333', '#2a2020'],
+    ['redux', '#ffffff', '#ffffff'],
+    ['redux-color', '#ffffff', '#ffffff'],
+    ['redux-dark', '#333333', '#111113'],
+    ['redux-dark-color', '#333333', '#111113'],
   ]
   for (const [theme, background, branch] of presets) {
     const svg = mermaid(graph, 'preset', { theme })!
     expect(svg).toContain(`data-diagram-theme="${theme}"`)
+    expect(svg).toContain('data-diagram-kind="gitgraph" transform="translate(8 8)"')
     expect(svg).toContain(`style="--diagram-background:${background}"`)
     expect(svg).toMatch(new RegExp(`class="diagram-git-branch-label-box"[^>]*fill="${branch}"`))
     expect(svg).toContain('data-commit-id="shared" data-parent-ids="root, ready"')
@@ -910,6 +913,40 @@ test('applies every named Mermaid GitGraph preset and lets diagram colors overri
   expect(svg).toMatch(/class="diagram-git-dot"[^>]*fill="#aabbcc"/)
   expect(svg).toMatch(/class="diagram-git-label"[^>]*style="fill:#b8b6b6;font-size:14px;"/)
   expect(svg).toMatch(/class="diagram-git-tag-box"[^>]*fill="#1f2020" stroke="#ffcc66"/)
+})
+
+test('renders themed GitGraph symbols, rails, and distinct Redux branch colors', () => {
+  const source = `gitGraph
+commit id:"root"
+branch review
+commit id:"ready" type:REVERSE tag:"v1"
+checkout main
+merge review id:"released"`
+  for (const direction of ['LR', 'TB', 'BT']) {
+    const graph = source.replace('gitGraph', `gitGraph ${direction}:`)
+    const stock = mermaid(graph, 'classic-themes', { theme: 'forest' })!
+    const redux = mermaid(graph, 'redux-themes', { theme: 'redux' })!
+    const colored = mermaid(graph, 'redux-color-themes', { theme: 'redux-color' })!
+    const dark = mermaid(graph, 'redux-dark-color-themes', { theme: 'redux-dark-color' })!
+    expect(stock).toMatch(/<title>review<\/title><path[^>]*stroke="#000000" stroke-width="1" stroke-dasharray="2"/)
+    expect(stock).toMatch(/data-commit-id="ready"[^>]*>.*?<circle class="diagram-git-dot"[^>]*r="10" fill="#7aff32"/)
+    expect(stock).toMatch(/class="diagram-git-edge"[^>]*stroke-width="8" stroke-linecap="round"/)
+    expect(redux).toMatch(/data-commit-id="ready"[^>]*>.*?<circle class="diagram-git-dot"[^>]*r="7" fill="#28253d"/)
+    expect(redux).toMatch(/class="diagram-git-ring" fill="#ffffff"[^>]*r="5"/)
+    expect(colored).toMatch(/<title>review<\/title><path[^>]*stroke="#bdbccc" stroke-width="2" stroke-dasharray="4 2"/)
+    expect(colored).toMatch(/<title>review<\/title>.*?class="diagram-git-branch-label-box"[^>]*rx="0" fill="#2dd4bf" stroke="#2dd4bf"/)
+    expect(colored).toMatch(/data-commit-id="ready"[^>]*>.*?<circle class="diagram-git-dot"[^>]*r="7" fill="#2dd4bf"/)
+    expect(colored).toMatch(/class="diagram-git-edge"[^>]*stroke-width="2" stroke-linecap="round"[^>]*stroke="#2dd4bf"/)
+    expect(dark).toMatch(/<title>review<\/title>.*?class="diagram-git-branch-label-box"[^>]*fill="#111113" stroke="#2dd4bf"/)
+    expect(dark).toMatch(/data-commit-id="root"[^>]*>.*?<circle class="diagram-git-dot"[^>]*r="7" fill="#ffffff"/)
+  }
+  const custom = mermaid(source, 'custom-redux', { theme: 'redux-color', themeVariables: {
+    borderColorArray: ['#ff0055', '#bc4422'], mainBkg: '#eff0f4', nodeBorder: '#151525',
+    strokeWidth: 3, commitLineColor: '#204060',
+  } })!
+  expect(custom).toMatch(/<title>review<\/title><path[^>]*stroke="#204060" stroke-width="3"/)
+  expect(custom).toMatch(/class="diagram-git-edge"[^>]*stroke-width="3"[^>]*stroke="#bc4422"/)
+  expect(custom).toMatch(/class="diagram-git-ring" fill="#eff0f4"/)
 })
 
 const actions = `gantt
