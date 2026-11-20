@@ -23,6 +23,7 @@ const alignmentCellStyles = new Set([
   'text-align:left', 'text-align:right', 'text-align:center', '--math-cell-align:end', '--math-cell-align:center',
   'padding-inline:0', 'padding-inline-start:1em', 'math-style:normal', 'padding-block:0.125em',
 ])
+const measuredCellSpacing = /^(?:padding-block:\d+(?:\.\d+)?em|padding-bottom:max\(0px,calc\(\d+(?:\.\d+)?em \+ [+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:em|ex|px|pt|pc|cm|mm|in)\)\))$/
 
 function only(node: RawMathElement, ...names: string[]): boolean {
   return Object.keys(node.attributes).every(name => names.includes(name))
@@ -70,6 +71,8 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba):
   const size = Math.max(100, Math.min(400000, Math.round(fontSize * PT_PER_PX * 100)))
   const hex = [color.r, color.g, color.b].map(value => Math.round(value).toString(16).padStart(2, '0')).join('').toUpperCase()
   let opacity = color.a
+  let bold = false
+  let italicText = false
   const properties = () => {
     const paint = opacity === 1 ? `<a:srgbClr val="${hex}"/>` : `<a:srgbClr val="${hex}"><a:alpha val="${Math.round(opacity * 100000)}"/></a:srgbClr>`
     return `<a:rPr sz="${size}"><a:solidFill>${paint}</a:solidFill><a:latin typeface="Cambria Math"/></a:rPr>`
@@ -77,7 +80,7 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba):
   const wrap = (name: string, content: string) => `<m:${name}>${content}</m:${name}>`
   const setting = (name: string, value: string) => `<m:${name} m:val="${escapeHtml(value)}"/>`
   const run = (text: string, italic = false) =>
-    wrap('r', `<m:rPr><m:sty m:val="${italic ? 'i' : 'p'}"/></m:rPr>${properties()}<m:t xml:space="preserve">${escapeHtml(text)}</m:t>`)
+    wrap('r', `<m:rPr><m:sty m:val="${(bold ? 'b' : '') + (italic ? 'i' : '') || 'p'}"/></m:rPr>${properties()}<m:t xml:space="preserve">${escapeHtml(text)}</m:t>`)
   function sequence(nodes: readonly RawMathElement[]): string | undefined {
     let output = ''
     for (let index = 0; index < nodes.length; index++) {
@@ -173,10 +176,16 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba):
       // XML 1.0 forbids control characters even inside a text run.
       // eslint-disable-next-line no-control-regex
       if (/[\x00-\x08\x0B\x0C\x0E-\x1F\uFFFE\uFFFF]/.test(text)) return
-      const italic = name === 'mi' && !attributes.mathvariant && /^[\p{Script=Latin}\p{Script=Greek}]\p{M}*$/u.test(text)
+      const italic = name === 'mtext' ? italicText
+        : name === 'mi' && !attributes.mathvariant && /^[\p{Script=Latin}\p{Script=Greek}]\p{M}*$/u.test(text)
       return run(text, italic)
     }
     if (text.trim()) return
+    if (name === 'mtd' && only(node, 'style')) {
+      const styles = (attributes.style ?? '').split(';').filter(Boolean)
+      if (styles.every(style => alignmentCellStyles.has(style) || measuredCellSpacing.test(style))) return sequence(children)
+      return
+    }
     if (name === 'munder' || name === 'mover' || name === 'munderover') return underOver(node)
     if (name === 'mspace' && only(node, 'width') && !children.length && /^\d+(?:\.\d+)?em$/.test(attributes.width ?? '')) {
       const width = Number.parseFloat(attributes.width)
@@ -191,6 +200,22 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba):
       if (body === undefined) return
       const options = setting('pos', attributes.class === 'math-overline' ? 'top' : 'bot')
       return wrap('bar', wrap('barPr', options) + wrap('e', body))
+    }
+    if (name === 'mrow' && only(node, 'style') && attributes.style) {
+      const previousBold = bold
+      const previousItalic = italicText
+      try {
+        for (const style of attributes.style.split(';').filter(Boolean)) {
+          if (style === 'font-weight:bold' || style === 'font-weight:normal') bold = style.endsWith('bold')
+          else if (style === 'font-style:italic' || style === 'font-style:normal') italicText = style.endsWith('italic')
+          else return
+        }
+        return sequence(children)
+      }
+      finally {
+        bold = previousBold
+        italicText = previousItalic
+      }
     }
     if (name === 'mrow' && only(node)) {
       const left = children[0]

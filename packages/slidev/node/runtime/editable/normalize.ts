@@ -9,6 +9,7 @@ import type {
   IrText,
   LinearGradient,
   RasterReason,
+  RawMathFragment,
   RawNode,
   RawSlide,
   RawSnapshot,
@@ -594,17 +595,19 @@ function buildSlideIr(
       const fontSize = parseLength(style.fontSize)
       const bounds = clipToSlide(math.rect, size)
       if (color?.a === 1 && fontSize > 0 && bounds?.w === math.rect.w && bounds.h === math.rect.h) {
-        const expression = officeMath(math.expression, fontSize, color)
-        if (expression) {
-          const tags = math.tags?.map((tag) => {
-            const visible = clipToSlide(tag.rect, size)
-            if (visible?.w !== tag.rect.w || visible.h !== tag.rect.h || !(tag.fontSize > 0)
-              || !Number.isFinite(tag.opacity) || tag.opacity < 0 || tag.opacity > 1) return
-            const expression = officeMath(tag.expression, tag.fontSize, withOpacity(color, tag.opacity)!)
-            if (expression) return { expression, rect: tag.rect, display: false }
-          })
-          if (!tags || tags.every(tag => tag !== undefined))
-            equation = { expression, rect: math.rect, display: math.display, ...(tags?.length ? { tags } : {}) }
+        const convertFragment = (fragment: RawMathFragment, display: boolean) => {
+          const visible = clipToSlide(fragment.rect, size)
+          if (visible?.w !== fragment.rect.w || visible.h !== fragment.rect.h || !(fragment.fontSize > 0)
+            || !Number.isFinite(fragment.opacity) || fragment.opacity < 0 || fragment.opacity > 1) return
+          const expression = officeMath(fragment.expression, fragment.fontSize, withOpacity(color, fragment.opacity)!)
+          if (expression) return { expression, rect: fragment.rect, display }
+        }
+        const tags = math.tags?.map(tag => convertFragment(tag, false)) ?? []
+        const fragments = math.cells ?? [{ expression: math.expression, rect: math.rect, fontSize, opacity: 1 }]
+        const bodies = fragments.map(fragment => convertFragment(fragment, math.display))
+        if (tags.every(tag => tag !== undefined) && bodies.every(body => body !== undefined)) {
+          const [body, ...cells] = bodies
+          if (body) equation = { ...body, ...(tags.length ? { tags } : {}), ...(cells.length ? { cells } : {}) }
         }
       }
     }

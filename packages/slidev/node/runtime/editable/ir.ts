@@ -94,12 +94,18 @@ export interface RawMathElement {
   opacity?: number
 }
 
-export interface RawMathSnapshot {
+export interface RawMathFragment {
   expression: RawMathElement
   rect: Rect
-  display: boolean
-  tags?: { expression: RawMathElement, rect: Rect, opacity: number, fontSize: number }[]
+  opacity: number
+  fontSize: number
 }
+
+export type RawMathSnapshot = {
+  rect: Rect
+  display: boolean
+  tags?: RawMathFragment[]
+} & ({ expression: RawMathElement, cells?: never } | { cells: RawMathFragment[], expression?: never })
 
 export interface RawNode {
   /** Index into `RawSnapshot.nodes`, and the value of `data-slidev-export-id`. */
@@ -300,7 +306,7 @@ export interface IrRaster extends IrBase {
   /** Also hide the element's own children while capturing. Correct only when they are walked and redrawn as shapes; hiding a leaf's children (e.g. an `<svg>`) removes its artwork from the picture. */
   hideDescendants: boolean
   /** Native Office Math choice with this raster as the compatibility fallback. */
-  equation?: IrEquation & { tags?: IrEquation[] }
+  equation?: IrEquation & { tags?: IrEquation[], cells?: IrEquation[] }
 }
 
 export type IrNode = IrBox | IrText | IrImage | IrRaster

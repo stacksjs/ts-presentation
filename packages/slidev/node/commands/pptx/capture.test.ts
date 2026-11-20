@@ -196,7 +196,19 @@ $$
 $$
 
 $$
-\begin{align*}a&=b\\[1ex]c&=d\end{align*}
+\begin{align*}x&=y\\[1ex]x&=y\\x&=y\end{align*}
+$$
+
+---
+
+# Single tags
+
+$$
+\frac{a}{b}\tag*{\textbf{Rate}}
+$$
+
+$$
+\begin{equation}\begin{split}a&=b+c\\&=d\end{split}\tag{Result $k^2$}\end{equation}
 $$`)
     const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
     const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
@@ -204,8 +216,8 @@ $$`)
     if (status) throw new Error(stderr)
     const frames: PowerPointFrame[] = []
     await captureFrames({ root: join(root, 'dist'), executable: chrome!, scale: 1, canvas, editable: true, withClicks: true }, frame => { frames.push(frame) })
-    expect(frames).toHaveLength(3)
-    for (const [step, frame] of frames.entries()) {
+    expect(frames).toHaveLength(4)
+    for (const [step, frame] of frames.slice(0, 3).entries()) {
       const arrays = frame.editable?.nodes.filter((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math') ?? []
       expect(arrays).toHaveLength(3)
       const [aligned, gathered, spaced] = arrays.map(node => node.equation)
@@ -221,17 +233,31 @@ $$`)
       expect(gathered?.expression.match(/<m:e>/g)).toHaveLength(2)
       expect(gathered?.expression).not.toContain('&amp;')
       expect(gathered?.tags).toHaveLength(2)
-      expect(spaced).toBeUndefined()
+      expect(spaced?.cells).toHaveLength(5)
+      const rowY = [spaced!.rect.y, spaced!.cells![1].rect.y, spaced!.cells![3].rect.y]
+      expect(rowY[1] - rowY[0]).toBeGreaterThan(rowY[2] - rowY[1] + 5)
     }
+    const singles = frames[3].editable?.nodes.filter((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math') ?? []
+    expect(singles).toHaveLength(2)
+    expect(singles[0].equation?.expression).toContain('<m:f>')
+    expect(singles[0].equation?.tags?.[0].expression).toContain('>Rate</m:t>')
+    expect(singles[0].equation?.tags?.[0].expression).toContain('<m:sty m:val="b"/>')
+    expect(singles[1].equation?.expression).toContain('<m:eqArr>')
+    expect(singles[1].equation?.tags?.[0].expression).toContain('>(Result')
+    expect(singles[1].equation?.tags?.[0].expression).toContain('<m:sSup>')
+    for (const { equation } of singles)
+      expect(equation!.tags![0].rect.x + equation!.tags![0].rect.w).toBeLessThan(equation!.rect.x)
     const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Aligned equations' }))
     const markup = [...parts].filter(([path]) => /^ppt\/slides\/slide\d+\.xml$/.test(path)).map(([, value]) => value.toString())
-    expect(markup).toHaveLength(3)
-    for (const slide of markup) {
+    expect(markup).toHaveLength(4)
+    for (const slide of markup.slice(0, 3)) {
       expect(slide.match(/<m:eqArr>/g)).toHaveLength(2)
       expect(slide.match(/name="Equation tag"/g)).toHaveLength(4)
-      expect(slide.match(/<mc:Fallback><p:sp>/g)).toHaveLength(2)
-      expect(slide.match(/<p:pic>/g)).toHaveLength(1)
+      expect(slide.match(/name="Equation cell"/g)).toHaveLength(5)
+      expect(slide.match(/<mc:Fallback><p:sp>/g)).toHaveLength(3)
     }
+    expect(markup[3].match(/name="Equation tag"/g)).toHaveLength(2)
+    expect(markup[3].match(/<mc:Fallback><p:sp>/g)).toHaveLength(2)
   }
   finally {
     await rm(root, { recursive: true, force: true })

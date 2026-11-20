@@ -62,11 +62,12 @@ objects, including supported CSS linear-gradient fills. MathML formulas with
 fractions, roots, scripts, matrices, operator limits, accents, and braces can
 become Office Math objects with picture alternatives. Supported AMS alignment
 and gather environments export as equation arrays with separate editable tags
-and per-row click dimming. Other formulas,
-diagrams, and browser artwork are embedded as pictures. Eligible deck-local
-PNG and JPEG images retain their source bytes and slide-edge crops.
-Browser capture preserves effects like
-image opacity and rotation. The exporter reports slides that require a
+and per-row click dimming. Custom row gaps use separately positioned editable
+cells. Single equation tags also support bold text and embedded math.
+Other formulas, diagrams, and browser artwork are embedded as pictures.
+Eligible deck-local PNG and JPEG images retain their source bytes and
+slide-edge crops. Browser capture preserves effects like image opacity and
+rotation. The exporter reports slides that require a
 full-frame image. It references fonts by name, so recipients may see font
 substitutions.
 

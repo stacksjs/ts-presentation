@@ -1,5 +1,5 @@
 // Adapted from Slidev v53.1.0. See licenses/Slidev-MIT.txt.
-import type { RawMathElement, RawMathSnapshot, RawNode, RawSlide, RawSnapshot, RawStyle } from './ir.ts'
+import type { RawMathElement, RawMathFragment, RawMathSnapshot, RawNode, RawSlide, RawSnapshot, RawStyle } from './ir.ts'
 
 /**
  * The one function that runs inside the browser. Invariant: zero free variables.
@@ -328,51 +328,82 @@ export function collectSnapshot(options: {
       }
     }
 
-    function mathSnapshot(presentation: Element, display: boolean, scale: number): RawMathSnapshot | undefined {
-      const expression = mathExpression(presentation)
-      if (!expression) return
+    function mathBounds(boxes: DOMRect[]) {
+      if (!boxes.length) return
+      const left = Math.min(...boxes.map(box => box.left))
+      const top = Math.min(...boxes.map(box => box.top))
+      const width = Math.max(...boxes.map(box => box.right)) - left
+      const height = Math.max(...boxes.map(box => box.bottom)) - top
+      if (width > 0 && height > 0) return relative({ left, top, width, height })
+    }
+
+    function mathProjection(presentation: Element, expression: RawMathElement, display: boolean, scale: number): RawMathSnapshot | undefined {
       let table = presentation
       let data = expression
       while (table.localName === 'mrow' && table.children.length === 1) {
         table = table.children[0]
         data = data.children[0]
       }
-      if (!display || table.localName !== 'mtable' || !table.hasAttribute('data-equation-environment')
-        || !table.hasAttribute('data-equation-tags')) {
+      const singleTag = display && table.localName === 'mtable' && table.getAttribute('class') === 'math-tagged-display'
+      const ams = display && table.localName === 'mtable' && table.hasAttribute('data-equation-environment')
+      const tagsAtMargin = ams && table.hasAttribute('data-equation-tags')
+      const spacedRows = ams && table.hasAttribute('data-equation-row-spacing')
+      if (!singleTag && !tagsAtMargin && !spacedRows) {
         const rect = relative(presentation.getBoundingClientRect())
         if (rect.w > 0 && rect.h > 0) return { expression, rect, display }
         return
       }
 
-      // Capture the tag ink independently of the alignment grid's full-width gutters.
-      const tags: NonNullable<RawMathSnapshot['tags']> = []
+      const fragment = (element: Element, expression: RawMathElement, opacity: number, rect: RawMathFragment['rect']): RawMathFragment => ({
+        expression, opacity, rect, fontSize: Number.parseFloat(getComputedStyle(element).fontSize) * scale,
+      })
+      // Capture tags independently of the full-width gutters.
+      const tags: RawMathFragment[] = []
+      const measuredCells: RawMathFragment[] = []
       const body: DOMRect[] = []
+      let singleFormula: RawMathSnapshot | undefined
       for (const [index, row] of Array.from(table.children).entries()) {
         const mathRow = data.children[index]
         const cells = Array.from(row.children)
         const tagIndex = cells.findIndex(cell => cell.getAttribute('class') === 'math-equation-number')
-        if (tagIndex < 0) return
-        const tag = cells[tagIndex]
-        for (const cell of cells) if (cell !== tag) body.push(cell.getBoundingClientRect())
-        const [content] = mathRow.children.splice(tagIndex, 1)
-        if (!tag.children.length && !tag.textContent?.trim()) continue
-        // The contents always have a MathML wrapper or a token as their root.
-        const label = tag.firstElementChild
-        if (!label || tag.children.length !== 1 || content.children.length !== 1 || content.text.trim()) return
-        const rect = relative(label.getBoundingClientRect())
-        if (rect.w <= 0 || rect.h <= 0) return
-        tags.push({
-          rect, expression: content.children[0], opacity: mathRow.opacity ?? 1,
-          fontSize: Number.parseFloat(getComputedStyle(label).fontSize) * scale,
-        })
+        if ((singleTag || tagsAtMargin) && tagIndex < 0) return
+        const rowOpacity = mathRow.opacity ?? 1
+        for (const [column, cell] of cells.entries()) {
+          const cellData = mathRow.children[column]
+          if (column === tagIndex) {
+            if (!cell.children.length && !cellData.text.trim()) continue
+            const label = cell.firstElementChild
+            if (!label || cell.children.length !== 1 || cellData.text.trim()) return
+            const rect = mathBounds([label.getBoundingClientRect()])
+            if (!rect) return
+            tags.push(fragment(label, cellData.children[0], rowOpacity, rect))
+          }
+          else if (singleTag) {
+            if (cell.hasAttribute('aria-hidden')) continue
+            const formula = cell.firstElementChild
+            if (singleFormula || !cell.hasAttribute('data-equation-body') || !formula || cell.children.length !== 1) return
+            singleFormula = mathProjection(formula, cellData.children[0], true, scale)
+            if (!singleFormula) return
+          }
+          else {
+            body.push(cell.getBoundingClientRect())
+            if (!spacedRows) continue
+            const boxes = Array.from(cell.children, child => child.getBoundingClientRect())
+            const rect = mathBounds(boxes)
+            if (rect) measuredCells.push(fragment(cell, cellData, rowOpacity, rect))
+            else if (/(?:^|;)(?:border-|background:)/.test(cellData.attributes.style ?? '')) return
+          }
+        }
+        if (tagIndex >= 0) mathRow.children.splice(tagIndex, 1)
       }
-      if (!body.length) return
-      const left = Math.min(...body.map(box => box.left))
-      const top = Math.min(...body.map(box => box.top))
-      const width = Math.max(...body.map(box => box.right)) - left
-      const height = Math.max(...body.map(box => box.bottom)) - top
-      if (width > 0 && height > 0)
-        return { expression, rect: relative({ left, top, width, height }), display, tags }
+      if (singleTag) {
+        if (singleFormula) return { ...singleFormula, tags: [...(singleFormula.tags ?? []), ...tags] }
+        return
+      }
+      const rect = mathBounds(body)
+      if (!rect) return
+      if (!spacedRows) return { expression, rect, display, tags }
+      if (measuredCells.length) return { rect, display, tags, cells: measuredCells }
     }
 
     function walk(node: Node, parent: number, fromShadowRoot: boolean, inheritedOpacity: number, inheritedScale: number): void {
@@ -500,7 +531,8 @@ export function collectSnapshot(options: {
       const semantics = el.localName === 'math' ? el.firstElementChild : undefined
       const presentation = semantics?.localName === 'semantics' ? semantics.firstElementChild : undefined
       if (presentation && !el.hasAttribute('class') && !computed.getPropertyValue('--math-min-rule').trim()) {
-        const source = mathSnapshot(presentation, el.getAttribute('display') === 'block', scale)
+        const expression = mathExpression(presentation)
+        const source = expression && mathProjection(presentation, expression, el.getAttribute('display') === 'block', scale)
         if (source) record.math = source
       }
       if (el.tagName.toUpperCase() === 'IMG') {

@@ -145,6 +145,7 @@ function mathShape({ display, expression, rect }: IrEquation, id: number, name: 
 
 function drawEquation(equation: NonNullable<IrRaster['equation']>, id: number, relationship: string, pictureRect: Rect, nextId: () => number): string {
   const editable = mathShape(equation, id, 'Equation')
+    + (equation.cells?.map(cell => mathShape(cell, nextId(), 'Equation cell')).join('') ?? '')
     + (equation.tags?.map(tag => mathShape(tag, nextId(), 'Equation tag')).join('') ?? '')
   const picture = `<a:blipFill><a:blip r:embed="${relationship}"/><a:stretch><a:fillRect/></a:stretch></a:blipFill>`
   const fallback = shape(id, 'Picture of math', transform(pictureRect) + rectShape(0, pictureRect) + picture + line())
