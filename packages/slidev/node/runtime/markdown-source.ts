@@ -9,12 +9,13 @@ export interface MarkdownDocument {
   revision: string
   file: string
   secret: string
+  inheritedHeadmatter?: Record<string, unknown>
   lines: number[]
   rawIndex: (normalized: number) => number
 }
 
 /** Map parser offsets to the original file, including a BOM and mixed newline sequences. */
-export function markdownDocument(path: string, root: string, source: string, secret: string): MarkdownDocument {
+export function markdownDocument(path: string, root: string, source: string, secret: string, inheritedHeadmatter?: Record<string, unknown>): MarkdownDocument {
   const bom = Number(source.startsWith('\uFEFF'))
   const lines = [0]
   const removed: number[] = []
@@ -34,5 +35,5 @@ export function markdownDocument(path: string, root: string, source: string, sec
   }
   const revision = snippetRevision(source)
   const file = snippetToken(secret, path)
-  return { path, root, source, revision, file, secret, lines, rawIndex }
+  return { path, root, source, revision, file, secret, lines, rawIndex, inheritedHeadmatter }
 }

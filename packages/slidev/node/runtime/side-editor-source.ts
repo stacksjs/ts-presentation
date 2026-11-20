@@ -14,6 +14,7 @@ export interface WritableSlide extends WritableSnippet {
   document: string
   start: number
   end: number
+  inheritedHeadmatter?: Record<string, unknown>
 }
 
 export function bindSlideSource(doc: MarkdownDocument, slide: Slide, index: number): WritableSlide | undefined {
@@ -23,8 +24,8 @@ export function bindSlideSource(doc: MarkdownDocument, slide: Slide, index: numb
   const end = range.endLine < doc.lines.length ? doc.rawIndex(doc.lines[range.endLine]) : doc.source.length
   if (end - start > maxSlideEditLength) return
   return {
-    token: snippetToken(doc.secret, `slide\0${doc.path}\0${index}`),
-    document: doc.source, start, end, path: doc.path, root: doc.root, revision: doc.revision,
+    token: snippetToken(doc.secret, `slide\0${doc.path}\0${index}${doc.inheritedHeadmatter?.comark ? '\0comark' : ''}`),
+    document: doc.source, start, end, path: doc.path, root: doc.root, revision: doc.revision, inheritedHeadmatter: doc.inheritedHeadmatter,
   }
 }
 
@@ -56,7 +57,7 @@ export async function saveSlideSource(files: ReadonlyMap<string, WritableSlide>,
   if (Buffer.byteLength(modified, 'utf8') > maxDeckSourceBytes)
     return new Response('The edited Markdown file is too large.', { status: 422 })
   if (modified !== file.document) {
-    try { parseDeck(modified) }
+    try { parseDeck(modified, file.inheritedHeadmatter) }
     catch (error) {
       return new Response(error instanceof Error ? error.message : 'Invalid slide Markdown.', { status: 422 })
     }

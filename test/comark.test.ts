@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 import { join } from 'node:path'
 import { parseDeck, renderDeck } from '../src/index.ts'
+import { formatDeck, inspectDeckSource, slideSourceOf } from '../packages/parser/src/deck.ts'
 
 test('renders the copied Slidev Comark fixture with a positioned arrow', async () => {
   const source = await Bun.file(join(import.meta.dir, 'fixtures/slidev-markdown/mdc.md')).text()
@@ -34,4 +35,39 @@ test('attaches Comark attributes to native Markdown with the legacy mdc setting'
   expect(html).toContain('<code>[code]{.literal}</code> and <strong>word</strong>{.escaped}')
   expect(html).toContain('<pre>[raw]{.literal}</pre>')
   expect(html).not.toContain('tp-attrs-')
+})
+
+test('keeps frontmatter-style Comark props inside the same slide and source ranges', () => {
+  const source = [
+    '---', 'config:', '  mdc: true', '---', '# First', '',
+    '::demo-card', '---', 'title: Component title', 'message: |', '  ---', '  <!-- literal', '---', '',
+    '  :::nested-card', '  ---', '  title: Nested title', '  ---', '  :::', '',
+    '#footer', 'Card footer', '::', '', '<!--', 'Speaker note.', '-->', '',
+    '---', 'title: Next slide', '---', '# Second', '',
+  ].join('\r\n')
+  const deck = parseDeck(source)
+  expect(deck.slides.map(slide => slide.title)).toEqual(['First', 'Next slide'])
+  expect(deck.headmatter).toEqual({ config: { mdc: true } })
+  expect(deck.slides[0].content).toContain('title: Component title\nmessage: |\n  ---\n  <!-- literal')
+  expect(deck.slides[0].notes).toBe('Speaker note.')
+  expect(deck.slides[1].frontmatter).toEqual({ title: 'Next slide' })
+  expect(inspectDeckSource(source).map(slide => slide.endLine)).toEqual(deck.slides.map(slide => slideSourceOf(slide)!.endLine))
+  expect(inspectDeckSource(source).map(slide => slide.frontmatter)).toEqual([{ start: 0, end: 3 }, { start: 28, end: 30 }])
+  expect(parseDeck(formatDeck(source))).toEqual(deck)
+})
+
+test('preserves slide separators after literal and incomplete Comark examples', () => {
+  const source = [
+    '---', 'comark: true', '---', '# First', '',
+    '```md', '::demo-card', '---', 'title: Sample code', '---', '::', '```', '',
+    '<!--', '::demo-card', '---', 'title: Comment', '---', '::', '-->', '',
+    '::unclosed-card', '---', 'title: Second slide', '---', '# Second', '',
+    '---', 'comark: false', '---', '# Literal', '::demo-card',
+    '---', 'title: Third separator', '---', '# Fourth', '::', '',
+  ].join('\n')
+  const deck = parseDeck(source)
+  expect(deck.slides.map(slide => slide.title)).toEqual(['First', 'Second slide', 'Literal', 'Third separator'])
+  expect(inspectDeckSource(source)).toHaveLength(4)
+  expect(deck.slides[0].content).toContain('::unclosed-card')
+  expect(deck.slides[2].content).toContain('::demo-card')
 })

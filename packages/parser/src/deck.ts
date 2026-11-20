@@ -1,5 +1,6 @@
 import { plainMarkdown } from './plain-markdown.ts'
 import { isFenceClose, MarkdownFenceReader, readFenceOpening } from './markdown-fences.ts'
+import { comarkSetting, scanComarkBlocks } from './comark.ts'
 // Adapted from Slidev's MIT-licensed Markdown parser. See licenses/Slidev-MIT.txt.
 export interface Slide {
   title: string
@@ -178,15 +179,37 @@ export function slideSourceOf(slide: Slide): SlideSource | undefined {
   return slideSources.get(slide)
 }
 
-function splitSlides(lines: string[], parseYaml = true): SlideDraft[] {
+function splitSlides(lines: string[], parseYaml = true, inheritedHeadmatter?: Frontmatter): SlideDraft[] {
   const drafts: SlideDraft[] = []
   const fences = new MarkdownFenceReader()
   const scan: MarkdownScan = { commentStart: -1 }
+  const componentProps = new Map<number, number>()
+  if (lines.some((line, index) => /^ *:{2,}[a-z]/i.test(line) && /^ *---[ \t]*$/.test(lines[index + 1] ?? ''))) {
+    for (const { props } of scanComarkBlocks(lines, true).blocks.values()) {
+      if (props?.dashed) componentProps.set(props.start, props.end)
+    }
+  }
   let start = 0
   let matter: Matter | undefined
+  let headmatter: Frontmatter | undefined
+  let acceptsComponentProps = comarkSetting(undefined, undefined, inheritedHeadmatter) === true
+  let propsEnd = -1
   let visible: string[] | undefined
   let offset = 0
   let hasContent = false
+
+  function updateMatter(next: Matter | undefined): void {
+    matter = next
+    let config = matter?.attributes
+    if (next && !parseYaml && componentProps.size && next.end < lines.length) {
+      // The editor still reports slide ranges through invalid frontmatter.
+      // Use valid opt-ins when available without asking it to validate YAML.
+      try { config = yamlMatter(lines, next.start, next.end, true).attributes }
+      catch { /* Keep the current structural parse. */ }
+    }
+    if (!drafts.length) headmatter = config
+    acceptsComponentProps = comarkSetting(config, headmatter, inheritedHeadmatter) === true
+  }
 
   function append(end: number): void {
     if (!hasContent && !matter) return
@@ -207,11 +230,13 @@ function splitSlides(lines: string[], parseYaml = true): SlideDraft[] {
 
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index]
-    const fenced = scan.commentStart === -1 && !!fences.read(line)
+    if (acceptsComponentProps && scan.commentStart === -1) propsEnd = componentProps.get(index) ?? propsEnd
+    const fenced = index <= propsEnd || (scan.commentStart === -1 && !!fences.read(line))
     if (!fenced && scan.commentStart === -1 && line.startsWith('---')) {
       append(index)
-      matter = dashedMatter(lines, index, parseYaml)
-      if (matter) index = matter.end
+      const next = dashedMatter(lines, index, parseYaml)
+      updateMatter(next)
+      if (next) index = next.end
       start = Math.min(index + 1, lines.length)
       scan.lastComment = undefined
       fences.reset()
@@ -221,8 +246,10 @@ function splitSlides(lines: string[], parseYaml = true): SlideDraft[] {
       continue
     }
     if (!hasContent && line.trim()) {
-      if (!matter && (matter = fencedMatter(lines, index, parseYaml))) {
-        index = matter.end
+      const next = !matter && fencedMatter(lines, index, parseYaml)
+      if (next) {
+        updateMatter(next)
+        index = next.end
         start = Math.min(index + 1, lines.length)
         offset = 0
         fences.reset()
@@ -288,8 +315,8 @@ function finishDeck(drafts: SlideDraft[], keepSources = false): Deck {
   return { title: slides[0].title, slides, headmatter: Object.keys(headmatter).length ? headmatter : undefined }
 }
 
-export function parseDeck(markdown: string): Deck {
-  return finishDeck(splitSlides(splitLines(markdown)), true)
+export function parseDeck(markdown: string, inheritedHeadmatter?: Frontmatter): Deck {
+  return finishDeck(splitSlides(splitLines(markdown), true, inheritedHeadmatter), true)
 }
 
 /** Normalize slide boundaries while preserving the original Markdown and YAML. */
@@ -318,11 +345,11 @@ export function formatDeck(markdown: string): string {
   return bom + pieces.join('\n\n').replaceAll('\n', newline) + newline
 }
 
-export async function parseDeckAsync(markdown: string, extensions: readonly PreparserExtension[] = []): Promise<Deck> {
-  if (!extensions.length) return parseDeck(markdown)
+export async function parseDeckAsync(markdown: string, extensions: readonly PreparserExtension[] = [], inheritedHeadmatter?: Frontmatter): Promise<Deck> {
+  if (!extensions.length) return parseDeck(markdown, inheritedHeadmatter)
   const lines = splitLines(markdown)
   for (const extension of extensions) await extension.transformRawLines?.(lines)
-  const drafts = splitSlides(lines)
+  const drafts = splitSlides(lines, true, inheritedHeadmatter)
   for (const draft of drafts) {
     const before = draft.content
     for (const extension of extensions) {

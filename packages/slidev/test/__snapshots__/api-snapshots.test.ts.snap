@@ -171,10 +171,10 @@ export interface DeckSourceSlide {
 }
 /** Read zero-based slide ranges even while frontmatter is incomplete or invalid. */
 export declare function inspectDeckSource(markdown: string): DeckSourceSlide[];
-export declare function parseDeck(markdown: string): Deck;
+export declare function parseDeck(markdown: string, inheritedHeadmatter?: Frontmatter): Deck;
 /** Normalize slide boundaries while preserving the original Markdown and YAML. */
 export declare function formatDeck(markdown: string): string;
-export declare function parseDeckAsync(markdown: string, extensions?: readonly PreparserExtension[]): Promise<Deck>;
+export declare function parseDeckAsync(markdown: string, extensions?: readonly PreparserExtension[], inheritedHeadmatter?: Frontmatter): Promise<Deck>;
 export {};
 
 // packages/parser/src/fs.d.ts
@@ -1238,10 +1238,10 @@ export interface DeckSourceSlide {
 }
 /** Read zero-based slide ranges even while frontmatter is incomplete or invalid. */
 export declare function inspectDeckSource(markdown: string): DeckSourceSlide[];
-export declare function parseDeck(markdown: string): Deck;
+export declare function parseDeck(markdown: string, inheritedHeadmatter?: Frontmatter): Deck;
 /** Normalize slide boundaries while preserving the original Markdown and YAML. */
 export declare function formatDeck(markdown: string): string;
-export declare function parseDeckAsync(markdown: string, extensions?: readonly PreparserExtension[]): Promise<Deck>;
+export declare function parseDeckAsync(markdown: string, extensions?: readonly PreparserExtension[], inheritedHeadmatter?: Frontmatter): Promise<Deck>;
 export {};
 
 // packages/types/src/builtin-layouts.d.ts

@@ -257,7 +257,7 @@ function projectScopedSlot(html: string, literal: (html: string) => string): str
 const attributes = /\s+([^\s=/\x22'<>]+)(?:\s*=\s*(?:\x22([^\x22]*)\x22|'([^']*)'|([^\s>]+)))?/g
 const slideDirectives = /^v-(?:click(?:-hide)?|after|drag)(?:\.[\w-]+)*$/
 
-function readProps(markup: string, frontmatter: Record<string, unknown>) {
+function readProps(markup: string, frontmatter: Record<string, unknown>, parentProps: Record<string, unknown> | undefined) {
   const props: Record<string, unknown> = Object.create(null)
   const forwarded: [string, string][] = []
   for (const [, attribute, double, single, bare] of markup.matchAll(attributes)) {
@@ -271,7 +271,7 @@ function readProps(markup: string, frontmatter: Record<string, unknown>) {
     if (!/^[\w-]+$/.test(key) || /^__|^(?:constructor|prototype)$/.test(key)) continue
     const normalized = key.replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase())
     if (Object.hasOwn(props, normalized)) continue
-    props[normalized] = value === undefined ? !bound : bound ? readBoundValue(unescapeHtml(value).trim(), frontmatter) : unescapeHtml(value)
+    props[normalized] = value === undefined ? !bound : bound ? readBoundValue(unescapeHtml(value).trim(), frontmatter, parentProps) : unescapeHtml(value)
   }
   return { props, forwarded }
 }
@@ -291,16 +291,18 @@ export function createDeckComponentRenderer(
   slideNumber: number,
   frontmatter: Record<string, unknown>,
   observe?: Observe,
+  headmatter?: Record<string, unknown>,
 ): DeckComponentRenderer {
   const root = dirname(entry)
   const context = { __filename: `${entry}.slide-${slideNumber}`, __importedComponents: paths, frontmatter, slideNumber }
+  const bindingFrontmatter = { ...headmatter, ...frontmatter }
   const options = { ...defaultConfig, root, componentsDir: join(root, 'components'), partialsDir: '', layoutsDir: '', seo: { enabled: false } }
   const marker = `tp-component-${Bun.randomUUIDv7().replaceAll('-', '')}`
   let markerCount = 0
 
   const isComponent = ({ name }: Tag) => (/^[A-Z]/.test(name) || name.includes('-')) && paths.has(name) && !builtins.has(name.replaceAll('-', '').toLowerCase())
 
-  async function render(source: string, markdown: (source: string) => string, depth = 0, project?: ProjectSlot): Promise<string> {
+  async function render(source: string, markdown: (source: string) => string, depth = 0, project?: ProjectSlot, parentProps?: Record<string, unknown>): Promise<string> {
     const ranges = depth < 48 && source.includes('<') ? findRanges(source, isComponent) : []
     if (!ranges.length) {
       const html = markdown(source)
@@ -324,7 +326,7 @@ export function createDeckComponentRenderer(
       }
       const { tag, body } = range
       const file = paths.get(tag.name)!
-      const { props, forwarded } = readProps(tag.attrs, frontmatter)
+      const { props, forwarded } = readProps(tag.attrs, bindingFrontmatter, parentProps)
       const values = new Map<string, string>()
       let slots = ''
       for (const slot of readSlots(body, isComponent)) {
@@ -343,7 +345,7 @@ export function createDeckComponentRenderer(
         const projectSlot: ProjectSlot | undefined = slot.binding
           ? (html, restore) => projectScopedSlot(unwrap(html), literal => stash(restore(literal)))
           : undefined
-        const output = await render(content, markdown, depth + 1, projectSlot)
+        const output = await render(content, markdown, depth + 1, projectSlot, props)
         const value = slot.binding ? output : stash(unwrap(output))
         const binding = slot.binding ? `="${escapeHtml(slot.binding)}"` : ''
         slots += slot.name === 'default' && !slot.binding ? value : `<template #${slot.name}${binding}>${value}</template>`

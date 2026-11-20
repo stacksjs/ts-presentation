@@ -1,6 +1,6 @@
-import { MarkdownFenceReader, isFenceClose, readFenceOpening } from '../../../parser/src/markdown-fences.ts'
+import { scanComarkBlocks } from '../../../parser/src/comark.ts'
+import type { ComarkAttributes } from '../../../parser/src/comark.ts'
 import { comarkAttributeMarkup, readComarkAttributes } from './comark.ts'
-import type { ComarkAttributes } from './comark.ts'
 import { htmlTag } from './slide-html.ts'
 
 const builtins: Readonly<Record<string, string>> = {
@@ -11,18 +11,6 @@ const builtins: Readonly<Record<string, string>> = {
 }
 const htmlBlocks = new Set(['aside', 'div', 'footer', 'header', 'main', 'nav', 'section'])
 const rawElement = /^(?:pre|code|script|style|textarea|xmp|iframe|noembed|noframes|noscript)$/i
-const blockOpen = /^( *)(:{2,})([a-z][\w-]*)[ \t]*/i
-const blockClose = /^( *)(:{2,})[ \t]*$/
-const slotLine = /^( *)#([a-z][\w-]*)[ \t]*$/i
-
-interface Block {
-  start: number
-  indent: number
-  width: number
-  tag: string | undefined
-  attrs?: ComarkAttributes
-  slots: { at: number, name: string }[]
-}
 
 function labelEnd(line: string, start: number): number {
   const tokens = /\\.|`+|[[\]\n]/g
@@ -41,14 +29,10 @@ function labelEnd(line: string, start: number): number {
   return -1
 }
 
-function codeProps(lines: string[], start: number, end: number, attributes: ComarkAttributes): number {
-  const opening = start < end && readFenceOpening(lines[start].trimStart())
-  if (!opening || !/^ya?ml\s+\[props\]\s*$/i.test(opening.info)) return start
-  let close = start + 1
-  while (close < end && !isFenceClose(lines[close].trimStart(), opening.marker)) close++
-  if (close === end) return start
-  const props: unknown = Bun.YAML.parse(lines.slice(start + 1, close).join('\n'))
-  if (!props || typeof props !== 'object' || Array.isArray(props)) throw new Error('Comark component props must be a YAML mapping')
+function mergeProps(source: string, attributes: ComarkAttributes): void {
+  const props: unknown = Bun.YAML.parse(source)
+  if (props == null) return
+  if (typeof props !== 'object' || Array.isArray(props)) throw new Error('Comark component props must be a YAML mapping')
   for (const [name, property] of Object.entries(props)) {
     if (!/^[a-zA-Z_][\w-]*$/.test(name) || /^(?:on[a-z]+|srcdoc)$/i.test(name)) continue
     const value = name === 'class' && typeof property === 'string' && attributes.get('class') ? `${attributes.get('class')} ${property}` : property
@@ -57,7 +41,6 @@ function codeProps(lines: string[], start: number, end: number, attributes: Coma
     if (typeof value === 'string') attributes.set(name, value)
     else attributes.set(`:${name}`, JSON.stringify(value))
   }
-  return close + 1
 }
 
 export function expandComarkComponents(source: string, registered?: (name: string) => boolean): string {
@@ -74,44 +57,7 @@ export function expandComarkComponents(source: string, registered?: (name: strin
   }
 
   const lines = source.split('\n')
-  const fences = new MarkdownFenceReader()
-  const literal = new Set<number>()
-  const pending: Block[] = []
-  const blocks = new Map<number, Block & { end: number }>()
-  let rawEnd: RegExp | undefined
-  const tag = new RegExp(`^${htmlTag.source}`, 'i')
-  for (const [at, line] of lines.entries()) {
-    const fenced = !rawEnd && fences.read(line)
-    const content = fences.block.content
-    if (!rawEnd && !fenced) {
-      const html = tag.exec(content.trimStart())
-      if (/^ {0,3}<!--/.test(content)) rawEnd = /-->/
-      else if (html && !html[1] && rawElement.test(html[2]) && !html[0].endsWith('/>')) rawEnd = new RegExp(`</${html[2]}\\s*>`, 'i')
-    }
-    if (rawEnd || fenced) {
-      literal.add(at)
-      if (rawEnd?.test(line)) rawEnd = undefined
-      continue
-    }
-    const parent = pending.at(-1)
-    const opening = blockOpen.exec(line)
-    if (opening && opening[1].length <= (parent?.indent ?? 0) + 3) {
-      const attributes = readComarkAttributes(line, opening[0].length)
-      if (!line.slice(attributes?.end ?? opening[0].length).trim()) {
-        pending.push({ start: at, indent: opening[1].length, width: opening[2].length, tag: tagName(opening[3], true), attrs: attributes?.values, slots: [] })
-        continue
-      }
-    }
-    if (!parent) continue
-    const closing = blockClose.exec(line)
-    if (closing && closing[1].length <= parent.indent + 3 && closing[2].length === parent.width) {
-      pending.pop()
-      if (parent.tag) blocks.set(parent.start, { ...parent, end: at })
-      continue
-    }
-    const slot = slotLine.exec(line)
-    if (slot && slot[1].length <= parent.indent + 3) parent.slots.push({ at, name: slot[2] })
-  }
+  const { blocks, literal } = scanComarkBlocks(lines)
 
   const inlinePattern = `\\\\.|\x60+|<!--[\\s\\S]*?(?:-->|$)|${htmlTag.source}|(?<![^\\s*_[~(])(:[a-z][\\w-]*)`
   function inline(line: string, depth = 0): string {
@@ -162,7 +108,8 @@ export function expandComarkComponents(source: string, registered?: (name: strin
     }
     for (let at = start; at < end; at++) {
       const block = blocks.get(at)
-      if (!block || block.end >= end) {
+      const tag = block && tagName(block.name, true)
+      if (!block || !tag || block.end >= end) {
         const line = lines[at].replace(indent, '')
         if (!line.trim() || literal.has(at) || /^(?: {4}| *\t)/.test(line)) {
           flush()
@@ -172,9 +119,9 @@ export function expandComarkComponents(source: string, registered?: (name: strin
         continue
       }
       flush()
-      const tag = block.tag!
-      const attrs = block.attrs ?? new Map()
-      const first = codeProps(lines, at + 1, block.end, attrs)
+      const attrs = readComarkAttributes(lines[at], block.attrsStart)?.values ?? new Map()
+      const first = block.props ? block.props.end + 1 : at + 1
+      if (block.props) mergeProps(lines.slice(block.props.start + 1, block.props.end).join('\n'), attrs)
       rendered.push(`<${tag}${comarkAttributeMarkup(attrs)}>`, '')
       let slotStart = first
       let named = false

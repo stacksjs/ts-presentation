@@ -1,31 +1,10 @@
 import { escapeHtml, unescapeHtml } from './html.ts'
 import { attributeValues, htmlTag, serialized, setAttribute } from './slide-html.ts'
-
-export type ComarkAttributes = Map<string, string | undefined>
-
-const attributeToken = /(?:([.#])([^\s.#{}`]+)|(:?[a-zA-Z_][\w:.-]*)(?:[ \t]*=[ \t]*(?:"((?:[^"\\\r\n]|\\.)*)"|'((?:[^'\\\r\n]|\\.)*)'|([^\s{}'"`=<>]+)))?)/y
+import { readComarkAttributes as readAttributes } from '../../../parser/src/comark.ts'
+import type { ComarkAttributes } from '../../../parser/src/comark.ts'
 
 export function readComarkAttributes(source: string, start: number): { values: ComarkAttributes, end: number } | undefined {
-  if (source[start] !== '{') return
-  const values: ComarkAttributes = new Map()
-  let cursor = start + 1
-  while (cursor < source.length) {
-    while (source[cursor] === ' ' || source[cursor] === '\t') cursor++
-    if (source[cursor] === '}') return values.size ? { values, end: cursor + 1 } : undefined
-    attributeToken.lastIndex = cursor
-    const match = attributeToken.exec(source)
-    if (!match) return
-    const [, shorthand, label, key, double, single, bare] = match
-    const name = shorthand === '.' ? 'class' : shorthand === '#' ? 'id' : key
-    if (/^(?:on[a-z]+|srcdoc)$/i.test(name.replace(/^:/, ''))) return
-    const raw = double ?? single ?? bare
-    const quote = double !== undefined ? '"' : "'"
-    const value = label ?? (raw === undefined ? undefined : unescapeHtml(raw.replace(/\\(.)/g, (whole, escaped: string) => escaped === quote || escaped === '\\' ? escaped : whole)))
-    const prior = values.get(name)
-    values.set(name, name === 'class' && prior && value ? `${prior} ${value}` : value)
-    cursor = attributeToken.lastIndex
-    if (!/^[ \t}]/.test(source[cursor] ?? '') && source[cursor] !== '.' && source[cursor] !== '#') return
-  }
+  return readAttributes(source, start, unescapeHtml)
 }
 
 export function comarkAttributeMarkup(attributes: ComarkAttributes): string {

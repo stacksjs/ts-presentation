@@ -23,7 +23,9 @@ import { loadDeckLayers } from './layers.ts'
 import { findWorkspaceRoot } from './extension-resolver.ts'
 import { renderPresentation } from './index.ts'
 import { markdownDocument, maxDeckSourceBytes } from './markdown-source.ts'
+import type { MarkdownDocument } from './markdown-source.ts'
 import { extractImagesUsage, parseDeckAsync, readHeadmatter } from '../../../parser/src/deck.ts'
+import { comarkSetting } from '../../../parser/src/comark.ts'
 import type { PreparserExtension, PreparserSetup } from '../../../parser/src/deck.ts'
 import { slideRange } from './selection.ts'
 import type { WritableSlide } from './side-editor-source.ts'
@@ -86,10 +88,9 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
     }
 
     const files = new Map<string, string | undefined>()
-    const origins = new WeakMap<Slide, { path: string, slide: Slide, index: number }>()
+    const origins = new WeakMap<Slide, { path: string, slide: Slide, index: number, source?: MarkdownDocument }>()
     const writableSnippets = new Map<string, WritableSnippet>()
     const writableDrags = new Map<string, WritableDrag>()
-    const sourceDocuments = new Map<string, ReturnType<typeof markdownDocument>>()
     const writableSlides = new Map<string, WritableSlide>()
     const sourceBindings = new WeakMap<Slide, { token: string, revision: string }>()
     const transformerSources = new WeakMap<Slide, TransformerSlideSource>()
@@ -136,42 +137,51 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
     const allowedRoots = [...new Set([directory, ...roots, workspace])]
     const allowed = (path: string) => allowedRoots.some(root => within(root, path))
 
-    const documents = new Map<string, Deck>()
-    async function parseDocument(path: string, input: string, parsed?: Deck): Promise<Deck> {
-      const deck = parsed ?? await parseDeckAsync(input, preparsers)
-      documents.set(path, deck)
-      if (writerKey && !preparsers.length && within(directory, path) && Buffer.byteLength(input, 'utf8') <= maxDeckSourceBytes)
-        sourceDocuments.set(path, markdownDocument(path, directory, input, writerKey))
-      return deck
+    const documents = new Map<string, { deck: Deck, source?: MarkdownDocument }>()
+    const documentKey = (path: string, comark?: boolean) => comark ? `${path}\0comark` : path
+    async function parseDocument(path: string, input: string, comark?: boolean, parsed?: Deck) {
+      const inheritedHeadmatter = comark ? { comark } : undefined
+      const deck = parsed ?? await parseDeckAsync(input, preparsers, inheritedHeadmatter)
+      const source = writerKey && !preparsers.length && within(directory, path) && Buffer.byteLength(input, 'utf8') <= maxDeckSourceBytes
+        ? markdownDocument(path, directory, input, writerKey, inheritedHeadmatter)
+        : undefined
+      const document = { deck, source }
+      documents.set(documentKey(path, comark), document)
+      return document
     }
-    const entryDeck = await parseDocument(filepath, source, extraPreparsers.length ? undefined : bootstrap)
+    const { deck: entryDeck } = await parseDocument(filepath, source, undefined, extraPreparsers.length ? undefined : bootstrap)
 
-    async function read(path: string, stack: string[], range?: string): Promise<Deck> {
+    async function read(path: string, stack: string[], range?: string, inheritedComark?: boolean): Promise<Deck> {
       if (!allowed(path)) throw new Error('Slide source must stay inside the deck directory or a configured extension or workspace root')
       const filePath = await realpath(path)
       if (!allowed(filePath)) throw new Error('Slide source must stay inside the deck directory or a configured extension or workspace root')
       if (stack.includes(filePath)) throw new Error(`Circular slide source: ${relative(directory, filePath)}`)
-      let deck = documents.get(filePath)
-      if (!deck) {
+      let document = documents.get(documentKey(filePath, inheritedComark))
+      if (!document) {
         await observe(filePath)
-        deck = await parseDocument(filePath, await readFile(filePath, 'utf8'))
+        document = await parseDocument(filePath, await readFile(filePath, 'utf8'), inheritedComark)
       }
+      const { deck, source } = document
       const slides: Slide[] = []
       for (const number of slideRange(deck.slides.length, range)) {
         const slide = deck.slides[number - 1]
         const attributes = slide.frontmatter ?? {}
         const reference = attributes.src
         if (typeof reference !== 'string' || attributes.hide === true || attributes.disabled === true) {
-          origins.set(slide, { path: filePath, slide, index: number })
+          origins.set(slide, { path: filePath, slide, index: number, source })
           slides.push(slide)
           continue
         }
         const [file, selection] = reference.split('#')
         if (!file || !file.endsWith('.md')) throw new Error(`Expected a Markdown slide source: ${reference}`)
         const target = file.startsWith('/') ? resolve(directory, file.slice(1)) : resolve(dirname(filePath), file)
-        const included = await read(target, [...stack, filePath], selection)
+        const includeComark = comarkSetting(attributes, deck.headmatter) ?? inheritedComark
+        const included = await read(target, [...stack, filePath], selection, includeComark)
         for (const item of included.slides) {
-          const frontmatter = { ...item.frontmatter, ...attributes, src: undefined }
+          const frontmatter: Record<string, unknown> = { ...item.frontmatter, ...attributes, src: undefined }
+          const comark = comarkSetting(attributes) ?? comarkSetting(item.frontmatter, included.headmatter) ?? includeComark
+          if (comark !== undefined && comark !== (comarkSetting(frontmatter, entryDeck.headmatter) ?? false))
+            frontmatter.comark = comark
           const selected: Slide = {
             ...item,
             layout: typeof attributes.layout === 'string' ? slide.layout : item.layout,
@@ -194,7 +204,7 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
     deck.slides = await Promise.all(deck.slides.map(async (slide) => {
       if (slide.frontmatter?.hide === true || slide.frontmatter?.disabled === true) return slide
       const origin = origins.get(slide)!
-      const doc = sourceDocuments.get(origin.path)
+      const doc = origin.source
       const marked = doc ? bindDragSources(doc, slide, origin.slide, origin.index, writableDrags) : slide.content
       const content = await expandSnippets(marked, directory, origin.path, observe, (path, source) => {
         if (!writerKey || !within(directory, path) || source.length > maxCodeLength || source.includes('\0')) return
@@ -245,7 +255,7 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
       base: options.base, routerMode: options.routerMode, liveCompile: options.liveCompile, mcpNavigation: options.mcpNavigation, mode, extensions, setup, writableSnippets, savedDrawings, saveDrawings,
       deckCssRevision: deckCss && snippetRevision(deckCss), sourceBindings, layers, compileExample: liveCode.authored,
       entry: filepath, transformerSources, pdfDownloadHref: download?.href, withoutNotes: options.withoutNotes,
-      components: components.size ? (frontmatter, number) => createDeckComponentRenderer(components, filepath, number, frontmatter, observeOptional) : undefined,
+      components: components.size ? (frontmatter, number) => createDeckComponentRenderer(components, filepath, number, frontmatter, observeOptional, deck.headmatter) : undefined,
       async resolveFileLayout(name, registered) {
         if (!/^[\w-]+$/.test(name)) return
         for (const root of registered ? [directory] : layoutRoots) {

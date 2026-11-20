@@ -43,6 +43,18 @@ The **default** slot content
 ::
 ```
 
+Put typed YAML props at the start of a block. Use `---` delimiters or a `yaml [props]` code fence. Inside a slot, `:prop="props.name"` reads the parent component's props.
+
+```md
+::block-component
+---
+label: Ready
+count: 3
+---
+Status :inline-component{:prop="props.label"}
+::
+```
+
 ## Use Cases
 
 - Add inline styles without HTML

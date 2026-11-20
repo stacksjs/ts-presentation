@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { asset } from '../packages/slidev/node/runtime/assets.ts'
 import { findChrome } from '../packages/slidev/node/runtime/chrome.ts'
 import { createDeckCompiler } from '../packages/slidev/node/runtime/loader.ts'
+import { readSlideSource, saveSlideSource } from '../packages/slidev/node/runtime/side-editor-source.ts'
 
 async function project(run: (root: string) => Promise<void>): Promise<void> {
   const root = await mkdtemp(join(tmpdir(), 'presentation-stx-components-'))
@@ -99,7 +100,8 @@ test('renders Comark components through STX with typed props and nested Markdown
       '::doc-card{.featured count="placeholder"}',
       '```yaml [props]', 'class: primary', 'count: 42', 'option:', '  name: Bundled', '```',
       '#default', 'Body **Markdown**.', '',
-      '  :::doc-card{:option=\'{"name":"Nested"}\' :count=2}', '  Nested *content*.', '  :::', '',
+      '  :::doc-card', '  ---', '  option: { name: Nested }', '  count: 2', '  ---',
+      '  Nested *content*. :badge{:label="props.option.name"}', '  :::', '',
       '#footer', 'Footer :status-badge[**Styled**].', '::', '',
       '`:status-badge{label="code"}`', '', '    :status-badge{label="indented"}', '',
       '`Example', ':status-badge{label="multiline"}`', '',
@@ -119,8 +121,9 @@ test('renders Comark components through STX with typed props and nested Markdown
   expect(deck.html).toContain('Body <strong>Markdown</strong>.')
   expect(deck.html).toContain('<h2>Nested 3</h2>')
   expect(deck.html).toContain('Nested <em>content</em>.')
+  expect(deck.html).toContain('<span class="status">Nested</span>')
   expect(deck.html).toContain('Footer <span class="status"><strong>Styled</strong></span>.')
-  expect(deck.html.match(/class="status"/g)).toHaveLength(2)
+  expect(deck.html.match(/class="status"/g)).toHaveLength(3)
   expect(deck.html).toContain('<code>:status-badge{label=&quot;code&quot;}</code>')
   expect(deck.html).toContain('<code>Example :status-badge{label=&quot;multiline&quot;}</code>')
   expect(deck.html).toContain('<pre>:status-badge{label="raw"}</pre>')
@@ -128,6 +131,44 @@ test('renders Comark components through STX with typed props and nested Markdown
   expect(deck.html).toContain('<h1>Disabled {.literal}</h1>')
   expect(deck.html).toContain(':status-badge{label=&quot;literal&quot;}')
   expect(deck.html).not.toContain('<template #footer>')
+}))
+
+test('loads and edits imported slides with inherited Comark settings and typed component props', async () => project(async (root) => {
+  const entry = join(root, 'slides.md')
+  const imported = join(root, 'appendix.md')
+  await Promise.all([
+    Bun.write(entry, [
+      '---', 'comark: true', 'label: Main deck', '---', '# Entry', '',
+      '---', 'src: ./include.md', '---', '',
+      '---', 'src: ./appendix.md#2', 'comark: false', '---', '',
+    ].join('\n')),
+    Bun.write(join(root, 'include.md'), '---\nsrc: ./appendix.md#2\n---\n'),
+    Bun.write(imported, [
+      '# Skip', '', '---', '', '# Imported', '::card{.primary title=initial}', '---',
+      'title: From YAML', 'class: secondary', 'items: [one, two]', '---',
+      'First :badge{:label="props.items.0"}.', '', '#footer', 'Footer :badge{:label="frontmatter.label"}.', '::', '',
+      '---', '', '# Last', '',
+    ].join('\n')),
+    Bun.write(join(root, 'components', 'Card.stx'), '<section class="{{ props.class }}"><h2>{{ props.title }}</h2><slot /><footer><slot name="footer" /></footer></section>'),
+    Bun.write(join(root, 'components', 'Badge.stx'), '<strong>{{ props.label }}</strong>'),
+  ])
+  const compile = createDeckCompiler(entry, { liveCompile: true })
+  const result = await compile()
+  expect(result.live?.slides).toHaveLength(3)
+  expect(result.live?.slides[1].html).toContain('<section class="primary secondary"><h2>From YAML</h2>')
+  expect(result.live?.slides[1].html).toContain('First <strong>one</strong>.')
+  expect(result.live?.slides[1].html).toContain('Footer <strong>Main deck</strong>.')
+  expect(result.live?.slides[2].html).toContain('::card{.primary title=initial}')
+  expect(result.live?.slides[2].html).not.toContain('<h2>From YAML</h2>')
+  const references = [...result.writableSlides.values()].filter(slide => slide.path.endsWith('appendix.md'))
+  expect(references).toHaveLength(2)
+  const file = references.find(slide => slide.inheritedHeadmatter?.comark)!
+  expect(file.document.slice(file.start, file.end)).toContain('items: [one, two]')
+  const edit = readSlideSource(file)
+  const response = await saveSlideSource(result.writableSlides, { ...edit, source: edit.source.replace('From YAML', 'Updated') })
+  expect(response.status).toBe(200)
+  expect((await compile()).live?.slides[1].html).toContain('<h2>Updated</h2>')
+  expect(await Bun.file(imported).text()).toContain('# Last')
 }))
 
 test('binds native HTML attributes in scoped Markdown slots', async () => project(async (root) => {

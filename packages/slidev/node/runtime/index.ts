@@ -33,6 +33,7 @@ import type { RouterMode, Routing } from '../../../client/runtime/routing.ts'
 import { normalizeBasePath, resolveRouterMode } from '../../../client/runtime/routing.ts'
 import { createTocTree } from '../../../client/runtime/toc.ts'
 import type { Deck, PreparserContext, Slide } from '../../../parser/src/deck.ts'
+import { comarkSetting } from '../../../parser/src/comark.ts'
 import { plainMarkdown } from '../../../parser/src/plain-markdown.ts'
 import { parseTimeString } from '../../../parser/src/timesplit/timestring.ts'
 import { createSlideDestinations, firstSlideHeading, prepareSlideHtml, titleLabel } from './slide-html.ts'
@@ -239,8 +240,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     },
   }
   const componentRenderers = activeSlides.map((slide, index) => options.components?.(slide.frontmatter ?? {}, index + 1))
-  const comarkSlides = activeSlides.map(({ frontmatter }) =>
-    (frontmatter?.comark ?? frontmatter?.mdc ?? deck.headmatter?.comark ?? deck.headmatter?.mdc ?? settings?.comark ?? settings?.mdc) === true)
+  const comarkSlides = activeSlides.map(({ frontmatter }) => comarkSetting(frontmatter, deck.headmatter) === true)
   function effectiveLayout(slide: Slide): string {
     return slide.layout === 'default' && typeof slide.frontmatter?.layout !== 'string' ? defaults?.layout ?? slide.layout : slide.layout
   }
