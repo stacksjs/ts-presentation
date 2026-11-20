@@ -2213,6 +2213,24 @@ function formula(source: string, display = false): string {
   return createMathRenderer({ throwOnError: true })(source, display).split('<annotation')[0]
 }
 
+// Based on KaTeX's MathML number fixtures and script-base joining.
+test('joins TeX number atoms and braced separators while preserving script boundaries', () => {
+  expect(formula('0.34=.34^1')).toContain('<mn>0.34</mn><mo>=</mo><msup><mn>.34</mn><mn>1</mn></msup>')
+  expect(formula('1{,}000{,}000')).toContain('<mn>1,000,000</mn>')
+  expect(formula('2 {,} 500.')).toContain('<mn>2,500.</mn>')
+  expect(formula('2,500')).toContain('<mn>2</mn><mo>,</mo><mn>500</mn>')
+  expect(formula('1{2}3')).toContain('<mn>123</mn>')
+  expect(formula('1{}2')).toContain('<mn>1</mn><mrow></mrow><mn>2</mn>')
+  expect(formula('1{,}234_5')).toContain('<msub><mn>1,234</mn><mn>5</mn></msub>')
+  expect(formula('1{,}234_5^6')).toContain('<mn>1,23</mn><msubsup><mn>4</mn><mn>5</mn><mn>6</mn></msubsup>')
+  expect(formula('1{2}^3')).toContain('<msup><mn>12</mn><mn>3</mn></msup>')
+  expect(formula('1{2x}^3')).toContain('<mn>1</mn><msup><mrow><mn>2</mn><mi>x</mi></mrow><mn>3</mn></msup>')
+  expect(formula(String.raw`1\kern0em2`)).toContain('<mn>1</mn><mspace width="0em"/><mn>2</mn>')
+  expect(formula(String.raw`1\def\digit{2}\digit\relax\char51`)).toContain('<mn>123</mn>')
+  expect(formula(String.raw`1\mathchoice{2}{3}{4}{5}4`)).toContain('<mn>134</mn>')
+  expect(formula(String.raw`1\mathchoice{2}{3}{4}{5}4`, true)).toContain('<mn>124</mn>')
+})
+
 // Cases adapted from KaTeX's delimiter and prime parser tests.
 test('renders fixed TeX delimiter sizes with open, middle, and close spacing', () => {
   const input = String.raw`\bigl( a \bigr) \Bigl\lbrack b \Bigr\rbrack

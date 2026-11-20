@@ -690,9 +690,54 @@ function colorRowPart(part: RowPart, color: string): RowPart {
   }
 }
 
-function joinRow(parts: RowPart[], wrap = false, followsOrdinary = false, explicitSpacing = false): Markup {
-  if (parts.some(part => part.fragment))
-    return style => renderMarkup(joinRow(expandRow(parts, style), wrap, followsOrdinary, true), style)
+interface NumberPart { text: string, numeral: boolean, joined?: boolean }
+
+function readNumberPart(part: RowPart): NumberPart | undefined {
+  if (typeof part.markup !== 'string' || part.mathClass || part.operator) return
+  const numeral = /^(?:<mrow>)*<mn>([\p{Nd}.,]+)<\/mn>(?:<\/mrow>)*$/u.exec(part.markup)
+  if (numeral) return { text: numeral[1], numeral: true }
+  const punctuation = /^(?:<mrow>)+<mo>([.,])<\/mo>(?:<\/mrow>)+$/.exec(part.markup)
+  if (punctuation) return { text: punctuation[1], numeral: false }
+  if (part.markup === '<mo>.</mo>') return { text: '.', numeral: false }
+}
+
+// KaTeX consolidates numbers after parsing atoms and attaching scripts.
+// An ordinary comma delimits expressions, while a braced comma joins digits.
+function joinNumberParts(parts: RowPart[]): RowPart[] {
+  if (parts.length < 2) return parts
+  const result: RowPart[] = []
+  let previous: NumberPart | undefined
+  for (const part of parts) {
+    if (!part.markup && part.token !== '\\allowbreak' && part.token !== '\\nobreak') continue
+    const next = readNumberPart(part)
+    if (previous && next && (previous.numeral || next.numeral)) {
+      previous.text += next.text
+      previous.numeral = true
+      previous.joined = true
+      continue
+    }
+    if (previous && !part.mathClass && typeof part.markup === 'string') {
+      // A single script moves the preceding digits into its number base.
+      // Simultaneous upper and lower scripts stay on the final atom.
+      const base = /^(<ms(?:ub|up)>)((?:<mrow>)*)<mn>([\p{Nd}.,]+)<\/mn>((?:<\/mrow>)*)/u.exec(part.markup)
+      if (base && base[2].length / '<mrow>'.length === base[4].length / '</mrow>'.length) {
+        result[result.length - 1] = { ...part, markup: base[1] + tag('mn', previous.text + base[3]) + part.markup.slice(base[0].length) }
+        previous = undefined
+        continue
+      }
+    }
+    if (previous?.joined) result[result.length - 1] = { markup: tag('mn', previous.text) }
+    result.push(part)
+    previous = next
+  }
+  if (previous?.joined) result[result.length - 1] = { markup: tag('mn', previous.text) }
+  return result
+}
+
+function joinRow(atoms: RowPart[], wrap = false, followsOrdinary = false, explicitSpacing = false): Markup {
+  if (atoms.some(part => part.fragment))
+    return style => renderMarkup(joinRow(expandRow(atoms, style), wrap, followsOrdinary, true), style)
+  const parts = joinNumberParts(atoms)
   const explicit = explicitSpacing || followsOrdinary || parts.some(part => part.mathClass)
   if (!explicit && !wrap) return joinMarkup(parts.map(part => part.markup))
   const categories = parts.map(rowClass)
@@ -2092,16 +2137,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       }
       const unicodeScriptToken = unicodeSuperscripts.has(token) || unicodeSubscripts.has(token)
       let part: Atom
-      if (/^\d$/.test(token)) {
-        let number = token
-        while (/^\d$/.test(tokens[cursor] ?? '') && !macroFor(tokens[cursor])) number += tokens[cursor++]
-        if (tokens[cursor] === '.' && !macroFor('.') && /^\d$/.test(tokens[cursor + 1] ?? '') && !macroFor(tokens[cursor + 1])) {
-          number += tokens[cursor++]
-          while (/^\d$/.test(tokens[cursor] ?? '') && !macroFor(tokens[cursor])) number += tokens[cursor++]
-        }
-        part = { markup: tag('mn', number) }
-      }
-      else if (token === '_' || token === '^' || primeCount(token) || unicodeScriptToken) {
+      if (token === '_' || token === '^' || primeCount(token) || unicodeScriptToken) {
         if (unicodeScriptToken) checkUnicode(token)
         part = { markup: '<mrow/>' }
         cursor--
@@ -2666,7 +2702,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
     if (name === '@char') {
       const glyph = explicitCharacter()
-      return { markup: tag(/^\p{L}$/u.test(glyph) ? 'mi' : 'mtext', glyph) }
+      return { markup: tag(/^\p{L}$/u.test(glyph) ? 'mi' : /^\d$/.test(glyph) ? 'mn' : 'mtext', glyph) }
     }
     if (name === 'aa' || name === 'AA') {
       strictViolation('mathVsTextAccents', 'The ring accent works only in text mode', true, token)
