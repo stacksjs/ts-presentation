@@ -1,7 +1,7 @@
 import type { GitCommitStyle, GitGraphDirection, GitGraphOperation, GitGraphOptions, GitHistory } from 'ts-charts/diagrams'
 import { buildGitHistory as buildHistory, gitGraphChart } from 'ts-charts/diagrams'
 import type { MermaidOptions } from '../authoring-setup.ts'
-import { diagramPixels, readChronology, sizeChronologySvg } from './chronology.ts'
+import { diagramFontFamily, diagramPixels, readChronology, sizeChronologySvg } from './chronology.ts'
 import { gitGraphLabelEffects, gitGraphPreset, gitGraphStyleIndex, gitGraphThemeFamily, reduxBranchColors, usesReduxBranchColors } from './gitgraph-themes.ts'
 import { syntaxMask } from './syntax.ts'
 
@@ -177,6 +177,7 @@ export function gitGraph(source: string, idPrefix: string, options: MermaidOptio
   const labelBackground = typeof options.themeCSS === 'string' && options.themeCSS.trim() ? 'transparent' : undefined
   const svg = gitGraphChart({
     ...chart, idPrefix, title: chart.title || (typeof options.title === 'string' ? options.title : ''),
+    fontFamily: diagramFontFamily(options.fontFamily, variables.fontFamily),
     ...gitGraphLabelEffects(options.theme, options.look, variables, strokeWidth),
     diagramPadding: chart.diagramPadding ?? (preset ? 8 : undefined),
     truncateLabels: false,

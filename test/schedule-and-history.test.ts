@@ -679,6 +679,7 @@ test('native Gantt YAML and compatibility syntax render the same schedule', () =
   const yaml = `type: gantt
 accessibleTitle: Delivery steps
 description: The preview comes before release.
+fontFamily: serif
 todayMarker: false
 taskLabelPlacement: bar
 wrapTaskLabels: true
@@ -700,12 +701,14 @@ section Release
 `
   const native = renderChart(yaml, 'release')
   expect(native).toContain('aria-describedby="release-description"')
-  expect(native).toBe(mermaid(legacy, 'release'))
+  expect(native).toContain('font-family="serif"')
+  expect(native).toBe(mermaid(legacy, 'release', { fontFamily: 'serif' }))
 })
 
 test('native Git history YAML and compatibility syntax render the same branch graph', () => {
   const yaml = `type: gitgraph
 direction: BT
+fontFamily: monospace
 rotateCommitLabel: true
 edgeLayout: orthogonal
 tagLabel: { shape: tag }
@@ -725,7 +728,8 @@ merge test id:"release" tag:"v1.0"
 `
   const native = renderChart(yaml, 'history')
   expect(native).toContain('data-commit-id="release" data-parent-ids="start, proof"')
-  expect(native).toBe(mermaid(legacy, 'history'))
+  expect(native).toContain('font-family="monospace"')
+  expect(native).toBe(mermaid(legacy, 'history', { fontFamily: 'monospace' }))
 })
 
 test('imports Gantt layout options and routes enabled task links to a slide reveal', async () => {
@@ -1386,6 +1390,59 @@ test.skipIf(!chrome)('scopes GitGraph effects per diagram and preserves theme pa
     await server.stop(true)
   }
 })
+
+test.skipIf(!chrome)('applies scoped font families and fits monospaced Gantt and GitGraph labels in Chromium', async () => {
+  const longLabel = 'i'.repeat(65)
+  const graphLabel = 'i'.repeat(30)
+  const source = [
+    '# Release', '',
+    '~~~mermaid', '---', 'config:', '  fontFamily: serif', '  themeVariables:', '    fontFamily: monospace;',
+    '  gantt:', '    useWidth: 330', '    leftPadding: 55', '    displayMode: compact', '---',
+    'gantt', `title ${longLabel}`, 'dateFormat YYYY-MM-DD', 'axisFormat %Y-%m-%d', 'todayMarker off',
+    `section ${longLabel}`, `${longLabel} :review, 2026-03-01, 1d`,
+    'Publish :ship, 2026-03-02, 1d', `${longLabel} :vert, marker, 2026-03-03, 0d`, '~~~', '',
+    '~~~mermaid', '---', 'title: Commit log', 'config:', '  fontFamily: monospace',
+    '  gitGraph:', '    rotateCommitLabel: false', '  theme: default', '---',
+    'gitGraph LR:', `commit id:"${graphLabel}" tag:"${graphLabel}"`, `branch ${graphLabel}`, 'commit id:"Publish"', '~~~', '',
+    '~~~mermaid', 'gantt', 'Publish :ship, 2026-03-02, 1d', '~~~',
+  ].join('\n')
+  const html = await renderDeck(parseDeck(source))
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response(html, { headers: { 'Content-Type': 'text/html' } }),
+  })
+  const browser = new Bun.WebView({ width: 960, height: 620, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await browser.navigate(server.url.href)
+    const typography = await browser.evaluate(`(() => {
+      const [gantt, git, plain] = document.querySelectorAll('svg.slide-diagram')
+      const inside = (box, outer) => box.x >= outer.x - 1 && box.x + box.width <= outer.x + outer.width + 1
+      const labels = [...gantt.querySelectorAll('text')]
+      const kinds = ['.diagram-title', '.diagram-gantt-section-label', '.diagram-gantt-label', '.diagram-gantt-tick', '.diagram-gantt-reference-label']
+      const gitLabels = [...git.querySelectorAll(':is(.diagram-git-branch-label, .diagram-git-label, .diagram-git-tag)')]
+      const gitBoxes = gitLabels.every(label => {
+        const box = label.parentNode.querySelector('.' + label.getAttribute('class') + '-box')
+        return box && inside(label.getBBox(), box.getBBox())
+      })
+      return {
+        ganttFonts: kinds.map(kind => getComputedStyle(gantt.querySelector(kind)).fontFamily),
+        ganttFits: labels.every(label => inside(label.getBBox(), gantt.viewBox.baseVal)),
+        wrapped: gantt.querySelector('.diagram-title').querySelectorAll('tspan').length > 1,
+        gitFonts: [...new Set(gitLabels.map(label => getComputedStyle(label).fontFamily))],
+        gitBoxes,
+        plainFont: getComputedStyle(plain.querySelector('.diagram-gantt-label')).fontFamily,
+      }
+    })()`)
+    expect(typography).toEqual({
+      ganttFonts: Array.from({ length: 5 }, () => 'monospace'), ganttFits: true, wrapped: true,
+      gitFonts: ['monospace'], gitBoxes: true, plainFont: 'system-ui, sans-serif',
+    })
+  }
+  finally {
+    browser.close()
+    await server.stop(true)
+  }
+}, 45000)
 
 test.skipIf(!chrome)('keeps full Gantt labels inside the chart without compact row collisions in Chromium', async () => {
   const title = 'Release preparation and production validation before handing the deployed application over to the support team'

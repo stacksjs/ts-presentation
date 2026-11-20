@@ -470,7 +470,8 @@ it.skipIf(!chrome)('can start image capture before unrelated resources finish lo
     await exportDeck(root, '--format', 'png', '--wait-until', 'domcontentloaded', '--timeout', '8000', '--out', 'early')
     expect(await Bun.file(join(root, 'early', 'slide-1.png')).exists()).toBe(true)
     expect(requests).toBe(1)
-    await expect(exportDeck(root, '--format', 'png', '--wait-until', 'load', '--timeout', '1200', '--out', 'late')).rejects.toThrow('did not finish within 1200ms')
+    // Give Chrome time to launch and request the image before measuring a stalled load.
+    await expect(exportDeck(root, '--format', 'png', '--wait-until', 'load', '--timeout', '6000', '--out', 'late')).rejects.toThrow('did not finish within 6000ms')
     expect(requests).toBe(2)
     expect(await Bun.file(join(root, 'late', 'slide-1.png')).exists()).toBe(false)
   }

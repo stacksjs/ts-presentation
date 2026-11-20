@@ -13,6 +13,10 @@ export function diagramPixels(value: unknown): number | undefined {
   if (typeof value === 'string' && /^\d+(?:\.\d+)?(?:px)?$/i.test(value.trim())) return Number.parseFloat(value)
 }
 
+export function diagramFontFamily(config: unknown, theme: unknown): string | undefined {
+  return [theme, config].find((value): value is string => typeof value === 'string' && !!value.trim())
+}
+
 export function sizeChronologySvg(svg: string | undefined, useMaxWidth: unknown): string | undefined {
   if (useMaxWidth !== false) return svg
   return svg?.replace(/^(<svg\b[^>]*\bviewBox="0 0 ([\d.]+) ([\d.]+)")/, '$1 width="$2" height="$3"')
