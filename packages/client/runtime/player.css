@@ -762,6 +762,8 @@ v-switch { display: block; }
 @keyframes slide-up { from { opacity: 0; translate: 0 16px; } }
 
 .slide math[display="block"] { margin-block: 0.7em; }
+.math-unrendered { white-space: pre-wrap; overflow-wrap: anywhere; }
+.math-unrendered[data-math-display] { display: block; margin-block: 0.7em; }
 .math-inline-fragment { white-space: nowrap; }
 .math-inline-source {
   position: absolute;

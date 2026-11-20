@@ -1,3 +1,4 @@
+import { MathParseError } from './math-error.ts'
 import type { KatexOptions, KatexTrustContext } from './authoring-setup.ts'
 import { escapeHtml } from './html.ts'
 
@@ -34,7 +35,7 @@ export function mathUrl(command: UrlCommand, raw: string): Extract<KatexTrustCon
 export function mathKeyValues(source: string): [string, string][] {
   return (source.match(/(?:\{,\}|[^,])+/g) ?? []).map((item) => {
     const at = item.indexOf('=')
-    if (at < 0) throw new Error('Expected a math key and value separated by an equals sign')
+    if (at < 0) throw new MathParseError('Expected a math key and value separated by an equals sign')
     return [item.slice(0, at).trim(), item.slice(at + 1).replaceAll('{,}', ',')]
   })
 }
@@ -44,7 +45,7 @@ export function mathAttributes(command: AttributeCommand, value: string): { cont
   if (command === '\\htmlId') return { context: { command, id: value }, attributes: `id="${escapeHtml(value)}"` }
   if (command === '\\htmlStyle') return { context: { command, style: value }, attributes: `style="${escapeHtml(value)}"` }
   const attributes = Object.fromEntries(mathKeyValues(value).map(([key, item]) => {
-    if (!/^[a-z][\w.-]*$/i.test(key)) throw new Error('Invalid math data attribute name')
+    if (!/^[a-z][\w.-]*$/i.test(key)) throw new MathParseError('Invalid math data attribute name')
     return [`data-${key.toLowerCase()}`, item]
   }))
   return {

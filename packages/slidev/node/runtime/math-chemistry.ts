@@ -1,3 +1,4 @@
+import { MathParseError } from './math-error.ts'
 import { escapeHtml } from './html.ts'
 import { mathArrowBody, stackMathArrow } from './math-arrow.ts'
 import type { Markup } from './math-markup.ts'
@@ -57,7 +58,7 @@ function groupAt(source: string, start: number, opening: string, closing: string
     }
     else at += character === '\\' ? 2 : 1
   }
-  throw new Error('Unclosed chemical notation group')
+  throw new MathParseError('Unclosed chemical notation group')
 }
 
 function readScript(source: string, start: number): { content: string, end: number } | undefined {
@@ -169,7 +170,7 @@ export function chemicalFormula(source: string, math: (source: string) => Markup
   }
 
   function sequence(end = '', depth = 0): Markup {
-    if (depth > 80) throw new Error('Chemical notation is nested too deeply')
+    if (depth > 80) throw new MathParseError('Chemical notation is nested too deeply')
     const atoms: Markup[] = []
     while (cursor < source.length && !(end && source.startsWith(end, cursor))) {
       let rest = source.slice(cursor)
@@ -213,7 +214,7 @@ export function chemicalFormula(source: string, math: (source: string) => Markup
       else if (closing) {
         cursor += opening.length
         const inside = sequence(closing, depth + 1)
-        if (!source.startsWith(closing, cursor)) throw new Error('Unclosed molecular group')
+        if (!source.startsWith(closing, cursor)) throw new MathParseError('Unclosed molecular group')
         cursor += closing.length
         const group = xml`<mrow>${tag('mo', opening.at(-1)!)}${inside}${tag('mo', closing.at(-1)!)}</mrow>`
         atoms.push(atom(group, prefix))
@@ -235,12 +236,12 @@ export function chemicalFormula(source: string, math: (source: string) => Markup
       else if (rest.startsWith('\\bond{')) {
         cursor += '\\bond'.length
         const bond = balanced('{', '}')
-        if (!Object.hasOwn(bonds, bond)) throw new Error('Unknown chemical bond')
+        if (!Object.hasOwn(bonds, bond)) throw new MathParseError('Unknown chemical bond')
         atoms.push(tag('mo', bonds[bond]))
       }
       else if (rest[0] === '\\') {
         const command = /^\\(?:[A-Za-z@]+|.)/.exec(rest)?.[0]
-        if (!command) throw new Error('Incomplete chemical command')
+        if (!command) throw new MathParseError('Incomplete chemical command')
         cursor += command.length
         if (command === '\\ca') atoms.push(tag('mo', '∼'))
         else atoms.push(atom(math(command), prefix))
@@ -284,7 +285,7 @@ const exponent = /^(?:\^?\{([+-]?\d+)\}|\^?([+-]?\d+))/
 const unitSpace = '<mspace width="0.18em"/>'
 
 function unitProduct(source: string, depth = 0): string {
-  if (depth > 50) throw new Error('Physical unit groups are nested too deeply')
+  if (depth > 50) throw new MathParseError('Physical unit groups are nested too deeply')
   const parts: string[] = []
   const text = source.trim()
   for (let cursor = 0; cursor < text.length;) {

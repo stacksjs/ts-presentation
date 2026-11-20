@@ -3,6 +3,7 @@ import type { MathMacroContext } from '../src/index.ts'
 import { findChrome } from '../packages/slidev/node/runtime/chrome.ts'
 import { collectSnapshot } from '../packages/slidev/node/runtime/editable/walker.ts'
 import { parseDeck, renderDeck, renderPresentation } from '../packages/slidev/node/runtime/index.ts'
+import { MathParseError } from '../packages/slidev/node/runtime/math-error.ts'
 import { createMathRenderer, renderMath } from '../packages/slidev/node/runtime/math.ts'
 
 const thin = '<mspace width="0.16666666666666666em"/>'
@@ -342,7 +343,7 @@ test('rejects stray delimiters, undeclared environments, and nested unbraced fun
   expect(() => math(String.raw`\mathbb \mathrm R`, false)).toThrow('Missing math argument')
   expect(math(String.raw`x^{\sqrt y}+\frac \alpha 2`, false)).toContain('<msqrt><mi>y</mi></msqrt>')
   expect(math(String.raw`\sqrt \frac x y+x^\frac x y+e^\mathbf{x}`, false)).toContain('<msqrt><mfrac>')
-  expect(renderMath('x}')).toBe('<code class="math-unrendered">x}</code>')
+  expect(renderMath('x}')).toBe('<code class="math-unrendered" title="Unexpected math token: }" style="color:#cc0000">x}</code>')
   expect(() => math(String.raw`\raisebox5pt{text}`, false)).toThrow('requires a grouped dimension')
   expect(() => math(String.raw`s\hspace7ex k`, false)).toThrow('requires a grouped dimension')
   expect(math(String.raw`s\hskip7ex k`, false)).toContain('<mspace width="7ex"/>')
@@ -359,6 +360,21 @@ test('distinguishes text symbols, unknown commands, and math-only functions', ()
   const tolerant = createMathRenderer({ errorColor: '#a00' })
   expect(tolerant(String.raw`\text{a\unknown b}`, false)).toContain('<mtext style="color:#a00">\\unknown</mtext>')
   expect(tolerant(String.raw`\text{\sqrt{x}}`, false)).toContain('math-unrendered')
+})
+
+test('reports recoverable math errors with a safe color and lets extension failures surface', () => {
+  const tolerant = createMathRenderer({ throwOnError: false })
+  expect(tolerant(String.raw`a+\missing+b`, false)).toContain(String.raw`<mtext style="color:#cc0000">\missing</mtext>`)
+  const color = createMathRenderer({ errorColor: '#413855' })
+  expect(color('x}<em>sample</em>', false))
+    .toBe('<code class="math-unrendered" title="Unexpected math token: }" style="color:#413855">x}&lt;em&gt;sample&lt;/em&gt;</code>')
+  expect(createMathRenderer({ errorColor: 'red" data-test="example' })('x}', false))
+    .toContain('style="color:#cc0000"')
+  const strict = createMathRenderer({ throwOnError: true })
+  expect(() => strict(String.raw`\begin{array}{c}a`, true)).toThrow(MathParseError)
+  expect(() => strict('x'.repeat(6001), false)).toThrow('Equation has too many input tokens')
+  const configured = createMathRenderer({ macros: { '\\example': () => { throw new Error('Example setup failed') } } })
+  expect(() => configured(String.raw`\example`, false)).toThrow('Example setup failed')
 })
 
 test('handles math debug messages, an accented blank, and text-mode ring accents', () => {
@@ -890,7 +906,7 @@ test('supports optional arguments, delimited macros and scoped definitions', () 
   expect(html).toContain('<mi>z</mi><mo>+</mo><mi>x</mi>')
   expect(html).toContain('<mi>y</mi><mo>+</mo><mi>x</mi>')
   expect(html).toContain('<mo stretchy="true">(</mo><mi>a</mi><mo>,</mo><mi>b</mi>')
-  expect(html).toContain('<mrow><mi>q</mi></mrow><mtext>\\tmp</mtext>')
+  expect(html).toContain('<mrow><mi>q</mi></mrow><mtext style="color:#cc0000">\\tmp</mtext>')
 })
 
 test('captures eager macro expansion and tracks global definitions per deck', () => {
@@ -898,8 +914,8 @@ test('captures eager macro expansion and tracks global definitions per deck', ()
   const html = math(String.raw`\def\x{a}\edef\frozen{\x}\def\x{b}\global\def\persist{\nope}\frozen\global\let\deckOnly=\frozen\x`, false)
   expect(html).toContain('<mi>a</mi><mi>b</mi>')
   expect(math(String.raw`\deckOnly`, false)).toContain('<mi>a</mi>')
-  expect(math(String.raw`\persist`, false)).toContain('<mtext>\\nope</mtext>')
-  expect(createMathRenderer()(String.raw`\deckOnly`, false)).toContain('<mtext>\\deckOnly</mtext>')
+  expect(math(String.raw`\persist`, false)).toContain('<mtext style="color:#cc0000">\\nope</mtext>')
+  expect(createMathRenderer()(String.raw`\deckOnly`, false)).toContain('<mtext style="color:#cc0000">\\deckOnly</mtext>')
 })
 
 test('expands brace-delimited definitions and nested macro parameters', () => {
@@ -952,7 +968,7 @@ test('lays out AMS arrays with solid and dashed rules, row gaps, and scoped cell
   expect(html).toContain('border-bottom:1px solid currentColor')
   expect(html).toContain('padding-bottom:max(0px,calc(0.21em + 1ex))')
   expect(html).toContain('<mstyle displaystyle="true" scriptlevel="0"><mi>D</mi></mstyle>')
-  expect(html).toContain('<mtext>\\value</mtext>')
+  expect(html).toContain('<mtext style="color:#cc0000">\\value</mtext>')
   const array = html.match(/<mtable data-equation-lines[^>]*>.*?<\/mtable>/)?.[0]
   expect(array?.match(/<mtr>/g)).toHaveLength(2)
   expect(renderMath(String.raw`\begin{array}{c}a`)).toContain('math-unrendered')
@@ -1024,7 +1040,7 @@ test('ignores TeX comments while preserving escaped percent signs inside text', 
   const html = renderMath(String.raw`\text{90\%} + %\badcommand
     x`)
   expect(html).toContain('<mtext>90%</mtext><mo>+</mo><mi>x</mi>')
-  expect(html).not.toContain('<mtext>\\badcommand</mtext>')
+  expect(html).not.toMatch(/<mtext[^>]*>\\badcommand<\/mtext>/)
   expect(html).toContain('%\\badcommand')
 })
 

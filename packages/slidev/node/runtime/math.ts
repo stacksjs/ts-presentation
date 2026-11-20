@@ -1,6 +1,7 @@
 import { escapeHtml, unescapeHtml } from './html.ts'
 import type { KatexOptions, KatexTrustContext } from './authoring-setup.ts'
 import { mathArrowBody, stackMathArrow, verticalMathArrow } from './math-arrow.ts'
+import { MathParseError } from './math-error.ts'
 import { chemicalFormula, physicalUnits } from './math-chemistry.ts'
 import type { Markup, MathStyle } from './math-markup.ts'
 import { joinMarkup, renderMarkup, xml } from './math-markup.ts'
@@ -387,6 +388,16 @@ function safeColor(value: string): string {
   return /^(?:#(?:[\da-f]{3,4}|[\da-f]{6}|[\da-f]{8})|[a-z]+)$/i.test(value) ? value : ''
 }
 
+function mathErrorColor(value: unknown): string {
+  return (typeof value === 'string' && safeColor(value)) || '#cc0000'
+}
+
+export function renderUnrenderedMath(source: string, display: boolean, error: MathParseError, color?: string | false): string {
+  const block = display ? ' data-math-display' : ''
+  const style = color === false ? '' : ` style="color:${mathErrorColor(color)}"`
+  return `<code class="math-unrendered"${block} title="${escapeHtml(error.message)}"${style}>${escapeHtml(source)}</code>`
+}
+
 function applyVariant(content: string, variant: string): string {
   const style = styledLetters[variant]
   const uprightFont = variant === 'normal' || variant === 'bold' || variant === 'sans-serif' || variant === 'monospace'
@@ -539,7 +550,7 @@ function arrayColumns(spec: string): { columns: ArrayColumn[], after: ArrayRule[
       columns.push({ align: alignments[char], before: after })
       after = []
     }
-    else throw new Error('Invalid array column')
+    else throw new MathParseError('Invalid array column')
   }
   return { columns, after }
 }
@@ -841,7 +852,7 @@ function fence(token: string, stretchy = true, color = ''): string {
 
 function delimiter(token: string, command: string): string {
   const glyph = delimiterAliases[token] ?? delimiters[token] ?? token
-  if (!delimiterGlyphs.has(glyph)) throw new Error(`Invalid delimiter after \\${command}`)
+  if (!delimiterGlyphs.has(glyph)) throw new MathParseError(`Invalid delimiter after \\${command}`)
   return glyph
 }
 
@@ -980,11 +991,15 @@ function fractionMarkup(first: Markup, second: Markup, layout: FractionLayout): 
 
 /** Translate a bounded TeX math subset to native MathML, with the source retained for accessibility. */
 export function renderMath(source: string, display = false, configured: MathMacros = {}, state?: MathState, numberMarkup?: EquationNumberMarkup): string {
+  const options = state?.options
+  function parseFailure(error: MathParseError): string {
+    if (options?.throwOnError) throw error
+    return renderUnrenderedMath(source, display, error, options?.errorColor)
+  }
   let trailingComment = false
   const recordComment = () => { trailingComment = true }
   let tokens = tokenize(source, recordComment)
-  if (tokens.length > 6000) return `<code>${escapeHtml(source)}</code>`
-  const options = state?.options
+  if (tokens.length > 6000) return parseFailure(new MathParseError('Equation has too many input tokens'))
   const limit = options?.maxExpand
   const maxExpand = typeof limit === 'number' && !Number.isNaN(limit) ? Math.max(0, limit) : 1000
   const configuredSize = options?.maxSize ?? Infinity
@@ -1034,7 +1049,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
 
   function restoreScope(): void {
     const scope = scopes.pop()
-    if (!scope) throw new Error('Unbalanced math macro group')
+    if (!scope) throw new MathParseError('Unbalanced math macro group')
     for (const [command, previous] of scope.undo) {
       if (previous) macros.set(command, previous)
       else macros.delete(command)
@@ -1109,7 +1124,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   }
 
   function replaceExpansion(start: number, body: string[]): number {
-    if (remainingOuterTokens + tokens.length - (cursor - start) + body.length > 12000) throw new Error('Expanded equation is too long')
+    if (remainingOuterTokens + tokens.length - (cursor - start) + body.length > 12000) throw new MathParseError('Expanded equation is too long')
     tokens.splice(start, cursor - start, ...body)
     cursor = start
     return body.length
@@ -1117,7 +1132,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
 
   function countExpansions(count: number): void {
     expandedCount += count
-    if (expandedCount > maxExpand) throw new Error('Too many math macro expansions')
+    if (expandedCount > maxExpand) throw new MathParseError('Too many math macro expansions')
   }
 
   function expandNativeMacro(macro: NativeMacro): string[] {
@@ -1128,10 +1143,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (primitive === '\\expandafter' || primitive === '\\noexpand') {
       space()
       const next = tokens[cursor++]
-      if (!next || next === boundary) throw new Error('Missing math expansion token')
+      if (!next || next === boundary) throw new MathParseError('Missing math expansion token')
       if (primitive === '\\noexpand') return [expandable(next) ? inhibitedToken + next : next]
       space()
-      if (!tokens[cursor] || tokens[cursor] === boundary) throw new Error('Missing token after delayed math expansion')
+      if (!tokens[cursor] || tokens[cursor] === boundary) throw new MathParseError('Missing token after delayed math expansion')
       expandOnce(true)
       return [next]
     }
@@ -1187,7 +1202,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       while (digit.test(tokenValue(tokens[cursor] ?? ''))) cursor++
       code = Number.parseInt(tokens.slice(start, cursor).map(tokenValue).join(''), radix)
     }
-    if (!Number.isSafeInteger(code)) throw new Error('Invalid math character code')
+    if (!Number.isSafeInteger(code)) throw new MathParseError('Invalid math character code')
     // Freeze the generated digits so active character definitions cannot
     // change the code during an eager definition or later formula rendering.
     return ['\\@char', '{', ...Array.from(String(code), digit => literalToken + digit), '}']
@@ -1199,7 +1214,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
 
   function consumeMacroPrefix(prefix: readonly string[]): void {
     for (const token of prefix) {
-      if (tokenText(tokens[cursor++] ?? '') !== token) throw new Error('Missing macro prefix')
+      if (tokenText(tokens[cursor++] ?? '') !== token) throw new MathParseError('Missing macro prefix')
     }
   }
 
@@ -1207,7 +1222,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const token = tokens[cursor]
     const definition = macroDefinition(token)
     if (!definition) {
-      if (eager && controlSequence.test(token) && !defined(token)) throw new Error(`Undefined control sequence: ${token}`)
+      if (eager && controlSequence.test(token) && !defined(token)) throw new MathParseError(`Undefined control sequence: ${token}`)
       return false
     }
     if (eager && typeof definition !== 'function' && 'body' in definition && definition.unexpandable) return false
@@ -1242,7 +1257,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       }
       else if (/^#[1-9]$/.test(token)) {
         const value = values[Number(token[1]) - 1]
-        if (!value) throw new Error(`Unbound macro parameter: ${token}`)
+        if (!value) throw new MathParseError(`Unbound macro parameter: ${token}`)
         body.push(...value)
       }
       else body.push(token)
@@ -1274,18 +1289,18 @@ export function renderMath(source: string, display = false, configured: MathMacr
   function rawGroup(missing = 'Missing math argument'): string[] {
     space()
     const first = tokenText(tokens[cursor] ?? '')
-    if (!first || first === boundary || first === '}') throw new Error(missing)
+    if (!first || first === boundary || first === '}') throw new MathParseError(missing)
     if (first !== '{') return [tokens[cursor++]]
     cursor++
     let level = 1
     const begin = cursor
     while (cursor < tokens.length && level) {
       const next = tokenText(tokens[cursor++])
-      if (next === boundary) throw new Error('Unclosed math argument')
+      if (next === boundary) throw new MathParseError('Unclosed math argument')
       if (next === '{') level++
       if (next === '}') level--
     }
-    if (level) throw new Error('Unclosed math argument')
+    if (level) throw new MathParseError('Unclosed math argument')
     return tokens.slice(begin, cursor - 1)
   }
 
@@ -1309,7 +1324,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       else if (token === '}' && --level === 0) groupEnd ??= cursor
       if (level < 0) break
     }
-    throw new Error('Missing macro delimiter')
+    throw new MathParseError('Missing macro delimiter')
   }
 
   function rawBracket(): string[] | undefined {
@@ -1404,7 +1419,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
     const pushTokens = (stack: readonly MathMacroToken[]): void => {
       const body = readStack(stack)
-      if (remainingOuterTokens + tokens.length + body.length > 12000) throw new Error('Expanded equation is too long')
+      if (remainingOuterTokens + tokens.length + body.length > 12000) throw new MathParseError('Expanded equation is too long')
       tokens.splice(cursor, 0, ...body)
     }
     const consumeArg = (delimiters?: readonly string[] | null): MathMacroArgument => {
@@ -1500,15 +1515,15 @@ export function renderMath(source: string, display = false, configured: MathMacr
   }
 
   function argumentAtom(primitive = false): Atom {
-    if (depth++ > 100) throw new Error('Math arguments are nested too deeply')
+    if (depth++ > 100) throw new MathParseError('Math arguments are nested too deeply')
     const token = take()
     if (!token || token === '}' || token === boundary || token === '^' || token === '_' || macroDeclaration.test(token))
-      throw new Error('Missing math argument')
-    if (infixFractions.has(token)) throw new Error('An infix fraction argument requires a group')
+      throw new MathParseError('Missing math argument')
+    if (infixFractions.has(token)) throw new MathParseError('An infix fraction argument requires a group')
     if (token.startsWith('\\')) {
       const name = token.slice(1)
       if (groupedArgumentFunctions.has(name) || (!primitive && primitiveArgumentFunctions.has(name)))
-        throw new Error(`Math command ${token} requires a grouped argument`)
+        throw new MathParseError(`Math command ${token} requires a grouped argument`)
     }
     const result = atom(token)
     depth--
@@ -1559,7 +1574,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
     const reject = strict === true || strict === 'error'
     if (strict === 'warn') console.warn(`${message} [${code}]`)
-    if (reject && report) throw new Error(`${message} [${code}]`)
+    if (reject && report) throw new MathParseError(`${message} [${code}]`)
     return reject
   }
 
@@ -1578,7 +1593,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   function lineGap(command: string): string | undefined {
     const extra = command === '\\\\' && tokens[cursor] === '[' ? rawBracket() : undefined
     const gap = extra === undefined ? '' : dimension(expandDefinition(extra).join(''))
-    if (gap === undefined) throw new Error('Invalid math line spacing')
+    if (gap === undefined) throw new MathParseError('Invalid math line spacing')
     if (!display) return gap
     return strictViolation('newLineInDisplayMode', 'A standalone TeX line break has no effect in LaTeX display math', false) ? undefined : gap
   }
@@ -1587,7 +1602,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const token = take()
     if (token !== '{') return delimiter(token, command)
     const symbol = take()
-    if (take() !== '}') throw new Error(`Invalid delimiter after \\${command}`)
+    if (take() !== '}') throw new MathParseError(`Invalid delimiter after \\${command}`)
     return delimiter(symbol, command)
   }
 
@@ -1601,7 +1616,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       content = row(['\\right', '}', '\\end', '&', '\\cr'])
     }
     finally { delimiterDepth-- }
-    if (take() !== '\\right') throw new Error('Missing \\right for \\left')
+    if (take() !== '\\right') throw new MathParseError('Missing \\right for \\left')
     const rightGlyph = readDelimiter('right')
     const right = rightGlyph === '.' ? spaceMarkup('0.12em') : fence(rightGlyph, true, currentColor)
     return xml`<mrow>${left}${content}${right}</mrow>`
@@ -1638,20 +1653,20 @@ export function renderMath(source: string, display = false, configured: MathMacr
         }
       }
     }
-    throw new Error('Invalid math dimension')
+    throw new MathParseError('Invalid math dimension')
   }
 
   function spacingMarkup(name: string): string {
     if (name === 'hspace') {
       if (peek() === '*') take()
-      if (peek() !== '{') throw new Error('Math spacing requires a grouped dimension')
+      if (peek() !== '{') throw new MathParseError('Math spacing requires a grouped dimension')
     }
     return spaceMarkup(readDimension(undefined, name))
   }
 
   function readColor(message = 'Invalid math color'): string {
     const color = safeColor(expandDefinition(rawGroup()).join(''))
-    if (!color) throw new Error(message)
+    if (!color) throw new MathParseError(message)
     return color
   }
 
@@ -1668,7 +1683,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const size = rawBracket()
     if (size === undefined) return
     const value = dimension(expandDefinition(size).join(''))
-    if (value === undefined) throw new Error('Invalid math box dimension')
+    if (value === undefined) throw new MathParseError('Invalid math box dimension')
     return value
   }
 
@@ -1685,7 +1700,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       return `<mpadded voffset="${offset}" height="0" style="padding-top:${ascent};padding-bottom:${descent}">${rule}</mpadded>`
     }
     if (name === 'raisebox') {
-      if (peek() !== '{') throw new Error('Raised math box requires a grouped dimension')
+      if (peek() !== '{') throw new MathParseError('Raised math box requires a grouped dimension')
       const offset = readDimension('0px')
       const height = optionalBoxDimension()
       const depth = optionalBoxDimension()
@@ -1719,21 +1734,21 @@ export function renderMath(source: string, display = false, configured: MathMacr
   }
 
   function untrusted(command: string): string {
-    const color = safeColor(state?.options.errorColor ?? '') || '#cc0000'
+    const color = mathErrorColor(options?.errorColor)
     return `<mtext class="math-untrusted" style="color:${color}">${escapeHtml(command)}</mtext>`
   }
 
   function imageMarkup(url: string, options: string): string {
     const values = new Map(mathKeyValues(options))
     for (const key of values.keys()) {
-      if (!['width', 'height', 'totalheight', 'alt'].includes(key)) throw new Error(`Unknown math image option: ${key}`)
+      if (!['width', 'height', 'totalheight', 'alt'].includes(key)) throw new MathParseError(`Unknown math image option: ${key}`)
     }
     function size(key: string): string | undefined {
       const value = values.get(key)?.trim()
       if (value === undefined) return
       const normalized = /^[+\-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(value) ? `${Number(value)}bp` : value
       const parsed = dimension(normalized)
-      if (!parsed || Number.parseFloat(parsed) < 0) throw new Error(`Invalid math image size: ${key}`)
+      if (!parsed || Number.parseFloat(parsed) < 0) throw new MathParseError(`Invalid math image size: ${key}`)
       return parsed
     }
     const width = size('width')
@@ -1805,21 +1820,20 @@ export function renderMath(source: string, display = false, configured: MathMacr
   }
 
   function unsupportedCommand(token: string): string {
-    if (options?.throwOnError) throw new Error(`Unsupported math command: ${token}`)
-    const color = safeColor(options?.errorColor ?? '')
-    return color ? `<mtext style="color:${color}">${escapeHtml(token)}</mtext>` : tag('mtext', token)
+    if (options?.throwOnError) throw new MathParseError(`Unsupported math command: ${token}`)
+    return `<mtext style="color:${mathErrorColor(options?.errorColor)}">${escapeHtml(token)}</mtext>`
   }
 
   function textCharacter(token: string): string | undefined {
     if (token === '\\@char') return explicitCharacter()
-    if (/^(?:[&#^_]|#[1-9])$/.test(token)) throw new Error(`Unexpected text token: ${token}`)
+    if (/^(?:[&#^_]|#[1-9])$/.test(token)) throw new MathParseError(`Unexpected text token: ${token}`)
     if (!token.startsWith('\\')) {
       const unicode = checkUnicode(token)
       return unicode?.marks ? (unicode.base + unicode.marks).normalize('NFC') : token
     }
     const name = token.slice(1)
     if (mathModeFunctions.has(name) || name === 'includegraphics')
-      throw new Error(`Math command ${token} requires math mode`)
+      throw new MathParseError(`Math command ${token} requires math mode`)
     const escaped = /^\\([%$#&_{} ])$/.exec(token)
     return escaped?.[1] ?? textSymbols[token] ?? textSymbol(token)
   }
@@ -1846,7 +1860,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   }
 
   function parseTextArgument(properties: string, parentheses: boolean, capture?: (parts: Markup[]) => void, end = boundary): Markup {
-    if (depth++ > 100) throw new Error('Math text is nested too deeply')
+    if (depth++ > 100) throw new MathParseError('Math text is nested too deeply')
     const wrap = (markup: Markup) => properties ? xml`<mrow style="${properties}">${markup}</mrow>` : markup
     const opening = parentheses ? '(' : ''
     const closing = parentheses ? ')' : ''
@@ -1883,7 +1897,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
           literal += closing
           break
         }
-        if (!token || token === boundary || token === '}' || token === '\\endgroup') throw new Error('Unclosed math text')
+        if (!token || token === boundary || token === '}' || token === '\\endgroup') throw new MathParseError('Unclosed math text')
         cursor++
         if (token === '\\relax' || declareMacro(token) || equationDirective(token)) continue
         const command = token.startsWith('\\') ? token.slice(1) : ''
@@ -1917,7 +1931,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
             textItalic = textFont?.['font-style'] === 'italic'
             textMonospace = textFont?.['font-family'] === 'monospace'
             const content = row([close, '}', '\\endgroup', boundary])
-            if (take() !== close) throw new Error('Unclosed inline math in text')
+            if (take() !== close) throw new MathParseError('Unclosed inline math in text')
             return content
           })))
           parts.push(style => {
@@ -2048,8 +2062,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
 
   function equationDirective(token: string): boolean {
     if (token === '\\tag') {
-      if (!display) throw new Error('Equation tags require display math')
-      if (tagState.label !== undefined) throw new Error('Multiple tags for one equation')
+      if (!display) throw new MathParseError('Equation tags require display math')
+      if (tagState.label !== undefined) throw new MathParseError('Multiple tags for one equation')
       const starred = peek() === '*'
       if (starred) take()
       tagState.label = ''
@@ -2101,7 +2115,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   }
 
   function row(stop: string[] = [], breakOnInfix = false, exposeLines = false, capture?: (parts: RowPart[]) => void, followsOrdinary = false): Markup {
-    if (depth++ > 100) throw new Error('Math groups are nested too deeply')
+    if (depth++ > 100) throw new MathParseError('Math groups are nested too deeply')
     const softWrap = !display && depth === 1 && state?.inlineBreaks === true
     let parts: RowPart[] = []
     let lines: MathLine[] | undefined
@@ -2113,12 +2127,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
       return lines ? lineTable([...lines, { content }], display && exposeLines, !display || options?.fleqn === true) : content
     }
     for (let token = peek(); token && !stop.includes(token); token = peek()) {
-      if (token === boundary) throw new Error('Unclosed math argument')
+      if (token === boundary) throw new MathParseError('Unclosed math argument')
       if (breakOnInfix && infixFractions.has(token)) break
       cursor++
       if (token === '\\relax') continue
       if (infixFractions.has(token)) {
-        if (infix) throw new Error('Only one infix fraction is allowed per math group')
+        if (infix) throw new MathParseError('Only one infix fraction is allowed per math group')
         infix = token
         thickness = infixThickness(token)
         numerator = finish()
@@ -2183,18 +2197,18 @@ export function renderMath(source: string, display = false, configured: MathMacr
       for (let kind = peek(); kind; kind = peek()) {
         if (kind === '\\limits' || kind === '\\nolimits' || kind === '\\displaylimits') {
           cursor++
-          if (part.limits === undefined) throw new Error('Limit control requires a math operator')
+          if (part.limits === undefined) throw new MathParseError('Limit control requires a math operator')
           if (!part.ignoreLimitControl) forceLimits = kind === '\\displaylimits' ? 'display' : kind === '\\limits'
           continue
         }
         if (kind === '_' || unicodeSubscripts.has(kind)) {
-          if (lower) throw new Error('Double subscript')
+          if (lower) throw new MathParseError('Double subscript')
           lower = inScript(kind === '_' ? (cursor++, scriptArgument()) : unicodeScript(unicodeSubscripts))
           continue
         }
         const prime = primeCount(kind) > 0
         if (kind !== '^' && !prime && !unicodeSuperscripts.has(kind)) break
-        if (upper) throw new Error('Double superscript')
+        if (upper) throw new MathParseError('Double superscript')
         upper = inScript(kind === '^' ? (cursor++, scriptArgument()) : prime ? primeScript() : unicodeScript(unicodeSuperscripts))
       }
       if (part.brace === 'upper' && upper) {
@@ -2248,7 +2262,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const rows: string[][] = []
     function arrowLabel(type: string): string {
       const label = renderMarkup(row([...stops, type]), 2)
-      if (take() !== type) throw new Error('Incomplete CD arrow')
+      if (take() !== type) throw new MathParseError('Incomplete CD arrow')
       return label ? `<mrow>${label}</mrow>` : ''
     }
     function vertical(symbol: '↑' | '↓' | '‖', left = '', right = ''): string {
@@ -2259,7 +2273,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       if (type === '.') return ''
       if (type === '=') return mathArrowBody('=', '3em')
       if (type === '|') return vertical('‖')
-      if (!/^[<>AV]$/.test(type)) throw new Error('Unknown CD arrow')
+      if (!/^[<>AV]$/.test(type)) throw new MathParseError('Unknown CD arrow')
       const first = arrowLabel(type)
       const second = arrowLabel(type)
       if (type === '<' || type === '>') {
@@ -2281,7 +2295,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
         if (separator === '\\end' && literalGroup() === 'CD') return { cells, last: true }
         break
       }
-      throw new Error('Unclosed CD environment')
+      throw new MathParseError('Unclosed CD environment')
     }
 
     let closed = false
@@ -2295,42 +2309,42 @@ export function renderMath(source: string, display = false, configured: MathMacr
       if (cells.some(Boolean) || !last) rows.push(cells)
       if (last) { closed = true; break }
     }
-    if (!closed) throw new Error('Unclosed CD environment')
+    if (!closed) throw new MathParseError('Unclosed CD environment')
     const columns = Math.max(0, ...rows.map(cells => cells.length))
-    if (columns * rows.length > 6000) throw new Error('CD environment has too many cells')
+    if (columns * rows.length > 6000) throw new MathParseError('CD environment has too many cells')
     const markup = rows.map(cells => `<mtr>${Array.from({ length: columns }, (_, index) => `<mtd>${cells[index] ?? ''}</mtd>`).join('')}</mtr>`).join('')
     return `<mtable class="math-cd">${markup}</mtable>`
   }
 
   function matrix(environment: string): Markup {
-    const unclosed = () => new Error(`Unclosed math environment: ${environment}`)
+    const unclosed = () => new MathParseError(`Unclosed math environment: ${environment}`)
     if (!display && /^(?:equation\*?|align(?:at)?\*?|gather\*?|split|CD)$/.test(environment))
-      throw new Error(`${environment} requires display math`)
+      throw new MathParseError(`${environment} requires display math`)
     if (environment === 'CD') return commutativeDiagram()
     if (/^equation[*]?$/.test(environment)) {
       environmentDepth++
       const content = row(['&', '\\end'], false, true)
       environmentDepth--
-      if (peek() === '&') throw new Error('Too many columns in equation')
+      if (peek() === '&') throw new MathParseError('Too many columns in equation')
       if (take() !== '\\end' || literalGroup() !== environment) throw unclosed()
       tagState.label = nextTag(display && environment === 'equation')
       return xml`<mrow>${content}</mrow>`
     }
     if (!/^(?:[pbBvV]?matrix[*]?|smallmatrix|d?rcases|d?cases|align(?:ed|edat|at[*]?|[*])?|gather(?:ed|[*])?|split|d?array|subarray|multline[*]?)$/.test(environment))
-      throw new Error(`Unsupported math environment: ${environment}`)
+      throw new MathParseError(`Unsupported math environment: ${environment}`)
     const subarray = environment === 'subarray'
     const smallMatrix = environment === 'smallmatrix'
     const columnArray = subarray || /^(?:d?array)$/.test(environment)
     const alignmentTokens = environment.endsWith('matrix*') ? rawBracket() : undefined
     const matrixAlignment = alignmentTokens && expandDefinition(alignmentTokens).join('').trim()
-    if (matrixAlignment !== undefined && !/^[lcr]$/.test(matrixAlignment)) throw new Error('Invalid matrix alignment')
+    if (matrixAlignment !== undefined && !/^[lcr]$/.test(matrixAlignment)) throw new MathParseError('Invalid matrix alignment')
     const columns = columnArray ? expandDefinition(rawGroup()).join('') : matrixAlignment ?? ''
     const paired = /^align(?:ed)?at[*]?$/.test(environment)
     const pairCount = paired ? expandDefinition(rawGroup()).join('').replace(/\s/g, '') : ''
     const pairs = Number(pairCount)
-    if (paired && (!/^\d+$/.test(pairCount) || !Number.isSafeInteger(pairs) || pairs < 1)) throw new Error('Invalid alignment column count')
+    if (paired && (!/^\d+$/.test(pairCount) || !Number.isSafeInteger(pairs) || pairs < 1)) throw new MathParseError('Invalid alignment column count')
     const layout = arrayColumns(columns)
-    if (subarray && !/^[lc]?$/.test(columns.trim())) throw new Error('Invalid subarray alignment')
+    if (subarray && !/^[lc]?$/.test(columns.trim())) throw new MathParseError('Invalid subarray alignment')
     const compact = subarray || smallMatrix
     const aligned = environment.startsWith('align') || environment === 'split'
     const gathered = environment.startsWith('gather') || environment.startsWith('multline')
@@ -2338,7 +2352,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const ordinaryCellStyle = environment.startsWith('d') || aligned || gathered ? 0 : 1
     const stretch = !compact && !cases && macros.has('\\arraystretch')
       ? Number.parseFloat(expandDefinition(['\\arraystretch']).join('')) : 1
-    if (!(stretch > 0 && stretch <= 100)) throw new Error('Invalid array stretch')
+    if (!(stretch > 0 && stretch <= 100)) throw new MathParseError('Invalid array stretch')
     const outerTag = tagState
     const rowTags = /^(?:align|alignat|gather)[*]?$/.test(environment)
     const automatic = rowTags && display && environmentDepth === 0 && !environment.endsWith('*')
@@ -2360,16 +2374,16 @@ export function renderMath(source: string, display = false, configured: MathMacr
       cells.push(inScope(() => row(stops, false, false, undefined, followsOrdinary)))
       const separator = take()
       if (separator === '&') {
-        if (subarray || gathered) throw new Error('Too many columns in math stack')
-        if (environment === 'split' && cells.length === 2) throw new Error('Too many columns in split')
+        if (subarray || gathered) throw new MathParseError('Too many columns in math stack')
+        if (environment === 'split' && cells.length === 2) throw new MathParseError('Too many columns in split')
         if (columnArray && cells.length === layout.columns.length) strictViolation('textEnv', 'Too few columns in the array specification')
         continue
       }
-      if (pairs && cells.length > pairs * 2) throw new Error('Too many alignment columns')
+      if (pairs && cells.length > pairs * 2) throw new MathParseError('Too many alignment columns')
       const lineBreak = separator === '\\\\' || separator === '\\newline' || separator === '\\cr'
       const extra = separator === '\\\\' && tokens[cursor] === '[' ? rawBracket() : undefined
       const gap = extra === undefined ? undefined : dimension(expandDefinition(extra).join(''))
-      if (extra !== undefined && gap === undefined) throw new Error('Invalid array row spacing')
+      if (extra !== undefined && gap === undefined) throw new MathParseError('Invalid array row spacing')
       const label = rowTags ? nextTag(automatic) : undefined
       if (cells.length > 1 || cells[0] || label !== undefined || rows.length === 0 || lineBreak) {
         rows.push({ cells, label, before: rules, gap })
@@ -2397,9 +2411,9 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const rowRules = rows.reduce((count, entry) => count + entry.before.length, rules.length)
     const columnRules = layout.columns.reduce((count, column) => count + column.before.length, layout.after.length)
     const rectangular = grid || columnArray || tags || rowRules > 0
-    if (rectangular && columnCount * rows.length > 6000) throw new Error('Math array has too many cells')
+    if (rectangular && columnCount * rows.length > 6000) throw new MathParseError('Math array has too many cells')
     if (rowRules * columnCount + columnRules * rows.length > 24000)
-      throw new Error('Math array has too many rules')
+      throw new MathParseError('Math array has too many rules')
     const alignmentAt = (index: number) => aligned ? (index % 2 ? 'left' : 'right') : alignment[index] ?? alignment.at(-1) ?? (cases ? 'left' : '')
     const columnAlignment = Array.from({ length: columnCount }, (_, index) => alignmentAt(index) || 'center')
     if (tags) {
@@ -2471,7 +2485,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const value = (mode === 'math' ? parts.filter(token => !texWhitespace.test(token)) : parts).join('')
     const code = /^\d+$/.test(value) ? Number(value) : NaN
     if (!Number.isInteger(code) || code < 0x20 || code > 0x10FFFF || (code >= 0xD800 && code <= 0xDFFF))
-      throw new Error('Invalid math character code')
+      throw new MathParseError('Invalid math character code')
     return String.fromCodePoint(code)
   }
 
@@ -2484,13 +2498,13 @@ export function renderMath(source: string, display = false, configured: MathMacr
       token = take()
     }
     if (prefixed && !assignmentCommand.test(token))
-      throw new Error('Invalid token after math macro prefix')
+      throw new MathParseError('Invalid token after math macro prefix')
     const name = token.slice(1)
     function definitionTarget(grouped = false): string {
       space()
       const target = grouped ? literalGroup().trim() : tokenText(tokens[cursor++] ?? '')
       if (!target || (!controlSequence.test(target) && !activeCharacter.test(target)))
-        throw new Error(`Invalid macro name in ${token}`)
+        throw new MathParseError(`Invalid macro name in ${token}`)
       return target
     }
     if (['def', 'gdef', 'edef', 'xdef'].includes(name)) {
@@ -2502,15 +2516,15 @@ export function renderMath(source: string, display = false, configured: MathMacr
       let openDelimiter = false
       while (tokenText(tokens[cursor] ?? '') !== '{') {
         const token = tokenText(tokens[cursor++] ?? '')
-        if (!token || token === boundary || token === '}' || sequence.length > 80) throw new Error('Invalid macro parameter')
+        if (!token || token === boundary || token === '}' || sequence.length > 80) throw new MathParseError('Invalid macro parameter')
         if (token === '#') {
-          if (tokenText(tokens[cursor] ?? '') !== '{') throw new Error('Invalid macro parameter')
+          if (tokenText(tokens[cursor] ?? '') !== '{') throw new MathParseError('Invalid macro parameter')
           sequence.push('{')
           openDelimiter = true
           break
         }
         if (/^#[1-9]$/.test(token)) {
-          if (Number(token[1]) !== parameters.length + 1) throw new Error('Macro parameters must be sequential')
+          if (Number(token[1]) !== parameters.length + 1) throw new MathParseError('Macro parameters must be sequential')
           sequence = []
           parameters.push(sequence)
         }
@@ -2534,7 +2548,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
         }
         value = tokens[following]
         if (!middle || middle === boundary || !value || value === boundary)
-          throw new Error('Missing math lookahead token')
+          throw new MathParseError('Missing math lookahead token')
       }
       else {
         space()
@@ -2543,7 +2557,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
           if (texWhitespace.test(tokens[cursor] ?? '')) cursor++
         }
         value = tokens[cursor++]
-        if (!value || value === boundary) throw new Error('Missing math assignment token')
+        if (!value || value === boundary) throw new MathParseError('Missing math assignment token')
       }
       const existing = macroFor(value)
       const command = value.startsWith('\\')
@@ -2555,12 +2569,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (name === 'newcommand' || name === 'renewcommand' || name === 'providecommand') {
       const command = definitionTarget(true)
       const exists = defined(command)
-      if (name === 'newcommand' && exists) throw new Error(`Macro ${command} is already defined. Use \\renewcommand`)
-      if (name === 'renewcommand' && !exists) throw new Error(`Macro ${command} is undefined. Use \\newcommand`)
+      if (name === 'newcommand' && exists) throw new MathParseError(`Macro ${command} is already defined. Use \\renewcommand`)
+      if (name === 'renewcommand' && !exists) throw new MathParseError(`Macro ${command} is undefined. Use \\newcommand`)
       const rawCount = rawBracket()
       const count = rawCount && expandDefinition(rawCount).join('').trim()
       const arity = Number(count ?? 0)
-      if (count !== undefined && (!/^\d+$/.test(count) || arity > 6000)) throw new Error('Invalid macro argument count')
+      if (count !== undefined && (!/^\d+$/.test(count) || arity > 6000)) throw new MathParseError('Invalid macro argument count')
       const optional = arity ? rawBracket() : undefined
       const body = rawGroup()
       if (name !== 'providecommand' || !exists) assign(command, plainMacro(body, arity, optional), global)
@@ -2572,11 +2586,11 @@ export function renderMath(source: string, display = false, configured: MathMacr
   function atom(token: string): Atom {
     if (token === '{') {
       const content = inScope(() => row(['}']))
-      if (take() !== '}') throw new Error('Unclosed math group')
+      if (take() !== '}') throw new MathParseError('Unclosed math group')
       return { markup: xml`<mrow>${content}</mrow>` }
     }
     if (!token.startsWith('\\')) {
-      if (/^(?:[}&#$]|#[1-9])$/.test(token)) throw new Error(`Unexpected math token: ${token}`)
+      if (/^(?:[}&#$]|#[1-9])$/.test(token)) throw new MathParseError(`Unexpected math token: ${token}`)
       if (token === '~') return { markup: spaceMarkup(spacing.nobreakspace) }
       if (token === '®') {
         strictViolation('mathVsTextAccents', 'The registered sign is a text-mode symbol')
@@ -2611,7 +2625,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (name === 'begingroup') {
       let parts: RowPart[] | undefined
       const content = inScope(() => row(['\\endgroup'], false, false, value => { parts = value }))
-      if (take() !== '\\endgroup') throw new Error('Unclosed math group')
+      if (take() !== '\\endgroup') throw new MathParseError('Unclosed math group')
       const inner = parts
       return { markup: xml`<mrow>${content}</mrow>`, fragment: inner && (() => inner) }
     }
@@ -2653,9 +2667,9 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const lap = /^(math)?([lcr])lap$/.exec(name)
     if (lap) return { markup: overlap(lap[2], lap[1] ? argument() : textArgument()) }
     if (name === 'left') return { markup: pairedDelimiters() }
-    if (name === 'right') throw new Error('Unexpected \\right')
+    if (name === 'right') throw new MathParseError('Unexpected \\right')
     if (name === 'middle') {
-      if (!delimiterDepth) throw new Error('\\middle requires \\left and \\right')
+      if (!delimiterDepth) throw new MathParseError('\\middle requires \\left and \\right')
       const glyph = readDelimiter(name)
       const markup = glyph === '.' ? spaceMarkup('0.12em')
         : `<mo stretchy="true" symmetric="true" form="infix" fence="true" lspace="0.05em" rspace="0.05em">${escapeHtml(glyph)}</mo>`
@@ -2664,7 +2678,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const sized = /^(bigg|Bigg|big|Big)([lrm]?)$/.exec(name)
     if (sized) return { markup: sizedFence(readDelimiter(name), sizedDelimiters[sized[1]], sized[2]) }
     if (name === 'begin') return { markup: inScope(() => matrix(literalGroup())) }
-    if (name === 'end' || name === 'endgroup') throw new Error(`Unexpected math token: ${token}`)
+    if (name === 'end' || name === 'endgroup') throw new MathParseError(`Unexpected math token: ${token}`)
     if (['frac', 'dfrac', 'tfrac', 'binom', 'dbinom', 'tbinom'].includes(name)) {
       const binomial = name.endsWith('binom')
       const forced = name.startsWith('d') ? 0 : name.startsWith('t') ? 1 : undefined
@@ -2674,7 +2688,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const fences = [fractionDelimiter('open'), fractionDelimiter('close')] as const
       const bar = readDimension('')
       const mode = expandDefinition(rawGroup()).join('').trim()
-      if (mode && !/^[0-3]$/.test(mode)) throw new Error('Invalid fraction style')
+      if (mode && !/^[0-3]$/.test(mode)) throw new MathParseError('Invalid fraction style')
       const thickness = bar ? (Number.parseFloat(bar) > 0 ? bar : '0') : undefined
       return { markup: fraction({ forced: mode ? Number(mode) as MathStyle : undefined, thickness, fences }) }
     }
@@ -2772,7 +2786,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       if (peek() === '[') {
         take()
         below = xml`<mrow>${inScript(inScope(() => row([']'])))}</mrow>`
-        if (take() !== ']') throw new Error('Unclosed arrow subscript')
+        if (take() !== ']') throw new MathParseError('Unclosed arrow subscript')
       }
       const above = inScript(argument())
       const bias = name === 'xleftequilibrium' ? 'left' : name === 'xrightequilibrium' ? 'right' : undefined
@@ -2816,7 +2830,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return `<math xmlns="http://www.w3.org/1998/Math/MathML"${display ? ' display="block"' : ''}${layout}><semantics>${markup}<annotation encoding="application/x-tex">${escapeHtml(source)}</annotation></semantics></math>`
   }
   catch (error) {
-    if (state?.options.throwOnError) throw error
-    return `<code class="math-unrendered">${escapeHtml(source)}</code>`
+    if (!(error instanceof MathParseError)) throw error
+    return parseFailure(error)
   }
 }

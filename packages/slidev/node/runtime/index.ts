@@ -21,7 +21,8 @@ import type { DrawingClientConfig, SavedDrawing } from '../../../types/src/drawi
 import { escapeHtml, unescapeHtml } from './html.ts'
 import { liveBlock } from './live-markup.ts'
 import type { CompileLiveCode } from './compile-code.ts'
-import { createMathRenderer, resolveMathMacros } from './math.ts'
+import { createMathRenderer, renderUnrenderedMath, resolveMathMacros } from './math.ts'
+import { MathParseError } from './math-error.ts'
 import type { DeckLayers } from './layers.ts'
 import { renderLayer, renderSlideLayers } from './layers.ts'
 import type { SlideRoute } from '../../../client/runtime/navigation.ts'
@@ -157,8 +158,10 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   const mathOptions = deck.headmatter?.math ?? deck.headmatter?.katex
   const mathConfig = mathOptions && typeof mathOptions === 'object' ? mathOptions as Record<string, unknown> : {}
   const strict = mathConfig.strict
-  const renderMath = createMathRenderer({
+  const renderFormula = createMathRenderer({
     ...configuration?.katex,
+    throwOnError: typeof mathConfig.throwOnError === 'boolean' ? mathConfig.throwOnError : configuration?.katex?.throwOnError,
+    errorColor: typeof mathConfig.errorColor === 'string' ? mathConfig.errorColor : configuration?.katex?.errorColor,
     trust: typeof mathConfig.trust === 'boolean' ? mathConfig.trust : configuration?.katex?.trust,
     leqno: typeof mathConfig.leqno === 'boolean' ? mathConfig.leqno : configuration?.katex?.leqno,
     fleqn: typeof mathConfig.fleqn === 'boolean' ? mathConfig.fleqn : configuration?.katex?.fleqn,
@@ -170,6 +173,14 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     strict: typeof strict === 'boolean' || strict === 'ignore' || strict === 'warn' || strict === 'error' ? strict : configuration?.katex?.strict,
     macros: { ...configuration?.katex?.macros, ...resolveMathMacros(deck.headmatter) },
   }, true)
+  function renderMath(body: string, display: boolean, numberMarkup?: Parameters<typeof renderFormula>[2]): string {
+    try { return renderFormula(body, display, numberMarkup) }
+    catch (error) {
+      if (!(error instanceof MathParseError)) throw error
+      console.warn(error.message)
+      return renderUnrenderedMath(body, display, error, false)
+    }
+  }
   const mermaidConfig = deck.headmatter?.mermaid
   const diagramOptions = {
     ...configuration?.mermaid,

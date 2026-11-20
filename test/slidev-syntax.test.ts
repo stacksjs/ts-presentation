@@ -61,7 +61,7 @@ $\pu{1.5e-3 mol/L}$
   expect(html).toContain('<mo>3+</mo>')
   expect(html).toContain('<msup><mn>10</mn><mn>−3</mn></msup>')
   const nextDeck = await renderDeck(parseDeck('# Third\n\n$\\sq{z}$'))
-  expect(nextDeck).toContain('<mtext>\\sq</mtext>')
+  expect(nextDeck).toContain('<mtext style="color:#cc0000">\\sq</mtext>')
 })
 
 test('reads Mermaid fence options without executing expressions', async () => {

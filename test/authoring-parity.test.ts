@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test'
+import { expect, spyOn, test } from 'bun:test'
 import { parseDeck, renderDeck } from '../packages/slidev/node/runtime/index.ts'
 import { renderMath } from '../packages/slidev/node/runtime/math.ts'
 import { mermaid } from '../packages/slidev/node/runtime/diagram.ts'
@@ -73,7 +73,57 @@ $\saved\saved$
   const html = await renderDeck(deck)
   expect(html).toContain('<mrow style="color:red"><mrow><mi>b</mi></mrow></mrow><mi>c</mi>')
   expect(html).toContain('<mrow><mi>z</mi></mrow>')
-  expect(html).toContain(String.raw`<code class="math-unrendered">\saved\saved</code>`)
+  expect(html).toContain(String.raw`<code class="math-unrendered" title="Too many math macro expansions" style="color:#cc0000">\saved\saved</code>`)
+})
+
+test('keeps invalid formulas isolated and honors the error settings in deck frontmatter', async () => {
+  const warn = spyOn(console, 'warn').mockImplementation(() => {})
+  try {
+    const tolerant = parseDeck(String.raw`---
+katex:
+  errorColor: '#813b52'
+  throwOnError: false
+---
+
+# Tolerant
+
+$a+\unknown+b$
+
+$$
+\begin{broken"formula}a
+$$
+
+---
+
+$\frac12$
+`)
+    const html = await renderDeck(tolerant, { setup: { katex: { errorColor: '#456789', throwOnError: true } } })
+    expect(html).toContain(String.raw`<mtext style="color:#813b52">\unknown</mtext>`)
+    expect(html).toContain(String.raw`<code class="math-unrendered" data-math-display title="Unsupported math environment: broken&quot;formula" style="color:#813b52">\begin{broken&quot;formula}a</code>`)
+    expect(html).toContain('<mfrac><mn>1</mn><mn>2</mn></mfrac>')
+    expect(warn).not.toHaveBeenCalled()
+
+    const strict = parseDeck(String.raw`---
+math:
+  throwOnError: true
+---
+
+# Strict
+
+$a+\unknown+b$
+
+---
+
+$y^2$
+`)
+    const strictHtml = await renderDeck(strict, { setup: { katex: { throwOnError: false } } })
+    expect(warn.mock.calls).toEqual([[String.raw`Unsupported math command: \unknown`]])
+    expect(strictHtml).toContain(String.raw`<code class="math-unrendered" title="Unsupported math command: \unknown">a+\unknown+b</code>`)
+    expect(strictHtml).toContain('<msup><mi>y</mi><mn>2</mn></msup>')
+  }
+  finally {
+    warn.mockRestore()
+  }
 })
 
 test('configures TeX dimensions and rule widths from deck headmatter', async () => {

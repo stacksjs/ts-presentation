@@ -1,3 +1,4 @@
+import { MathParseError } from './math-error.ts'
 // Unicode coverage and accents follow the KaTeX 0.19.1 tables and parser.
 // See licenses/KaTeX-MIT.txt.
 const mathSymbols = new Set(
@@ -30,10 +31,10 @@ interface UnicodeToken {
 
 export function readUnicodeToken(token: string, mode: 'math' | 'text'): UnicodeToken | undefined {
   if (!/[^\x00-\x7F]/.test(token)) return
-  if (/^[\u2028\u2029\uD800-\uF8FF]/u.test(token)) throw new Error('Unexpected Unicode character in TeX input')
+  if (/^[\u2028\u2029\uD800-\uF8FF]/u.test(token)) throw new MathParseError('Unexpected Unicode character in TeX input')
   const suffix = accentSuffix.exec(token)?.[0] ?? ''
   const original = suffix ? token.slice(0, -suffix.length) : token
-  if (!original) throw new Error('A Unicode combining accent requires a base character')
+  if (!original) throw new MathParseError('A Unicode combining accent requires a base character')
   const symbols = mode === 'math' ? mathSymbols : textSymbols
   const known = original.charCodeAt(0) < 0x80 || symbols.has(original) || styledSymbol.test(original)
   // Normalize supported precomposed accents without rewriting other scripts.
@@ -58,6 +59,6 @@ export function readUnicodeToken(token: string, mode: 'math' | 'text'): UnicodeT
 
 function validateAccents(marks: string): void {
   for (const mark of marks) {
-    if (!Object.hasOwn(unicodeAccents, mark)) throw new Error(`Unknown Unicode combining accent: ${mark}`)
+    if (!Object.hasOwn(unicodeAccents, mark)) throw new MathParseError(`Unknown Unicode combining accent: ${mark}`)
   }
 }
