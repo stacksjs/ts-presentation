@@ -1036,6 +1036,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   let delimiterDepth = 0
   let currentColor = ''
   let equationNumber = 0
+  let fullWidthAlignment = false
   let fontScale = 1
   let textItalic = false
   let textMonospace = false
@@ -2409,8 +2410,11 @@ export function renderMath(source: string, display = false, configured: MathMacr
 
   function matrix(environment: string): Markup {
     const unclosed = () => new MathParseError(`Unclosed math environment: ${environment}`)
-    if (!display && /^(?:(?:equation|align(?:at)?|gather|multline)\*?|split|CD)$/.test(environment))
+    const spreadEnvironment = /^(?:(?:flalign|xalignat)\*?|xxalignat)$/.test(environment)
+    if (!display && (spreadEnvironment || /^(?:(?:equation|align(?:at)?|gather|multline)\*?|split|CD)$/.test(environment)))
       throw new MathParseError(`${environment} requires display math`)
+    if (spreadEnvironment && (environmentDepth !== 0 || depth !== 1))
+      throw new MathParseError(`${environment} requires a top-level display`)
     if (environment === 'CD') return commutativeDiagram()
     if (environment === 'multline' || environment === 'multline*') return multline(environment)
     if (/^equation[*]?$/.test(environment)) {
@@ -2422,7 +2426,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       tagState.label = nextTag(display && environment === 'equation')
       return xml`<mrow>${content}</mrow>`
     }
-    if (!/^(?:[pbBvV]?matrix[*]?|smallmatrix|d?rcases|d?cases|align(?:ed|edat|at[*]?|[*])?|gather(?:ed|[*])?|split|d?array|subarray)$/.test(environment))
+    if (!spreadEnvironment && !/^(?:[pbBvV]?matrix[*]?|smallmatrix|d?rcases|d?cases|align(?:ed|edat|at[*]?|[*])?|gather(?:ed|[*])?|split|d?array|subarray)$/.test(environment))
       throw new MathParseError(`Unsupported math environment: ${environment}`)
     const subarray = environment === 'subarray'
     const smallMatrix = environment === 'smallmatrix'
@@ -2431,14 +2435,14 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const matrixAlignment = alignmentTokens && expandDefinition(alignmentTokens).join('').trim()
     if (matrixAlignment !== undefined && !/^[lcr]$/.test(matrixAlignment)) throw new MathParseError('Invalid matrix alignment')
     const columns = columnArray ? expandDefinition(rawGroup()).join('') : matrixAlignment ?? ''
-    const paired = /^align(?:ed)?at[*]?$/.test(environment)
+    const paired = /^(?:align(?:ed)?|xx?align)at[*]?$/.test(environment)
     const pairCount = paired ? expandDefinition(rawGroup()).join('').replace(/\s/g, '') : ''
     const pairs = Number(pairCount)
     if (paired && (!/^\d+$/.test(pairCount) || !Number.isSafeInteger(pairs) || pairs < 1)) throw new MathParseError('Invalid alignment column count')
     const layout = arrayColumns(columns)
     if (subarray && !/^[lc]?$/.test(columns.trim())) throw new MathParseError('Invalid subarray alignment')
     const compact = subarray || smallMatrix
-    const aligned = environment.startsWith('align') || environment === 'split'
+    const aligned = spreadEnvironment || environment.startsWith('align') || environment === 'split'
     const gathered = environment.startsWith('gather')
     const cases = environment.endsWith('cases')
     const ordinaryCellStyle = environment.startsWith('d') || aligned || gathered ? 0 : 1
@@ -2446,9 +2450,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
       ? Number.parseFloat(expandDefinition(['\\arraystretch']).join('')) : 1
     if (!(stretch > 0 && stretch <= 100)) throw new MathParseError('Invalid array stretch')
     const outerTag = tagState
-    const rowTags = /^(?:align|alignat|gather)[*]?$/.test(environment)
+    const rowTags = spreadEnvironment || /^(?:align|alignat|gather)[*]?$/.test(environment)
     const allowIntertext = rowTags && display && environmentDepth === 0
-    const automatic = allowIntertext && !environment.endsWith('*')
+    const tagless = environment === 'xxalignat'
+    const automatic = allowIntertext && !tagless && !environment.endsWith('*')
     environmentDepth++
     // Embedded tables such as split and aligned share the enclosing
     // equation's tag. Only the top-level AMS row environments collect tags.
@@ -2502,6 +2507,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const spacing = allowIntertext && intertextCommands.get(separator)
       const lineBreak = Boolean(spacing) || separator === '\\\\' || separator === '\\newline' || separator === '\\cr'
       const gap = arrayRowGap(separator)
+      if (tagless && tagState.label !== undefined) throw new MathParseError('Equation tags are not allowed in xxalignat')
       const label = rowTags ? nextTag(automatic) : undefined
       if (cells.length > 1 || cells[0] || label !== undefined || rows.length === 0 || lineBreak) {
         rows.push({ cells, label, before: rules, gap })
@@ -2525,13 +2531,17 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const tags = rows.some(entry => entry.label !== undefined)
     const hasIntertext = intertexts.size > 0
     const leqno = state?.options.leqno === true
-    const displayRows = (tags || hasIntertext) && rowTags && display && depth === 1
-    const columnCount = Math.max(layout.columns.length, Number(hasIntertext), ...rows.map(entry => entry.cells.length))
+    const authoredColumns = Math.max(layout.columns.length, Number(hasIntertext), ...rows.map(entry => entry.cells.length))
+    const columnCount = spreadEnvironment ? Math.max(pairs * 2, 2 * Math.ceil(authoredColumns / 2)) : authoredColumns
+    // A single alignment pair has no intercolumn space to distribute.
+    const spread = spreadEnvironment && columnCount > 2 ? environment.startsWith('xalignat') ? 'balanced' : 'full' : ''
+    if (spread === 'full') fullWidthAlignment = true
+    const displayRows = (tags || hasIntertext || spread) && rowTags && display && depth === 1
     const grid = aligned || alignment.length > 0 || displayRows
     const rowRules = rows.reduce((count, entry) => count + entry.before.length, rules.length)
     const columnRules = layout.columns.reduce((count, column) => count + column.before.length, layout.after.length)
     const rectangular = grid || columnArray || tags || rowRules > 0
-    if (rectangular && columnCount * rows.length > 6000) throw new MathParseError('Math array has too many cells')
+    if (rectangular && columnCount * Math.max(1, rows.length) > 6000) throw new MathParseError('Math array has too many cells')
     if (rowRules * columnCount + columnRules * rows.length > 24000)
       throw new MathParseError('Math array has too many rules')
     const alignmentAt = (index: number) => aligned ? (index % 2 ? 'left' : 'right') : alignment[index] ?? alignment.at(-1) ?? (cases ? 'left' : '')
@@ -2549,8 +2559,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const amsAlignment = (aligned || environment.startsWith('gather')) ? ` data-equation-environment="${environment}"` : ''
     const rowSpacing = amsAlignment && (hasIntertext || stretch !== 1 || rows.some(row => row.gap !== undefined)) ? ' data-equation-row-spacing' : ''
     const tagPlacement = tags ? ` data-equation-tags="${leqno ? 'left' : 'right'}"` : ''
+    const spreadLayout = spread ? ` data-equation-spread="${spread}"` : ''
+    const gridTracks = spread ? `--math-pair-gaps:${columnCount / 2 - 1}` : `--math-columns:${columnCount}`
     const gridLayout = displayRows
-      ? ` style="--math-columns:${columnCount}"${tagPlacement}${options?.fleqn ? ' data-equation-flush' : ''}`
+      ? ` style="${gridTracks}"${tagPlacement}${spreadLayout}${options?.fleqn && spread !== 'full' ? ' data-equation-flush' : ''}`
       : grid ? ` style="--math-columns:${columnAlignment.length}"` : ''
     return (style) => {
       const cellStyle = compact ? 2 : ordinaryCellStyle
@@ -2567,7 +2579,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
             styling.push(`--math-cell-align:${align === 'right' ? 'end' : 'center'}`)
           if (aligned || cases || displayRows) {
             styling.push('padding-inline:0')
-            if ((aligned && !paired && index > 0 && index % 2 === 0) || (cases && index > 0))
+            if (spread) styling.push(`grid-column:${index + 2 + Math.floor(index / 2)}`)
+            else if ((aligned && !paired && index > 0 && index % 2 === 0) || (cases && index > 0))
               styling.push('padding-inline-start:1em')
           }
           if (compact) {
@@ -2747,7 +2760,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (declareMacro(token) || equationDirective(token)) return { markup: '' }
     if (token === '\\ref' || token === '\\eqref') return { markup: equationReference(token) }
     const name = token.slice(1)
-    if (intertextCommands.has(token)) throw new MathParseError(`${token} requires a top-level align, alignat, or gather display`)
+    if (intertextCommands.has(token)) throw new MathParseError(`${token} requires a top-level align, alignat, or gather display (including full-width alignments)`)
     if (name === 'begingroup') {
       let parts: RowPart[] | undefined
       const content = inScope(() => row(['\\endgroup'], false, false, value => { parts = value }))
@@ -2946,7 +2959,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   try {
     if (trailingComment) strictViolation('commentAtEnd', 'A TeX comment at the end of the formula needs a terminating newline')
     const expression = `<mrow>${renderMarkup(row([], false, true), display ? 0 : 1)}</mrow>`
-    const flush = display && state?.options.fleqn === true
+    const flush = display && !fullWidthAlignment && state?.options.fleqn === true
     const label = nextTag(false)
     const markup = label === undefined ? expression : taggedDisplay(expression, label, state?.options.leqno === true, flush)
     const layoutStyle = flush ? 'display:block;padding-inline-start:2em;text-align:start'

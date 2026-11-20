@@ -228,6 +228,55 @@ $$`)
   }
 }, 45_000)
 
+it.skipIf(!chrome)('exports AMS full-width alignments with editable columns and tags', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-flalign-'))
+  const canvas = { width: 960, height: 540 }
+  try {
+    const entry = join(root, 'slides.md')
+    await Bun.write(entry, String.raw`# Full-width calculation
+
+$$ {1|2}
+\begin{flalign}
+a&=\frac{b}{c} & d&=e\tag*{Result}\\
+f&=g & h&=k_i
+\end{flalign}
+$$`)
+    const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
+    const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
+    const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
+    if (status) throw new Error(stderr)
+    const frames: PowerPointFrame[] = []
+    await captureFrames({ root: join(root, 'dist'), executable: chrome!, scale: 1, canvas, editable: true, withClicks: true }, frame => { frames.push(frame) })
+    expect(frames).toHaveLength(2)
+    for (const [step, frame] of frames.entries()) {
+      const equation = frame.editable?.nodes.find((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math')?.equation
+      expect(equation).toBeDefined()
+      expect(equation?.cells).toHaveLength(7)
+      expect(equation?.tags).toHaveLength(2)
+      const [, firstPair, , rightPair, , nextFirst, , nextRight] = [equation!, ...equation!.cells!]
+      expect(firstPair.expression).toContain('<m:f>')
+      expect(nextRight.expression).toContain('<m:sSub>')
+      expect(firstPair.rect.x).toBeCloseTo(nextFirst.rect.x, 1)
+      expect(rightPair.rect.x).toBeCloseTo(nextRight.rect.x, 1)
+      expect(rightPair.rect.x - firstPair.rect.x).toBeGreaterThan(500)
+      const [tag, nextTag] = equation!.tags!
+      expect(tag.rect.x).toBeGreaterThan(rightPair.rect.x + rightPair.rect.w)
+      expect(tag.expression).toContain('>Result</m:t>')
+      expect(nextTag.expression).toContain('>(1)</m:t>')
+      const dim = '<a:alpha val="24000"/>'
+      expect([firstPair, rightPair, tag, nextFirst, nextRight, nextTag].map(fragment => fragment.expression.includes(dim)))
+        .toEqual([step === 1, step === 1, step === 1, step === 0, step === 0, step === 0])
+    }
+    const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Full-width calculation' }))
+    const slide = parts.get('ppt/slides/slide2.xml')?.toString() ?? ''
+    expect(slide.match(/<a14:m>/g)).toHaveLength(10)
+    expect(slide.match(/<mc:Fallback><p:sp>/g)).toHaveLength(1)
+  }
+  finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}, 45_000)
+
 it.skipIf(!chrome)('exports supported TeX as editable Office equations with picture alternatives', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-equations-'))
   const canvas = { width: 960, height: 540 }

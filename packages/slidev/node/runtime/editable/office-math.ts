@@ -44,7 +44,7 @@ const compactCellStyles = new Set([
 ])
 const centeredCellStyles = new Set(['text-align:center', '--math-cell-align:center', 'math-style:normal'])
 const caseCellStyles = new Set(['text-align:left', 'padding-inline:0', 'padding-inline-start:1em', 'math-style:normal', 'padding-block:0.125em'])
-const measuredCellSpacing = /^(?:padding-block:\d+(?:\.\d+)?em|padding-bottom:max\(0px,calc\(\d+(?:\.\d+)?em \+ [+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:em|ex|px|pt|pc|cm|mm|in)\)\))$/
+const measuredCellLayout = /^(?:grid-column:[1-9]\d*|padding-block:\d+(?:\.\d+)?em|padding-bottom:max\(0px,calc\(\d+(?:\.\d+)?em \+ [+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:em|ex|px|pt|pc|cm|mm|in)\)\))$/
 const mathTypeface = 'Cambria Math'
 const textTypefaces: Readonly<Record<string, string>> = {
   'font-family:math': mathTypeface,
@@ -310,7 +310,7 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba, 
     return leftSub || leftSup ? wrap('sPre', wrap('sub', leftSub) + wrap('sup', leftSup) + wrap('e', body)) : body
   }
   function equationArray(table: RawMathElement, environment: string): string | undefined {
-    if (!/^(?:align(?:ed|at|edat)?|gather(?:ed)?|split)[*]?$/.test(environment)
+    if (!/^(?:align(?:ed|at|edat)?|flalign|xx?alignat|gather(?:ed)?|split)[*]?$/.test(environment)
       || !only(table, 'class', 'style', 'columnalign', 'data-equation-lines', 'data-math-array', 'data-equation-environment', 'data-equation-tags', 'data-equation-flush')) return
     const aligned = !environment.startsWith('gather')
     let rows = ''
@@ -497,7 +497,7 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba, 
 
     if (name === 'mtd' && only(node, 'style')) {
       const styles = (attributes.style ?? '').split(';').filter(Boolean)
-      if (styles.every(style => alignmentCellStyles.has(style) || measuredCellSpacing.test(style))) return sequence(children)
+      if (styles.every(style => alignmentCellStyles.has(style) || measuredCellLayout.test(style))) return sequence(children)
       return
     }
     if (name === 'munder' || name === 'mover' || name === 'munderover') return underOver(node)

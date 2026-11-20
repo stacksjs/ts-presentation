@@ -784,6 +784,45 @@ e&=f\\
   expect(() => math(String.raw`\begin{align}a&=b\\\intertext\end{align}`, true)).toThrow()
 })
 
+test('parses AMS full-width alignments and applies their tag and column rules', async () => {
+  const flalign = String.raw`\begin{flalign}
+a&=b\label{first} & c&=d\\
+\intertext{Then substitute.}
+aa&=bb\notag & cc&=dd
+\end{flalign}`
+  const xalignat = String.raw`\begin{xalignat}{3}
+e&=f & g&=h\tag*{Trial}
+\end{xalignat}`
+  const xxalignat = String.raw`\begin{xxalignat}{2}i&=j & k&=l\end{xxalignat}`
+  const math = createMathRenderer({ throwOnError: true, fleqn: true, leqno: true })
+  const markup = math(flalign, true)
+  expect(markup).toContain('data-equation-spread="full" data-equation-environment="flalign"')
+  expect(markup).toContain('data-equation-tags="left"')
+  expect(markup).toContain('<mtext>(1)</mtext>')
+  expect(markup).toContain('data-equation-intertext="normal"')
+  expect(markup).not.toContain('data-equation-flush')
+  expect(markup).not.toContain('padding-inline-start:2em')
+  const balanced = math(xalignat, true)
+  expect(balanced).toContain('--math-pair-gaps:2')
+  expect(balanced).toContain('data-equation-spread="balanced" data-equation-flush')
+  expect(balanced).toContain('<mtext>Trial</mtext>')
+  expect(math(xxalignat, true)).not.toContain('math-equation-number')
+  expect(math(String.raw`\begin{flalign*}a&=b\end{flalign*}`, true)).not.toContain('data-equation-spread')
+  expect(() => math(xalignat.replace('{3}', '{1}'), true)).toThrow('Too many alignment columns')
+  expect(() => math(xxalignat.replace('{2}', '{0}'), true)).toThrow('Invalid alignment column count')
+  expect(() => math(xxalignat.replace('k&=l', String.raw`k&=l\tag{Manual}`), true)).toThrow('Equation tags are not allowed in xxalignat')
+  expect(() => math(flalign, false)).toThrow('requires display math')
+  expect(() => math(String.raw`\begin{equation}${flalign}\end{equation}`, true)).toThrow('requires a top-level display')
+
+  const source = ['# Alignment', '', String.raw`See \eqref{first}.`, '', flalign, '', xalignat, '', xxalignat, '',
+    String.raw`\begin{xalignat}{2}a&=b & c&=d\end{xalignat}`,
+  ].join('\n')
+  const deck = await renderDeck(parseDeck(source))
+  expect(deck.match(/data-equation-spread="(?:full|balanced)"/g)).toHaveLength(4)
+  expect(deck).toContain('<mtext>(2)</mtext>')
+  expect(deck).toContain('<a href="#slide-1" data-slide-link="1"><math><mrow><mtext>(1)</mtext>')
+})
+
 test('reads matrix row spacing only after adjacent double backslashes and permits an empty CD', () => {
   const math = createMathRenderer({ throwOnError: true })
   const source = String.raw`\begin{matrix}a&b\cr[c]&d\\ [e]&f\\[1ex]g&h\end{matrix}`
@@ -1473,6 +1512,57 @@ test('enforces KaTeX strict settings for comments, markup, text commands, spacin
 })
 
 const chrome = await findChrome()
+
+test.skipIf(!chrome)('distributes AMS full-width alignment gaps and reserves space for tags', async () => {
+  const equations = [
+    ['full', {}, String.raw`\begin{flalign*}a&=b & c&=d & x&=y\\aa&=z & p&=q & xx&=y\end{flalign*}`],
+    ['balanced', {}, String.raw`\begin{xalignat*}{3}a&=b & c&=d & x&=y\\aa&=z & p&=q & xx&=y\end{xalignat*}`],
+    ['left', { fleqn: true, leqno: true }, String.raw`\begin{flalign}a&=b & c&=d\tag*{Result}\\aa&=z & p&=d\end{flalign}`],
+    ['single', {}, String.raw`\begin{flalign*}a&=b\end{flalign*}`],
+  ] as const
+  const body = equations.map(([id, options, equation]) => `<section id="${id}">${createMathRenderer(options)(equation, true)}</section>`).join('')
+  const css = await Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url)).text()
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response(`<!doctype html><style>${css} section { width: 800px; font-size: 24px; }</style>${body}`, { headers: { 'Content-Type': 'text/html' } }),
+  })
+  const browser = new Bun.WebView({ width: 920, height: 640, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await browser.navigate(server.url.href)
+    const sizes = await browser.evaluate<Record<string, { columns: number[], edges: [number, number], relations: number[][], tagRight: number }>>(`(() => {
+      return Object.fromEntries([...document.querySelectorAll('section')].map(section => {
+        const table = section.querySelector('mtable');
+        const cells = [...table.firstElementChild.querySelectorAll('mtd:not(.math-equation-number) > mrow')];
+        const bounds = section.getBoundingClientRect();
+        const number = table.querySelector('.math-equation-number');
+        return [section.id, {
+          columns: getComputedStyle(table).gridTemplateColumns.split(' ').map(Number.parseFloat),
+          edges: [cells[0].getBoundingClientRect().left - bounds.left, bounds.right - cells.at(-1).getBoundingClientRect().right],
+          relations: [...table.children].map(row => [...row.querySelectorAll('mo')].map(node => node.getBoundingClientRect().left)),
+          tagRight: number ? number.getBoundingClientRect().right - bounds.left : 0,
+        }];
+      }));
+    })()`)
+    expect(sizes.full.columns).toHaveLength(10)
+    expect(sizes.full.columns[0]).toBe(0)
+    expect(sizes.full.columns.at(-1)).toBe(0)
+    expect(sizes.full.columns[3]).toBeCloseTo(sizes.full.columns[6], 1)
+    expect(sizes.full.columns[3]).toBeGreaterThan(140)
+    expect(sizes.full.edges[0]).toBeLessThan(22)
+    expect(sizes.full.edges[1]).toBeCloseTo(0, 1)
+    expect(sizes.full.relations[0]).toEqual(sizes.full.relations[1])
+    expect(sizes.balanced.columns[0]).toBeGreaterThan(100)
+    for (const column of [0, 6, 9]) expect(sizes.balanced.columns[column]).toBeCloseTo(sizes.balanced.columns[3], 1)
+    expect(sizes.balanced.relations[0]).toEqual(sizes.balanced.relations[1])
+    expect(sizes.left.edges[0]).toBeGreaterThanOrEqual(sizes.left.tagRight)
+    expect(sizes.left.edges[1]).toBeCloseTo(0, 1)
+    expect(sizes.single.edges[0]).toBeCloseTo(sizes.single.edges[1], 1)
+  }
+  finally {
+    browser.close()
+    await server.stop(true)
+  }
+}, 20_000)
 
 test.skipIf(!chrome)('preserves the horizontal advance of negative kerns in invisible boxes in Chromium', async () => {
   const comparisons = [

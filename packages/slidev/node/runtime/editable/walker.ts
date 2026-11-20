@@ -409,8 +409,8 @@ export function collectSnapshot(options: {
       const singleTag = display && table.localName === 'mtable' && table.getAttribute('class') === 'math-tagged-display'
       const ams = display && table.localName === 'mtable' && table.hasAttribute('data-equation-environment')
       const tagsAtMargin = ams && table.hasAttribute('data-equation-tags')
-      const spacedRows = ams && table.hasAttribute('data-equation-row-spacing')
-      if (!singleTag && !tagsAtMargin && !spacedRows) {
+      const positionedCells = ams && (table.hasAttribute('data-equation-row-spacing') || table.hasAttribute('data-equation-spread'))
+      if (!singleTag && !tagsAtMargin && !positionedCells) {
         const rect = relative(presentation.getBoundingClientRect())
         if (rect.w > 0 && rect.h > 0) return { expression, rect, display }
         return
@@ -430,7 +430,7 @@ export function collectSnapshot(options: {
         if (row.hasAttribute('data-equation-intertext')) {
           const paragraph = row.firstElementChild?.firstElementChild?.firstElementChild
           const content = mathRow.children[0]?.children[0]?.children[0]
-          if (!spacedRows || !paragraph || !content) return
+          if (!positionedCells || !paragraph || !content) return
           body.push(paragraph.getBoundingClientRect())
           measuredCells.push(...intertextFragments(paragraph, content, rowOpacity, scale))
           continue
@@ -457,7 +457,7 @@ export function collectSnapshot(options: {
           }
           else {
             body.push(cell.getBoundingClientRect())
-            if (!spacedRows) continue
+            if (!positionedCells) continue
             const boxes = Array.from(cell.children, child => child.getBoundingClientRect())
             const rect = mathBounds(boxes)
             if (rect) measuredCells.push(fragment(cell, cellData, rowOpacity, rect))
@@ -472,7 +472,7 @@ export function collectSnapshot(options: {
       }
       const rect = mathBounds(body)
       if (!rect) return
-      if (!spacedRows) return { expression, rect, display, tags }
+      if (!positionedCells) return { expression, rect, display, tags }
       if (measuredCells.length) return { rect, display, tags, cells: measuredCells }
     }
 

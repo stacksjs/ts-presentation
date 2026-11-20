@@ -998,6 +998,13 @@ math .math-alignment-axis > mtr > mtd { padding: 0; }
   math .math-display-grid[data-equation-flush] {
     grid-template-columns: max-content repeat(var(--math-columns), max-content) minmax(max-content, 1fr);
   }
+  math .math-display-grid[data-equation-spread] {
+    --math-spread-margin: minmax(max-content, 1fr);
+    grid-template-columns: var(--math-spread-start, var(--math-spread-margin)) max-content max-content
+      repeat(var(--math-pair-gaps), minmax(1em, 1fr) max-content max-content) var(--math-spread-margin);
+  }
+  math .math-display-grid[data-equation-spread="full"] { --math-spread-margin: max-content; }
+  math .math-display-grid[data-equation-spread][data-equation-flush] { --math-spread-start: max-content; }
   math .math-display-grid > mtr > :first-child { grid-column: 2; }
   math .math-alignment-grid > mtr[data-equation-intertext] > mtd {
     grid-column: 1 / -1;
