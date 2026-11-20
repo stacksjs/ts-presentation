@@ -337,9 +337,9 @@ test('rejects stray delimiters, undeclared environments, and nested unbraced fun
     expect(() => math(source, false)).toThrow('Unexpected math token')
   }
   expect(() => math(String.raw`\begin{unknown}x\end{unknown}`, true)).toThrow('Unsupported math environment')
-  for (const source of [String.raw`x^\sqrt x`, String.raw`\frac \left(x\right) y`, String.raw`\mathbb \mathrm R`]) {
-    expect(() => math(source, false)).toThrow('requires a grouped argument')
-  }
+  expect(() => math(String.raw`x^\sqrt x`, false)).toThrow('requires a grouped argument')
+  expect(() => math(String.raw`\frac \left(x\right) y`, false)).toThrow('Invalid delimiter')
+  expect(() => math(String.raw`\mathbb \mathrm R`, false)).toThrow('Missing math argument')
   expect(math(String.raw`x^{\sqrt y}+\frac \alpha 2`, false)).toContain('<msqrt><mi>y</mi></msqrt>')
   expect(math(String.raw`\sqrt \frac x y+x^\frac x y+e^\mathbf{x}`, false)).toContain('<msqrt><mfrac>')
   expect(renderMath('x}')).toBe('<code class="math-unrendered">x}</code>')
@@ -2504,10 +2504,41 @@ test('honors custom generalized fraction bars, delimiters, and explicit styles',
   expect(opposite).toContain('</mfrac><mo stretchy="true">‖</mo>')
   expect(formula(String.raw`\genfrac{\lvert}{q}{}{}{a}{b}`)).toContain('<mo stretchy="true">|</mo><mfrac>')
   expect(formula(String.raw`\genfrac{\mathopen{/}}{q}{}{}{a}{b}`)).not.toContain('stretchy=')
-  expect(formula(String.raw`\frac\frac12 x`)).toContain('<mfrac><mfrac><mn>1</mn><mn>2</mn></mfrac><mi>x</mi></mfrac>')
+  expect(formula(String.raw`\frac{\frac12}x`)).toContain('<mfrac><mrow><mfrac><mn>1</mn><mn>2</mn></mfrac></mrow><mi>x</mi></mfrac>')
+  expect(() => formula(String.raw`\frac\frac12 x`)).toThrow('Missing math argument')
   expect(() => formula(String.raw`a\above{50} b`)).toThrow('Invalid math dimension')
   expect(() => formula(String.raw`\genfrac{}{}{2pt}{9}ab`)).toThrow('Invalid fraction style')
   expect(() => formula(String.raw`\genfrac{}{}{}{}{n}`)).toThrow('Missing math argument')
+})
+
+test('isolates ordinary TeX arguments while preserving primitive roots and scripts', () => {
+  const math = createMathRenderer({
+    throwOnError: true,
+    macros: {
+      '\\empty': ' ',
+      '\\pair': 'ab',
+      '\\inner': String.raw`\frac{1}{2}+z`,
+      '\\branch': String.raw`\mathchoice{D}{T}{ab}{Q}`,
+      '\\boldarg': String.raw`\mathbf{#1}`,
+      '\\local': String.raw`\def\temporary{t}\temporary`,
+    },
+  })
+  const render = (source: string, display = false) => math(source, display).split('<annotation')[0]
+  expect(render(String.raw`\frac\empty\empty`)).toContain('<mfrac><mrow></mrow><mrow></mrow></mfrac>')
+  expect(render(String.raw`\frac\relax y`)).toContain('<mfrac><mrow></mrow><mi>y</mi></mfrac>')
+  expect(render(String.raw`\frac\pair x`)).toContain('<mfrac><mrow><mi>a</mi><mi>b</mi></mrow><mi>x</mi></mfrac>')
+  expect(render(String.raw`\frac\inner 2`)).toBe(render(String.raw`\frac{\frac{1}{2}+z}2`))
+  expect(render(String.raw`\frac{\boldarg{ab}}q`)).toContain('<mi>q</mi></mfrac>')
+  expect(() => render(String.raw`\frac\boldarg{ab}q`)).toThrow('Missing math argument')
+  expect(render(String.raw`\frac\branch x`)).toBe(render(String.raw`\frac{ab}x`))
+  expect(render(String.raw`\sqrt\pair x`)).toContain('<msqrt><mi>a</mi></msqrt><mi>b</mi><mi>x</mi>')
+  expect(render(String.raw`x^\pair`)).toContain('<msup><mi>x</mi><mi>a</mi></msup><mi>b</mi>')
+  expect(render(String.raw`\sqrt[3]\pair x`)).toContain('<mroot><mrow><mi>a</mi><mi>b</mi></mrow><mrow><mn>3</mn></mrow></mroot><mi>x</mi>')
+  expect(render(String.raw`\sqrt[]x`)).toContain('<mroot><mi>x</mi><mrow></mrow></mroot>')
+  expect(render(String.raw`\mathchoice\pair T S Qx`, true)).toContain('<mi>a</mi><mi>b</mi><mi>x</mi>')
+  expect(render(String.raw`\textcolor{red}\pair x`)).toContain('<mi>a</mi><mi>b</mi></mrow></mrow><mi>x</mi>')
+  expect(render(String.raw`\frac\local x`)).toContain('<mfrac><mrow><mi>t</mi></mrow><mi>x</mi></mfrac>')
+  expect(() => render(String.raw`\temporary`)).toThrow('Unsupported math command')
 })
 
 test('resolves math choice and limit placement once the fraction style is known', () => {

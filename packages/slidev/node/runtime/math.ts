@@ -967,7 +967,7 @@ function fractionMarkup(first: Markup, second: Markup, layout: FractionLayout): 
 export function renderMath(source: string, display = false, configured: MathMacros = {}, state?: MathState, numberMarkup?: EquationNumberMarkup): string {
   let trailingComment = false
   const recordComment = () => { trailingComment = true }
-  const tokens = tokenize(source, recordComment)
+  let tokens = tokenize(source, recordComment)
   if (tokens.length > 6000) return `<code>${escapeHtml(source)}</code>`
   const options = state?.options
   const limit = options?.maxExpand
@@ -978,6 +978,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   const minRule = Number.isFinite(configuredRule) ? Math.max(0, configuredRule) : 0
   const dimension = (value: string) => mathDimension(value, maxSize)
   let cursor = 0
+  let remainingOuterTokens = 0
   let depth = 0
   let expandedCount = 0
   let mode: MathMode = 'math'
@@ -1093,7 +1094,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   }
 
   function replaceExpansion(start: number, body: string[]): number {
-    if (tokens.length - (cursor - start) + body.length > 12000) throw new Error('Expanded equation is too long')
+    if (remainingOuterTokens + tokens.length - (cursor - start) + body.length > 12000) throw new Error('Expanded equation is too long')
     tokens.splice(start, cursor - start, ...body)
     cursor = start
     return body.length
@@ -1278,14 +1279,19 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return delimitedArgument([']'])
   }
 
-  function withTokens<T>(body: string[], read: () => T, begin = cursor): T {
-    tokens.splice(begin, cursor - begin, ...body, boundary)
-    cursor = begin
+  function withTokens<T>(body: string[], read: () => T): T {
+    // Expand a local argument without shifting the rest of the formula.
+    const outer = tokens
+    const resume = cursor
+    const remaining = outer.length - resume
+    remainingOuterTokens += remaining
+    tokens = [...body, boundary]
+    cursor = 0
     try { return read() }
     finally {
-      const end = tokens.indexOf(boundary, begin)
-      tokens.splice(begin, end - begin + 1)
-      cursor = begin
+      tokens = outer
+      cursor = resume
+      remainingOuterTokens -= remaining
     }
   }
 
@@ -1358,7 +1364,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
     const pushTokens = (stack: readonly MathMacroToken[]): void => {
       const body = readStack(stack)
-      if (tokens.length + body.length > 12000) throw new Error('Expanded equation is too long')
+      if (remainingOuterTokens + tokens.length + body.length > 12000) throw new Error('Expanded equation is too long')
       tokens.splice(cursor, 0, ...body)
     }
     const consumeArg = (delimiters?: readonly string[] | null): MathMacroArgument => {
@@ -1453,7 +1459,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     finally { tagState = previous }
   }
 
-  function argumentAtom(classify = false, primitive = false): Atom {
+  function argumentAtom(primitive = false): Atom {
     if (depth++ > 100) throw new Error('Math arguments are nested too deeply')
     const token = take()
     if (!token || token === '}' || token === boundary || token === '^' || token === '_' || macroDeclaration.test(token))
@@ -1464,20 +1470,20 @@ export function renderMath(source: string, display = false, configured: MathMacr
       if (groupedArgumentFunctions.has(name) || (!primitive && primitiveArgumentFunctions.has(name)))
         throw new Error(`Math command ${token} requires a grouped argument`)
     }
-    const result = atom(token, classify)
+    const result = atom(token)
     depth--
-    if (classify) result.mathClass = rowClass({ ...result, token })
     return result
   }
 
   function binRelArgument(): Atom & { mathClass: MathClass } {
-    const result = argumentAtom(true)
-    const mathClass = result.mathClass === 'bin' || result.mathClass === 'rel' ? result.mathClass : 'ord'
-    return { ...result, mathClass }
+    const { markup, parts } = fragmentArgument()
+    const first = parts.find(part => part.markup !== '')
+    const category = first && rowClass(first)
+    return { markup, mathClass: category === 'bin' || category === 'rel' ? category : 'ord' }
   }
 
   function argument(primitive = false): Markup {
-    return argumentAtom(false, primitive).markup
+    return primitive ? argumentAtom(true).markup : fragmentArgument().markup
   }
 
   function scriptArgument(): Markup {
@@ -1485,18 +1491,17 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return argument(true)
   }
 
-  function fragmentArgument(): { markup: Markup, parts: RowPart[] } {
-    const token = peek()
-    if (token !== '{' && token !== '\\begingroup') {
-      const part = argumentAtom(true)
-      return { markup: part.markup, parts: [{ ...part, token }] }
-    }
-    take()
-    const close = token === '{' ? '}' : '\\endgroup'
+  function fragmentArgument(missing?: string): { markup: Markup, parts: RowPart[] } {
+    space()
+    const grouped = tokenText(tokens[cursor] ?? '') === '{'
+    const body = rawGroup(missing)
     let parts: RowPart[] | undefined
-    const content = inScope(() => row([close], false, false, value => { parts = value }))
-    if (take() !== close) throw new Error('Unclosed math group')
-    return { markup: xml`<mrow>${content}</mrow>`, parts: parts ?? [{ markup: content }] }
+    // Fully expand an ordinary argument inside its own group. A single raw
+    // macro token can produce several atoms, but cannot consume the next argument.
+    const content = withTokens(body, () => inScope(() => row([boundary], false, false, value => { parts = value })))
+    const single = parts?.length === 1 && !parts[0].fragment
+    const markup = grouped || !single ? xml`<mrow>${content}</mrow>` : content
+    return { markup, parts: parts ?? [{ markup: content }] }
   }
 
   function bracket(): string | undefined {
@@ -1742,13 +1747,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const properties = reset ? textFontCSS({ ...normalFont, ...textFont }) : declaration ? textFontCSS(declaration) : ''
     try {
       space()
-      const start = cursor
       const word = controlWord.test(tokens[cursor] ?? '')
       const body = rawGroup('Missing math text argument')
       if (word) space()
       // Scan the argument before expansion so a token's whole expansion
       // stays in text mode and stops at the boundary of this argument.
-      const content = inMode('text', () => withTokens(body, () => parseTextArgument(properties, parentheses, capture), start))
+      const content = inMode('text', () => withTokens(body, () => parseTextArgument(properties, parentheses, capture)))
       if (name !== 'hbox') return content
       const sized = renderMarkup(content, 1)
       return style => style === 1 ? sized : mathSize(1, sized)
@@ -1972,12 +1976,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
   }
 
   function fraction(layout: FractionLayout): Markup {
-    return fractionMarkup(argument(true), argument(true), { ...layout, thickness: fractionRule(layout.thickness, minRule) })
+    return fractionMarkup(argument(), argument(), { ...layout, thickness: fractionRule(layout.thickness, minRule) })
   }
 
   function fractionDelimiter(side: 'open' | 'close'): string {
-    const { markup, mathClass } = argumentAtom(true, true)
-    if (mathClass !== side || typeof markup !== 'string') return ''
+    const { markup, parts } = fragmentArgument()
+    if (parts.length !== 1 || rowClass(parts[0]) !== side || typeof markup !== 'string') return ''
     const glyph = /^(?:<mrow>)*<mo stretchy="false">([^<]+)<\/mo>(?:<\/mrow>)*$/.exec(markup)?.[1]
     if (!glyph) return ''
     const value = unescapeHtml(glyph)
@@ -2535,18 +2539,11 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return false
   }
 
-  function atom(token: string, classifyGroup = false): Atom {
+  function atom(token: string): Atom {
     if (token === '{') {
-      let mathClass: MathClass | undefined
-      const captureClass = classifyGroup
-        ? (parts: RowPart[]) => {
-            const first = parts.find(part => part.markup !== '')
-            mathClass = first && rowClass(first)
-          }
-        : undefined
-      const content = inScope(() => row(['}'], false, false, captureClass))
+      const content = inScope(() => row(['}']))
       if (take() !== '}') throw new Error('Unclosed math group')
-      return { markup: xml`<mrow>${content}</mrow>`, mathClass }
+      return { markup: xml`<mrow>${content}</mrow>` }
     }
     if (!token.startsWith('\\')) {
       if (/^(?:[}&#$]|#[1-9])$/.test(token)) throw new Error(`Unexpected math token: ${token}`)
@@ -2597,11 +2594,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       return classifiedAtom(mathClass, argument())
     }
     if (name === 'mathchoice') {
-      const choices = Array.from({ length: 4 }, () => {
-        const next = peek()
-        if (!next || next === '}') throw new Error('Missing math choice')
-        return fragmentArgument()
-      })
+      const choices = Array.from({ length: 4 }, () => fragmentArgument('Missing math choice'))
       return {
         markup: style => renderMarkup(choices[style].markup, style),
         fragment: style => choices[style].parts,
@@ -2682,15 +2675,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
       return { markup: xml`<mmultiscripts>${argument()}<mprescripts/>${lower}${upper}</mmultiscripts>` }
     }
     if (name === 'sqrt') {
-      let degree = ''
-      const indexed = peek() === '['
-      if (indexed) {
-        take()
-        degree = renderMarkup(inScope(() => row([']'])), 3)
-        if (take() !== ']') throw new Error('Unclosed root index')
-      }
-      const base = argument(!indexed)
-      return { markup: degree ? xml`<mroot>${base}<mrow>${degree}</mrow></mroot>` : xml`<msqrt>${base}</msqrt>` }
+      const index = rawBracket()
+      if (index === undefined) return { markup: xml`<msqrt>${argument(true)}</msqrt>` }
+      const degree = withTokens(index, () => renderMarkup(inScope(() => row([boundary])), 3))
+      return { markup: xml`<mroot>${argument()}<mrow>${degree}</mrow></mroot>` }
     }
     if (Object.hasOwn(textFonts, name)) return { markup: textArgument(name) }
     if (typesettingNames.has(name)) return { markup: typesettingName(name) }
