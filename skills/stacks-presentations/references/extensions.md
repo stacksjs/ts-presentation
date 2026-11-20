@@ -73,6 +73,39 @@ the route, and a static build writes `handbook/guide/index.html`. Both
 honor `--base` and use ordinary browser navigation between the deck and
 the custom page. Use fixed paths with lowercase segments and hyphens.
 
+## Context menu
+
+Right-click the slide or press Shift+F10 with the slide focused. Use the
+arrow keys to move through actions, Enter or Space to run one, and Escape
+to close the menu and return focus. Shift+right-click opens the browser menu.
+
+Add `setup/context-menu.ts` to a deck, theme, or addon. Setups run in the
+browser in theme, addon, then deck order each time the menu opens.
+
+```ts
+import { defineContextMenuSetup } from 'ts-presentation'
+
+export default defineContextMenuSetup((items, { navigation, isPresenter }) => [
+  ...items.filter(item => item === 'separator' || item.name !== 'fullscreen'),
+  'separator',
+  {
+    name: 'go-to-summary',
+    label: 'Go to summary',
+    disabled: isPresenter,
+    action: () => navigation.go('summary'),
+  },
+])
+```
+
+Use text for `label` and the optional `icon`. Set `small: true` to show
+only the icon while keeping the label available to assistive technology.
+Use `show: false` to hide an action. The setup context also provides
+`target` and `isFullscreen`.
+
+`contextMenu: false` disables the menu. Set it to `dev` or `build` to
+limit it to one mode. Inputs and editable text keep their browser menu.
+Add `data-presentation-context-menu="ignore"` to preserve it on a region.
+
 ## STX components
 
 Save `Callout.stx` to `components/` or a subdirectory in the deck,

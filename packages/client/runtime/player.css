@@ -248,6 +248,41 @@ button, select { font: inherit; }
 #controls button:enabled { cursor: pointer; }
 #controls button:disabled { opacity: 0.4; }
 
+#presentation-context-menu {
+  position: fixed;
+  z-index: 60;
+  display: grid;
+  min-width: min(14rem, calc(100vw - 16px));
+  max-width: min(20rem, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+  padding: 0.25rem;
+  background: #1b2028;
+  color: #fbfaf8;
+  border: 1px solid #49515e;
+  border-radius: 0.55rem;
+  box-shadow: 0 0.5rem 1.75rem #0008;
+}
+#presentation-context-menu button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.4rem 0.65rem;
+  border: 0;
+  border-radius: 0.3rem;
+  background: transparent;
+  color: inherit;
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+  text-align: start;
+}
+#presentation-context-menu button:is(:hover, :focus-visible) { background: #36465b; }
+#presentation-context-menu button:focus-visible { outline: 2px solid #aacdfa; outline-offset: -2px; }
+#presentation-context-menu button:not([aria-disabled="true"]) { cursor: pointer; }
+#presentation-context-menu button[aria-disabled="true"] { color: #aeb6c2; }
+#presentation-context-menu [role="separator"] { border-top: 1px solid #49515e; margin: 0.2rem 0.45rem; }
+
 .playing.presenting {
   --presenter-width: 360px;
   --presenter-height: 280px;

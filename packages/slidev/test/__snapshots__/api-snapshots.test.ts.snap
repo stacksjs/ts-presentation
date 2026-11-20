@@ -1348,6 +1348,27 @@ export interface ResolvedExportOptions extends Omit<ExportArgs, 'entry' | 'theme
     withToc?: boolean;
 }
 
+// packages/types/src/context-menu.d.ts
+import type { PresentationNavigation } from '../../client/runtime/navigation.ts';
+export interface ContextMenuAction {
+    name?: string;
+    label: string;
+    action: () => void | Promise<void>;
+    disabled?: boolean;
+    show?: boolean;
+    icon?: string;
+    small?: boolean;
+}
+export type ContextMenuItem = ContextMenuAction | 'separator';
+export interface ContextMenuContext {
+    readonly navigation: PresentationNavigation;
+    readonly target: Element;
+    readonly isPresenter: boolean;
+    readonly isFullscreen: boolean;
+}
+export type ContextMenuSetup = (items: ContextMenuItem[], context: ContextMenuContext) => readonly ContextMenuItem[] | void;
+export declare function defineContextMenuSetup(setup: ContextMenuSetup): ContextMenuSetup;
+
 // packages/types/src/drawings.d.ts
 export interface DrawingOptions {
     enabled?: boolean | 'dev' | 'build';
@@ -2041,6 +2062,8 @@ export type { CodeRunner, CodeRunnerContext, CodeRunnerOutput, CodeRunnerOutputD
 export * from './transform.ts';
 export { defineRoutesSetup } from './routes.ts';
 export type { PresentationRoute, RoutesSetup } from './routes.ts';
+export { defineContextMenuSetup } from './context-menu.ts';
+export type { ContextMenuAction, ContextMenuContext, ContextMenuItem, ContextMenuSetup } from './context-menu.ts';
 
 // packages/types/src/routes.d.ts
 export interface PresentationRoute {

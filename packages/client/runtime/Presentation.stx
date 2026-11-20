@@ -94,5 +94,6 @@
     <form method="dialog"><button aria-label="Close screenshot">Close</button></form>
     <img alt="">
   </dialog>
+  {!! contextMenu !!}
 </body>
 </html>

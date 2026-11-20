@@ -1,20 +1,24 @@
-import type { Component } from 'vue'
+import type { PresentationNavigation } from '../../client/runtime/navigation.ts'
 
-type ContextMenuOption = {
-  action: () => void
+export interface ContextMenuAction {
+  name?: string
+  label: string
+  action: () => void | Promise<void>
   disabled?: boolean
   show?: boolean
-} & (
-  | {
-    small?: false
-    icon?: Component | string
-    label: string | Component
-  }
-  | {
-    small: true
-    icon: Component | string
-    label: string
-  }
-  )
+  icon?: string
+  small?: boolean
+}
 
-export type ContextMenuItem = ContextMenuOption | 'separator'
+export type ContextMenuItem = ContextMenuAction | 'separator'
+
+export interface ContextMenuContext {
+  readonly navigation: PresentationNavigation
+  readonly target: Element
+  readonly isPresenter: boolean
+  readonly isFullscreen: boolean
+}
+
+export type ContextMenuSetup = (items: ContextMenuItem[], context: ContextMenuContext) => readonly ContextMenuItem[] | void
+
+export function defineContextMenuSetup(setup: ContextMenuSetup): ContextMenuSetup { return setup }

@@ -3,6 +3,7 @@ import { createAutoFitText } from './auto-fit-text.ts'
 import { setupCodeCopy, setupCodeTabs } from './code-controls.ts'
 import { setupCodeDiffs } from './code-diff.ts'
 import { createSlideConditions } from './conditions.ts'
+import { mountContextMenu } from './context-menu.ts'
 import { setupDiagramActions } from './diagram-actions.ts'
 import type { LiveDeck } from '../../types/src/dev-protocol.ts'
 import type { LiveManifest } from './dev-updates.ts'
@@ -39,6 +40,7 @@ const previous = control.querySelector<HTMLButtonElement>('#previous')!
 const next = control.querySelector<HTMLButtonElement>('#next')!
 const presenter = control.querySelector<HTMLButtonElement>('#presenter')!
 const fullscreen = control.querySelector<HTMLButtonElement>('#fullscreen')!
+const drawButton = control.querySelector<HTMLButtonElement>('#draw-button')!
 const overview = document.querySelector<HTMLDialogElement>('#overview')!
 const overviewFrame = overview.querySelector('iframe')!
 const overviewLink = overview.querySelector<HTMLAnchorElement>('#overview-page-link')!
@@ -339,6 +341,12 @@ function openPresenter(): void {
   if (!popup) togglePresenter()
 }
 
+function exitPresenter(): void {
+  if (!isPresenter) togglePresenter()
+  else if (opener) window.close()
+  else location.assign(audienceUrl(routes[current - 1], click).href)
+}
+
 function sendOverviewPosition(): void {
   if (overview.open) overviewFrame.contentWindow?.postMessage({ presentationPreview: position() }, messageOrigin)
 }
@@ -431,7 +439,7 @@ const drawing = !isCapture && !isOverview && drawingConfig.enabled ? setupDrawin
   stage,
   articles,
   canvas: { width: canvasWidth, height: canvasHeight },
-  button: control.querySelector<HTMLButtonElement>('#draw-button')!,
+  button: drawButton,
   clearButton: control.querySelector<HTMLButtonElement>('#clear-drawing')!,
   status: control.querySelector<HTMLElement>('#drawing-status')!,
   preview: isPreview,
@@ -719,7 +727,34 @@ if (!isCapture && !isPreview && !isEntry) {
     { name: 'clear_drawing', key: ['c', 'Shift+c'], fn: () => drawing?.clear() ?? false },
   ]
   for (const setup of window.presentationShortcutSetups ?? []) shortcuts = setup(nav, shortcuts)
-  registerShortcuts(shortcuts, () => !overview.open && !imageView.open)
+  const menu = window.parent === window ? document.querySelector<HTMLElement>('#presentation-context-menu') : null
+  const available = () => !overview.open && !imageView.open
+  if (menu) {
+    mountContextMenu({
+      stage, menu, available,
+      context: target => ({ target, navigation, isPresenter: slideMode() === 'presenter', isFullscreen: Boolean(document.fullscreenElement) }),
+      defaults() {
+        const presenting = slideMode() === 'presenter'
+        const editor = document.querySelector('#edit-slide')
+        return [
+          { name: 'previous-step', label: 'Previous step', action: nav.prev, disabled: previous.disabled },
+          { name: 'next-step', label: 'Next step', action: nav.next, disabled: next.disabled },
+          { name: 'previous-slide', label: 'Previous slide', action: nav.prevSlide, disabled: current <= 1 },
+          { name: 'next-slide', label: 'Next slide', action: nav.nextSlide, disabled: current >= articles.length },
+          'separator',
+          { name: 'editor', label: editor?.getAttribute('aria-expanded') === 'true' ? 'Hide editor' : 'Show editor',
+            action: () => sideEditor?.toggle(), show: Boolean(sideEditor) && !presenting },
+          { name: 'drawing', label: drawButton.getAttribute('aria-pressed') === 'true' ? 'Hide drawing toolbar' : 'Show drawing toolbar',
+            action: nav.toggleDrawing, show: !drawButton.hidden },
+          { name: 'overview', label: 'Show slide overview', action: openOverview },
+          { name: 'presenter', label: presenting ? 'Exit presenter view' : 'Open presenter view', action: presenting ? exitPresenter : openPresenter },
+          { name: 'fullscreen', label: document.fullscreenElement ? 'Exit fullscreen' : 'Enter fullscreen',
+            action: toggleFullscreen, show: Boolean(document.fullscreenElement || document.fullscreenEnabled) },
+        ]
+      },
+    })
+  }
+  registerShortcuts(shortcuts, () => available() && menu?.hidden !== false)
 }
 
 const recordButton = control.querySelector<HTMLButtonElement>('#record-button')!

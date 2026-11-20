@@ -52,6 +52,8 @@ export type { DrawingOptions } from '../../../types/src/drawings.ts'
 export * from '../../../types/src/transform.ts'
 export { defineRoutesSetup } from '../../../types/src/routes.ts'
 export type { PresentationRoute, RoutesSetup } from '../../../types/src/routes.ts'
+export { defineContextMenuSetup } from '../../../types/src/context-menu.ts'
+export type { ContextMenuAction, ContextMenuContext, ContextMenuItem, ContextMenuSetup } from '../../../types/src/context-menu.ts'
 
 export { definePreparserSetup, extractImagesUsage, parseDeck, parseDeckAsync } from '../../../parser/src/deck.ts'
 export type { Deck, PreparserContext, PreparserExtension, PreparserSetup, Slide } from '../../../parser/src/deck.ts'
@@ -107,6 +109,9 @@ export async function renderDeck(deck: Deck, options?: RenderOptions): Promise<s
 
 export async function renderPresentation(deck: Deck, options: RenderOptions = {}): Promise<{ html: string, routes: SlideRoute[], routing: Routing, live?: LiveDeck }> {
   const nested = deck.headmatter?.config as Record<string, unknown> | undefined
+  const mode = options.mode ?? (options.liveCompile ? 'dev' : 'build')
+  const menuSetting = deck.headmatter?.contextMenu ?? nested?.contextMenu
+  const contextMenu = mode !== 'export' && (menuSetting == null || menuSetting === true || menuSetting === mode)
   const routing: Routing = options.mode === 'export' ? { base: '/', mode: 'legacy' } : {
     base: normalizeBasePath(options.base),
     mode: resolveRouterMode(options.routerMode ?? deck.headmatter?.routerMode ?? nested?.routerMode),
@@ -116,7 +121,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   const { width, height } = resolveCanvas(deck.headmatter)
   const drawSettings = resolveDrawings(deck.headmatter, options.extensions?.theme.defaults?.drawings)
   const drawings: DrawingClientConfig = {
-    enabled: drawingEnabled(drawSettings, options.mode ?? (options.liveCompile ? 'dev' : 'build')),
+    enabled: drawingEnabled(drawSettings, mode),
     presenterOnly: drawSettings.presenterOnly,
     syncAll: drawSettings.syncAll,
     persist: options.saveDrawings === true,
@@ -409,7 +414,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   if (options.liveCompile) {
     const drawingOptions = [drawings.enabled, drawings.presenterOnly, drawings.syncAll, drawings.persist]
     const theme = extensions?.theme.name
-    const frame = snippetRevision(JSON.stringify([routing, width, height, clicksPreset, drawingOptions, theme, colorSchema, codeTheme, fontMarkup, mcpNavigation, extensions?.styles, extensions?.client, globalTop, globalBottom, customControls, reactiveSlides]))
+    const frame = snippetRevision(JSON.stringify([routing, width, height, clicksPreset, drawingOptions, contextMenu, theme, colorSchema, codeTheme, fontMarkup, mcpNavigation, extensions?.styles, extensions?.client, globalTop, globalBottom, customControls, reactiveSlides]))
     const parts = slides.map((slide, index) => {
       const source = options.sourceBindings?.get(activeSlides[index])
       const part = { ...slide, notes: notes[index], route: routes[index], sourceToken: source?.token }
@@ -445,6 +450,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     slideMarkup: slides.map(slide => slide.html).join('\n'),
     globalBottom,
     customControls,
+    contextMenu: contextMenu ? '<div id="presentation-context-menu" role="menu" aria-label="Presentation actions" hidden></div>' : '',
     editorPanel: options.liveCompile ? sideEditor : '',
     notesMarkup: notes.join('\n'),
     slideChoices: choices.join(''),

@@ -13,3 +13,5 @@ export type { CodeRunner, CodeRunnerContext, CodeRunnerOutput, CodeRunnerOutputD
 export * from './transform.ts'
 export { defineRoutesSetup } from './routes.ts'
 export type { PresentationRoute, RoutesSetup } from './routes.ts'
+export { defineContextMenuSetup } from './context-menu.ts'
+export type { ContextMenuAction, ContextMenuContext, ContextMenuItem, ContextMenuSetup } from './context-menu.ts'

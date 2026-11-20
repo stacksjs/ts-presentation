@@ -34,8 +34,8 @@ export async function loadBrowserSetups(
   observe: ObserveDeckFile,
   observeOptional: (path: string) => Promise<string | undefined>,
 ): Promise<string> {
-  const kinds = ['shortcuts', 'code-runners'] as const
-  const setups: Record<typeof kinds[number], string[]> = { shortcuts: [], 'code-runners': [] }
+  const kinds = ['shortcuts', 'code-runners', 'context-menu'] as const
+  const setups: Record<typeof kinds[number], string[]> = { shortcuts: [], 'code-runners': [], 'context-menu': [] }
   for (const directory of new Set([...extensions.filter(directory => directory !== root), root])) {
     for (const kind of kinds) {
       const path = join(directory, 'setup', `${kind}.ts`)
@@ -59,6 +59,10 @@ export async function loadBrowserSetups(
   if (setups.shortcuts.length) {
     const shortcuts = importSetups('shortcuts', 'shortcut')
     contents.push(`window.presentationShortcutSetups = ${shortcuts};`)
+  }
+  if (setups['context-menu'].length) {
+    const menus = importSetups('context-menu', 'menu')
+    contents.push(`window.presentationContextMenuSetups = ${menus};`)
   }
   if (setups['code-runners'].length) {
     const runners = importSetups('code-runners', 'runner')

@@ -18,6 +18,7 @@ in a new ts-presentation project.
 | Subpath hosting | `--base` for build and dev, history and hash navigation, direct presenter links, and deck-relative assets |
 | Custom pages | `setup/routes.ts` registers fixed paths for interactive STX pages in dev and static builds. Pages use document navigation |
 | Custom shortcuts | Browser-side `setup/shortcuts.ts` with named defaults, string key combinations, repeat control, and navigation actions |
+| Context menu | Browser-side `setup/context-menu.ts` with named actions, slide and presenter context, keyboard operation, and mode-specific frontmatter |
 | Monaco editor and runner | Local editor and timed browser-worker runner. Bun compiles TypeScript edits in dev and can save opted-in snippets |
 | Runner imports | Bun bundles local JavaScript, TypeScript, and JSON imports from authored examples. Dev edits can reuse those paths or list additional local modules in `monacoRunAdditionalDeps` |
 | Custom code runners | Browser-side `setup/code-runners.ts` for decks, themes, and addons, with fence options, chained runners, cancellation, and text, HTML, or DOM results |
