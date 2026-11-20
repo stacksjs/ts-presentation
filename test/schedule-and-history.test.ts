@@ -481,6 +481,33 @@ test('dispatches gitGraph when its header and first commit share a line', () => 
   expect(svg).toContain('data-parent-ids="first; draft"')
 })
 
+test('preserves GitGraph declaration order for default orders and explicit ties', () => {
+  const names = Array.from({ length: 40 }, (_, index) => `branch-${index + 1}`)
+  const source = ['gitGraph', 'branch first order:-2', 'branch tied order:0',
+    ...names.map(name => `branch ${name}`), 'branch last order:5'].join('\n')
+  expect(buildGitHistory(source)?.branches.map(branch => branch.name)).toEqual(['first', 'main', 'tied', ...names, 'last'])
+  expect(buildGitHistory(source, { mainBranchOrder: 1.5 })?.branches.map(branch => branch.name)).toEqual(['first', 'tied', ...names, 'main', 'last'])
+  const svg = mermaid(source, 'ordered', { theme: 'forest' })!
+  expect(svg).toContain('data-git-branch-index="2"><title>tied</title>')
+  expect(svg).toContain('data-git-branch-index="12"><title>branch-10</title>')
+  expect(svg).toContain('data-git-branch-index="43"><title>last</title>')
+})
+
+test('renders literal quotes in imported GitGraph labels through the deck compiler', async () => {
+  const graph = String.raw`gitGraph TB:
+commit id:"\"Release\"" tag:"\"Ready\""
+branch "\"Support\""
+commit id:"\"Patch\""
+checkout main
+cherry-pick id:"\"Patch\"" parent:""`
+  const html = await renderDeck(parseDeck(['# Release', '', '~~~mermaid', graph, '~~~'].join('\n')))
+  expect(html).toContain('data-commit-id="&quot;Release&quot;"')
+  expect(html).toContain('data-picked-id="&quot;Patch&quot;"')
+  expect(html).not.toContain('data-picked-parent=')
+  for (const label of ['Release', 'Ready', 'Support', 'Patch'])
+    expect(html).toContain(`>&quot;${label}&quot;</tspan>`)
+})
+
 test('imports GitGraph branch-only diagrams and warns while retaining repeated commit IDs', () => {
   const svg = mermaid('gitGraph\nbranch review\nswitch review', 'empty-history')
   expect(svg).toContain('>review</tspan>')
@@ -1628,7 +1655,7 @@ test.skipIf(!chrome)('applies scoped indexed CSS to imported Gantt and GitGraph 
     '    .commit-highlight2 { fill: #ab33aa; }', '    .branch2 { stroke: #449966; }',
     '    .branch-label1 { fill: #567812; }', '    .label2 { fill: #aaaaaa; }',
     '    .arrow2 { stroke: #135724; }',
-    '---', 'gitGraph', 'commit id:"root"', 'branch review', 'commit id:"audit" type:HIGHLIGHT',
+    '---', 'gitGraph', 'commit id:"root"', 'branch review order:1', 'commit id:"audit" type:HIGHLIGHT',
     'checkout main', 'branch priority order:0', 'commit id:"urgent"', 'checkout main', 'merge review id:"approved"',
   ].join('\n')
   const html = await renderDeck(parseDeck([

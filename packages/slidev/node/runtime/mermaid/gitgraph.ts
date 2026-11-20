@@ -110,7 +110,7 @@ function parseGitHistory(source: string, config: Record<string, unknown>): GitGr
       const attrs = fields(fieldsForLine.slice(1), ['id', 'parent', 'tag'])
       const commit = attrs?.get('id')?.[0]
       if (!commit) return
-      operations.push({ op, commit, parent: attrs?.get('parent')?.[0], tags: attrs?.get('tag') })
+      operations.push({ op, commit, parent: attrs?.get('parent')?.[0] || undefined, tags: attrs?.get('tag') })
       continue
     }
     if (op === 'commit' || op === 'merge') {
@@ -128,16 +128,7 @@ function parseGitHistory(source: string, config: Record<string, unknown>): GitGr
     }
     return
   }
-  // Imported diagrams give undeclared orders fractional positions based on
-  // declaration order. Pass integer ranks to the native renderer.
   const mainOrder = typeof config.mainBranchOrder === 'number' && Number.isFinite(config.mainBranchOrder) ? config.mainBranchOrder : 0
-  const branches = operations.filter(operation => operation.op === 'branch')
-  const ordered = [{ branch: undefined, order: mainOrder }, ...branches.map((branch, index) => ({
-    branch, order: branch.order ?? Number(`0.${index + 1}`),
-  }))].sort((a, b) => a.order - b.order)
-  for (const [index, { branch }] of ordered.entries()) {
-    if (branch) branch.order = index
-  }
   return {
     operations, title: chart.title, accessibleTitle: chart.accessibleTitle, description: chart.description,
     direction: header[1] as GitGraphDirection | undefined,
@@ -145,7 +136,7 @@ function parseGitHistory(source: string, config: Record<string, unknown>): GitGr
     cherryPickSourceParent: true,
     allowMergeFromInheritedHead: false,
     mainBranchName: typeof config.mainBranchName === 'string' ? config.mainBranchName : undefined,
-    mainBranchOrder: ordered.findIndex(({ branch }) => !branch),
+    mainBranchOrder: mainOrder,
     titleTopMargin: diagramPixels(config.titleTopMargin),
     diagramPadding: diagramPixels(config.diagramPadding),
     parallelCommits: Boolean(config.parallelCommits), showBranches: config.showBranches !== false, showCommitLabel: config.showCommitLabel !== false,
