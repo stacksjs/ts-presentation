@@ -120,6 +120,62 @@ test('reads multi-digit and expanded argument counts in macro declarations', () 
   expect(() => math(String.raw`\newcommand\foo[900000000]{x}`, false)).toThrow('Invalid macro argument count')
 })
 
+// Parser diagnostics adapted from the KaTeX v0.19.1 test suite (MIT).
+test('checks macro declaration intent against local, built-in, and configured commands', () => {
+  const math = createMathRenderer({ macros: { '\\deckTerm': 'Q' }, throwOnError: true })
+  expect(math(String.raw`\newcommand\term{A}{\renewcommand\term{B}\term}\providecommand\term{C}\term`, false))
+    .toContain('<mrow><mi>B</mi></mrow><mi>A</mi>')
+  expect(math(String.raw`\providecommand\lambda{X}\lambda\renewcommand\deckTerm{R}\deckTerm`, false))
+    .toContain('<mi>λ</mi><mi>R</mi>')
+  for (const command of ['\\bar', '\\lambda', '\\textdollar', '\\limits', '\\blue', '\\deckTerm']) {
+    expect(() => math(`\\newcommand{${command}}{x}`, false)).toThrow('already defined')
+  }
+  expect(() => math(String.raw`\renewcommand\unknown{X}`, false)).toThrow('undefined')
+  expect(() => math(String.raw`\newcommand\term{X}\newcommand\term{Y}`, false)).toThrow('already defined')
+})
+
+test('checks definition targets, named parameters, and eager expansion', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  expect(math(String.raw`\def+{A}\def1{B}2+31`, false)).toContain('<mn>2</mn><mi>A</mi><mn>3</mn><mi>B</mi>')
+  expect(math(String.raw`\def+{A}` + 'x\u207ax\u207a', false)).toContain('<msup><mi>x</mi><mrow><mi>A</mi></mrow></msup>')
+  expect(() => math(String.raw`\def+{\undefined}` + 'x\u207a', false)).toThrow('Unsupported math command')
+  expect(math(String.raw`\edef\saved{\sin}\saved x`, false)).toContain('<mo>sin</mo><mi>x</mi>')
+  expect(() => math(String.raw`\gdef{\foo}{}`, false)).toThrow('Invalid macro name')
+  expect(() => math(String.raw`\newcommand{\foo\bar}{}`, false)).toThrow('Invalid macro name')
+  expect(() => math(String.raw`\newcommand\foo{#1}\foo x`, false)).toThrow('Unbound macro parameter')
+  expect(() => math(String.raw`\edef\foo{\unknown}`, false)).toThrow('Undefined control sequence')
+})
+
+test('rejects stray delimiters, undeclared environments, and nested unbraced functions', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  for (const source of ['x}', 'x&y', 'x#2', '$x$', String.raw`x\end{align}`]) {
+    expect(() => math(source, false)).toThrow('Unexpected math token')
+  }
+  expect(() => math(String.raw`\begin{unknown}x\end{unknown}`, true)).toThrow('Unsupported math environment')
+  for (const source of [String.raw`x^\sqrt x`, String.raw`\frac \left(x\right) y`, String.raw`\mathbb \mathrm R`]) {
+    expect(() => math(source, false)).toThrow('requires a grouped argument')
+  }
+  expect(math(String.raw`x^{\sqrt y}+\frac \alpha 2`, false)).toContain('<msqrt><mi>y</mi></msqrt>')
+  expect(math(String.raw`\sqrt \frac x y+x^\frac x y+e^\mathbf{x}`, false)).toContain('<msqrt><mfrac>')
+  expect(renderMath('x}')).toBe('<code class="math-unrendered">x}</code>')
+  expect(() => math(String.raw`\raisebox5pt{text}`, false)).toThrow('requires a grouped dimension')
+  expect(() => math(String.raw`s\hspace7ex k`, false)).toThrow('requires a grouped dimension')
+  expect(math(String.raw`s\hskip7ex k`, false)).toContain('<mspace width="7ex"/>')
+})
+
+test('distinguishes text symbols, unknown commands, and math-only functions', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const html = math(String.raw`\text{\sect\textregistered\char65\vdots\dots x\tag{Note}}`, true)
+  expect(html).toContain('<mtext>\u00a7®A⋮… x</mtext>')
+  expect(html).toContain('<mtext>(Note)</mtext>')
+  expect(() => math(String.raw`\text{\sqrt{x}}`, false)).toThrow('requires math mode')
+  expect(() => math(String.raw`\text{\unknown}`, false)).toThrow('Unsupported math command')
+  expect(() => math(String.raw`\text{a_b}`, false)).toThrow('Unexpected text token')
+  const tolerant = createMathRenderer({ errorColor: '#a00' })
+  expect(tolerant(String.raw`\text{a\unknown b}`, false)).toContain('<mtext style="color:#a00">\\unknown</mtext>')
+  expect(tolerant(String.raw`\text{\sqrt{x}}`, false)).toContain('math-unrendered')
+})
+
 test('handles math debug messages, an accented blank, and text-mode ring accents', () => {
   const math = createMathRenderer({ throwOnError: true, strict: 'ignore' })
   const log = spyOn(console, 'log').mockImplementation(() => {})
@@ -232,6 +288,16 @@ test('expands legacy palette macros in math and text and allows scoped overrides
   expect(html).toContain('<mrow><mi>B</mi></mrow><mrow style="color:#6495ed"><mrow><mi>x</mi></mrow></mrow>')
   expect(html).toContain('<mrow style="color:#fca9a9"><mrow><mi>y</mi></mrow></mrow>')
   expect(html).toContain('<mrow style="color:#e0e5cc"><mtext>fresh</mtext></mrow>')
+})
+
+test('validates expanded color values and scopes alpha colors in text and math', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const html = math(String.raw`\def\tint{##1234}\text{a{\color{\tint}b\textcolor{#ABCDEF80}{c}}d}+\textcolor{\tint}{x}`, false)
+  expect(html).toContain('<mtext>a</mtext><mrow style="color:#1234"><mtext>b</mtext><mrow style="color:#ABCDEF80"><mtext>c</mtext></mrow></mrow><mtext>d</mtext>')
+  expect(html).toContain('<mrow style="color:#1234"><mrow><mi>x</mi></mrow></mrow>')
+  for (const value of ['bad-color', '#abcde', '#fff0000g', 'red"><img>']) {
+    expect(() => math(`\\textcolor{${value}}{x}`, false)).toThrow('Invalid math color')
+  }
 })
 
 test('caps positive TeX dimensions in ems, including TeX-only units', () => {

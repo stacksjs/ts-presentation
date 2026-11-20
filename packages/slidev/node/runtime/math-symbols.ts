@@ -150,7 +150,8 @@ const text: Readonly<Record<string, string>> = {
   textbraceleft: '{', textbraceright: '}', textdagger: '†', textdaggerdbl: '‡', textdegree: '°',
   textellipsis: '…', textemdash: '\u2014', textendash: '\u2013', textquotedblleft: '“', textquotedblright: '”',
   textquoteleft: '‘', textquoteright: '’', textsterling: '£', varvdots: '⋮', yen: '¥',
-  copyright: '©', lq: '‘', rq: '’',
+  copyright: '©', textregistered: '®', sect: '\u00a7', lq: '‘', rq: '’',
+  dots: '…', dotsc: '…', dotso: '…', dotsx: '…\u2009', vdots: '⋮',
 }
 
 const centeredGlyphs = new Set([
