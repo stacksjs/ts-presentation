@@ -2548,6 +2548,34 @@ test('renders TeX character codes, zero-width struts, and common font aliases', 
   expect(renderMath(String.raw`\char"110000`)).toContain('math-unrendered')
 })
 
+test('expands TeX character codes eagerly and reads literal character tokens', () => {
+  const percent = '<mtext>%</mtext>'
+  for (const source of ['\\char`\\%', '\\char37', "\\char'45", '\\char"25', '\\@char{37}']) {
+    expect(formula(source)).toContain(percent)
+  }
+  expect(formula('\\def\\a{B}\\char`\\a')).toContain('<mi>a</mi>')
+  expect(formula('\\char`🙃')).toContain('<mtext>🙃</mtext>')
+  expect(formula(String.raw`\char"1d7d9`)).toContain('<mtext>𝟙</mtext>')
+  expect(formula(String.raw`\edef\saved{\char"41}\def\char{B}\saved`)).toContain('<mi>A</mi>')
+  expect(formula('\\edef\\saved{\\char`\\x}\\text{\\saved\\@char{121}}')).toContain('<mtext>xy</mtext>')
+  expect(formula(String.raw`\def\digits{6 5}\@char{\digits}`)).toContain('<mi>A</mi>')
+  expect(() => formula(String.raw`\text{\@char{6 5}}`)).toThrow('Invalid math character code')
+  expect(() => formula(String.raw`\@char{\text{2}}`)).toThrow('Invalid math character code')
+  for (const source of ['\\char', '\\char`', "\\char'8", '\\char"g', '\\char"110000']) {
+    expect(() => formula(source)).toThrow('Invalid math character code')
+  }
+})
+
+test('skips relax before script arguments and preserves scripts with an empty base', () => {
+  expect(formula(String.raw`x^\relax 2_\relax\relax 3`)).toContain('<msubsup><mi>x</mi><mn>3</mn><mn>2</mn></msubsup>')
+  expect(formula(String.raw`x'^\relax 2`)).toBe(formula("x'^2"))
+  expect(formula(String.raw`\hskip1em\relax^2`)).toContain('<mspace width="1em"/><msup><mrow/><mn>2</mn></msup>')
+  expect(formula('^3_2')).toContain('<msubsup><mrow/><mn>2</mn><mn>3</mn></msubsup>')
+  expect(formula('¹²C')).toContain('<msup><mrow/><mrow><mn>12</mn></mrow></msup><mi>C</mi>')
+  expect(formula('₂₃C')).toContain('<msub><mrow/><mrow><mn>23</mn></mrow></msub><mi>C</mi>')
+  expect(() => formula(String.raw`x^\relax`)).toThrow('Missing math argument')
+})
+
 test('renders verbatim math without opening Markdown or TeX delimiters inside it', async () => {
   const html = await renderDeck(parseDeck(String.raw`Examples $\verb|x $ y % { <em>| + z$ and \(\verb*+a b+\).`))
   expect(html).toContain('>x $ y % { &lt;em&gt;</mtext>')

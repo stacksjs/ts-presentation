@@ -52,6 +52,7 @@ in a new ts-presentation project.
 | KaTeX accents and annotations | Stacked overbracket and underbracket labels, scalable line segments, text-mode underbars, circled text, and macro-expanded accent arguments |
 | KaTeX conditional macros | Mode-aware `\TextOrMath`, starred forms, token lookahead, and branch expansion in formulas, text, and `\edef`. Unbraced text commands keep the complete expansion of their argument in a local text scope |
 | KaTeX legacy macros | Khan Academy color names and shades, literal token and active character snapshots with `\let`, whitespace-aware `\futurelet` lookahead, `\long` and `\global` assignment prefixes, multi-digit macro arity, and `\message` or `\errmessage` output during expansion |
+| TeX character codes and scripts | `\char` expands decimal, octal, hexadecimal, and literal character codes inside macros, including eager definitions. Superscripts and subscripts accept `\relax` before the argument, and leading Unicode scripts render with an empty base |
 | KaTeX math choices | `\mathchoice` selects display, text, script, and scriptscript branches with operator spacing from the enclosing row |
 | KaTeX parser diagnostics | Macro declaration and scope checks, undefined commands in eager expansion, unexpected delimiters, text-mode command checks, and validation of expanded colors |
 | KaTeX macro and color settings | Deck-scoped `globalGroup`, per-formula `maxExpand` including eager definitions, and two-argument `\color` via `colorIsTextColor` |

@@ -300,12 +300,12 @@ function tokenize(source: string, onTrailingComment?: () => void): string[] {
 }
 
 type MathMode = 'math' | 'text'
-const expansionPrimitives = ['\\expandafter', '\\noexpand', '\\@firstoftwo', '\\@secondoftwo', '\\@ifnextchar', '\\@ifstar', '\\TextOrMath', '\\html@mathml', '\\message', '\\errmessage'] as const
+const expansionPrimitives = ['\\expandafter', '\\noexpand', '\\@firstoftwo', '\\@secondoftwo', '\\@ifnextchar', '\\@ifstar', '\\TextOrMath', '\\html@mathml', '\\message', '\\errmessage', '\\char'] as const
 const expansionPrimitiveNames = new Set<string>(expansionPrimitives)
 const macroDeclaration = /^\\(?:[gex]?def|(?:future)?let|(?:new|renew|provide)command|global|long)$/
 const assignmentCommand = /^\\(?:[gex]?def|(?:future)?let)$/
 type ExpansionPrimitive = typeof expansionPrimitives[number]
-type ConditionalPrimitive = Exclude<ExpansionPrimitive, '\\expandafter' | '\\noexpand' | '\\message' | '\\errmessage'>
+type ConditionalPrimitive = Exclude<ExpansionPrimitive, '\\expandafter' | '\\noexpand' | '\\message' | '\\errmessage' | '\\char'>
 interface TokenMacro { body: string[], parameters: string[][], prefix: string[], optional?: string[], unexpandable?: boolean, source?: string }
 type DelimitedNotation = 'Braket' | 'Set' | 'set'
 type NativeMacro = { primitive: ExpansionPrimitive } | { notation: DelimitedNotation } | { separator: () => string[] }
@@ -815,7 +815,7 @@ const mathModeFunctions = new Set([
 const sharedFunctions = new Set([
   ...Object.keys(textFonts), ...typesettingNames, ...textBoxes, ...verticalBoxCommands, ...spacingCommands,
   'begingroup', 'endgroup', 'relax', 'newline', 'cr', 'color', 'textcolor',
-  'sout', 'underline', 'underbar', 'textcircled', 'llap', 'clap', 'rlap', 'char',
+  'sout', 'underline', 'underbar', 'textcircled', 'llap', 'clap', 'rlap', '@char',
   'tag', 'label', 'notag', 'nonumber', 'nobreak', 'hline', 'hdashline',
 ])
 const fractionFences: Record<string, [string, string]> = {
@@ -1079,7 +1079,32 @@ export function renderMath(source: string, display = false, configured: MathMacr
       else console.error(message)
       return []
     }
+    if (primitive === '\\char') return expandCharacter()
     return chooseBranch(primitive)
+  }
+
+  function expandCharacter(): string[] {
+    const prefix = peek()
+    let code: number
+    if (prefix === '`') {
+      cursor++
+      // Character constants name the next token itself, even for a macro.
+      const token = tokenText(tokens[cursor++] ?? '')
+      code = token === boundary ? NaN : token.codePointAt(token.startsWith('\\') ? 1 : 0) ?? NaN
+    }
+    else {
+      const radix = prefix === '"' ? 16 : prefix === "'" ? 8 : 10
+      if (radix !== 10) cursor++
+      const digit = radix === 16 ? /^[0-9a-f]$/i : radix === 8 ? /^[0-7]$/ : /^\d$/
+      space()
+      const start = cursor
+      while (digit.test(tokenValue(tokens[cursor] ?? ''))) cursor++
+      code = Number.parseInt(tokens.slice(start, cursor).map(tokenValue).join(''), radix)
+    }
+    if (!Number.isSafeInteger(code)) throw new Error('Invalid math character code')
+    // Freeze the generated digits so active character definitions cannot
+    // change the code during an eager definition or later formula rendering.
+    return ['\\@char', '{', ...Array.from(String(code), digit => literalToken + digit), '}']
   }
 
   function macroDefinition(token: string): Macro | undefined {
@@ -1410,6 +1435,11 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return argumentAtom(false, primitive).markup
   }
 
+  function scriptArgument(): Markup {
+    while (peek() === '\\relax') cursor++
+    return argument(true)
+  }
+
   function fragmentArgument(): { markup: Markup, parts: RowPart[] } {
     const token = peek()
     if (token !== '{' && token !== '\\begingroup') {
@@ -1692,7 +1722,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   }
 
   function textCharacter(token: string): string | undefined {
-    if (token === '\\char') return explicitCharacter()
+    if (token === '\\@char') return explicitCharacter()
     if (/^(?:[&#^_]|#[1-9])$/.test(token)) throw new Error(`Unexpected text token: ${token}`)
     if (!token.startsWith('\\')) {
       const unicode = checkUnicode(token)
@@ -1959,7 +1989,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       cursor++
       text += '′'.repeat(count)
     }
-    const following = peek() === '^' ? (cursor++, argument()) : ''
+    const following = peek() === '^' ? (cursor++, scriptArgument()) : ''
     return xml`<mrow>${tag('mo', text)}${following}</mrow>`
   }
 
@@ -2007,6 +2037,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       if (token === boundary) throw new Error('Unclosed math argument')
       if (breakOnInfix && infixFractions.has(token)) break
       cursor++
+      if (token === '\\relax') continue
       if (infixFractions.has(token)) {
         if (infix) throw new Error('Only one infix fraction is allowed per math group')
         infix = token
@@ -2059,6 +2090,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
         else parts.push({ markup: xml`<mrow style="color:${color}">${content}</mrow>` })
         continue
       }
+      const unicodeScriptToken = unicodeSuperscripts.has(token) || unicodeSubscripts.has(token)
       let part: Atom
       if (/^\d$/.test(token)) {
         let number = token
@@ -2069,7 +2101,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
         }
         part = { markup: tag('mn', number) }
       }
-      else if (token === '_' || token === '^' || primeCount(token)) {
+      else if (token === '_' || token === '^' || primeCount(token) || unicodeScriptToken) {
+        if (unicodeScriptToken) checkUnicode(token)
         part = { markup: '<mrow/>' }
         cursor--
       }
@@ -2086,13 +2119,13 @@ export function renderMath(source: string, display = false, configured: MathMacr
         }
         if (kind === '_' || unicodeSubscripts.has(kind)) {
           if (lower) throw new Error('Double subscript')
-          lower = inScript(kind === '_' ? (cursor++, argument(true)) : unicodeScript(unicodeSubscripts))
+          lower = inScript(kind === '_' ? (cursor++, scriptArgument()) : unicodeScript(unicodeSubscripts))
           continue
         }
         const prime = primeCount(kind) > 0
         if (kind !== '^' && !prime && !unicodeSuperscripts.has(kind)) break
         if (upper) throw new Error('Double superscript')
-        upper = inScript(kind === '^' ? (cursor++, argument(true)) : prime ? primeScript() : unicodeScript(unicodeSuperscripts))
+        upper = inScript(kind === '^' ? (cursor++, scriptArgument()) : prime ? primeScript() : unicodeScript(unicodeSuperscripts))
       }
       if (part.brace === 'upper' && upper) {
         part.markup = xml`<mover>${part.markup}${upper}</mover>`
@@ -2364,22 +2397,9 @@ export function renderMath(source: string, display = false, configured: MathMacr
   }
 
   function explicitCharacter(): string {
-    const prefix = peek()
-    let code: number
-    if (prefix === '`') {
-      take()
-      const char = take().replace(/^\\(?=.$)/u, '')
-      code = [...char].length === 1 ? char.codePointAt(0)! : NaN
-    }
-    else {
-      const radix = prefix === '"' ? 16 : prefix === "'" ? 8 : 10
-      if (radix !== 10) take()
-      const digits = radix === 16 ? /^[0-9a-f]$/i : radix === 8 ? /^[0-7]$/ : /^\d$/
-      space()
-      const start = cursor
-      while (cursor - start < 16 && digits.test(tokenValue(tokens[cursor] ?? ''))) cursor++
-      code = Number.parseInt(tokens.slice(start, cursor).map(tokenValue).join(''), radix)
-    }
+    const parts = expandDefinition(rawGroup())
+    const value = (mode === 'math' ? parts.filter(token => !texWhitespace.test(token)) : parts).join('')
+    const code = /^\d+$/.test(value) ? Number(value) : NaN
     if (!Number.isInteger(code) || code < 0x20 || code > 0x10FFFF || (code >= 0xD800 && code <= 0xDFFF))
       throw new Error('Invalid math character code')
     return String.fromCodePoint(code)
@@ -2644,7 +2664,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const limits = name === 'operatornamewithlimits' || star
       return { markup: operatorLabel(argument()), mathClass: 'op', limits, ignoreLimitControl: !limits }
     }
-    if (name === 'char') {
+    if (name === '@char') {
       const glyph = explicitCharacter()
       return { markup: tag(/^\p{L}$/u.test(glyph) ? 'mi' : 'mtext', glyph) }
     }
