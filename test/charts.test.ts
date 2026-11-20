@@ -34,6 +34,7 @@ test('renders native charts in the example deck using the normal compiler', asyn
   expect(html).toContain('data-diagram-kind="sequence"')
   expect(html).toContain('data-diagram-kind="pie"')
   expect(html).toContain('data-diagram-kind="er"')
+  expect(html).toContain('data-diagram-kind="xy"')
   expect(html).toContain('data-task-id="verify" data-task-start="2026-03-07T00:00:00.000Z" data-task-end="2026-03-11T00:00:00.000Z"')
   expect(html).toContain('data-commit-id="Approve" data-parent-ids="Prepare, Draft"')
   expect(html).toContain('Release milestones by phase')

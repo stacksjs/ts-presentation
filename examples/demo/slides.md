@@ -522,3 +522,27 @@ $$
 <!--
 Point out the four parentheses sizes, then compare the taller set braces. Read the double prime, centered dots, and modular expression aloud.
 -->
+
+---
+
+# Compare delivery with the target
+
+```charts
+type: xy
+accessibleTitle: Actual and target delivery over four weeks
+width: 700
+height: 365
+showDataLabel: true
+xAxis:
+  categories: [Week 1, Week 2, Week 3, Week 4]
+yAxis:
+  title: Items delivered
+  domain: [0, 20]
+series:
+  - { type: bar, label: Actual, color: '#71a4d6', values: [6, 11, 14, 18] }
+  - { type: line, label: Target, color: '#cb854f', values: [8, 10, 13, 16] }
+```
+
+<!--
+Delivery was below target in the first week and exceeded it in the next three.
+-->

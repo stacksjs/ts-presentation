@@ -8,6 +8,7 @@ import { pieDiagram } from './mermaid/pie.ts'
 import { relationshipsDiagram } from './mermaid/relationships.ts'
 import { sequence } from './mermaid/sequence.ts'
 import { timeline } from './mermaid/timeline.ts'
+import { xyDiagram } from './mermaid/xy.ts'
 
 function mapping(value: unknown): MermaidOptions {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as MermaidOptions : {}
@@ -15,9 +16,24 @@ function mapping(value: unknown): MermaidOptions {
 
 function mergeDiagramOptions(base: MermaidOptions = {}, override: MermaidOptions = {}): MermaidOptions {
   const result = { ...base, ...override }
-  for (const key of ['flowchart', 'gantt', 'gitGraph', 'journey', 'pie', 'timeline', 'themeVariables']) {
+  for (const key of ['flowchart', 'gantt', 'gitGraph', 'journey', 'pie', 'timeline', 'xyChart', 'themeVariables']) {
     if (base[key] && override[key] && typeof base[key] === 'object' && typeof override[key] === 'object')
       result[key] = { ...mapping(base[key]), ...mapping(override[key]) }
+  }
+  for (const [scope, children] of [
+    ['xyChart', ['xAxis', 'yAxis']],
+    ['themeVariables', ['xyChart']],
+  ] as const) {
+    const before = mapping(base[scope])
+    const after = mapping(override[scope])
+    if (!Object.keys(before).length || !Object.keys(after).length) continue
+    const combined = { ...mapping(result[scope]) }
+    for (const child of children) {
+      if (Object.hasOwn(before, child) && Object.hasOwn(after, child)) {
+        combined[child] = { ...mapping(before[child]), ...mapping(after[child]) }
+      }
+    }
+    result[scope] = combined
   }
   return result
 }
@@ -48,7 +64,8 @@ function render(code: string, marker: string, options: MermaidOptions): string |
   if (/^timeline(?:\s|$)/i.test(header ?? '')) return timeline(code, marker, options)
   if (/^journey$/i.test(header ?? '')) return journey(code, marker, options)
   if (header === 'gantt') return gantt(code, marker, options.gantt, title, options.securityLevel === 'loose', options.themeVariables)
-  if (/^gitGraph(?:\s|:|$)/.test(header ?? '')) return gitGraph(code, marker, options)
+  if (/^xychart(?:-beta)?(?:\s|$)/.test(header ?? '')) return xyDiagram(code, marker, options)
+  if (/^gitGraph(?:\s|:|;|$)/.test(header ?? '')) return gitGraph(code, marker, options)
   if (header === 'sequenceDiagram') return sequence(code, marker)
   if (header === 'classDiagram' || header === 'erDiagram') return relationshipsDiagram(code, marker)
   if (/^pie(?:\s|$)/.test(header ?? '')) return pieDiagram(code, marker, options.pie, title)

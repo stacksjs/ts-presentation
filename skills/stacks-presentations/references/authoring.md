@@ -222,6 +222,12 @@ speaker notes. Each hook can be asynchronous.
 - Use `type: pie` with `slices` containing a `label` and positive
   `value`. Set `showData: true` to include values in the legend and
   `donutHole` to set the inner radius as a fraction of the outer radius.
+- Use `type: xy` with ordered `series` of `type: bar` or `type: line`.
+  Each series takes `values` and can have a `label` for the legend.
+  Use `xAxis.categories` or a numeric `xAxis.domain` and give
+  `yAxis.domain` an explicit range when charts need a shared scale.
+  A line point may use `{ value: 8, label: Target }`.
+  Set `orientation: horizontal` to flip the chart.
 - Use `type: timeline` with `sections` and `type: journey` with `phases`.
 - Use `type: gantt` with `sections` containing tasks. Give each task a
   `name`, an optional `id`, a `start` date or `after` list, and one
@@ -245,7 +251,7 @@ speaker notes. Each hook can be asynchronous.
   `fontSize`.
 - Imported Slidev diagram fences pass through a compatibility parser.
   Styled flowchart groups, sequence and state diagrams, relationships,
-  pie charts, Gantt schedules, Git histories, timelines, and journeys use
+  pie charts, XY charts, Gantt schedules, Git histories, timelines, and journeys use
   the same `ts-charts` renderers as `charts` fences.
 - Imported Gantt schedules support date and axis formats, exclusions, task
   dependencies, milestones, today-marker styling, and chart spacing. Enable
@@ -269,6 +275,10 @@ speaker notes. Each hook can be asynchronous.
   on a commit or merge to choose its symbol.
   Imported Gantt tasks without IDs receive `task1`, `task2`, and so on for
   dependencies, links, and callbacks.
+- Imported `xychart` or `xychart-beta` supports named `bar` and `line`
+  series, quoted categories, negative and positive numbers, and point labels.
+  Set dimensions and axis options in `config.xyChart`. Palette and text
+  colors go in `config.themeVariables.xyChart`.
 - Use `timeline` or `timeline TD` for chronological periods. A period can
   have several events on one line or continuation lines starting with `:`.
   Add `section` headings and use `<br>` to break a label manually.

@@ -153,6 +153,12 @@ const history = `gitGraph LR:
   merge "feature/review" id: "release" tag: "v1.0" tag: "stable"
 `
 
+test('dispatches gitGraph when its header and first commit share a line', () => {
+  const svg = mermaid('gitGraph; commit id: "first; draft"; commit id: "publish"', 'history')!
+  expect(svg).toContain('data-commit-id="first; draft"')
+  expect(svg).toContain('data-parent-ids="first; draft"')
+})
+
 test('builds GitGraph branch history with merge parents, tags, and cherry-picks', () => {
   const graph = buildGitHistory(history, { parallelCommits: true })
   expect(graph?.commits.map(commit => [commit.id, commit.rank])).toEqual([
