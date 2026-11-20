@@ -362,6 +362,30 @@ test('positions boxes and prescripts with bounded MathML dimensions', () => {
   expect(unsafe).not.toContain(' onclick="')
 })
 
+test('renders phantom space, smashed dimensions, raised boxes, rules, and verbatim in text mode', async () => {
+  const source = String.raw`\def\sides{tb}\def\shift{2pt}
+    \text{A\phantom{hidden}\hphantom{wide}\vphantom{tall}\smash[\sides]{flat}
+      \raisebox{\shift}{up}\rule[\shift]{1em}{.5pt}\verb*|<a $ b>%{}|Z}`
+  const html = await renderDeck(parseDeck(`Inline $${source.replace(/\s*\n\s*/g, ' ')}$ stays inline.`))
+  expect(html).toContain('<mphantom><mtext>hidden</mtext></mphantom>')
+  expect(html).toContain('<mpadded height="0" depth="0"><mphantom><mtext>wide</mtext></mphantom></mpadded>')
+  expect(html).toContain('<mpadded width="0"><mphantom><mtext>tall</mtext></mphantom></mpadded>')
+  expect(html).toContain('<mpadded height="0" depth="0"><mtext>flat</mtext></mpadded>')
+  expect(html).toContain('<mpadded voffset="2pt"><mtext>up</mtext></mpadded>')
+  expect(html).toContain('<mpadded voffset="2pt"><mspace width="1em" height=".5pt"')
+  expect(html).toContain('>&lt;a␣$␣b&gt;%{}</mtext><mtext>Z</mtext>')
+  expect(html).toContain(' stays inline.')
+})
+
+test('applies only valid TeX smash flags and expands optional box dimensions', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const html = math(String.raw`\smash[]x\smash[tx]{y}\smash[t]{z} + \text{\smash[b]{g}}`, false)
+  expect(html).toContain('<mi>x</mi><mrow><mi>y</mi></mrow><mpadded height="0"><mrow><mi>z</mi></mrow></mpadded>')
+  expect(html).toContain('<mpadded depth="0"><mtext>g</mtext></mpadded>')
+  expect(math(String.raw`\def\size{1ex}\raisebox{2pt}[\size]{x}`, false)).toContain('<mpadded voffset="2pt" height="1ex">')
+  expect(() => math(String.raw`\text{\rule[wrong]{1em}{2pt}}`, false)).toThrow('Invalid math box dimension')
+})
+
 test('supports optional arguments, delimited macros and scoped definitions', () => {
   const math = String.raw`\newcommand{\sumPair}[2][z]{#1 + #2}
     \def\pair#1,#2\endpair{\left(#1,#2\right)}

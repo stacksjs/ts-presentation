@@ -171,6 +171,15 @@ export function mathVerbLength(source: string): number {
   return source.startsWith('\\verb') ? leadingVerb.exec(source)?.[0].length ?? 0 : 0
 }
 
+function verbatimMarkup(token: string): string | undefined {
+  if (!token.startsWith('\\verb')) return
+  const match = leadingVerb.exec(token)
+  if (!match) return
+  const [, star, withSpaces, , literal] = match
+  const content = star === undefined ? literal : withSpaces.replaceAll(' ', '␣')
+  return `<mtext class="math-verbatim" style="font-family:monospace;white-space:pre">${escapeHtml(content)}</mtext>`
+}
+
 function tokenize(source: string, onTrailingComment?: () => void): string[] {
   if (!source.includes('%')) return source.match(mathTokens) ?? []
   const lexer = new RegExp(mathTokens)
@@ -274,6 +283,7 @@ const textFonts: Record<string, string> = {
 }
 const typesettingNames = new Set(['TeX', 'LaTeX', 'KaTeX'])
 const textBoxes = new Set(['colorbox', 'fcolorbox', 'fbox', 'reflectbox'])
+const verticalBoxCommands = new Set(['phantom', 'hphantom', 'vphantom', 'smash', 'raisebox', 'rule'])
 const textSymbols: Record<string, string> = {
   '\\textdollar': '$', '\\textunderscore': '_', '\\textbackslash': '\\',
   '\\textasciitilde': '~', '\\textasciicircum': '^', '\\textbar': '|',
@@ -945,6 +955,41 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return xml`<mrow class="math-color-box${frame ? ' math-frame' : ''}" style="background-color:${background}${frame ? `;border-color:${frame}` : ''}">${content}</mrow>`
   }
 
+  function optionalBoxDimension(): string | undefined {
+    const size = rawBracket()
+    if (size === undefined) return
+    const value = dimension(expandDefinition(size).join(''))
+    if (value === undefined) throw new Error('Invalid math box dimension')
+    return value
+  }
+
+  function verticalBox(name: string, readBody: () => Markup): Markup {
+    if (name === 'rule') {
+      const offset = optionalBoxDimension()
+      const width = readDimension()
+      const height = readDimension()
+      const rule = `<mspace width="${width}" height="${height}" style="background:currentColor"/>`
+      return offset ? `<mpadded voffset="${offset}">${rule}</mpadded>` : rule
+    }
+    if (name === 'raisebox') {
+      const offset = readDimension()
+      const height = optionalBoxDimension()
+      const depth = optionalBoxDimension()
+      return xml`<mpadded voffset="${offset}"${height ? ` height="${height}"` : ''}${depth ? ` depth="${depth}"` : ''}>${textArgument('text')}</mpadded>`
+    }
+    if (name === 'smash') {
+      const flags = rawBracket()
+      const sides = flags === undefined ? 'tb' : expandDefinition(flags).join('').replace(/\s/g, '')
+      const content = readBody()
+      if (!/^[tb]+$/.test(sides)) return content
+      return xml`<mpadded${sides.includes('t') ? ' height="0"' : ''}${sides.includes('b') ? ' depth="0"' : ''}>${content}</mpadded>`
+    }
+    const invisible = xml`<mphantom>${readBody()}</mphantom>`
+    if (name === 'hphantom') return xml`<mpadded height="0" depth="0">${invisible}</mpadded>`
+    if (name === 'vphantom') return xml`<mpadded width="0">${invisible}</mpadded>`
+    return invisible
+  }
+
   function overlap(direction: string, content: Markup): Markup {
     return xml`<mpadded width="0"><mrow class="math-overlap-${direction}">${content}</mrow></mpadded>`
   }
@@ -1072,7 +1117,13 @@ export function renderMath(source: string, display = false, configured: MathMacr
           break
         }
         if (token === '\\relax' || declareMacro(token)) continue
-        if (token === '\\\\' || token === '\\newline') {
+        const command = token.startsWith('\\') ? token.slice(1) : ''
+        const verbatim = verbatimMarkup(token)
+        if (verbatim !== undefined) {
+          flush()
+          parts.push(verbatim)
+        }
+        else if (token === '\\\\' || token === '\\newline') {
           const gap = lineGap(token)
           if (gap === undefined) continue
           flushFormatting()
@@ -1101,18 +1152,22 @@ export function renderMath(source: string, display = false, configured: MathMacr
             return `<mrow style="font-style:normal;font-weight:normal">${style === 0 ? mathSize(1, content) : content}</mrow>`
           })
         }
-        else if (token === '{' || (token.startsWith('\\') && Object.hasOwn(textFonts, token.slice(1)))) {
+        else if (token === '{' || Object.hasOwn(textFonts, command)) {
           flush()
           if (token === '{') cursor--
-          parts.push(textArgument(token === '{' ? 'text' : token.slice(1)))
+          parts.push(textArgument(token === '{' ? 'text' : command))
         }
-        else if (token.startsWith('\\') && textBoxes.has(token.slice(1))) {
+        else if (textBoxes.has(command)) {
           flush()
-          parts.push(textBox(token.slice(1)))
+          parts.push(textBox(command))
         }
-        else if (token.startsWith('\\') && typesettingNames.has(token.slice(1))) {
+        else if (verticalBoxCommands.has(command)) {
           flush()
-          parts.push(typesettingName(token.slice(1)))
+          parts.push(verticalBox(command, () => textArgument('text')))
+        }
+        else if (typesettingNames.has(command)) {
+          flush()
+          parts.push(typesettingName(command))
           space()
         }
         else if (token === '\\textcolor' || (token === '\\color' && options?.colorIsTextColor)) {
@@ -1127,9 +1182,9 @@ export function renderMath(source: string, display = false, configured: MathMacr
           flush()
           parts.push(xml`<mrow class="math-underline">${textArgument('text')}</mrow>`)
         }
-        else if (token.startsWith('\\') && spacingCommands.has(token.slice(1))) {
+        else if (spacingCommands.has(command)) {
           flush()
-          parts.push(spacingMarkup(token.slice(1)))
+          parts.push(spacingMarkup(command))
         }
         else if (/^\\[^ >]/.test(token) && Object.hasOwn(spacing, token.slice(1))) {
           flush()
@@ -1701,11 +1756,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
       return { markup: tag(/^\p{L}$/u.test(token) ? 'mi' : 'mo', token === '-' ? '−' : token), limits }
     }
 
-    if (mathVerbLength(token)) {
-      const [, star, withSpaces, , literal] = leadingVerb.exec(token)!
-      const content = star === undefined ? literal : withSpaces.replaceAll(' ', '␣')
-      return { markup: `<mtext class="math-verbatim" style="font-family:monospace;white-space:pre">${escapeHtml(content)}</mtext>` }
-    }
+    const verbatim = verbatimMarkup(token)
+    if (verbatim !== undefined) return { markup: verbatim }
 
     if (declareMacro(token)) return { markup: '' }
     const name = token.slice(1)
@@ -1801,23 +1853,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const align = bracket()
       return { markup: fraction(0, undefined, align === 'l' ? 'left' : align === 'r' ? 'right' : undefined) }
     }
-    if (name === 'raisebox' || name === 'rule') {
-      if (name === 'rule') {
-        const offset = dimension(bracket() ?? '')
-        const width = readDimension()
-        const height = readDimension()
-        const rule = `<mspace width="${width}" height="${height}" style="background:currentColor"/>`
-        return { markup: offset ? `<mpadded voffset="${offset}">${rule}</mpadded>` : rule }
-      }
-      const offset = readDimension()
-      const height = dimension(bracket() ?? '')
-      const depth = dimension(bracket() ?? '')
-      return { markup: xml`<mpadded voffset="${offset}"${height ? ` height="${height}"` : ''}${depth ? ` depth="${depth}"` : ''}>${textArgument('text')}</mpadded>` }
-    }
-    if (name === 'smash') {
-      const side = bracket()
-      return { markup: xml`<mpadded${side !== 'b' ? ' height="0"' : ''}${side !== 't' ? ' depth="0"' : ''}>${argument()}</mpadded>` }
-    }
+    if (verticalBoxCommands.has(name)) return { markup: verticalBox(name, argument) }
     if (spacingCommands.has(name)) return { markup: spacingMarkup(name) }
     if (Object.hasOwn(notationDelimiters, name)) return { markup: delimitedNotation(name) }
     if (name === 'prescript') {
@@ -1907,11 +1943,6 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const above = inScript(argument())
       const bias = name === 'xleftequilibrium' ? 'left' : name === 'xrightequilibrium' ? 'right' : undefined
       return { markup: stackMathArrow(mathArrowBody(extensibleArrows[name], '1.75em', bias), above, below) }
-    }
-    if (name === 'phantom' || name === 'hphantom' || name === 'vphantom') {
-      const invisible = xml`<mphantom>${argument()}</mphantom>`
-      const dimensions = name === 'hphantom' ? ' height="0" depth="0"' : name === 'vphantom' ? ' width="0"' : ''
-      return { markup: dimensions ? xml`<mpadded${dimensions}>${invisible}</mpadded>` : invisible }
     }
     if (name === 'relax' || name === 'allowbreak' || name === 'nobreak') return { markup: '' }
     if (name === 'implies' || name === 'impliedby') {
