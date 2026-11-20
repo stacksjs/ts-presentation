@@ -6,7 +6,7 @@
       "name": "ts-presentation",
       "dependencies": {
         "@stacksjs/stx": "0.2.919",
-        "ts-charts": "https://codeload.github.com/stacksjs/ts-charts/tar.gz/1f1e981ac37fa6f96e695b1e14430d91a8a6ddf4",
+        "ts-charts": "https://codeload.github.com/stacksjs/ts-charts/tar.gz/1552332d3f21fad7d8961dc8da777957f5190ba5",
         "ts-syntax-highlighter": "^0.2.20",
       },
       "devDependencies": {
@@ -46,7 +46,7 @@
       },
       "dependencies": {
         "@stacksjs/stx": "0.2.919",
-        "ts-charts": "https://codeload.github.com/stacksjs/ts-charts/tar.gz/1f1e981ac37fa6f96e695b1e14430d91a8a6ddf4",
+        "ts-charts": "https://codeload.github.com/stacksjs/ts-charts/tar.gz/1552332d3f21fad7d8961dc8da777957f5190ba5",
         "ts-syntax-highlighter": "^0.2.20",
       },
     },
@@ -168,7 +168,7 @@
 
     "ts-broadcasting": ["ts-broadcasting@0.0.13", "", { "bin": { "broadcast": "./dist/bin/cli.js" } }, "sha512-F9amVHcLX3DzslD9HuFEZh8l0HnQR8e1yc1H/lo0TIsbw0EcZLg8UTbOGAipCywkdJtJrMvlm9ab/dhM9ugBmA=="],
 
-    "ts-charts": ["ts-charts@https://codeload.github.com/stacksjs/ts-charts/tar.gz/1f1e981ac37fa6f96e695b1e14430d91a8a6ddf4", { "hasInstallScript": true }, "sha512-yYY+jxeqEuYtNUV2hl76njekjEBu/g2K0uK9iR1p6TOhep6gdPbLXdVQ96jnwbJOtng11jBPR0+qvfd1nehuQw=="],
+    "ts-charts": ["ts-charts@https://codeload.github.com/stacksjs/ts-charts/tar.gz/1552332d3f21fad7d8961dc8da777957f5190ba5", { "hasInstallScript": true }, "sha512-4b27ADBFc3f33OPFwmklw7B2RqRK+3QIrNglan0vnE4W6XABruq5zKfCOTQjDqYnn+nyhjnBKWiPdNKm2TIerA=="],
 
     "ts-error-handling": ["ts-error-handling@0.1.4", "", {}, "sha512-kclM6oGVMKWp/uznLiZH+r7i4OZZll/hjpMxotX1f9EYe5UHYEklIJzSBq71uDWIPQrYWHJ4W0H6HLidV0Vb/A=="],
 

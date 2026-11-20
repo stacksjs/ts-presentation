@@ -1,4 +1,5 @@
-import type { GitLabelAppearance, GitTagAppearance } from 'ts-charts/diagrams'
+import { color as parseColor } from 'ts-charts/color'
+import type { GitGraphOptions, GitLabelAppearance, GitLabelShadow, GitTagAppearance } from 'ts-charts/diagrams'
 
 interface GitGraphPreset {
   branches: readonly string[]
@@ -121,4 +122,56 @@ export function gitGraphStyleIndex(lane: number, theme: unknown, label: boolean,
     ? typeof customLimit === 'number' && Number.isSafeInteger(customLimit) && customLimit > 1 ? customLimit : 12
     : 8
   return usesReduxBranchColors(theme) && lane > 0 ? (lane - 1) % (limit - 1) + 1 : lane % limit
+}
+
+function shadowFromCss(value: string): GitLabelShadow | undefined {
+  const body = /^drop-shadow\(([^;]{1,200})\)\s*;?$/i.exec(value.trim())?.[1]?.trim()
+  if (!body) return
+  const tokens = /\s*(?:[a-z]+\([^()]*\)|[^\s()]+)(?=\s|$)/giy
+  const lengths: number[] = []
+  let paint: ReturnType<typeof parseColor> = null
+  while (tokens.lastIndex < body.length) {
+    const field = tokens.exec(body)?.[0].trim()
+    if (!field) return
+    if (/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)px$|^[+-]?0$/i.test(field)) lengths.push(Number.parseFloat(field))
+    else {
+      if (paint) return
+      paint = parseColor(field)
+      if (!paint) return
+    }
+  }
+  const [offsetX, offsetY, blur = 0] = lengths
+  if (lengths.length < 2 || lengths.length > 3 || !lengths.every(Number.isFinite) || blur < 0) return
+  return { offsetX, offsetY, blur, color: paint?.formatHex(), opacity: paint ? Math.max(0, Math.min(1, paint.opacity)) : 1 }
+}
+
+function effectColor(value: unknown, fallback: string): string {
+  if (typeof value !== 'string') return fallback
+  const paint = parseColor(value)
+  return paint ? paint.opacity === 1 ? paint.formatHex() : paint.formatHex8() : value
+}
+
+export function gitGraphLabelEffects(theme: unknown, look: unknown, variables: Record<string, unknown>, strokeWidth?: number):
+  Pick<GitGraphOptions, 'branchLabelGradient' | 'branchLabelShadow' | 'tagLabelShadow'> {
+  const family = gitGraphThemeFamily(theme)
+  const neoLook = look === 'neo'
+  const neoDark = theme === 'neo-dark'
+  const lightShadow = { color: '#000000', offsetX: 0, offsetY: 1, blur: 2, opacity: 0.25 }
+  const darkShadow = { color: '#b9b9b9', offsetX: 1, offsetY: 2, blur: 2, opacity: 0.2 }
+  const customShadow = typeof variables.dropShadow === 'string' ? variables.dropShadow : undefined
+  const shadow = customShadow !== undefined ? shadowFromCss(customShadow)
+    : family === 'neo' ? neoDark ? darkShadow : lightShadow : undefined
+  const reduxShadow: GitLabelShadow | undefined = family === 'redux' && neoLook ? {
+    color: effectColor(variables.filterColor, theme === 'redux-dark' || theme === 'redux-dark-color' ? '#ffffff' : '#000000'),
+    offsetX: 4, offsetY: 4, blur: 0, opacity: 0.06,
+  } : undefined
+  return {
+    branchLabelGradient: family === 'neo' && variables.useGradient !== false ? {
+      start: effectColor(variables.gradientStart, '#0042eb'),
+      end: effectColor(variables.gradientStop, '#eb0042'),
+      width: strokeWidth ?? 1,
+    } : undefined,
+    branchLabelShadow: neoLook ? reduxShadow ?? shadow : undefined,
+    tagLabelShadow: family === 'classic' ? undefined : customShadow !== undefined ? shadow : reduxShadow ?? shadow,
+  }
 }

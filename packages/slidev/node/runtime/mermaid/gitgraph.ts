@@ -2,7 +2,7 @@ import type { GitCommitStyle, GitGraphDirection, GitGraphOperation, GitGraphOpti
 import { buildGitHistory as buildHistory, gitGraphChart } from 'ts-charts/diagrams'
 import type { MermaidOptions } from '../authoring-setup.ts'
 import { diagramPixels, readChronology, sizeChronologySvg } from './chronology.ts'
-import { gitGraphPreset, gitGraphStyleIndex, gitGraphThemeFamily, reduxBranchColors, usesReduxBranchColors } from './gitgraph-themes.ts'
+import { gitGraphLabelEffects, gitGraphPreset, gitGraphStyleIndex, gitGraphThemeFamily, reduxBranchColors, usesReduxBranchColors } from './gitgraph-themes.ts'
 import { syntaxMask } from './syntax.ts'
 
 function logicalLines(source: string): string[] {
@@ -180,6 +180,7 @@ export function gitGraph(source: string, idPrefix: string, options: MermaidOptio
   const labelBackground = typeof options.themeCSS === 'string' && options.themeCSS.trim() ? 'transparent' : undefined
   const svg = gitGraphChart({
     ...chart, idPrefix, title: chart.title || (typeof options.title === 'string' ? options.title : ''),
+    ...gitGraphLabelEffects(options.theme, options.look, variables, strokeWidth),
     diagramPadding: chart.diagramPadding ?? (preset ? 8 : undefined),
     truncateLabels: false,
     edgeLayout: 'orthogonal',

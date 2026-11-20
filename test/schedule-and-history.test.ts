@@ -949,6 +949,31 @@ merge review id:"released"`
   expect(custom).toMatch(/class="diagram-git-ring" fill="#eff0f4"/)
 })
 
+// A compact version of the GitGraph look and theme fixtures from Mermaid 12.3.0 (MIT).
+const neoHistory = `gitGraph
+commit id:"initial"
+branch review
+commit id:"approved" type:HIGHLIGHT tag:"v1"
+checkout main
+merge review id:"published"`
+
+test('configures Neo GitGraph gradients and label shadows independently of branch visibility', () => {
+  const themed = mermaid(neoHistory, 'neo-classic-look', { theme: 'neo-dark' })!
+  expect(themed).toContain('stop-color="#0042eb"')
+  expect(themed).toContain('stop-color="#eb0042"')
+  expect(themed).toMatch(/<feDropShadow dx="1" dy="2" stdDeviation="2" flood-color="#b9b9b9" flood-opacity="0.2"/)
+  expect(themed).not.toMatch(/class="diagram-git-branch-label-box"[^>]*filter=/)
+  expect(themed).toMatch(/class="diagram-git-tag-box"[^>]*filter="url\(#neo-classic-look-label-shadow-1\)"/)
+
+  const hidden = mermaid(neoHistory, 'neo-hidden', { theme: 'neo', look: 'neo', gitGraph: { showBranches: false, showCommitLabel: false } })!
+  expect(hidden).not.toContain('linearGradient')
+  expect(hidden).not.toContain('diagram-git-branch')
+  expect(hidden).toMatch(/class="diagram-git-tag-box"[^>]*filter="url\(#neo-hidden-label-shadow-1\)"/)
+  const flat = mermaid(neoHistory, 'neo-flat', { theme: 'neo', look: 'neo', themeVariables: { dropShadow: 'none', useGradient: false } })!
+  expect(flat).toContain('class="diagram-git-branch-label-box"')
+  expect(flat).not.toContain('<defs>')
+})
+
 const actions = `gantt
 todayMarker off
 Draft :draft, 2026-11-01, 1d
@@ -971,6 +996,71 @@ test('imports Gantt callback commands and applies security settings', () => {
 })
 
 const chrome = await findChrome()
+
+test.skipIf(!chrome)('scopes GitGraph effects per diagram and preserves theme paint in the player', async () => {
+  const charts = [
+    ['  look: neo', '  theme: neo', '  themeVariables:', '    gradientStart: "rgb(17, 34, 51)"',
+      '    gradientStop: "#778899"', '    dropShadow: "drop-shadow(rgba(32, 64, 96, 0.4) -2px 3px 1px)"', '    strokeWidth: 3',
+      '  themeCSS: ".label1 { stroke: #abcdef }"'],
+    ['  look: neo', '  theme: redux-dark-color', '  themeVariables:', '    filterColor: "#b2d3e4"'],
+    ['  theme: neo-dark'],
+  ]
+  const deck = charts.map(config => ['~~~mermaid', '---', 'config:', ...config, '---', neoHistory, '~~~'].join('\n')).join('\n\n')
+  const html = await renderDeck(parseDeck('# GitGraph\n\n' + deck))
+  const css = Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url))
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: request => new URL(request.url).pathname === '/presentation.css'
+      ? new Response(css, { headers: { 'Content-Type': 'text/css' } })
+      : new Response(html, { headers: { 'Content-Type': 'text/html' } }),
+  })
+  const browser = new Bun.WebView({ width: 960, height: 620, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await browser.navigate(server.url.href)
+    const effects = await browser.evaluate(`(() => {
+      const effectId = value => /#([^")]+)/.exec(value)?.[1]
+      return [...document.querySelectorAll('.slide-diagram')].map(svg => {
+        const branch = svg.querySelector('.diagram-git-branch-label-box')
+        const tag = svg.querySelector('.diagram-git-tag-box')
+        const stroke = getComputedStyle(branch).stroke
+        const branchShadow = getComputedStyle(branch).filter
+        const tagShadow = getComputedStyle(tag).filter
+        const gradient = svg.querySelector('linearGradient')
+        const filter = svg.querySelector('filter')
+        const shadow = filter.querySelector('feDropShadow')
+        const rail = getComputedStyle(svg.querySelector('.diagram-git-branch > path'))
+        const edge = getComputedStyle(svg.querySelector('.diagram-git-edge'))
+        const merge = getComputedStyle(svg.querySelector('.diagram-git-merge .diagram-git-ring'))
+        return {
+          id: filter.id,
+          branchFilters: branchShadow === 'none' ? 'none' : effectId(branchShadow) === filter.id,
+          tagFilters: effectId(tagShadow) === filter.id,
+          gradient: gradient ? [effectId(stroke) === gradient.id, ...[...gradient.querySelectorAll('stop')].map(stop => stop.getAttribute('stop-color'))] : null,
+          branchOverride: getComputedStyle(svg.querySelectorAll('.diagram-git-branch-label-box')[1]).stroke,
+          shadow: ['dx', 'dy', 'stdDeviation', 'flood-color', 'flood-opacity'].map(key => shadow.getAttribute(key)),
+          rail: [rail.strokeWidth, rail.opacity],
+          edge: [edge.strokeWidth, edge.strokeLinecap],
+          merge: merge.fill,
+        }
+      })
+    })()`) as { id: string, [property: string]: unknown }[]
+    expect(effects).toHaveLength(3)
+    expect(new Set(effects.map(effect => effect.id)).size).toBe(3)
+    expect(effects[0]).toMatchObject({
+      branchFilters: true, tagFilters: true, gradient: [true, '#112233', '#778899'], branchOverride: 'rgb(171, 205, 239)',
+      shadow: ['-2', '3', '1', '#204060', '0.4'], rail: ['3px', '1'], edge: ['8px', 'round'], merge: 'rgb(255, 255, 255)',
+    })
+    expect(effects[1]).toMatchObject({
+      branchFilters: true, tagFilters: true, gradient: null, shadow: ['4', '4', '0', '#b2d3e4', '0.06'],
+      rail: ['2px', '1'], edge: ['2px', 'round'], merge: 'rgb(17, 17, 19)',
+    })
+    expect(effects[2]).toMatchObject({ branchFilters: 'none', tagFilters: true, gradient: [true, '#0042eb', '#eb0042'] })
+  }
+  finally {
+    browser.close()
+    await server.stop(true)
+  }
+})
 
 test.skipIf(!chrome)('keeps full Gantt labels inside the chart without compact row collisions in Chromium', async () => {
   const tasks = [
