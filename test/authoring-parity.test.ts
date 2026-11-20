@@ -52,6 +52,30 @@ $\@unit + \@unit* + \text{in \@unit}$
   expect(html).toContain('<mtext>in meters</mtext>')
 })
 
+test('reads macro persistence, expansion budgets, and legacy color from deck headmatter', async () => {
+  const deck = parseDeck(String.raw`---
+math:
+  globalGroup: true
+  maxExpand: 1
+  colorIsTextColor: true
+---
+
+$\def\saved{z}x$
+
+---
+
+$\color{red}{b}c$
+
+$\saved$
+
+$\saved\saved$
+`)
+  const html = await renderDeck(deck)
+  expect(html).toContain('<mrow style="color:red"><mrow><mi>b</mi></mrow></mrow><mi>c</mi>')
+  expect(html).toContain('<mrow><mi>z</mi></mrow>')
+  expect(html).toContain(String.raw`<code class="math-unrendered">\saved\saved</code>`)
+})
+
 test('renders flowchart clusters, styles, and parallel edges', () => {
   const markup = mermaid(`flowchart LR
   accTitle: Review workflow

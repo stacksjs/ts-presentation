@@ -154,6 +154,10 @@ speaker notes. Each hook can be asynchronous.
   below the operator in display math.
 - Use deck-wide macros under `math.macros`. Quote TeX with YAML single
   quotes so backslashes are preserved.
+- Set `globalGroup: true` under `math` to reuse top-level TeX definitions across
+  formulas in one deck. Use `maxExpand` to set the expansion budget per formula
+  and `colorIsTextColor: true` for decks that use the older two-argument
+  `\color` syntax. The same options work in `setup/katex.ts`.
 - Position a floating element with `v-drag="[left, top, width, height, angle]"`
   or `<v-drag pos="left, top, width, height, angle">`. Use `NaN` in the
   directive or `_` in the component to retain automatic height. Set

@@ -88,6 +88,9 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     trust: typeof mathConfig.trust === 'boolean' ? mathConfig.trust : configuration?.katex?.trust,
     leqno: typeof mathConfig.leqno === 'boolean' ? mathConfig.leqno : configuration?.katex?.leqno,
     fleqn: typeof mathConfig.fleqn === 'boolean' ? mathConfig.fleqn : configuration?.katex?.fleqn,
+    globalGroup: typeof mathConfig.globalGroup === 'boolean' ? mathConfig.globalGroup : configuration?.katex?.globalGroup,
+    maxExpand: typeof mathConfig.maxExpand === 'number' ? mathConfig.maxExpand : configuration?.katex?.maxExpand,
+    colorIsTextColor: typeof mathConfig.colorIsTextColor === 'boolean' ? mathConfig.colorIsTextColor : configuration?.katex?.colorIsTextColor,
     macros: { ...configuration?.katex?.macros, ...resolveMathMacros(deck.headmatter) },
   })
   const mermaidConfig = deck.headmatter?.mermaid

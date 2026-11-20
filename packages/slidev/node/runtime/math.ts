@@ -176,10 +176,11 @@ function tokenize(source: string): string[] {
 
 type MathStyle = 0 | 1 | 2 | 3
 type MathMode = 'math' | 'text'
-const expansionPrimitives = ['\\expandafter', '\\noexpand', '\\@firstoftwo', '\\@secondoftwo', '\\@ifnextchar', '\\@ifstar', '\\TextOrMath'] as const
+const expansionPrimitives = ['\\expandafter', '\\noexpand', '\\@firstoftwo', '\\@secondoftwo', '\\@ifnextchar', '\\@ifstar', '\\TextOrMath', '\\long'] as const
 const expansionPrimitiveNames = new Set<string>(expansionPrimitives)
+const macroDeclaration = /^\\(?:[gex]?def|(?:future)?let|(?:new|renew|provide)command|global)$/
 type ExpansionPrimitive = typeof expansionPrimitives[number]
-type ConditionalPrimitive = Exclude<ExpansionPrimitive, '\\expandafter' | '\\noexpand'>
+type ConditionalPrimitive = Exclude<ExpansionPrimitive, '\\expandafter' | '\\noexpand' | '\\long'>
 interface TokenMacro { body: string[], parameters: string[][], prefix: string[], optional?: string[] }
 type Macro = TokenMacro | { primitive: ExpansionPrimitive }
 interface MathState { globals: Map<string, Macro>, options: KatexOptions }
@@ -515,6 +516,9 @@ function dimension(value: string): string | undefined {
 export function renderMath(source: string, display = false, configured: MathMacros = {}, state?: MathState): string {
   const tokens = tokenize(source)
   if (tokens.length > 6000) return `<code>${escapeHtml(source)}</code>`
+  const options = state?.options
+  const limit = options?.maxExpand
+  const maxExpand = typeof limit === 'number' && !Number.isNaN(limit) ? Math.max(0, limit) : 1000
   let cursor = 0
   let depth = 0
   let expandedCount = 0
@@ -530,12 +534,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
   const scopes: Map<string, Macro | undefined>[] = []
   function assign(name: string, definition: Macro, global = false): void {
     if (!controlSequence.test(name)) return
+    const scope = scopes.at(-1)
     if (global) {
-      state?.globals.set(name, definition)
       for (const scope of scopes) scope.delete(name)
     }
-    const scope = scopes.at(-1)
-    if (!global && scope && !scope.has(name)) scope.set(name, macros.get(name))
+    else if (scope && !scope.has(name)) scope.set(name, macros.get(name))
+    if (global || (!scope && options?.globalGroup)) state?.globals.set(name, definition)
     macros.set(name, definition)
   }
   function plainMacro(body: string[], arity = 0, optional?: string[]): TokenMacro {
@@ -543,7 +547,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return { body, parameters: Array.from({ length: count }, () => []), prefix: [], optional }
   }
   for (const [name, replacement] of Object.entries(configured)) {
-    if (replacement.length <= 8192) assign(name, plainMacro(tokenize(replacement)))
+    if (controlSequence.test(name) && replacement.length <= 8192) macros.set(name, plainMacro(tokenize(replacement)))
   }
   for (const [name, definition] of state?.globals ?? []) macros.set(name, definition)
 
@@ -598,6 +602,11 @@ export function renderMath(source: string, display = false, configured: MathMacr
     cursor = start
   }
 
+  function countExpansions(count: number): void {
+    expandedCount += count
+    if (expandedCount > maxExpand) throw new Error('Too many math macro expansions')
+  }
+
   function expandOnce(): boolean {
     const token = tokens[cursor]
     const definition = macros.get(token)
@@ -605,7 +614,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const primitive = definition && 'primitive' in definition ? definition.primitive
       : !definition && isExpansionPrimitive(token) ? token : undefined
     if (!macro && !primitive) return false
-    if (++expandedCount > 300) throw new Error('Too many math macro expansions')
+    countExpansions(1)
     if (primitive === '\\expandafter' || primitive === '\\noexpand') {
       tokens.splice(cursor, 1)
       space()
@@ -625,7 +634,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
 
     if (primitive) {
       const start = cursor++
-      replaceExpansion(start, chooseBranch(primitive))
+      replaceExpansion(start, primitive === '\\long' ? [] : chooseBranch(primitive))
       return true
     }
     if (!macro) return false
@@ -721,6 +730,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       tokens.splice(begin, end - begin + 1)
       cursor = begin
     }
+    if (preserveLiterals) countExpansions(definition.length)
     return definition
   }
 
@@ -855,6 +865,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return inMode('text', () => parseTextArgument(name, parentheses))
   }
 
+  function coloredArgument(text: boolean): Markup {
+    const color = safeColor(literalGroup())
+    const content = text ? textArgument('text') : argument()
+    return xml`<mrow${color ? ` style="color:${color}"` : ''}>${content}</mrow>`
+  }
+
   function parseTextArgument(name: string, parentheses: boolean): Markup {
     if (depth++ > 100) throw new Error('Math text is nested too deeply')
     const properties = textFonts[name]
@@ -894,7 +910,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
           literal += closing
           break
         }
-        if (token === '\\relax') continue
+        if (token === '\\relax' || declareMacro(token)) continue
         if (Object.hasOwn(sizeCommands, token)) {
           flushSize()
           fontScale = sizeCommands[token]
@@ -921,6 +937,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
         else if (token.startsWith('\\') && textBoxes.has(token.slice(1))) {
           flush()
           parts.push(textBox(token.slice(1)))
+        }
+        else if (token === '\\textcolor' || (token === '\\color' && options?.colorIsTextColor)) {
+          flush()
+          parts.push(coloredArgument(true))
         }
         else if (token === '\\sout') {
           flush()
@@ -1047,7 +1067,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
         fontScale = baseScale
         continue
       }
-      if (token === '\\color') {
+      if (token === '\\color' && !options?.colorIsTextColor) {
         const color = safeColor(literalGroup())
         const content = row(stop, true)
         parts.push({ markup: color ? xml`<mrow style="color:${color}">${content}</mrow>` : content })
@@ -1318,39 +1338,14 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return String.fromCodePoint(code)
   }
 
-  function atom(token: string): Atom {
-    if (token === '{') {
-      const content = inScope(() => row(['}']))
-      if (take() !== '}') throw new Error('Unclosed math group')
-      return { markup: xml`<mrow>${content}</mrow>` }
+  function declareMacro(token: string): boolean {
+    if (!macroDeclaration.test(token)) return false
+    let global = false
+    while (token === '\\global') {
+      global = true
+      token = take()
     }
-    if (!token.startsWith('\\')) {
-      if (/^\d/.test(token)) return { markup: tag('mn', token) }
-      if (token !== '.' && delimiterGlyphs.has(token)) return { markup: fence(token, false) }
-      const limits = largeOperatorGlyphs.has(token) ? true : integralGlyphs.has(token) ? false : undefined
-      return { markup: tag(/^\p{L}$/u.test(token) ? 'mi' : 'mo', token === '-' ? '−' : token), limits }
-    }
-
-    if (mathVerbLength(token)) {
-      const [, star, withSpaces, , literal] = leadingVerb.exec(token)!
-      const content = star === undefined ? literal : withSpaces.replaceAll(' ', '␣')
-      return { markup: `<mtext class="math-verbatim" style="font-family:monospace;white-space:pre">${escapeHtml(content)}</mtext>` }
-    }
-
-    let name = token.slice(1)
-    const global = name === 'global'
-    if (global) name = take().slice(1)
-    if (name === 'begingroup' || name === 'bgroup') {
-      const close = name === 'begingroup' ? '\\endgroup' : '\\egroup'
-      const content = inScope(() => row([close]))
-      if (take() !== close) throw new Error('Unclosed math group')
-      return { markup: xml`<mrow>${content}</mrow>` }
-    }
-    if (name === 'ce' || name === 'pu') {
-      return { markup: (name === 'ce' ? chemicalFormula : physicalUnits)(literalGroup()) }
-    }
-    if (isMathAttributeCommand(token) || isMathUrlCommand(token)) return { markup: htmlCommand(token) }
-    if (Object.hasOwn(mathClasses, name)) return classifiedAtom(mathClasses[name], argument())
+    const name = token.slice(1)
     if (['def', 'gdef', 'edef', 'xdef'].includes(name)) {
       const command = literalGroup()
       space()
@@ -1370,7 +1365,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const body = rawGroup()
       const replacement = name === 'edef' || name === 'xdef' ? expandDefinition(body, true) : body
       assign(command, { body: replacement, parameters, prefix }, global || name === 'gdef' || name === 'xdef')
-      return { markup: '' }
+      return true
     }
     if (name === 'let' || name === 'futurelet') {
       const target = literalGroup()
@@ -1391,7 +1386,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const existing = value === undefined ? undefined : macros.get(value)
       const snapshot = value?.startsWith('\\') ? [literalToken + value] : source
       assign(target, existing ?? (isExpansionPrimitive(value) ? { primitive: value } : plainMacro(snapshot)), global)
-      return { markup: '' }
+      return true
     }
     if (name === 'newcommand' || name === 'renewcommand' || name === 'providecommand') {
       const command = literalGroup().trim()
@@ -1400,9 +1395,45 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const arity = Number(count ?? 0)
       const optional = arity ? rawBracket() : undefined
       const body = rawGroup()
-      if (name !== 'providecommand' || !macros.has(command)) assign(command, plainMacro(body, arity, optional))
-      return { markup: '' }
+      if (name !== 'providecommand' || !macros.has(command)) assign(command, plainMacro(body, arity, optional), global)
+      return true
     }
+    if (global) throw new Error('Global macro prefix requires a definition')
+    return false
+  }
+
+  function atom(token: string): Atom {
+    if (token === '{') {
+      const content = inScope(() => row(['}']))
+      if (take() !== '}') throw new Error('Unclosed math group')
+      return { markup: xml`<mrow>${content}</mrow>` }
+    }
+    if (!token.startsWith('\\')) {
+      if (/^\d/.test(token)) return { markup: tag('mn', token) }
+      if (token !== '.' && delimiterGlyphs.has(token)) return { markup: fence(token, false) }
+      const limits = largeOperatorGlyphs.has(token) ? true : integralGlyphs.has(token) ? false : undefined
+      return { markup: tag(/^\p{L}$/u.test(token) ? 'mi' : 'mo', token === '-' ? '−' : token), limits }
+    }
+
+    if (mathVerbLength(token)) {
+      const [, star, withSpaces, , literal] = leadingVerb.exec(token)!
+      const content = star === undefined ? literal : withSpaces.replaceAll(' ', '␣')
+      return { markup: `<mtext class="math-verbatim" style="font-family:monospace;white-space:pre">${escapeHtml(content)}</mtext>` }
+    }
+
+    if (declareMacro(token)) return { markup: '' }
+    const name = token.slice(1)
+    if (name === 'begingroup' || name === 'bgroup') {
+      const close = name === 'begingroup' ? '\\endgroup' : '\\egroup'
+      const content = inScope(() => row([close]))
+      if (take() !== close) throw new Error('Unclosed math group')
+      return { markup: xml`<mrow>${content}</mrow>` }
+    }
+    if (name === 'ce' || name === 'pu') {
+      return { markup: (name === 'ce' ? chemicalFormula : physicalUnits)(literalGroup()) }
+    }
+    if (isMathAttributeCommand(token) || isMathUrlCommand(token)) return { markup: htmlCommand(token) }
+    if (Object.hasOwn(mathClasses, name)) return classifiedAtom(mathClasses[name], argument())
     if (name === 'mathchoice') {
       const choices = Array.from({ length: 4 }, () => {
         const next = peek()
@@ -1430,12 +1461,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       return { markup: xml`<mrow class="math-${name}">${argument()}</mrow>` }
     }
     if (name === 'angln') return { markup: '<mrow class="math-angl"><mi>n</mi></mrow>' }
-    if (name === 'textcolor') {
-      const color = safeColor(literalGroup())
-      const content = argument()
-      const safe = color ? ` style="color:${color}"` : ''
-      return { markup: xml`<mrow${safe}>${content}</mrow>` }
-    }
+    if (name === 'textcolor' || (name === 'color' && options?.colorIsTextColor)) return { markup: coloredArgument(false) }
     if (textBoxes.has(name)) return { markup: textBox(name) }
     if (name === 'mathreflectbox') return { markup: xml`<mrow class="math-reflect">${argument()}</mrow>` }
     if (name === 'vcenter') {

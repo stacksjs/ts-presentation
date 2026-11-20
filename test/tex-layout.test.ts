@@ -101,6 +101,48 @@ test('selects text or math expansions across nested math and equation tags', () 
   expect(html.match(/<mi>μ<\/mi>/g)).toHaveLength(3)
 })
 
+test('enforces the configured expansion budget, including eager definition output', () => {
+  const limited = createMathRenderer({ maxExpand: 2, throwOnError: true })
+  expect(limited(String.raw`\def\letter{z}\letter\letter`, false)).toContain('<mi>z</mi><mi>z</mi>')
+  expect(() => limited(String.raw`\def\letter{z}\letter\letter\letter`, false)).toThrow('Too many math macro expansions')
+  expect(limited(String.raw`\edef\two{ab}`, false)).toContain('<math')
+  expect(() => limited(String.raw`\def\part{ab}\edef\two{\part}`, false)).toThrow('Too many math macro expansions')
+  expect(limited(String.raw`\def\letter{y}\letter`, false)).toContain('<mi>y</mi>')
+
+  const longFormula = String.raw`\def\term{x}` + String.raw`\term`.repeat(400)
+  expect(createMathRenderer({ throwOnError: true })(longFormula, false).match(/<mi>x<\/mi>/g)).toHaveLength(400)
+  expect(createMathRenderer({ maxExpand: Infinity, throwOnError: true })(longFormula, false)).toContain('<mi>x</mi>')
+  expect(createMathRenderer({ maxExpand: 0 })(String.raw`\def\term{x}\term`, false)).toContain('math-unrendered')
+})
+
+test('persists top-level definitions in a global group and scopes definitions inside text and arrays', () => {
+  const math = createMathRenderer({ globalGroup: true, throwOnError: true })
+  const first = math(String.raw`
+    \long\def\base{A}
+    \newcommand{\another}{B}
+    \let\copy=\base
+    {\def\base{X}\base}
+    \text{\edef\word{\TextOrMath{local}{wrong}}\word\gdef\shared{C}}
+    \begin{aligned}\def\cell{D}\cell\end{aligned}
+  `, true)
+  expect(first).toContain('<mi>X</mi>')
+  expect(first).toContain('<mtext>local</mtext>')
+  expect(first).toContain('<mi>D</mi>')
+  expect(math(String.raw`\base\another\copy\shared`, false)).toContain('<mi>A</mi><mi>B</mi><mi>A</mi><mi>C</mi>')
+  expect(() => math(String.raw`\word`, false)).toThrow('Unsupported math command')
+  expect(() => math(String.raw`\cell`, false)).toThrow('Unsupported math command')
+  expect(() => createMathRenderer({ globalGroup: true, throwOnError: true })(String.raw`\base`, false)).toThrow('Unsupported math command')
+})
+
+test('applies the legacy color option to one argument in text and math', () => {
+  const tex = String.raw`a\color{red}{b}c`
+  const legacy = createMathRenderer({ colorIsTextColor: true, throwOnError: true })
+  expect(legacy(tex, false)).toContain('<mi>a</mi><mrow style="color:red"><mrow><mi>b</mi></mrow></mrow><mi>c</mi>')
+  expect(renderMath(tex)).toContain('<mrow style="color:red"><mrow><mi>b</mi></mrow><mi>c</mi></mrow>')
+  expect(legacy(String.raw`\text{a\color{blue}{b}c}`, false))
+    .toContain('<mtext>a</mtext><mrow style="color:blue"><mtext>b</mtext></mrow><mtext>c</mtext>')
+})
+
 test('renders phase angles, actuarial notation, pseudo-bold, and strikeout as MathML', () => {
   const math = createMathRenderer({ throwOnError: true })
   const html = math(String.raw`\phase{-78^\circ} + a_{\angl{n+1}}+b_\angln + \pmb{\mu} + \text{old \sout{term $x^2$}}`, true)
