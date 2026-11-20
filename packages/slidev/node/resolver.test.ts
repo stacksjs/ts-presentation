@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, realpath, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { computeInvocationSearchPaths, findInvocationNodeModulesPath, findWorkspaceRoot, resolveDeckEntry, resolveExtension } from './runtime/extension-resolver.ts'
+import { createDeckCompiler } from './runtime/loader.ts'
 
 async function project(run: (root: string) => Promise<void>): Promise<void> {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'presentation-resolver-')))
@@ -37,6 +38,15 @@ describe('extension package resolution', () => {
     await Bun.write(entry, 'export default { name: "practice" }')
     expect((await resolveExtension('practice', 'theme', root))?.entry).toBe(entry)
     expect((await resolveExtension('@/themes/practice', 'theme', root))?.entry).toBe(entry)
+  }))
+
+  it('treats the none theme as built in even with a matching package installed', () => project(async (root) => {
+    const candidate = await install(root, 'ts-presentation-theme-none')
+    await Bun.write(candidate, 'throw new Error("The none theme should not load a package")')
+    const entry = join(root, 'slides.md')
+    await Bun.write(entry, '---\ntheme: none\n---\n\n# Blank theme')
+    const { html } = await createDeckCompiler(entry)()
+    expect(html).toContain('data-theme="none"')
   }))
 
   it.each(['bad!(name)', 'evil\\package', 'UpperCase', '@scope/foo/bar', '@scope/../escape', ''])('rejects invalid package name %j', (name) => project(async (root) => {
@@ -100,12 +110,22 @@ describe('invocation paths', () => {
     const global = join(root, 'pnpm', 'v11')
     const core = await install(join(global, 'core'), 'ts-presentation')
     const theme = await install(join(global, 'extra'), 'ts-presentation-theme-review')
+    const addon = await install(join(global, 'addon'), 'ts-presentation-addon-presenter')
     await mkdir(join(global, 'other'), { recursive: true })
     const own = join(global, 'core', 'node_modules')
-    expect(computeInvocationSearchPaths(own)).toEqual([own, join(global, 'extra', 'node_modules')])
+    expect(computeInvocationSearchPaths(own)).toEqual([
+      own, join(global, 'addon', 'node_modules'), join(global, 'extra', 'node_modules'),
+    ])
     expect(computeInvocationSearchPaths(undefined)).toEqual([])
     expect(computeInvocationSearchPaths(join(root, 'missing', 'core', 'node_modules'))).toEqual([join(root, 'missing', 'core', 'node_modules')])
     expect((await resolveExtension('review', 'theme', root, core))?.entry).toBe(theme)
+    expect((await resolveExtension('presenter', 'addon', root, core))?.entry).toBe(addon)
+  }))
+
+  it('keeps a single global install path when it has no siblings', () => project(async (root) => {
+    const own = join(root, 'global', 'node_modules')
+    await mkdir(own, { recursive: true })
+    expect(computeInvocationSearchPaths(own)).toEqual([own])
   }))
 })
 

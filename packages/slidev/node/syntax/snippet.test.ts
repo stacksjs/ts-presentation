@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { mkdtemp, rm, symlink } from 'node:fs/promises'
+import { mkdtemp, realpath, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createDeckCompiler } from '../runtime/loader.ts'
@@ -9,6 +9,16 @@ import { fenced, fixture, source } from '../../test/code-fixture.ts'
 
 // Adapted from Slidev's node/syntax/snippet.test.ts. Test the actual loader
 // used for dev, offline builds and exports.
+test('imports a top-level snippet region from the deck root', () => fixture(async (root, entry, file) => {
+  const directive = '<<< @/snippets/fixture.ts#sample'
+  await Bun.write(entry, '# Snippet\n\n' + directive + '\n')
+  const { html } = await createDeckCompiler(entry)()
+  expect((await resolveSnippet(directive, root, entry))?.file).toBe(await realpath(file))
+  expect(html).toMatch(/<pre><code class="language-ts">/)
+  expect(html).toContain('return')
+  expect(html).not.toContain('before')
+}))
+
 test('imports VS Code regions inside lists and leaves fenced directives literal', () => fixture(async (root, entry, file) => {
   const markdown = '# Snippets\n\n- Example\n   <<< @/snippets/fixture.ts#sample\n\n' + fenced('', '<<< @/snippets/fixture.ts')
   await Bun.write(entry, markdown)
@@ -51,6 +61,7 @@ test('authorizes saving only for opted-in dev snippets and detects stale edits',
   const compile = createDeckCompiler(entry, { liveCompile: true })
   const online = await compile()
   const [token, target] = [...online.writableSnippets][0]
+  expect(target.path).toBe(await realpath(file))
   expect(online.html).toContain('data-live-save')
   expect(online.html).toContain(`data-snippet-token="${token}"`)
   expect(online.html).not.toContain(target.path)
