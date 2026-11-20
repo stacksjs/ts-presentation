@@ -310,7 +310,7 @@ function tokenize(source: string, onTrailingComment?: () => void): string[] {
 type MathMode = 'math' | 'text'
 const expansionPrimitives = ['\\expandafter', '\\noexpand', '\\@firstoftwo', '\\@secondoftwo', '\\@ifnextchar', '\\@ifstar', '\\TextOrMath', '\\html@mathml', '\\message', '\\errmessage', '\\char', '\\MoveEqLeft'] as const
 const expansionPrimitiveNames = new Set<string>(expansionPrimitives)
-const macroDeclaration = /^\\(?:[gex]?def|(?:future)?let|(?:new|renew|provide)command|DeclarePairedDelimiter(?:X(?:PP)?)?|MakeAboxedCommand|mathtoolsset|(?:new|renew|use)tagform|setlength|global|long)$/
+const macroDeclaration = /^\\(?:[gex]?def|(?:future)?let|(?:new|renew|provide)command|DeclarePairedDelimiter(?:X(?:PP)?)?|Declare(?:Left|Right)Delimiter|MakeAboxedCommand|mathtoolsset|empheqset|(?:new|renew|use)tagform|setlength|global|long)$/
 const tagFormDeclaration = /^\\(?:new|renew|use)tagform$/
 const tagValueToken = '\u0000equation-tag-value'
 const assignmentCommand = /^\\(?:[gex]?def|(?:future)?let)$/
@@ -374,6 +374,18 @@ builtinMacros.set('\\@hspacer', { body: tokenize('\\rule{0pt}{0pt}\\hskip #1\\re
 builtinMacros.set('\\DeclareMathOperator', { body: tokenize('\\@ifstar\\@declareoperatorstar\\@declareoperator'), parameters: [], prefix: [] })
 builtinMacros.set('\\@declareoperator', { body: tokenize('\\newcommand{#1}{\\operatorname{#2}}'), parameters: [[], []], prefix: [] })
 builtinMacros.set('\\@declareoperatorstar', { body: tokenize('\\newcommand{#1}{\\operatorname*{#2}}'), parameters: [[], []], prefix: [] })
+const emphasisDelimiter = '\\@empheqDelimiter'
+function emphasisDelimiters(target: string, left: boolean, affix: string[] = []): [string, TokenMacro][] {
+  return ['', 'big'].map(size => {
+    const fence = [emphasisDelimiter, size ? '1' : '0', '{', target, '}']
+    const body = left ? [...fence, ...affix] : [...affix, ...fence]
+    return [`\\empheq${size}${target.slice(1)}`, plainMacro(body)]
+  })
+}
+for (const symbol of ['brace', 'brack', 'angle', 'vert', 'Vert', 'floor', 'ceil', 'paren']) {
+  for (const [name, macro] of [...emphasisDelimiters(`\\l${symbol}`, true), ...emphasisDelimiters(`\\r${symbol}`, false)])
+    builtinMacros.set(name, macro)
+}
 builtinMacros.set('\\angln', { body: tokenize('{\\angl n}'), parameters: [], prefix: [] })
 for (const [name, brace] of [['\\bgroup', '{'], ['\\egroup', '}']])
   builtinMacros.set(name, { body: [brace], parameters: [], prefix: [] })
@@ -965,7 +977,6 @@ const mathtoolsSpacingOptions = new Set([
 
 const arrowBetweenLines = '\\ArrowBetweenLines'
 const emphasisEnvironments = /^(?:(?:equation|align|alignat|flalign|gather|multline)\*?)$/
-const emphasisFence = /^\\empheq(big)?([lr](?:brace|brack|angle|vert|Vert|floor|ceil|paren))$/
 const emphasisEdges = ' data-empheq-start data-empheq-end'
 const swapAboveDisplaySkip = '\\SwapAboveDisplaySkip'
 const flushSpaceAbove = '\\MTFlushSpaceAbove'
@@ -1138,6 +1149,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   let fullWidthAlignment = false
   let shortDisplaySkip = false
   let emphasizedDisplay: 'equation' | 'alignment' | undefined
+  let emphasisDefaults: ReadonlyMap<string, string[]> | undefined
   let emphasisSide = false
   let fontScale = 1
   let textItalic = false
@@ -1190,6 +1202,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const previousMonospace = textMonospace
     const previousJot = equationJot
     const previousMathtoolsOptions = mathtoolsOptions
+    const previousEmphasisDefaults = emphasisDefaults
     const previousTagForms = tagForms
     const previousTagFormName = tagFormName
     scopes.push({ undo: new Map() })
@@ -1200,6 +1213,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       textMonospace = previousMonospace
       equationJot = previousJot
       mathtoolsOptions = previousMathtoolsOptions
+      emphasisDefaults = previousEmphasisDefaults
       tagForms = previousTagForms
       tagFormName = previousTagFormName
       while (scopes.length > before) restoreScope()
@@ -3291,49 +3305,56 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return shortDisplaySkip ? `<div class="math-short-display">${formula}</div>` : formula
   }
 
+  function emphasisOptions(raw: string[]): ReadonlyMap<string, string[]> {
+    const settings = new Map(emphasisDefaults)
+    withTokens([...raw, ','], () => {
+      space()
+      while (tokens[cursor] !== boundary) {
+        const assignment = delimitedArgument([','])
+        space()
+        if (!assignment.some(token => !texWhitespace.test(tokenText(token)))) continue
+        const equals = assignment.indexOf('=')
+        const key = assignment.slice(0, equals).map(tokenText).join('').trim()
+        if (equals < 1 || !/^(?:box|outerbox|innerbox|left|right)$/.test(key))
+          throw new MathParseError(`Unsupported empheq option: ${assignment.map(tokenText).join('').trim()}`)
+        const body = assignment.slice(equals + 1)
+        const value = withTokens(body, () => {
+          space()
+          if (tokenText(tokens[cursor] ?? '') !== '{') return body
+          const unwrapped = rawGroup()
+          space()
+          return tokens[cursor] === boundary ? unwrapped : body
+        })
+        const option = key === 'outerbox' ? 'box' : key
+        if (value.some(token => !texWhitespace.test(tokenText(token)))) settings.set(option, value)
+        else settings.delete(option)
+      }
+    })
+    return settings
+  }
+
   function empheqDisplay(tex: () => string): string {
     if (!display) throw new MathParseError('empheq requires display math')
     return inScope(() => {
-      const raw = rawBracket() ?? []
-      const settings = new Map<string, string[]>()
-      withTokens([...raw, ','], () => {
-        space()
-        while (tokens[cursor] !== boundary) {
-          const assignment = delimitedArgument([','])
-          space()
-          if (!assignment.some(token => !texWhitespace.test(tokenText(token)))) continue
-          const equals = assignment.indexOf('=')
-          const key = assignment.slice(0, equals).map(tokenText).join('').trim()
-          if (equals < 1 || !/^(?:box|outerbox|innerbox|left|right)$/.test(key))
-            throw new MathParseError(`Unsupported empheq option: ${assignment.map(tokenText).join('').trim()}`)
-          const body = assignment.slice(equals + 1)
-          const value = withTokens(body, () => {
-            space()
-            if (tokenText(tokens[cursor] ?? '') !== '{') return body
-            const unwrapped = rawGroup()
-            space()
-            return tokens[cursor] === boundary ? unwrapped : body
-          })
-          settings.set(key === 'outerbox' ? 'box' : key, value)
-        }
-      })
+      const raw = rawBracket()
+      const settings = raw ? emphasisOptions(raw) : emphasisDefaults
       const [environment, pairs, extra] = expandDefinition(rawGroup()).join('').replace(/\s/g, '').split('=')
       if (!emphasisEnvironments.test(environment) || extra !== undefined || environment.startsWith('alignat') !== (pairs !== undefined))
         throw new MathParseError('Invalid empheq alignment')
       function box(key: string, side: string): string {
-        const option = settings.get(key)
+        const option = settings?.get(key)
         if (!option) return ''
         const style = alignedBoxStyle(option).join(';')
         return `<div class="math-empheq-box" data-empheq-box="${side}"${style ? ` style="${style}"` : ''} aria-hidden="true"></div>`
       }
       function adornment(side: 'left' | 'right'): string {
-        const value = settings.get(side)
+        const value = settings?.get(side)
         if (!value) return ''
         const previousTag = tagState
         tagState = { suppressed: false }
         emphasisSide = true
         try {
-          const content = withTokens(value, () => renderMarkup(row([boundary]), 0))
+          const content = withTokens(value, () => inScope(() => renderMarkup(row([boundary]), 0)))
           return `<div class="math-empheq-side" data-empheq-side="${side}"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow>${content}</mrow></semantics></math></div>`
         }
         finally {
@@ -3521,6 +3542,18 @@ export function renderMath(source: string, display = false, configured: MathMacr
       setMathtoolsOptions()
       return true
     }
+    if (name === 'empheqset') {
+      emphasisDefaults = emphasisOptions(rawGroup())
+      return true
+    }
+    if (name === 'DeclareLeftDelimiter' || name === 'DeclareRightDelimiter') {
+      const affix = rawBracket()
+      const target = literalGroup().trim()
+      if (!controlWord.test(target)) throw new MathParseError(`Expected a delimiter command in ${token}`)
+      for (const [command, macro] of emphasisDelimiters(target, name === 'DeclareLeftDelimiter', affix))
+        assign(command, macro)
+      return true
+    }
     if (name === 'setlength') {
       if (literalGroup() !== '\\jot') throw new MathParseError('Unsupported math length register')
       equationJot = readDimension()
@@ -3676,12 +3709,13 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (equationReferences.has(token)) return { markup: equationReference(token) }
     const name = token.slice(1)
     if (token === swapAboveDisplaySkip) throw new MathParseError(`${token} must start a top-level align, alignat, gather, or full-width AMS alignment`)
-    if (emphasisSide) {
-      const size = emphasisFence.exec(token)
-      if (size) {
-        const symbol = delimiter(`\\${size[2]}`, 'empheq')
-        return { markup: `<mrow class="math-empheq-delimiter"><mo stretchy="true" symmetric="false" data-empheq-delimiter="${size[1] ? 'inner' : 'body'}" lspace="0em" rspace="0em">${escapeHtml(symbol)}</mo><mspace width="0"/></mrow>` }
-      }
+    if (token === emphasisDelimiter) {
+      if (!emphasisSide) throw new MathParseError('An empheq delimiter requires a left or right decoration')
+      const size = take() === '1' ? 'inner' : 'body'
+      const input = expandDefinition(rawGroup()).filter(token => !texWhitespace.test(token))
+      if (input.length !== 1) throw new MathParseError('Expected one glyph for an empheq delimiter')
+      const symbol = delimiter(input[0], 'empheq')
+      return { markup: symbol === '.' ? '' : `<mrow class="math-empheq-delimiter"><mo stretchy="true" symmetric="false" data-empheq-delimiter="${size}" lspace="0em" rspace="0em">${escapeHtml(symbol)}</mo><mspace width="0"/></mrow>` }
     }
     if (token === arrowBetweenLines) throw new MathParseError(`${token} requires an align, alignat, aligned, or alignedat environment`)
     if (token === flushSpaceAbove || token === flushSpaceBelow) throw new MathParseError(`${token} requires an alignment environment`)

@@ -334,9 +334,13 @@ See \eqref{a} and \eqref{b}.
 
 # Bounded equations
 
+\DeclareLeftDelimiter[\enspace P\Rightarrow]{\lbrace}
+\DeclareRightDelimiter[\Leftarrow Q\enspace]{\rbrack}
+\empheqset{innerbox=\fbox,left=\empheqbiglbrace,right=\empheqrbrack}
+
 $$ {1|2|all}
 \newcommand{\panel}[1]{\fcolorbox{blue}{navy}{#1}}
-\begin{empheq}[box=\panel,innerbox=\fbox,left={P\Rightarrow\empheqbiglbrace},right=\empheqrbrack]{alignat=1}
+\begin{empheq}[box=\panel]{alignat=1}
 X&=\frac{1}{2}\label{a}\\
 Y&=\frac{3}{4}\label{b}
 \end{empheq}
@@ -361,7 +365,7 @@ $$`)
       expect(markup).toContain('data-slide-link="2"><math><mrow><mtext>(2)</mtext>')
       await view.navigate(server.url.href + '#slide-2')
       const layout = await view.evaluate<{
-        positioned: boolean, delimiters: number[], bodyHeight: number, border: string, fill: string
+        positioned: boolean, affixOrder: boolean, delimiters: number[], bodyHeight: number, border: string, fill: string
       }>(`(async () => {
         await document.fonts.ready
         await new Promise(requestAnimationFrame)
@@ -380,11 +384,14 @@ $$`)
           positioned: outer.left < left.left && left.right <= inner.left + 0.5
             && inner.left < start.left && inner.right > end.right && inner.top < start.top && inner.bottom > end.bottom
             && right.left >= inner.right - 0.5 && outer.right > right.right && tag.left >= outer.right - 0.5,
+          affixOrder: rect('[data-empheq-side="left"] [data-empheq-delimiter]').right < rect('[data-empheq-side="left"] mi').left
+            && rect('[data-empheq-side="right"] mi').right < rect('[data-empheq-side="right"] [data-empheq-delimiter]').left,
           delimiters: Array.from(group.querySelectorAll('[data-empheq-delimiter]'), el => el.getBoundingClientRect().height),
           bodyHeight: end.bottom - start.top, border: paint.borderTopColor, fill: paint.backgroundColor,
         }
       })()`)
       expect(layout.positioned).toBe(true)
+      expect(layout.affixOrder).toBe(true)
       expect(layout.delimiters).toHaveLength(2)
       expect(Math.min(...layout.delimiters)).toBeGreaterThan(layout.bodyHeight * 0.85)
       expect(layout.border).toBe('rgb(0, 0, 255)')

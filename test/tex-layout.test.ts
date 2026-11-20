@@ -1469,6 +1469,80 @@ d&=e&&f=g
   expect(() => math(String.raw`\begin{empheq}[unknown=x]{align}a&=b\end{empheq}`, true)).toThrow('Unsupported empheq option')
 })
 
+test('merges scoped empheq defaults and declares normal and enlarged delimiters', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const source = String.raw`\DeclareLeftDelimiter[\enspace\text{Left, main}]{\leftedge}
+\DeclareRightDelimiter[\text{Right}\enspace]{\rrbracket}
+\def\leftedge{\llbracket}
+\let\tallleft\empheqbigleftedge
+\empheqset{outerbox={\fcolorbox{blue}{navy}},left=\tallleft}
+\empheqset{right=\empheqrrbracket}
+\begin{spreadlines}{4px}
+\begin{empheq}{equation*}x=1\end{empheq}
+\begin{spreadlines}{2px}
+\DeclareLeftDelimiter[\enspace\text{Local}]{\leftedge}
+\empheqset{box=\fcolorbox{red}{pink},right={ }}
+\begin{empheq}[outerbox={},innerbox=\fbox,left=\empheqleftedge]{gather*}y=2\end{empheq}
+\end{spreadlines}
+\begin{empheq}{equation*}z=3\end{empheq}
+\end{spreadlines}`
+  const displays = math(source, true).match(/<div class="math-empheq">[\s\S]*?<annotation/g) ?? []
+  expect(displays).toHaveLength(3)
+  for (const display of [displays[0], displays[2]]) {
+    expect(display).toContain('data-empheq-box="outer" style="--math-frame-fill:navy;--math-frame-color:blue"')
+    expect(display).not.toContain('data-empheq-box="inner"')
+    expect(display).toMatch(/data-empheq-delimiter="inner"[^>]*>⟦<.*?<mtext>Left, main<\/mtext>/)
+    expect(display).toMatch(/<mtext>Right<\/mtext>.*?data-empheq-delimiter="body"[^>]*>⟧</)
+  }
+  const inside = displays[1]
+  expect(inside).toContain('data-empheq-box="inner"')
+  expect(inside).not.toContain('data-empheq-box="outer"')
+  expect(inside).not.toContain('data-empheq-side="right"')
+  expect(inside).toMatch(/data-empheq-delimiter="body"[^>]*>⟦<.*?<mtext>Local<\/mtext>/)
+
+  expect(() => math(String.raw`\DeclareLeftDelimiter{notacommand} x`, true)).toThrow('Expected a delimiter command')
+  expect(() => math(String.raw`\DeclareRightDelimiter{\frac}\begin{empheq}[right=\empheqfrac]{equation*}x\end{empheq}`, true)).toThrow('Invalid delimiter')
+  expect(() => math(String.raw`\empheqset{weight=2} x`, true)).toThrow('Unsupported empheq option')
+})
+
+test('applies standalone empheq declarations only to subsequent displays in the current Markdown scope', async () => {
+  const source = String.raw`# First
+
+\DeclareLeftDelimiter[\enspace\text{Deck default}]{\lbrace} % A local delimiter
+\empheqset{box=\fbox,left=\empheqlbrace}
+
+\begin{empheq}{equation*}x=1\end{empheq}
+
+\begin{spreadlines}{4px}
+\empheqset{left={},box={}}
+\begin{empheq}{equation*}y=2\end{empheq}
+\end{spreadlines}
+
+~~~tex
+\empheqset{box=\colorbox{red}}
+~~~
+
+\begin{empheq}{equation*}z=3\end{empheq}
+
+---
+
+# Second
+
+\begin{empheq}{equation*}u=4\end{empheq}
+`
+  const { html } = await renderPresentation(parseDeck(source))
+  const displays = html.match(/<div class="math-empheq">[\s\S]*?<annotation/g) ?? []
+  expect(displays).toHaveLength(2)
+  for (const display of displays) {
+    expect(display).toContain('<mtext>Deck default</mtext>')
+    expect(display).toContain('data-empheq-box="outer"')
+    expect(display).not.toContain('--math-frame-fill:red')
+  }
+  expect(html).toMatch(/<pre><code class="language-tex">[\s\S]*?empheqset[\s\S]*?<\/code>/)
+  expect(html).toContain('<mi>y</mi>')
+  expect(html).toContain('<mi>u</mi>')
+})
+
 test('uses the short display skip only for the requested top-level alignment', () => {
   const math = createMathRenderer({ throwOnError: true })
   const source = String.raw`\begin{spreadlines}{2px}
