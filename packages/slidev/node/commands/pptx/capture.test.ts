@@ -856,6 +856,14 @@ $$
 
 $$
 \begin{array}{c|c}a&b\\c&d\end{array}
+$$
+
+---
+
+# Dotted matrices
+
+$$
+\begin{pmatrix}a&b&c\\\hdotsfor[1.5]{3}\\d&e&f\end{pmatrix}
 $$`)
     const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
     const exportDeck = Bun.spawn([process.execPath, cli, 'export', entry, '--format', 'pptx-editable', '--output', output, '--executable-path', chrome!], {
@@ -868,6 +876,7 @@ $$`)
     const compact = parts.get('ppt/slides/slide1.xml')?.toString() ?? ''
     const cases = parts.get('ppt/slides/slide2.xml')?.toString() ?? ''
     const arrays = parts.get('ppt/slides/slide3.xml')?.toString() ?? ''
+    const dotted = parts.get('ppt/slides/slide4.xml')?.toString() ?? ''
     expect(compact.match(/<a14:m>/g)).toHaveLength(4)
     expect(compact.match(/<mc:Fallback><p:sp>/g)).toHaveLength(4)
     expect(compact).toMatch(/<m:nary>.*?<m:sub><m:m><m:mr>/)
@@ -889,6 +898,8 @@ $$`)
     expect(arrays.match(/<p:pic>/g)).toHaveLength(1)
     expect(arrays).toContain('<m:dPr><m:begChr m:val="["/><m:endChr m:val="]"/></m:dPr><m:e><m:m>')
     expect(arrays.match(/<m:mr>/g)).toHaveLength(2)
+    expect(dotted.match(/<p:pic>/g)).toHaveLength(1)
+    expect(dotted).not.toContain('<a14:m>')
   }
   finally {
     await rm(root, { recursive: true, force: true })

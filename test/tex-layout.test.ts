@@ -1676,6 +1676,86 @@ test('enforces KaTeX strict settings for comments, markup, text commands, spacin
 
 const chrome = await findChrome()
 
+test('parses AMS dotted matrix spans and keeps subsequent columns aligned', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const output = math(String.raw`
+    \def\spanCount{2}\def\dotSpacing{2}
+    \begin{array}{|l|r|c|l|}
+      a&b&c&d\\
+      x&\hdotsfor[\dotSpacing]{\spanCount}&y\\
+      \hdotsfor{4}
+    \end{array}
+  `, true)
+  expect(output).toContain('style="--math-columns:4"')
+  expect(output).toContain('columnspan="2" style="text-align:right;--math-cell-align:end;--math-dot-step:0.5933em;grid-column:span 2;')
+  expect(output).toMatch(/columnspan="4"[^>]*grid-column:span 4;border-left:1px solid currentColor;border-right:1px solid currentColor/)
+  expect([...output.matchAll(/<mtr>(.*?)<\/mtr>/g)].map(([, row]) => row.match(/<mtd/g)?.length)).toEqual([4, 3, 1])
+  const invalid = [
+    [String.raw`\hdotsfor{2}`, 'must occupy a whole'],
+    [String.raw`\begin{matrix}\hdotsfor{2}x\end{matrix}`, 'must occupy a whole'],
+    [String.raw`\begin{matrix}\hdotsfor{0}\end{matrix}`, 'Invalid column span'],
+    [String.raw`\begin{matrix}\hdotsfor[-1]{2}\end{matrix}`, 'Invalid dot spacing'],
+    [String.raw`\begin{array}{cc}x&\hdotsfor{2}\end{array}`, 'spans past the array columns'],
+  ] as const
+  for (const [source, error] of invalid) expect(() => math(source, true)).toThrow(error)
+})
+
+test.skipIf(!chrome)('paints continuous dot leaders across native matrix and CSS grid columns', async () => {
+  const body = [
+    String.raw`\begin{pmatrix}A&\text{wide cell}&\text{another wide cell}&D\\X&\hdotsfor{2}&Y\end{pmatrix}`,
+    String.raw`\begin{array}{lrrl}A&\text{wide cell}&\text{another wide cell}&D\\X&\hdotsfor{2}&Y\end{array}`,
+    String.raw`\begin{pmatrix}A&\text{wide cell}&\text{another wide cell}&D\\X&\hdotsfor[2]{2}&Y\end{pmatrix}`,
+  ].map(source => renderMath(source, true)).join('')
+  const css = await Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url)).text()
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response(`<!doctype html><style>${css}</style><main style="padding:24px;color:#d00000;background:white;font-size:36px">${body}</main>`, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    }),
+  })
+  const view = new Bun.WebView({ width: 840, height: 660, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await view.navigate(server.url.href)
+    const screenshot = await view.screenshot()
+    const src = `data:${screenshot.type || 'image/png'};base64,${Buffer.from(await screenshot.arrayBuffer()).toString('base64')}`
+    const leaders = await view.evaluate<{ spansExactColumns: boolean, dots: number }[]>(`(async () => {
+      const image = new Image()
+      image.src = ${JSON.stringify(src)}
+      await image.decode()
+      const canvas = new OffscreenCanvas(image.width, image.height)
+      const context = canvas.getContext('2d')
+      context.drawImage(image, 0, 0)
+      return [...document.querySelectorAll('.math-array-dots')].map(cell => {
+        const previous = cell.parentElement.previousElementSibling.children
+        const bounds = cell.getBoundingClientRect()
+        const expectedLeft = previous[1].getBoundingClientRect().left
+        const expectedRight = previous[2].getBoundingClientRect().right
+        const x = Math.ceil(bounds.left * devicePixelRatio)
+        const y = Math.ceil(bounds.top * devicePixelRatio)
+        const width = Math.floor(bounds.right * devicePixelRatio) - x
+        const height = Math.floor(bounds.bottom * devicePixelRatio) - y
+        const data = context.getImageData(x, y, width, height).data
+        const ink = new Set()
+        for (let offset = 0; offset < data.length; offset += 4) {
+          if (data[offset] > 135 && data[offset + 1] < 100 && data[offset + 2] < 100)
+            ink.add((offset / 4) % width)
+        }
+        return {
+          spansExactColumns: Math.abs(bounds.left - expectedLeft) < 1 && Math.abs(bounds.right - expectedRight) < 1,
+          dots: [...ink].filter(column => !ink.has(column - 1)).length,
+        }
+      })
+    })()`)
+    expect(leaders).toHaveLength(3)
+    expect(leaders.every(leader => leader.spansExactColumns && leader.dots >= 5)).toBe(true)
+    expect(leaders[2].dots).toBeLessThan(leaders[0].dots)
+  }
+  finally {
+    view.close()
+    await server.stop(true)
+  }
+})
+
 test('parses AMS root-index offsets and plain TeX roots through the same degree renderer', () => {
   const math = createMathRenderer({ throwOnError: true })
   const plain = math(String.raw`\root 3\of{y}`, false)

@@ -244,6 +244,50 @@ test('rejects STX component discovery outside the active roots', async () => pro
 }))
 
 const chrome = await findChrome()
+
+test.skipIf(!chrome)('runs Vue template syntax and setup bindings in an STX slide component', async () => project(async (root) => {
+  const entry = join(root, 'slides.md')
+  await Promise.all([
+    Bun.write(entry, '# Compatibility\n\n<VueCounter :count="2" />\n'),
+    Bun.write(join(root, 'components', 'VueCounter.stx'), [
+      '<script setup lang="ts">',
+      'const props = defineProps({ count: { default: 0 } })',
+      'const counter = ref<number>(props.count)',
+      '</script>',
+      '<template>',
+      '  <div class="vue-counter">',
+      '    <button type="button" v-on:click="counter += 1">Increase</button>',
+      '    <output v-bind:aria-label="counter">{{ counter }}</output>',
+      '    <p v-show="counter > 2">Threshold reached</p>',
+      '    <p v-show="counter <= 2">Keep going</p>',
+      '  </div>',
+      '</template>',
+    ].join('\n')),
+  ])
+  const deck = await createDeckCompiler(entry)()
+  const server = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    fetch: () => new Response(deck.html, { headers: { 'Content-Type': 'text/html' } }),
+  })
+  const view = new Bun.WebView({ width: 960, height: 540, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await view.navigate(server.url.href)
+    const readOutput = `(() => {
+      const card = document.querySelector('.vue-counter')
+      const output = card.querySelector('output')
+      const visible = Array.from(card.querySelectorAll('p')).find(p => getComputedStyle(p).display !== 'none')
+      return [output.textContent, output.getAttribute('aria-label'), visible?.textContent]
+    })()`
+    expect(await view.evaluate(readOutput)).toEqual(['2', '2', 'Keep going'])
+    await view.evaluate('document.querySelector(".vue-counter button").click()')
+    expect(await view.evaluate(readOutput)).toEqual(['3', '3', 'Threshold reached'])
+  }
+  finally {
+    view.close()
+    await server.stop(true)
+  }
+}), 20_000)
 test.skipIf(!chrome)('hydrates independent STX counters and their scoped Markdown slots in a static build', async () => project(async (root) => {
   const starter = fileURLToPath(new URL('../packages/create-app/index.mjs', import.meta.url))
   const deck = join(root, 'starter')

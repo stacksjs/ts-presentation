@@ -515,7 +515,9 @@ type ArrayRule = 'solid' | 'dashed'
 type CellSide = 'top' | 'right' | 'bottom' | 'left'
 const alignments: Record<string, Alignment> = { l: 'left', c: 'center', r: 'right' }
 interface ArrayColumn { align: Alignment, before: ArrayRule[] }
-interface ArrayRow { cells: Markup[], label?: Markup, before: ArrayRule[], gap?: string, raise?: string }
+interface DottedArrayCell { span: number, spacing: number }
+type ArrayCell = Markup | DottedArrayCell
+interface ArrayRow { cells: ArrayCell[], columns: number, label?: Markup, before: ArrayRule[], gap?: string, raise?: string }
 interface MathLine { content: Markup, gap?: string }
 interface MultlineRow extends MathLine { align?: 'left' | 'right' }
 interface EquationTag { label?: Markup, key?: string, starred?: boolean, suppressed: boolean, raise?: string }
@@ -911,7 +913,7 @@ const mathModeFunctions = new Set([
   'prescript', 'mathstrut', 'sideset', 'overset', 'underset', 'overunderset', 'stackrel',
   'shoveleft', 'shoveright', ...Array.from(intertextCommands.keys(), command => command.slice(1)),
   'overline', 'operatorname', 'operatorname@', 'operatornamewithlimits', 'limits', 'nolimits', 'displaylimits',
-  'not', 'mod', 'bmod', 'pmod', 'pod', 'ce', 'pu', 'allowbreak', 'nonscript', 'root', 'of', 'leftroot', 'uproot',
+  'not', 'mod', 'bmod', 'pmod', 'pod', 'ce', 'pu', 'allowbreak', 'nonscript', 'root', 'of', 'leftroot', 'uproot', 'hdotsfor',
 ])
 const sharedFunctions = new Set([
   ...Object.keys(textFonts), ...typesettingNames, ...textBoxes, ...verticalBoxCommands, ...spacingCommands,
@@ -2582,7 +2584,9 @@ export function renderMath(source: string, display = false, configured: MathMacr
         tagState = rowTag
       }
     }
-    let cells: Markup[] = []
+    const allowDottedCells = /^(?:[pbBvV]?matrix\*?|smallmatrix|d?array)$/.test(environment)
+    let cells: ArrayCell[] = []
+    let columnsInRow = 0
     let rules: ArrayRule[] = []
     let closed = false
     const stops = ['&', '\\\\', '\\newline', '\\cr', '\\end']
@@ -2603,26 +2607,46 @@ export function renderMath(source: string, display = false, configured: MathMacr
           break
         }
       }
-      const followsOrdinary = aligned && cells.length % 2 === 1
-      cells.push(inScope(() => row(stops, false, false, undefined, followsOrdinary)))
+      const followsOrdinary = aligned && columnsInRow % 2 === 1
+      if (allowDottedCells && peek() === '\\hdotsfor') {
+        take()
+        const multiplier = rawBracket()
+        const scale = multiplier === undefined ? '1' : expandDefinition(multiplier).join('').trim()
+        const spanText = expandDefinition(rawGroup()).join('').trim()
+        const span = Number(spanText)
+        if (!/^\d+$/.test(spanText) || span < 1 || span > 6000 - columnsInRow)
+          throw new MathParseError('Invalid column span in \\hdotsfor')
+        if (!/^\+?(?:\d+(?:\.\d*)?|\.\d+)$/.test(scale) || !Number.isFinite(Number(scale)))
+          throw new MathParseError('Invalid dot spacing multiplier in \\hdotsfor')
+        if (!stops.includes(peek())) throw new MathParseError('\\hdotsfor must occupy a whole cell')
+        if (columnArray && columnsInRow + span > layout.columns.length)
+          throw new MathParseError('\\hdotsfor spans past the array columns')
+        cells.push({ span, spacing: Number(scale) })
+        columnsInRow += span
+      }
+      else {
+        cells.push(inScope(() => row(stops, false, false, undefined, followsOrdinary)))
+        columnsInRow++
+      }
       const separator = take()
       if (separator === '&') {
         if (subarray || gathered) throw new MathParseError('Too many columns in math stack')
-        if (environment === 'split' && cells.length === 2) throw new MathParseError('Too many columns in split')
-        if (columnArray && cells.length === layout.columns.length) strictViolation('textEnv', 'Too few columns in the array specification')
+        if (environment === 'split' && columnsInRow === 2) throw new MathParseError('Too many columns in split')
+        if (columnArray && columnsInRow === layout.columns.length) strictViolation('textEnv', 'Too few columns in the array specification')
         continue
       }
-      if (pairs && cells.length > pairs * 2) throw new MathParseError('Too many alignment columns')
+      if (pairs && columnsInRow > pairs * 2) throw new MathParseError('Too many alignment columns')
       const spacing = allowIntertext && intertextCommands.get(separator)
       const lineBreak = Boolean(spacing) || separator === '\\\\' || separator === '\\newline' || separator === '\\cr'
       const gap = arrayRowGap(separator)
       if (tagless && tagState.label !== undefined) throw new MathParseError('Equation tags are not allowed in xxalignat')
       const label = rowTags ? nextTag(automatic) : undefined
       if (cells.length > 1 || cells[0] || label !== undefined || rows.length === 0 || lineBreak) {
-        rows.push({ cells, label, before: rules, gap, raise: tagState.raise })
+        rows.push({ cells, columns: columnsInRow, label, before: rules, gap, raise: tagState.raise })
         rules = []
       }
       cells = []
+      columnsInRow = 0
       if (rowTags) tagState = { suppressed: false }
       if (spacing) intertext(spacing)
       if (separator === '\\end' && literalGroup() === environment) {
@@ -2640,7 +2664,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const tags = rows.some(entry => entry.label !== undefined)
     const hasIntertext = intertexts.size > 0
     const leqno = state?.options.leqno === true
-    const authoredColumns = Math.max(layout.columns.length, Number(hasIntertext), ...rows.map(entry => entry.cells.length))
+    const authoredColumns = Math.max(layout.columns.length, Number(hasIntertext), ...rows.map(entry => entry.columns))
     const columnCount = spreadEnvironment ? Math.max(pairs * 2, 2 * Math.ceil(authoredColumns / 2)) : authoredColumns
     // A single alignment pair has no intercolumn space to distribute.
     const spread = spreadEnvironment && columnCount > 2 ? environment.startsWith('xalignat') ? 'balanced' : 'full' : ''
@@ -2649,7 +2673,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const grid = aligned || alignment.length > 0 || displayRows
     const rowRules = rows.reduce((count, entry) => count + entry.before.length, rules.length)
     const columnRules = layout.columns.reduce((count, column) => count + column.before.length, layout.after.length)
-    const rectangular = grid || columnArray || tags || rowRules > 0
+    const rectangular = grid || columnArray || tags || rowRules > 0 || rows.some(row => row.columns > row.cells.length)
     if (rectangular && columnCount * Math.max(1, rows.length) > 6000) throw new MathParseError('Math array has too many cells')
     if (rowRules * columnCount + columnRules * rows.length > 24000)
       throw new MathParseError('Math array has too many rules')
@@ -2680,7 +2704,14 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const markup = rows.map((entry, rowIndex) => {
         const cell = tags ? equationNumberCell(entry.label, undefined, entry.raise) : ''
         // MathML Core browsers use CSS for cell alignment and visible rules.
-        const content = Array.from({ length: rectangular ? columnCount : entry.cells.length }, (_, index) => {
+        let cellIndex = 0
+        let nextColumn = 0
+        const content = Array.from({ length: rectangular ? columnCount : entry.columns }, (_, index) => {
+          if (index < nextColumn) return ''
+          const value = entry.cells[cellIndex++]
+          const dots = typeof value === 'object' ? value : undefined
+          const span = dots?.span ?? 1
+          nextColumn += span
           const align = alignmentAt(index)
           const styling: string[] = []
           if (align) styling.push(`text-align:${align}`)
@@ -2697,10 +2728,15 @@ export function renderMath(source: string, display = false, configured: MathMacr
             if (smallMatrix && index > 0) styling.push('padding-inline-start:0.2778em')
           }
           if (cellStyle === 0) styling.push('math-style:normal')
+          if (dots) {
+            // TeX places 1.5mu of scaled space on each side of a period.
+            styling.push(`--math-dot-step:${Number((0.26 + dots.spacing / 6).toFixed(4))}em`)
+            if (grid) styling.push(`grid-column:span ${span}`)
+          }
           if (rowRules || columnRules) {
             styling.push(...arrayRuleStyles([
               ['left', layout.columns[index]?.before],
-              ['right', index === columnCount - 1 ? layout.after : undefined],
+              ['right', index + span === columnCount ? layout.after : undefined],
               ['top', entry.before],
               ['bottom', rowIndex === rows.length - 1 ? rules : undefined],
             ], minRule))
@@ -2708,9 +2744,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
           if (compact || stretch !== 1 || moreRowSpace) styling.push(`padding-block:${pad}em`)
           if (entry.gap) styling.push(`padding-bottom:max(0px,calc(${pad}em + ${entry.gap}))`)
           const settings = styling.length ? ` style="${styling.join(';')}"` : ''
-          const value = renderMarkup(entry.cells[index] ?? '', cellStyle)
-          const sized = compact || style === cellStyle ? value : mathSize(cellStyle, value)
-          return `<mtd${settings}>${grid ? `<mrow>${sized}</mrow>` : sized}</mtd>`
+          const cellAttrs = dots ? ` class="math-array-dots" columnspan="${span}"` : ''
+          const markup = dots ? '<mo>…</mo>' : renderMarkup(typeof value === 'object' ? '' : value ?? '', cellStyle)
+          const sized = compact || style === cellStyle ? markup : mathSize(cellStyle, markup)
+          return `<mtd${cellAttrs}${settings}>${grid ? `<mrow>${sized}</mrow>` : sized}</mtd>`
         }).join('')
         return `${prose(rowIndex)}<mtr>${leqno ? cell : ''}${content}${leqno ? '' : cell}</mtr>`
       }).join('') + prose(rows.length)
@@ -3071,6 +3108,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       return { markup: xml`<mroot>${argument()}${degree}</mroot>` }
     }
     if (name === 'leftroot' || name === 'uproot') throw new MathParseError(`${token} belongs at the start of a root index`)
+    if (name === 'hdotsfor') throw new MathParseError('\\hdotsfor must occupy a whole matrix or array cell')
     if (Object.hasOwn(textFonts, name)) return { markup: textArgument(name) }
     if (typesettingNames.has(name)) return { markup: typesettingName(name) }
     if (name === 'operatorname' || name === 'operatorname@' || name === 'operatornamewithlimits') {

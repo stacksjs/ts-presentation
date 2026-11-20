@@ -167,3 +167,9 @@ The dev server observes the component directory. Static markup updates
 in place. Changes to a slide with client-side STX reload the player so
 its setup scripts run again. The starter's `components/Counter.stx`
 shows the client API.
+
+A ported single-file component can use `<template>`, `<script setup lang="ts">`,
+`<style scoped>`, and Vue-style bindings such as `v-bind:aria-label`,
+`v-on:click`, and `v-show` in its `.stx` file. STX makes `ref`,
+`computed`, and `defineProps` available to the setup script. Remove Vue
+runtime imports when using the currently pinned STX version.
