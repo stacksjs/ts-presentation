@@ -65,7 +65,7 @@ function render(code: string, marker: string, options: MermaidOptions): string |
   const title = typeof options.title === 'string' ? options.title : ''
   if (/^timeline(?:\s|$)/i.test(header ?? '')) return timeline(code, marker, options)
   if (/^journey$/i.test(header ?? '')) return journey(code, marker, options)
-  if (isGanttHeader(header)) return gantt(code, marker, options.gantt, title, options.securityLevel === 'loose', options.themeVariables)
+  if (isGanttHeader(header)) return gantt(code, marker, options)
   if (/^sankey(?:-beta)?$/.test(header ?? '')) return sankey(code, marker, options)
   if (/^xychart(?:-beta)?(?:\s|$)/.test(header ?? '')) return xyDiagram(code, marker, options)
   if (/^gitGraph(?:\s|:|;|$)/.test(header ?? '')) return gitGraph(code, marker, options)

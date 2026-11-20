@@ -55,6 +55,7 @@ in a new ts-presentation project.
 | Sankey diagrams | Weighted links from native YAML and imported CSV fences, with four alignments, gradient or solid links, and configurable node colors and labels |
 | Gantt styles and dates | Task labels in or beside bars, task status palettes, multiline section headings, case-insensitive directives, fractional times, calendar durations and UTC ticks, short ISO start dates, and fixed SVG dimensions via `useMaxWidth: false` |
 | Gantt markers and exclusions | Repeated markers with the same ID, time, and label share one visible marker. Invalid ends warn and keep the task at its start. Whole-day exclusions ignore unmatched calendar tokens |
+| Gantt themes | Named Mermaid palettes set the SVG background, section bands, grid, task states, and labels. Explicit theme variables override the selected palette |
 | Gantt dependencies | Forward references across sections, latest `after` and earliest `until` matches, and warnings with a UTC reference-day fallback when every referenced task is missing |
 | GitGraph | Named Mermaid palettes, diagram padding, branch-only graphs, commit and operation tooltips, and custom symbols. Repeated commit IDs warn, preserve each node, and resolve later references to the latest commit |
 | PlantUML sequence diagrams | Local `ts-charts` rendering for messages, participants, notes, and groups |

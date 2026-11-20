@@ -1,6 +1,8 @@
 import type { GanttChartOptions, GanttMarkerStyle, GanttSchedule, GanttTask, GanttTaskCallback, GanttTaskTag, GanttWeekday } from 'ts-charts/diagrams'
 import { ganttChart, ganttDateParser, ganttDurationEnd, scheduleGantt as scheduleTasks } from 'ts-charts/diagrams'
+import type { MermaidOptions } from '../authoring-setup.ts'
 import { diagramPixels, readChronology } from './chronology.ts'
+import { ganttTheme } from './gantt-themes.ts'
 
 function isTag(value: string): value is GanttTaskTag {
   return ['active', 'done', 'crit', 'milestone', 'vert'].includes(value)
@@ -180,18 +182,19 @@ export function scheduleGantt(source: string, now: number = Date.now()): GanttSc
   if (options) return scheduleTasks(options)
 }
 
-export function gantt(source: string, idPrefix: string, options?: unknown, fallbackTitle = '', interactionsEnabled = false, theme?: unknown): string | undefined {
-  const config = options && typeof options === 'object' ? options as Record<string, unknown> : {}
+export function gantt(source: string, idPrefix: string, options: MermaidOptions = {}): string | undefined {
+  const config = options.gantt && typeof options.gantt === 'object' ? options.gantt as Record<string, unknown> : {}
   const axisFormat = typeof config.axisFormat === 'string' ? config.axisFormat : undefined
-  const chart = parseGantt(source, Date.now(), interactionsEnabled, axisFormat)
+  const chart = parseGantt(source, Date.now(), options.securityLevel === 'loose', axisFormat)
   if (!chart) return
-  const variables = theme && typeof theme === 'object' ? theme as Record<string, unknown> : {}
+  const variables = options.themeVariables && typeof options.themeVariables === 'object' ? options.themeVariables as Record<string, unknown> : {}
+  const preset = ganttTheme(options.theme)
   const number = (key: string) => diagramPixels(config[key])
-  const color = (key: string) => typeof variables[key] === 'string' ? variables[key] as string : undefined
+  const color = (key: string) => typeof variables[key] === 'string' ? variables[key] as string : preset?.[key]
   const alternateSection = color('altSectionBkgColor')
   const sectionColors = [color('sectionBkgColor'), alternateSection, color('sectionBkgColor2'), alternateSection]
   const svg = ganttChart({
-    ...chart, idPrefix, title: chart.title || fallbackTitle,
+    ...chart, idPrefix, title: chart.title || (typeof options.title === 'string' ? options.title : ''),
     tickInterval: chart.tickInterval || (typeof config.tickInterval === 'string' ? config.tickInterval : undefined),
     weekday: chart.weekday ?? (isWeekday(config.weekday) ? config.weekday : undefined),
     topAxis: chart.topAxis ?? config.topAxis === true,
@@ -203,8 +206,9 @@ export function gantt(source: string, idPrefix: string, options?: unknown, fallb
     leftPadding: number('leftPadding'), rightPadding: number('rightPadding'),
     width: number('useWidth'), titleTopMargin: number('titleTopMargin'), bottomMarginAdj: number('bottomMarginAdj'),
     gridLineStartPadding: number('gridLineStartPadding'), fontSize: number('fontSize'), sectionFontSize: number('sectionFontSize'),
-    numberSectionStyles: number('numberSectionStyles') ?? 1, sectionColors,
+    numberSectionStyles: number('numberSectionStyles') ?? (preset ? 4 : 1), sectionColors,
     palette: {
+      background: color('background'),
       task: { fill: color('taskBkgColor'), border: color('taskBorderColor') },
       active: { fill: color('activeTaskBkgColor'), border: color('activeTaskBorderColor') },
       done: { fill: color('doneTaskBkgColor'), border: color('doneTaskBorderColor') },

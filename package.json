@@ -33,7 +33,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "ts-charts": "https://codeload.github.com/stacksjs/ts-charts/tar.gz/50a614effc886273b193c727a33a1731ef000b9a",
+    "ts-charts": "https://codeload.github.com/stacksjs/ts-charts/tar.gz/bcd03f847174dd7fd70a5b1acee28a8230f3d331",
     "ts-syntax-highlighter": "^0.2.20",
     "@stacksjs/stx": "0.2.919"
   },

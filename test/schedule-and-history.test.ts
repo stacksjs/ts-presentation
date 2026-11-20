@@ -539,6 +539,45 @@ test('applies Mermaid Gantt status colors, reference labels, and full date axis 
   expect(svg).toContain('data-task-id="activeTask" data-task-start="2026-01-05T00:00:00.000Z"')
 })
 
+const themedSchedule = `gantt
+title Delivery schedule
+todayMarker off
+section Prepare
+  Draft :draft, 2026-01-01, 5d
+section Review
+  Completed work :done, long, 2026-01-01, 8d
+section Ship
+  Notes :done, short, 2026-01-02, 5m`
+
+test('uses named Mermaid Gantt palettes for backgrounds, section bands, and task states', () => {
+  const expected = [
+    ['base', '#f4f4f4', '#fff4dd', '#d3d3d3', '#fff4dd'],
+    ['default', '#ffffff', '#8a90dd', '#d3d3d3', '#fff400'],
+    ['dark', '#333333', '#595c5c', '#d3d3d3', '#eae8d9'],
+    ['forest', '#ffffff', '#487e3a', '#d3d3d3', '#6eaa49'],
+    ['neutral', '#ffffff', '#707070', '#bbbbbb', '#bdbdbd'],
+    ['neo', '#ffffff', '#ececfe', '#d3d3d3', '#ececfe'],
+    ['neo-dark', '#333333', '#1f2020', '#584343', '#1f2020'],
+    ['redux', '#ffffff', '#ececfe', '#d3d3d3', '#ececfe'],
+    ['redux-color', '#ffffff', '#ececfe', '#d3d3d3', '#46ecd5'],
+    ['redux-dark', '#333333', '#1f2020', '#38383e', '#1f2020'],
+    ['redux-dark-color', '#333333', '#1f2020', '#38383e', '#46ecd5'],
+  ]
+  for (const [theme, background, taskFill, doneFill, thirdSection] of expected) {
+    const svg = mermaid(themedSchedule, 'palette', { theme })!
+    expect(svg).toContain(`style="--diagram-background:${background}"`)
+    expect(svg).toMatch(new RegExp(`data-task-id="draft"[^>]*>[^]*?class="diagram-gantt-bar"[^>]*style="fill:${taskFill};`))
+    expect(svg).toMatch(new RegExp(`data-task-id="long"[^>]*>[^]*?class="diagram-gantt-bar"[^>]*style="fill:${doneFill};`))
+    expect([...svg.matchAll(/class="diagram-gantt-band"[^>]*style="fill:([^;]+)/g)].map(match => match[1]).at(2)).toBe(thirdSection)
+  }
+  const source = '---\nconfig:\n  theme: dark\n  themeVariables:\n    taskBkgColor: "#224466"\n---\n' + themedSchedule
+  const override = mermaid(source, 'palette', { theme: 'forest', themeVariables: { background: '#101820' } })!
+  expect(override).toContain('data-diagram-theme="dark"')
+  expect(override).toContain('style="--diagram-background:#101820"')
+  expect(override).toContain('style="fill:#224466;stroke:#ffffff;stroke-width:2px"')
+  expect(override).toContain('style="fill:#d3d3d3;stroke:#808080;stroke-width:2px"')
+})
+
 test('applies imported Gantt label placement and GitGraph padding in a rendered deck', async () => {
   const markdown = [
     '# Project chronology', '',
@@ -665,6 +704,34 @@ test('imports Gantt callback commands and applies security settings', () => {
 })
 
 const chrome = await findChrome()
+test.skipIf(!chrome)('uses readable colors for completed Gantt labels inside and outside bars in Chromium', async () => {
+  const frontmatter = '---\nconfig:\n  theme: dark\n---'
+  const html = await renderDeck(parseDeck(['# Delivery', '', '~~~mermaid', frontmatter, themedSchedule, '~~~'].join('\n')))
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response(html, { headers: { 'Content-Type': 'text/html' } }),
+  })
+  const view = new Bun.WebView({ width: 960, height: 620, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await view.navigate(server.url.href)
+    expect(await view.evaluate(`(() => {
+      const chart = document.querySelector('.slide-diagram[data-diagram-theme="dark"]')
+      const label = id => chart.querySelector('[data-task-id="' + id + '"] .diagram-gantt-label')
+      return [
+        getComputedStyle(chart.querySelector(':scope > rect')).fill,
+        label('long').getAttribute('text-anchor'),
+        getComputedStyle(label('long')).fill,
+        label('short').getAttribute('text-anchor'),
+        getComputedStyle(label('short')).fill,
+      ]
+    })()`)).toEqual(['rgb(51, 51, 51)', 'middle', 'rgb(44, 44, 44)', 'start', 'rgb(211, 211, 211)'])
+  }
+  finally {
+    view.close()
+    await server.stop(true)
+  }
+}, 45000)
+
 test.skipIf(!chrome)('runs Gantt callbacks on keyboard and click and preserves slide navigation', async () => {
   const html = await renderDeck(parseDeck([
     '---', 'mermaid:', '  securityLevel: loose', '---', '', '# Delivery',
