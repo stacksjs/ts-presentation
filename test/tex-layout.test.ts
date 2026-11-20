@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test'
+import { expect, spyOn, test } from 'bun:test'
 import { findChrome } from '../packages/slidev/node/runtime/chrome.ts'
 import { collectSnapshot } from '../packages/slidev/node/runtime/editable/walker.ts'
 import { createMathRenderer, renderMath } from '../packages/slidev/node/runtime/math.ts'
@@ -294,11 +294,11 @@ test('supports optional arguments, delimited macros and scoped definitions', () 
 
 test('captures eager macro expansion and tracks global definitions per deck', () => {
   const math = createMathRenderer()
-  const html = math(String.raw`\def\x{a}\edef\frozen{\x}\def\x{b}\global\def\persist{\nope}\frozen\global\let\u=\frozen\x`, false)
+  const html = math(String.raw`\def\x{a}\edef\frozen{\x}\def\x{b}\global\def\persist{\nope}\frozen\global\let\deckOnly=\frozen\x`, false)
   expect(html).toContain('<mi>a</mi><mi>b</mi>')
-  expect(math(String.raw`\u`, false)).toContain('<mi>a</mi>')
+  expect(math(String.raw`\deckOnly`, false)).toContain('<mi>a</mi>')
   expect(math(String.raw`\persist`, false)).toContain('<mtext>\\nope</mtext>')
-  expect(createMathRenderer()(String.raw`\u`, false)).toContain('<mtext>\\u</mtext>')
+  expect(createMathRenderer()(String.raw`\deckOnly`, false)).toContain('<mtext>\\deckOnly</mtext>')
 })
 
 test('lays out AMS arrays with solid and dashed rules, row gaps, and scoped cell styles', () => {
@@ -480,7 +480,114 @@ test('uses the strict display break policy while keeping inline and AMS line bre
   expect(createMathRenderer({ strict: 'ignore' })(source, true)).toContain('<mtable data-equation-lines>')
 })
 
+test('renders bracket annotations, ruled segments, and text accents in both modes', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const formula = String.raw`\overbracket{a+b}^{top} + \underbracket{c+d}_{bottom}
+    + \overlinesegment{AB} + \underlinesegment{CD} + \underbar{AB $i^2$}
+    + \text{\def\vowel{e}caf\'{\vowel} \textcircled{A} \underbar{note}}
+    + \c{c} + \textcircled{B}`
+  const html = math(formula, true)
+  expect(html).toContain('<mover><mrow class="math-overbracket">')
+  expect(html).toContain('<munder><mrow class="math-underbracket">')
+  expect(html).toContain('<mrow class="math-overlinesegment"><mrow><mi>A</mi><mi>B</mi>')
+  expect(html).toContain('<mrow class="math-underlinesegment"><mrow><mi>C</mi><mi>D</mi>')
+  expect(html).toContain('<mrow class="math-underline"><mrow><mtext>AB </mtext>')
+  expect(html).toContain('<mtext>café </mtext>')
+  expect(html).toContain('<mtext>ç</mtext>')
+  expect(math(String.raw`\u{g}`, false)).toContain('<mtext>ğ</mtext>')
+  expect(() => math(String.raw`\u`, false)).toThrow('Missing math text argument')
+  expect(html).toContain('<mrow class="math-underline"><mtext>note</mtext>')
+  expect(html).toContain('<mrow class="math-text-circled"><mtext>A</mtext>')
+  expect(html).toContain('<mrow class="math-text-circled"><mtext>B</mtext>')
+  expect(math(String.raw`\sout{x^2}`, false)).toContain('<mrow class="math-sout"><mrow><msup><mi>x</mi>')
+  expect(math(String.raw`\text{a\kern1emb}`, false)).toContain('<mtext>a</mtext><mspace width="1em"/><mtext>b</mtext>')
+})
+
+test('enforces KaTeX strict settings for comments, markup, text commands, spacing, and array columns', () => {
+  const samples = [
+    ['commentAtEnd', 'x % comment'],
+    ['htmlExtension', String.raw`\htmlClass{accent}{x}`],
+    ['mathVsSout', String.raw`\sout{x^2}`],
+    ['mathVsTextAccents', String.raw`\'{e}`],
+    ['mathVsTextUnits', String.raw`a\mkern1emb`],
+    ['mathVsTextUnits', String.raw`\text{a\mskip{2mu}b}`],
+    ['mathVsTextUnits', String.raw`\text{a\kern{2mu}b}`],
+    ['textEnv', String.raw`\begin{array}{c}a&b\end{array}`],
+  ]
+  const error = createMathRenderer({ strict: true, throwOnError: true, trust: true })
+  const permissive = createMathRenderer({ strict: 'ignore', throwOnError: true, trust: true })
+  for (const [code, source] of samples) {
+    expect(() => error(source, true)).toThrow(`[${code}]`)
+    expect(permissive(source, true)).toContain('<math ')
+  }
+  const valid = String.raw`\text{s\'{e} \sout{old}\kern{1pt} 50\%} + x\mkern2muy`
+  expect(error(valid, true)).toContain('<mtext>sé </mtext>')
+  expect(error('x % comment\ny', false)).toContain('<mi>x</mi><mi>y</mi>')
+  expect(error(String.raw`\verb|a%b| \url{https://example.com/a%20b}`, false)).toContain('href="https://example.com/a%20b"')
+  expect(createMathRenderer({ strict: 'error' })('x % comment', false)).toContain('math-unrendered')
+  const warn = spyOn(console, 'warn').mockImplementation(() => {})
+  try {
+    const called: string[][] = []
+    const policy = createMathRenderer({
+      throwOnError: true,
+      strict(code, message, token) {
+        called.push([code, token?.text ?? ''])
+        return message.includes('accent') ? 'warn' : 'error'
+      },
+    })
+    expect(policy(String.raw`\'e`, true)).toContain('<mtext>é</mtext>')
+    expect(() => policy('x % comment', false)).toThrow('[commentAtEnd]')
+    expect(called).toEqual([['mathVsTextAccents', "\\'"], ['commentAtEnd', '']])
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn.mock.calls[0][0]).toContain('[mathVsTextAccents]')
+  }
+  finally {
+    warn.mockRestore()
+  }
+})
+
 const chrome = await findChrome()
+test.skipIf(!chrome)('stretches bracket and segment rules across their bases and stacks bracket labels in Chromium', async () => {
+  const math = createMathRenderer({ minRuleThickness: 0.2, throwOnError: true })
+  const formula = String.raw`\overbracket{x}^{top}+\overbracket{a+b+c+d}^{wide}
+    +\underbracket{a+b}_{lower}+\overlinesegment{e+f}+\underlinesegment{g+h}+\textcircled{A}`
+  const css = Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url))
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: request => new URL(request.url).pathname === '/player.css'
+      ? new Response(css, { headers: { 'Content-Type': 'text/css' } })
+      : new Response(`<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="/player.css"><main style="font-size:40px">${math(formula, true)}</main>`, {
+          headers: { 'Content-Type': 'text/html; charset=utf-8' },
+        }),
+  })
+  const view = new Bun.WebView({ width: 1000, height: 400, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await view.navigate(server.url.href)
+    const dimensions = await view.evaluate<{ widths: number[], stroked: boolean, upper: boolean, lower: boolean, circled: string }>(`(() => {
+      const marks = [...document.querySelectorAll('.math-overbracket,.math-underbracket,.math-overlinesegment,.math-underlinesegment')]
+      const [short, wide, lower] = marks
+      return {
+        widths: marks.map(mark => mark.getBoundingClientRect().width),
+        stroked: marks.every(mark => getComputedStyle(mark).backgroundSize.includes('100% 8px')),
+        upper: wide.nextElementSibling.getBoundingClientRect().bottom <= wide.getBoundingClientRect().top,
+        lower: lower.nextElementSibling.getBoundingClientRect().top >= lower.getBoundingClientRect().bottom,
+        circled: getComputedStyle(document.querySelector('.math-text-circled')).borderTopWidth,
+      }
+    })()`)
+    expect(dimensions.widths).toHaveLength(5)
+    expect(dimensions.widths[1]).toBeGreaterThan(dimensions.widths[0] * 2)
+    expect(dimensions.widths[0]).toBeGreaterThanOrEqual(63)
+    expect(dimensions.stroked).toBe(true)
+    expect(dimensions.upper).toBe(true)
+    expect(dimensions.lower).toBe(true)
+    expect(dimensions.circled).toBe('8px')
+  }
+  finally {
+    view.close()
+    server.stop(true)
+  }
+}, 45000)
+
 test.skipIf(!chrome)('renders TeX line breaks and vertical gaps in Chromium', async () => {
   const sources = [String.raw`a\\b`, String.raw`a\\[1em]b`, String.raw`a\newline b`]
   const body = sources.map((source, index) => `<div>${renderMath(source, index !== 2)}</div>`).join('')

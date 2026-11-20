@@ -165,8 +165,14 @@ speaker notes. Each hook can be asynchronous.
   `\\[0.5em]`. Set `math.strict` to `true` or `error` to suppress standalone
   display breaks, or `warn` to keep them and log a warning. Inline breaks and
   row separators in environments such as `aligned` still work with strict
-  mode enabled. In `setup/katex.ts`, a callback can set the policy for
-  `newLineInDisplayMode`.
+  mode enabled. Strict settings also cover comments at the end of a formula,
+  HTML extensions, text-only commands in math, math spacing units, and
+  overflowing array columns. In `setup/katex.ts`, a callback can choose a
+  policy for each diagnostic code.
+- Use `\overbracket{a+b}^{label}` or `\underbracket{a+b}_{label}` for
+  stacked bracket annotations. Use `\overlinesegment` and
+  `\underlinesegment` for a line with end marks. In text, use `\underbar`
+  to underline words and `\textcircled` to circle a character.
 - Position a floating element with `v-drag="[left, top, width, height, angle]"`
   or `<v-drag pos="left, top, width, height, angle">`. Use `NaN` in the
   directive or `_` in the component to retain automatic height. Set

@@ -662,6 +662,37 @@ v-switch { display: block; }
 .slide math .math-monospace { font-family: monospace; }
 math .math-overline { border-top: max(0.06em, var(--math-min-rule, 0px)) solid currentColor; }
 math .math-underline { border-bottom: max(0.06em, var(--math-min-rule, 0px)) solid currentColor; }
+math .math-text-circled {
+  border: max(0.05em, var(--math-min-rule, 0px)) solid currentColor;
+  border-radius: 50%;
+  padding: 0.04em 0.18em;
+}
+math :is(.math-overbracket, .math-underbracket, .math-overlinesegment, .math-underlinesegment) {
+  --math-accent-stroke: max(0.045em, var(--math-min-rule, 0px));
+  --math-accent-cap: 0.26em;
+  min-inline-size: 0.89em;
+  text-align: center;
+  background:
+    linear-gradient(currentColor, currentColor) left var(--math-accent-edge) / var(--math-accent-stroke) var(--math-accent-cap) no-repeat,
+    linear-gradient(currentColor, currentColor) right var(--math-accent-edge) / var(--math-accent-stroke) var(--math-accent-cap) no-repeat,
+    linear-gradient(currentColor, currentColor) center var(--math-accent-bar) / 100% var(--math-accent-stroke) no-repeat;
+}
+math :is(.math-overbracket, .math-underbracket) {
+  --math-accent-stroke: max(0.12em, var(--math-min-rule, 0px));
+  min-inline-size: 1.6em;
+}
+math :is(.math-overbracket, .math-overlinesegment) {
+  --math-accent-edge: top;
+  padding-block-start: 0.34em;
+}
+math :is(.math-underbracket, .math-underlinesegment) {
+  --math-accent-edge: bottom;
+  padding-block-end: 0.34em;
+}
+math .math-overbracket { --math-accent-bar: top; }
+math .math-underbracket { --math-accent-bar: bottom; }
+math .math-overlinesegment { --math-accent-bar: 0.11em; }
+math .math-underlinesegment { --math-accent-bar: calc(100% - 0.11em); }
 math .math-pmb { text-shadow: 0.035em 0 currentColor; }
 math .math-sout {
   background: linear-gradient(to bottom, transparent 47%, currentColor 48% 52%, transparent 53%);

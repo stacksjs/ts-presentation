@@ -19,6 +19,8 @@ in a new ts-presentation project.
 | KaTeX trust option | Opt-in links, URL labels, formula images, and HTML attributes through the KaTeX-shaped boolean or callback |
 | KaTeX display options | Formatted `\tag` and `\tag*` labels, `leqno` for left-side equation tags, and `fleqn` for flush-left display formulas |
 | KaTeX line breaks | Standalone `\\` and `\newline` in math and text, optional row spacing, and `strict` handling for standalone display breaks |
+| KaTeX strict diagnostics | End-of-formula comments, HTML extensions, text accents and strikeout in math, spacing units and modes, and overflowed array columns |
+| KaTeX accents and annotations | Stacked overbracket and underbracket labels, scalable line segments, text-mode underbars, circled text, and macro-expanded accent arguments |
 | KaTeX conditional macros | Mode-aware `\TextOrMath`, starred forms, token lookahead, and branch expansion in formulas, text, and `\edef` |
 | KaTeX macro and color settings | Deck-scoped `globalGroup`, per-formula `maxExpand` including eager definitions, and two-argument `\color` via `colorIsTextColor` |
 | KaTeX sizing settings | `maxSize` for explicit dimensions and `minRuleThickness` for fraction bars, array rules, box borders, and overlines or underlines |

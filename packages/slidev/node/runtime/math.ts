@@ -85,8 +85,9 @@ const stretchedAccents: Record<string, string> = {
   overrightarrow: '→', overleftarrow: '←', overleftrightarrow: '↔',
   underrightarrow: '→', underleftarrow: '←', underleftrightarrow: '↔',
   overleftharpoon: '↼', overrightharpoon: '⇀', underleftharpoon: '↽', underrightharpoon: '⇁',
-  Overrightarrow: '⇒', overbracket: '⎴', underbracket: '⎵', overgroup: '⏠', undergroup: '⏡',
+  Overrightarrow: '⇒', overgroup: '⏠', undergroup: '⏡',
 }
+const ruledAccents = new Set(['overbracket', 'underbracket', 'overlinesegment', 'underlinesegment'])
 const extensibleArrows: Record<string, string> = {
   xrightarrow: '→', xleftarrow: '←', xleftrightarrow: '↔', xRightarrow: '⇒', xLeftarrow: '⇐', xLeftrightarrow: '⇔',
   xmapsto: '↦', xhookrightarrow: '↪', xhookleftarrow: '↩', xtwoheadleftarrow: '↞', xtwoheadrightarrow: '↠',
@@ -147,13 +148,16 @@ export function mathVerbLength(source: string): number {
   return source.startsWith('\\verb') ? leadingVerb.exec(source)?.[0].length ?? 0 : 0
 }
 
-function tokenize(source: string): string[] {
+function tokenize(source: string, onTrailingComment?: () => void): string[] {
   if (!source.includes('%')) return source.match(mathTokens) ?? []
   const lexer = new RegExp(mathTokens)
   const tokens: string[] = []
   for (let match = lexer.exec(source); match; match = lexer.exec(source)) {
     const token = match[0]
-    if (token.startsWith('%')) continue
+    if (token.startsWith('%')) {
+      if (!token.includes('\n')) onTrailingComment?.()
+      continue
+    }
     tokens.push(token)
     if (!isMathUrlCommand(token)) continue
     const start = lexer.lastIndex
@@ -228,13 +232,13 @@ const textSymbols: Record<string, string> = {
   '\\textdollar': '$', '\\textunderscore': '_', '\\textbackslash': '\\',
   '\\textasciitilde': '~', '\\textasciicircum': '^', '\\textbar': '|',
   '\\textless': '<', '\\textgreater': '>', '\\ss': 'ß', '\\ae': 'æ', '\\AE': 'Æ',
-  '\\aa': 'å', '\\AA': 'Å', '\\o': 'ø', '\\O': 'Ø', '\\oe': 'œ', '\\OE': 'Œ',
+  '\\aa': 'å', '\\AA': 'Å', '\\o': 'ø', '\\O': 'Ø', '\\oe': 'œ', '\\OE': 'Œ', '\\i': 'ı', '\\j': 'ȷ',
 }
-const textAccents: Record<string, string> = {
-  "\\'": '\u0301', '\\`': '\u0300', '\\"': '\u0308',
-  '\\^': '\u0302', '\\~': '\u0303', '\\=': '\u0304', '\\.': '\u0307',
-  '\\u': '\u0306', '\\v': '\u030c', '\\H': '\u030b', '\\r': '\u030a',
-  '\\c': '\u0327', '\\k': '\u0328', '\\b': '\u0331', '\\d': '\u0323',
+const textAccents: Record<string, [mark: string, glyph: string, below?: boolean]> = {
+  "\\'": ['\u0301', '´'], '\\`': ['\u0300', '`'], '\\"': ['\u0308', '¨'],
+  '\\^': ['\u0302', 'ˆ'], '\\~': ['\u0303', '˜'], '\\=': ['\u0304', '¯'], '\\.': ['\u0307', '˙'],
+  '\\u': ['\u0306', '˘'], '\\v': ['\u030c', 'ˇ'], '\\H': ['\u030b', '˝'], '\\r': ['\u030a', '˚'],
+  '\\c': ['\u0327', '¸', true], '\\k': ['\u0328', '˛', true], '\\b': ['\u0331', '_', true], '\\d': ['\u0323', '.', true],
 }
 const operatorSpaces: Readonly<Record<string, string>> = {
   '\\,': '\u2009', '\\:': '\u205f', '\\;': '\u2004', '\\!': '', '\\ ': ' ',
@@ -526,7 +530,9 @@ function fractionMarkup(first: Markup, second: Markup, forced?: MathStyle, thick
 
 /** Translate a bounded TeX math subset to native MathML, with the source retained for accessibility. */
 export function renderMath(source: string, display = false, configured: MathMacros = {}, state?: MathState): string {
-  const tokens = tokenize(source)
+  let trailingComment = false
+  const recordComment = () => { trailingComment = true }
+  const tokens = tokenize(source, recordComment)
   if (tokens.length > 6000) return `<code>${escapeHtml(source)}</code>`
   const options = state?.options
   const limit = options?.maxExpand
@@ -769,20 +775,27 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return rawBracket()?.join('')
   }
 
+  function strictViolation(code: string, message: string, report = true, token?: string): boolean {
+    let strict = options?.strict
+    if (typeof strict === 'function') {
+      if (report) strict = strict(code, message, token === undefined ? undefined : { text: token })
+      else {
+        try { strict = strict(code, message) }
+        catch { strict = 'error' }
+      }
+    }
+    const reject = strict === true || strict === 'error'
+    if (strict === 'warn') console.warn(`${message} [${code}]`)
+    if (reject && report) throw new Error(`${message} [${code}]`)
+    return reject
+  }
+
   function lineGap(command: string): string | undefined {
     const extra = command === '\\\\' && tokens[cursor] === '[' ? bracket() : undefined
     const gap = extra === undefined ? '' : dimension(extra)
     if (gap === undefined) throw new Error('Invalid math line spacing')
     if (!display) return gap
-    const code = 'newLineInDisplayMode'
-    const message = 'A standalone TeX line break has no effect in LaTeX display math'
-    let strict = options?.strict
-    if (typeof strict === 'function') {
-      try { strict = strict(code, message) }
-      catch { strict = 'error' }
-    }
-    if (strict === 'warn') console.warn(`${message} [${code}]`)
-    return strict === true || strict === 'error' ? undefined : gap
+    return strictViolation('newLineInDisplayMode', 'A standalone TeX line break has no effect in LaTeX display math', false) ? undefined : gap
   }
 
   function readDelimiter(command: string): string {
@@ -806,19 +819,31 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return xml`<mrow>${left}${content}${right}</mrow>`
   }
 
-  function readDimension(blank?: string): string {
+  function readDimension(blank?: string, spacingCommand?: string): string {
+    function parseLength(raw: string): string | undefined {
+      const length = dimension(raw)
+      if (length === undefined || !spacingCommand || !options?.strict) return length
+      const unit = /[a-z]+$/.exec(raw.trim())?.[0] ?? 'pt'
+      const mathSpacing = spacingCommand.startsWith('m')
+      if (mathSpacing !== (unit === 'mu')) {
+        const units = mathSpacing ? 'requires mu units' : 'requires text units'
+        strictViolation('mathVsTextUnits', `\\${spacingCommand} ${units}`)
+      }
+      if (mathSpacing && mode !== 'math') strictViolation('mathVsTextUnits', `\\${spacingCommand} works only in math mode`)
+      return length
+    }
     expand()
     if (tokens[cursor] === '{') {
       const value = expandDefinition(rawGroup()).join('')
       if (!value.trim() && blank !== undefined) return blank
-      const length = dimension(value)
+      const length = parseLength(value)
       if (length !== undefined) return length
     }
     else {
       for (let end = cursor + 1; end <= Math.min(cursor + 15, tokens.length); end++) {
         const candidate = tokens.slice(cursor, end).join('')
         if (!/[a-z]$/i.test(candidate)) continue
-        const value = dimension(candidate)
+        const value = parseLength(candidate)
         if (value !== undefined) {
           cursor = end
           return value
@@ -826,6 +851,11 @@ export function renderMath(source: string, display = false, configured: MathMacr
       }
     }
     throw new Error('Invalid math dimension')
+  }
+
+  function spacingMarkup(name: string): string {
+    if (name === 'hspace' && peek() === '*') take()
+    return spaceMarkup(readDimension(undefined, name))
   }
 
   function textBox(name: string): Markup {
@@ -891,11 +921,25 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
     const { context, attributes } = mathAttributes(command, literalGroup())
     const content = body()
+    strictViolation('htmlExtension', 'HTML extension commands are disabled in strict mode')
     return trustedMath(context, state?.options.trust) ? xml`<mrow ${attributes}>${content}</mrow>` : untrusted(command)
   }
 
   function textArgument(name: string, parentheses = false): Markup {
     return inMode('text', () => parseTextArgument(name, parentheses))
+  }
+
+  function textAccent(command: string): { literal: string } | { markup: Markup } {
+    const content = textArgument('text')
+    if (command === '\\textcircled') return { markup: xml`<mrow class="math-text-circled">${content}</mrow>` }
+    const [mark, glyph, below] = textAccents[command]
+    const plain = typeof content === 'string' ? /^<mtext>([^&<]\p{M}*)<\/mtext>$/u.exec(content)?.[1] : undefined
+    if (plain !== undefined && plain.trim()) {
+      const base = below ? plain : plain.replace(/^ı/, 'i').replace(/^ȷ/, 'j')
+      return { literal: (base + mark).normalize('NFC') }
+    }
+    const element = below ? 'munder' : 'mover'
+    return { markup: xml`<${element} ${below ? 'accentunder' : 'accent'}="true"><mrow>${content}</mrow>${tag('mo', glyph)}</${element}>` }
   }
 
   function coloredArgument(text: boolean): Markup {
@@ -986,6 +1030,14 @@ export function renderMath(source: string, display = false, configured: MathMacr
           flush()
           parts.push(xml`<mrow class="math-sout">${textArgument('text')}</mrow>`)
         }
+        else if (token === '\\underbar' || token === '\\underline') {
+          flush()
+          parts.push(xml`<mrow class="math-underline">${textArgument('text')}</mrow>`)
+        }
+        else if (token.startsWith('\\') && spacingCommands.has(token.slice(1))) {
+          flush()
+          parts.push(spacingMarkup(token.slice(1)))
+        }
         else if (token === '\\llap' || token === '\\clap' || token === '\\rlap') {
           flush()
           parts.push(overlap(token[1], textArgument('text')))
@@ -994,9 +1046,13 @@ export function renderMath(source: string, display = false, configured: MathMacr
           flush()
           parts.push(htmlCommand(token, true))
         }
-        else if (Object.hasOwn(textAccents, token)) {
-          const character = literalGroup().trim()
-          literal += (character + textAccents[token]).normalize('NFC')
+        else if (token === '\\textcircled' || Object.hasOwn(textAccents, token)) {
+          const accented = textAccent(token)
+          if ('literal' in accented) literal += accented.literal
+          else {
+            flush()
+            parts.push(accented.markup)
+          }
         }
         else if (token === '~') {
           flush()
@@ -1315,6 +1371,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const separator = take()
       if (separator === '&') {
         if (stack || environment === 'subarray' || gathered) throw new Error('Too many columns in math stack')
+        if (columnArray && cells.length === layout.columns.length) strictViolation('textEnv', 'Too few columns in the array specification')
         continue
       }
       if (pairs && cells.length > pairs * 2) throw new Error('Too many alignment columns')
@@ -1514,7 +1571,11 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (name === 'boxed' || name === 'cancel' || name === 'bcancel' || name === 'xcancel') {
       return { markup: xml`<mrow class="math-${name}">${argument()}</mrow>` }
     }
-    if (name === 'sout') return { markup: xml`<mrow class="math-sout">${textArgument('text')}</mrow>` }
+    if (name === 'sout') {
+      const content = argument()
+      strictViolation('mathVsSout', 'LaTeX strikeout works only in text mode')
+      return { markup: xml`<mrow class="math-sout">${content}</mrow>` }
+    }
     if (name === 'pmb' || name === 'phase' || name === 'angl') {
       return { markup: xml`<mrow class="math-${name}">${argument()}</mrow>` }
     }
@@ -1579,10 +1640,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const side = bracket()
       return { markup: xml`<mpadded${side !== 'b' ? ' height="0"' : ''}${side !== 't' ? ' depth="0"' : ''}>${argument()}</mpadded>` }
     }
-    if (spacingCommands.has(name)) {
-      if (name === 'hspace' && peek() === '*') take()
-      return { markup: spaceMarkup(readDimension()) }
-    }
+    if (spacingCommands.has(name)) return { markup: spacingMarkup(name) }
     if (Object.hasOwn(notationDelimiters, name)) return { markup: delimitedNotation(name) }
     if (name === 'prescript') {
       const upper = inScript(argument())
@@ -1634,6 +1692,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const mark = name === 'varinjlim' ? '→' : '←'
       return { markup: `<munder accentunder="true"><mo>lim</mo><mo stretchy="true">${mark}</mo></munder>`, limits: true }
     }
+    if (name === 'underbar') return { markup: xml`<mrow class="math-underline">${textArgument('text')}</mrow>` }
+    if (name === 'textcircled' || Object.hasOwn(textAccents, token)) {
+      const accented = textAccent(token)
+      strictViolation('mathVsTextAccents', `LaTeX accent ${token} works only in text mode`, true, token)
+      return { markup: 'literal' in accented ? tag('mtext', accented.literal) : accented.markup }
+    }
     if (name === 'overline' || name === 'underline') {
       return { markup: xml`<mrow class="math-${name}">${argument()}</mrow>` }
     }
@@ -1641,6 +1705,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const annotation = inScript(argument())
       const element = name === 'underset' ? 'munder' : 'mover'
       return { markup: xml`<${element}>${argument()}${annotation}</${element}>` }
+    }
+    if (ruledAccents.has(name)) {
+      const brace = name.endsWith('bracket') ? (name.startsWith('over') ? 'upper' : 'lower') : undefined
+      return { brace, markup: xml`<mrow class="math-${name}">${argument()}</mrow>` }
     }
     if (Object.hasOwn(stretchedAccents, name)) {
       const under = name.startsWith('under') || name === 'utilde'
@@ -1692,6 +1760,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   }
 
   try {
+    if (trailingComment) strictViolation('commentAtEnd', 'A TeX comment at the end of the formula needs a terminating newline')
     const expression = `<mrow>${renderMarkup(row([], false, true), display ? 0 : 1)}</mrow>`
     const flush = display && state?.options.fleqn === true
     const label = tagState.label
