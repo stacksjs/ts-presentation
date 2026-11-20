@@ -1,4 +1,4 @@
-import { escapeHtml } from './html.ts'
+import { escapeHtml, unescapeHtml } from './html.ts'
 import type { KatexOptions, KatexTrustContext } from './authoring-setup.ts'
 import { mathArrowBody, stackMathArrow, verticalMathArrow } from './math-arrow.ts'
 import { chemicalFormula, physicalUnits } from './math-chemistry.ts'
@@ -113,10 +113,6 @@ const extensibleArrows: Record<string, string> = {
   xleftrightharpoons: '⇋', xrightleftharpoons: '⇌', xtofrom: '⇄', xrightleftarrows: '⇄', xlongequal: '=',
   xleftequilibrium: '⇌', xrightequilibrium: '⇌',
 }
-const notationDelimiters: Record<string, [string, string]> = {
-  bra: ['⟨', '|'], Bra: ['⟨', '|'], ket: ['|', '⟩'], Ket: ['|', '⟩'],
-  braket: ['⟨', '⟩'], Braket: ['⟨', '⟩'], set: ['{', '}'], Set: ['{', '}'],
-}
 const delimiters: Record<string, string> = {
   '\\{': '{', '\\}': '}', '\\lbrace': '{', '\\rbrace': '}', '\\langle': '⟨', '\\rangle': '⟩',
   '\\lparen': '(', '\\rparen': ')', '\\lbrack': '[', '\\rbrack': ']', '\\lang': '⟨', '\\rang': '⟩',
@@ -222,7 +218,8 @@ const macroDeclaration = /^\\(?:[gex]?def|(?:future)?let|(?:new|renew|provide)co
 type ExpansionPrimitive = typeof expansionPrimitives[number]
 type ConditionalPrimitive = Exclude<ExpansionPrimitive, '\\expandafter' | '\\noexpand' | '\\long' | '\\message' | '\\errmessage'>
 interface TokenMacro { body: string[], parameters: string[][], prefix: string[], optional?: string[], unexpandable?: boolean }
-type Macro = TokenMacro | { primitive: ExpansionPrimitive }
+type DelimitedNotation = 'Braket' | 'Set' | 'set'
+type Macro = TokenMacro | { primitive: ExpansionPrimitive } | { notation: DelimitedNotation } | { separator: () => string[] }
 interface MathState { globals: Map<string, Macro>, options: KatexOptions, inlineBreaks: boolean }
 type EquationNumberMarkup = (number: number) => string
 
@@ -245,8 +242,18 @@ const legacyColorShades: Record<string, string[]> = {
 for (const [name, shades] of Object.entries(legacyColorShades)) {
   shades.forEach((hex, index) => { legacyColors[`${name}${'ABCDEFGHI'[index]}`] = `#${hex}` })
 }
-const colorMacros = new Map<string, TokenMacro>(Object.entries(legacyColors).map(([name, value]) =>
+const builtinMacros = new Map<string, Macro>(Object.entries(legacyColors).map(([name, value]) =>
   [`\\${name}`, { body: ['\\textcolor', '{', value, '}', '{', '#1', '}'], parameters: [[]], prefix: [] }]))
+
+// Bra-ket expansions follow braket.sty as documented by KaTeX (MIT).
+for (const [name, expansion] of Object.entries({
+  bra: '\\mathinner{\\langle{#1}|}',
+  ket: '\\mathinner{|{#1}\\rangle}',
+  braket: '\\mathinner{\\langle{#1}\\rangle}',
+  Bra: '\\left\\langle#1\\right|',
+  Ket: '\\left|#1\\right\\rangle',
+})) builtinMacros.set(`\\${name}`, { body: tokenize(expansion), parameters: [[]], prefix: [] })
+for (const name of ['Braket', 'Set', 'set'] as const) builtinMacros.set(`\\${name}`, { notation: name })
 
 function isExpansionPrimitive(token: string | undefined): token is ExpansionPrimitive {
   return token !== undefined && expansionPrimitiveNames.has(token)
@@ -593,11 +600,11 @@ const sizeCommands: Readonly<Record<string, number>> = {
   '\\normalsize': 1, '\\large': 1.2, '\\Large': 1.44, '\\LARGE': 1.728, '\\huge': 2.074, '\\Huge': 2.488,
 }
 const infixFractions = new Set(['\\over', '\\atop', '\\choose', '\\brace', '\\brack', '\\above'])
-const primitiveArgumentFunctions = new Set(['frac', 'dfrac', 'tfrac', 'binom', 'dbinom', 'tbinom', ...Object.keys(variants)])
-const groupedArgumentFunctions = new Set(['genfrac', 'cfrac', 'sqrt', 'left', 'mathllap', 'mathclap', 'mathrlap'])
+const primitiveArgumentFunctions = new Set(['frac', 'dfrac', 'tfrac', 'binom', 'dbinom', 'tbinom', 'genfrac', 'cfrac', ...Object.keys(variants)])
+const groupedArgumentFunctions = new Set(['sqrt', 'left', 'mathllap', 'mathclap', 'mathrlap'])
 const mathModeFunctions = new Set([
   ...groupedArgumentFunctions, ...primitiveArgumentFunctions, ...Object.keys(mathClasses), ...Object.keys(accents),
-  ...Object.keys(stretchedAccents), ...Object.keys(extensibleArrows), ...Object.keys(notationDelimiters),
+  ...Object.keys(stretchedAccents), ...Object.keys(extensibleArrows),
   ...ruledAccents, ...Array.from(infixFractions, command => command.slice(1)),
   'begin', 'end', 'right', 'middle', '@binrel', 'mathchoice', 'vcenter', 'substack',
   'boxed', 'cancel', 'bcancel', 'xcancel', 'pmb', 'phase', 'angl', 'angln', 'mathreflectbox',
@@ -629,15 +636,29 @@ function scaledMath(content: Markup, ratio: number): Markup {
   return xml`<mstyle mathsize="${String(Number(ratio.toFixed(5)))}em">${content}</mstyle>`
 }
 
-function fractionMarkup(first: Markup, second: Markup, forced?: MathStyle, thickness?: string, align?: string): Markup {
+interface FractionLayout {
+  forced?: MathStyle
+  thickness?: string
+  align?: 'left' | 'right'
+  fences?: readonly [string, string]
+  continued?: boolean
+}
+
+function fractionMarkup(first: Markup, second: Markup, layout: FractionLayout): Markup {
+  const { forced, thickness, align, fences, continued } = layout
   const bar = thickness !== undefined ? ` linethickness="${thickness}"` : ''
   const numerator = align ? ` numalign="${align}"` : ''
   const start = `<mfrac${bar}${numerator}>`
-  if (forced === undefined && typeof first === 'string' && typeof second === 'string') return `${start}${first}${second}</mfrac>`
+  const [left, right] = fences ?? []
+  const opening = left || right ? `<mrow>${left}${start}` : start
+  const closing = left || right ? `</mfrac>${right}</mrow>` : '</mfrac>'
+  // Continued fractions have TeX's numerator strut without adding ink or width.
+  const top = continued ? xml`<mrow><mspace width="0" height="0.85em" depth="0.35em"/>${first}</mrow>` : first
+  if (forced === undefined && typeof top === 'string' && typeof second === 'string') return opening + top + second + closing
   return (parent) => {
     const target = forced ?? parent
     const child = fractionStyle(target)
-    const content = `${start}${renderMarkup(first, child)}${renderMarkup(second, child)}</mfrac>`
+    const content = opening + renderMarkup(top, child) + renderMarkup(second, child) + closing
     return target === parent ? content : mathSize(target, content)
   }
 }
@@ -669,7 +690,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   let linkDepth = 0
 
   const macros = new Map<string, Macro>()
-  const macroFor = (token: string) => macros.get(token) ?? colorMacros.get(token)
+  const macroFor = (token: string) => macros.get(token) ?? builtinMacros.get(token)
   const scopes: Map<string, Macro | undefined>[] = []
   function assign(name: string, definition: Macro, global = false): void {
     const scope = scopes.at(-1)
@@ -765,6 +786,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
   function expandOnce(eager = false): boolean {
     const token = tokens[cursor]
     const definition = macroFor(token)
+    if (definition && ('notation' in definition || 'separator' in definition)) {
+      countExpansions(1)
+      const start = cursor++
+      replaceExpansion(start, 'notation' in definition ? expandDelimitedNotation(definition.notation) : definition.separator())
+      return true
+    }
     const macro = definition && 'body' in definition ? definition : undefined
     const primitive = definition && 'primitive' in definition ? definition.primitive
       : !definition && isExpansionPrimitive(token) ? token : undefined
@@ -904,20 +931,52 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
   }
 
-  function expandDefinition(body: string[], preserveLiterals = false): string[] {
+  function expandDefinition(body: string[], expansionMode: 'value' | 'tokens' | 'definition' = 'value'): string[] {
+    const eager = expansionMode === 'definition'
+    const preserveTokens = expansionMode !== 'value'
     const definition = withTokens(body, () => {
       const result: string[] = []
       while (tokens[cursor] !== boundary) {
-        expand(false, preserveLiterals)
+        expand(false, eager)
         if (tokens[cursor] === boundary) break
         const token = tokens[cursor++]
-        if (token.startsWith(inhibitedToken)) result.push(token.slice(inhibitedToken.length))
-        else result.push(preserveLiterals ? token : tokenValue(token))
+        if (token.startsWith(inhibitedToken) && (eager || !preserveTokens)) result.push(token.slice(inhibitedToken.length))
+        else result.push(preserveTokens ? token : tokenValue(token))
       }
       return result
     })
-    if (preserveLiterals) countExpansions(definition.length)
+    if (eager) countExpansions(definition.length)
     return definition
+  }
+
+  function expandDelimitedNotation(name: DelimitedNotation): string[] {
+    const body = rawGroup()
+    const bars = name === 'set' ? ['|'] : ['|', '\\|']
+    const previous = bars.map(bar => macros.get(bar))
+    return inScope(() => {
+      for (const [index, bar] of bars.entries()) {
+        assign(bar, { separator() {
+          // Set builders replace only the first separator. A ket may contain
+          // several separators, including ones produced by user macros.
+          if (name !== 'Braket') {
+            for (const [index, key] of bars.entries()) {
+              const original = previous[index]
+              if (original) macros.set(key, original)
+              else macros.delete(key)
+            }
+          }
+          if (name === 'set') return ['\\mid']
+          const doubled = index === 0 && tokens[cursor] === '|'
+          if (doubled) cursor++
+          const gap = name === 'Set' ? '\\;' : '\\,'
+          const glyph = name === 'Set' && (index === 1 || doubled) ? '\\Vert' : '\\vert'
+          return [gap, '\\middle', glyph, gap]
+        } })
+      }
+      const open = name === 'Braket' ? ['\\left', '\\langle'] : name === 'Set' ? ['\\left', '\\{', '\\:'] : ['\\{', '\\,']
+      const close = name === 'Braket' ? ['\\right', '\\rangle'] : name === 'Set' ? ['\\:', '\\right', '\\}'] : ['\\,', '\\}']
+      return expandDefinition([...open, ...body, ...close], 'tokens')
+    })
   }
 
   function chemistryMath(source: string): Markup {
@@ -1386,8 +1445,17 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return properties || parts.length === 1 ? wrap(content) : xml`<mrow>${content}</mrow>`
   }
 
-  function fraction(target?: MathStyle, thickness?: string, align?: string): Markup {
-    return fractionMarkup(argument(), argument(), target, fractionRule(thickness, minRule), align)
+  function fraction(layout: FractionLayout): Markup {
+    return fractionMarkup(argument(true), argument(true), { ...layout, thickness: fractionRule(layout.thickness, minRule) })
+  }
+
+  function fractionDelimiter(side: 'open' | 'close'): string {
+    const { markup, mathClass } = argumentAtom(true, true)
+    if (mathClass !== side || typeof markup !== 'string') return ''
+    const glyph = /^(?:<mrow>)*<mo stretchy="false">([^<]+)<\/mo>(?:<\/mrow>)*$/.exec(markup)?.[1]
+    if (!glyph) return ''
+    const value = unescapeHtml(glyph)
+    return delimiterGlyphs.has(value) ? fence(value) : ''
   }
 
   function infixThickness(token: string): string | undefined {
@@ -1599,9 +1667,11 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
     const result = finish(softWrap && !infix)
     if (!infix) return result
-    const quotient = fractionMarkup(xml`<mrow>${numerator}</mrow>`, xml`<mrow>${result}</mrow>`, undefined, fractionRule(thickness, minRule))
     const fences = fractionFences[infix]
-    return fences ? xml`<mrow>${fence(fences[0])}${quotient}${fence(fences[1])}</mrow>` : quotient
+    return fractionMarkup(xml`<mrow>${numerator}</mrow>`, xml`<mrow>${result}</mrow>`, {
+      thickness: fractionRule(thickness, minRule),
+      fences: fences && [fence(fences[0]), fence(fences[1])],
+    })
   }
 
   function commutativeDiagram(): string {
@@ -1661,29 +1731,6 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (columns * rows.length > 6000) throw new Error('CD environment has too many cells')
     const markup = rows.map(cells => `<mtr>${Array.from({ length: columns }, (_, index) => `<mtd>${cells[index] ?? ''}</mtd>`).join('')}</mtr>`).join('')
     return `<mtable class="math-cd">${markup}</mtable>`
-  }
-
-  function delimitedNotation(name: string): Markup {
-    const [left, right] = notationDelimiters[name]
-    const stretchy = /^[A-Z]/.test(name)
-    const separator = name === 'Braket' || name === 'Set' || name === 'set'
-    if (!separator || peek() !== '{') return xml`<mrow>${fence(left, stretchy)}${argument()}${fence(right, stretchy)}</mrow>`
-    take()
-    const content = inScope(() => {
-      const parts: Markup[] = []
-      const stops = name === 'set' ? ['|', '}'] : ['|', '\\|', '}']
-      parts.push(row(stops))
-      while (peek() && peek() !== '}') {
-        const join = take()
-        const doubled = join === '\\|' || (stretchy && tokens[cursor] === '|')
-        if (join === '|' && doubled) cursor++
-        parts.push(stretchy ? fence(doubled && name === 'Set' ? '‖' : '∣') : tag('mo', '∣'))
-        parts.push(row(name === 'Braket' ? stops : ['}']))
-      }
-      if (take() !== '}') throw new Error('Unclosed math notation')
-      return joinMarkup(parts)
-    })
-    return xml`<mrow>${fence(left, stretchy)}${content}${fence(right, stretchy)}</mrow>`
   }
 
   function matrix(environment: string): Markup {
@@ -1893,7 +1940,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
         else sequence.push(token)
       }
       const body = rawGroup()
-      const replacement = name === 'edef' || name === 'xdef' ? expandDefinition(body, true) : body
+      const replacement = name === 'edef' || name === 'xdef' ? expandDefinition(body, 'definition') : body
       if (openDelimiter) replacement.push('{')
       assign(command, { body: replacement, parameters, prefix }, global || name === 'gdef' || name === 'xdef')
       return true
@@ -2045,27 +2092,23 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (name === 'end' || name === 'endgroup' || name === 'egroup') throw new Error(`Unexpected math token: ${token}`)
     if (['frac', 'dfrac', 'tfrac', 'binom', 'dbinom', 'tbinom'].includes(name)) {
       const binomial = name.endsWith('binom')
-      const targetStyle = name.startsWith('d') ? 0 : name.startsWith('t') ? 1 : undefined
-      const content = fraction(targetStyle, binomial ? '0' : undefined)
-      return { markup: binomial ? xml`<mrow>${fence('(')}${content}${fence(')')}</mrow>` : content }
+      const forced = name.startsWith('d') ? 0 : name.startsWith('t') ? 1 : undefined
+      return { markup: fraction({ forced, thickness: binomial ? '0' : undefined, fences: binomial ? [fence('('), fence(')')] : undefined }) }
     }
     if (name === 'genfrac') {
-      const left = expandDefinition(rawGroup()).join('').trim() || '.'
-      const right = expandDefinition(rawGroup()).join('').trim() || '.'
+      const fences = [fractionDelimiter('open'), fractionDelimiter('close')] as const
       const bar = readDimension('')
       const mode = expandDefinition(rawGroup()).join('').trim()
       if (mode && !/^[0-3]$/.test(mode)) throw new Error('Invalid fraction style')
       const thickness = bar ? (Number.parseFloat(bar) > 0 ? bar : '0') : undefined
-      const content = fraction(mode ? Number(mode) as MathStyle : undefined, thickness)
-      return { markup: xml`<mrow>${fence(delimiter(left, 'genfrac'))}${content}${fence(delimiter(right, 'genfrac'))}</mrow>` }
+      return { markup: fraction({ forced: mode ? Number(mode) as MathStyle : undefined, thickness, fences }) }
     }
     if (name === 'cfrac') {
       const align = bracket()
-      return { markup: fraction(0, undefined, align === 'l' ? 'left' : align === 'r' ? 'right' : undefined) }
+      return { markup: fraction({ forced: 0, continued: true, align: align === 'l' ? 'left' : align === 'r' ? 'right' : undefined }) }
     }
     if (verticalBoxCommands.has(name)) return { markup: verticalBox(name, argument) }
     if (spacingCommands.has(name)) return { markup: spacingMarkup(name) }
-    if (Object.hasOwn(notationDelimiters, name)) return { markup: delimitedNotation(name) }
     if (name === 'prescript') {
       const upper = inScript(argument())
       const lower = inScript(argument())

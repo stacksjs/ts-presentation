@@ -32,6 +32,7 @@ in a new ts-presentation project.
 | Extensible arrows | Label-sized shafts for TeX, chemistry, and horizontal commutative diagram arrows, including distinct forward- and reverse-biased equilibria |
 | AMS commutative diagrams | Centered vertical arrows with side labels, vertical parallel lines, extensible horizontal arrows, and row-local macros |
 | Macro parameters and operator wrappers | Delimited and nested TeX parameters, inherited binary and relation spacing in bold symbols and stacked labels, and sans-serif italic math |
+| Bra-ket and fraction layout | Scoped bar expansion for bra-ket notation and set builders, directional generalized fraction fences, nested unbraced fractions, and continued fraction numerator struts |
 | Custom TeX operators and emphasis | Upright operator names with fractions, scripts, and scoped macros, style-aware limits for starred names, and nested `\emph` that alternates between italic and upright text |
 | Mathtools relations and TeX fonts | Colon relation aliases and Unicode forms, scoped legacy font declarations, upright and italic Greek variants, named spacing, and nonbreaking inline spaces |
 | KaTeX trust option | Opt-in links, URL labels, formula images, and HTML attributes through the KaTeX-shaped boolean or callback |

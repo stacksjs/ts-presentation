@@ -543,9 +543,9 @@ test('handles operator limits and literal Unicode large operators in display and
 
 test('handles general fractions, TeX math styles, and continued fractions', () => {
   const html = renderMath(String.raw`\genfrac{(}{]}{2pt}{0}{a}{b}+\cfrac[r]{1}{1+\tfrac12}`)
-  expect(html).toContain('<mstyle displaystyle="true" scriptlevel="0"><mfrac linethickness="2pt">')
+  expect(html).toContain('<mstyle displaystyle="true" scriptlevel="0"><mrow><mo stretchy="true">(</mo><mfrac linethickness="2pt">')
   expect(html).toContain('<mo stretchy="true">]</mo>')
-  expect(html).toContain('<mfrac numalign="right">')
+  expect(html).toContain('<mfrac numalign="right"><mrow><mspace width="0" height="0.85em" depth="0.35em"/>')
   const choices = String.raw`\mathchoice{D}{T}{S}{s} + x^{\mathchoice{D}{T}{S}{s}}`
   expect(renderMath(choices)).toContain('<mrow><mi>T</mi></mrow>')
   expect(renderMath(choices, true)).toContain('<mrow><mi>D</mi></mrow>')
@@ -750,17 +750,24 @@ test('shares local macros across CD cells and labels within one row', () => {
   expect(html).toContain('</mtable><mo>+</mo><mi>x</mi>')
 })
 
-test('renders fixed and scalable bra-ket and set-builder delimiters', () => {
-  const html = renderMath(String.raw`\bra{\phi}\ket{\psi}+\Braket{\phi|\frac{H}{2}|\psi}\quad
-  \Set{x||x\in\mathbb{R}, |x|<1}+\set{n|n>0}`)
-  expect(html).toContain('<mo stretchy="false">⟨</mo>')
-  expect(html).toContain('<mo stretchy="false">⟩</mo>')
-  expect(html).toContain('<mo stretchy="true">⟨</mo>')
-  expect(html).toContain('<mo stretchy="true">⟩</mo>')
-  expect(html.match(/<mo stretchy="true">∣<\/mo>/g)).toHaveLength(2)
-  expect(html).toContain('<mo stretchy="true">‖</mo>')
-  expect(html).toContain('<mo stretchy="false">{</mo><mi>n</mi><mo>∣</mo>')
-  expect(html).toContain('<mo stretchy="false">|</mo><mi>x</mi><mo stretchy="false">|</mo>')
+// The reference expansions follow KaTeX v0.19.1's braket.sty tests (MIT).
+test('expands fixed and scalable bra-ket and set-builder delimiters', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const markup = (source: string) => math(source, false).split('<annotation')[0]
+  const cases = [
+    [String.raw`A\bra{\psi}B`, String.raw`A\mathinner{\langle{\psi}|}B`],
+    [String.raw`\ket{\phi}\braket{\phi|\psi}`, String.raw`\mathinner{|{\phi}\rangle}\mathinner{\langle{\phi|\psi}\rangle}`],
+    [String.raw`\Bra{\frac ab}\Ket{x}`, String.raw`\left\langle\frac ab\right|\left|x\right\rangle`],
+    [String.raw`\Braket{u|\frac H2\|v}`, String.raw`\left\langle u\,\middle\vert\,\frac H2\,\middle\vert\,v\right\rangle`],
+    [String.raw`\Set{x||x<5|S|}`, String.raw`\left\{\:x\;\middle\Vert\;x<5|S|\:\right\}`],
+    [String.raw`\set{x\|x<5|S|}`, String.raw`\{\,x\|x<5\mid S|\,\}`],
+    [String.raw`\def\sep{|}\Set{x\sep y|S|}`, String.raw`\left\{\:x\;\middle\vert\;y|S|\:\right\}`],
+    [String.raw`\def|{P}\Set{x\|y|z}|`, String.raw`\left\{\:x\;\middle\Vert\;yPz\:\right\}P`],
+    [String.raw`\edef\saved{\Braket{x|\frac ab|y}}\saved`, String.raw`\Braket{x|\frac ab|y}`],
+  ]
+  for (const [source, expansion] of cases) expect(markup(source)).toBe(markup(expansion))
+  math(String.raw`\global\let\savedSet=\Set`, false)
+  expect(markup(String.raw`\savedSet{n\|n>0}`)).toBe(markup(String.raw`\Set{n||n>0}`))
   expect(renderMath(String.raw`\Braket{\psi|`)).toContain('math-unrendered')
 })
 
@@ -975,6 +982,39 @@ test('enforces KaTeX strict settings for comments, markup, text commands, spacin
 })
 
 const chrome = await findChrome()
+
+test.skipIf(!chrome)('uses continued fraction struts and styles both generalized fraction fences in Chromium', async () => {
+  const sources = [
+    String.raw`\dfrac{1}{1}`,
+    String.raw`\cfrac{1}{1}`,
+    String.raw`\genfrac{(}{)}{}{0}{1}{1}`,
+    String.raw`\genfrac{(}{)}{}{1}{1}{1}`,
+  ]
+  const body = sources.map(source => `<div>${renderMath(source)}</div>`).join('')
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response(`<!doctype html><meta charset="utf-8"><main style="font-size:40px">${body}</main>`, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    }),
+  })
+  const view = new Bun.WebView({ backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await view.navigate(server.url.href)
+    const measures = await view.evaluate<{ height: number, fences: number[] }[]>(`[...document.querySelectorAll('main > div')].map(row => ({
+      height: row.querySelector('mfrac').getBoundingClientRect().height,
+      fences: [...row.querySelectorAll('mo')].map(fence => fence.getBoundingClientRect().height),
+    }))`)
+    expect(measures[1].height).toBeGreaterThan(measures[0].height)
+    expect(measures[2].height).toBeGreaterThan(measures[3].height)
+    expect(measures[2].fences).toHaveLength(2)
+    for (const [index, height] of measures[2].fences.entries())
+      expect(height).toBeGreaterThan(measures[3].fences[index])
+  }
+  finally {
+    view.close()
+    await server.stop(true)
+  }
+}, 45000)
 
 test.skipIf(!chrome)('renders legacy font boundaries and colon relation gaps in Chromium', async () => {
   const source = String.raw`{\bf A{\tt B}C} \Gamma\varGamma + a\coloneqq b`
@@ -1533,8 +1573,14 @@ test('honors custom generalized fraction bars, delimiters, and explicit styles',
   expect(formula(String.raw`\genfrac{}{}{0pt}{}{a}{b}`)).toContain('<mfrac linethickness="0">')
 
   const html = formula(String.raw`\def\L{(}\genfrac\L ] 2pt {1} a{a+1}`, true)
-  expect(html).toContain('<mo stretchy="true">(</mo><mstyle displaystyle="false" scriptlevel="0"><mfrac linethickness="2pt">')
-  expect(html).toContain('<mo stretchy="true">]</mo>')
+  expect(html).toContain('<mstyle displaystyle="false" scriptlevel="0"><mrow><mo stretchy="true">(</mo><mfrac linethickness="2pt">')
+  expect(html).toContain('<mo stretchy="true">]</mo></mrow></mstyle>')
+  const opposite = formula(String.raw`\genfrac{]}{\rVert}{}{}{a}{b}`)
+  expect(opposite).not.toContain('>]</mo>')
+  expect(opposite).toContain('</mfrac><mo stretchy="true">‖</mo>')
+  expect(formula(String.raw`\genfrac{\lvert}{q}{}{}{a}{b}`)).toContain('<mo stretchy="true">|</mo><mfrac>')
+  expect(formula(String.raw`\genfrac{\mathopen{/}}{q}{}{}{a}{b}`)).not.toContain('stretchy=')
+  expect(formula(String.raw`\frac\frac12 x`)).toContain('<mfrac><mfrac><mn>1</mn><mn>2</mn></mfrac><mi>x</mi></mfrac>')
   expect(() => formula(String.raw`a\above{50} b`)).toThrow('Invalid math dimension')
   expect(() => formula(String.raw`\genfrac{}{}{2pt}{9}ab`)).toThrow('Invalid fraction style')
   expect(() => formula(String.raw`\genfrac{}{}{}{}{n}`)).toThrow('Missing math argument')
