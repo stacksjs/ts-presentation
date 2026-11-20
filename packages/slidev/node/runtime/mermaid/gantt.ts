@@ -204,6 +204,7 @@ export function gantt(source: string, idPrefix: string, options: MermaidOptions 
     todayMarkerStyle: { stroke: color('todayLineColor'), ...chart.todayMarkerStyle },
     displayMode: config.displayMode === 'compact' ? 'compact' : undefined,
     taskLabelPlacement: 'bar',
+    wrapTaskLabels: true,
     barHeight: number('barHeight'), barGap: number('barGap'), topPadding: number('topPadding'),
     leftPadding: number('leftPadding'), rightPadding: number('rightPadding'),
     width: number('useWidth'), titleTopMargin: number('titleTopMargin'), bottomMarginAdj: number('bottomMarginAdj'),

@@ -408,6 +408,7 @@ accessibleTitle: Delivery steps
 description: The preview comes before release.
 todayMarker: false
 taskLabelPlacement: bar
+wrapTaskLabels: true
 sections:
   - name: Release
     tasks:
@@ -836,6 +837,60 @@ test('imports Gantt callback commands and applies security settings', () => {
 })
 
 const chrome = await findChrome()
+
+test.skipIf(!chrome)('keeps full Gantt labels inside the chart without compact row collisions in Chromium', async () => {
+  const tasks = [
+    'Prepare the weekly release notes and verify each version before the external review',
+    'Review the signed artifacts and publish the report for the delivery team',
+    'Deploy to the internal environment and run the final verification',
+  ]
+  const source = [
+    'gantt', 'dateFormat YYYY-MM-DD HH:mm', 'todayMarker off',
+    `${tasks[0]} :first, 2026-01-01 00:00, 2h`,
+    `${tasks[1]} :second, 2026-01-01 04:00, 2h`,
+    `${tasks[2]} :final, 2026-01-01 06:00, 1d`,
+  ]
+  const charts = [
+    mermaid(source.join('\n'), 'compact-labels', { gantt: { displayMode: 'compact', useWidth: 390, fontSize: 16, useMaxWidth: false } }),
+    mermaid(source.join('\n'), 'narrow-labels', { gantt: { useWidth: 220, leftPadding: 20, rightPadding: 0, useMaxWidth: false } }),
+  ]
+  expect(charts.every(Boolean)).toBe(true)
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response(`<!doctype html><meta charset="utf-8">${charts.join('')}`, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    }),
+  })
+  const browser = new Bun.WebView({ backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await browser.navigate(server.url.href)
+    const layout = await browser.evaluate<{ text: string[], lines: number[], fits: boolean, separate: boolean }[]>(`[...document.querySelectorAll('svg')].map(svg => {
+      const boundary = svg.getBoundingClientRect()
+      const tasks = [...svg.querySelectorAll('.diagram-gantt-task')]
+      const labels = tasks.map(task => task.querySelector('.diagram-gantt-label'))
+      const boxes = tasks.map(task => task.getBoundingClientRect())
+      return {
+        text: labels.map(label => label.textContent),
+        lines: labels.map(label => label.children.length),
+        fits: boxes.every(box => box.left >= boundary.left && box.right <= boundary.right &&
+          box.top >= boundary.top && box.bottom <= boundary.bottom),
+        separate: boxes.every((a, index) => boxes.slice(index + 1).every(b =>
+          a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top)),
+      }
+    })`)
+    expect(layout).toHaveLength(2)
+    for (const chart of layout) {
+      expect(chart.text.map(value => value.replace(/\s/g, ''))).toEqual(tasks.map(value => value.replace(/\s/g, '')))
+      expect(chart.lines.some(count => count > 1)).toBe(true)
+      expect(chart.fits).toBe(true)
+      expect(chart.separate).toBe(true)
+    }
+  }
+  finally {
+    browser.close()
+    await server.stop(true)
+  }
+}, 45_000)
 
 test.skipIf(!chrome)('fits complete GitGraph labels and separate tag stacks in every orientation in Chromium', async () => {
   const branch = 'feature/review-release-candidate-across-all-supported-platforms'
