@@ -7,16 +7,27 @@ import { joinMarkup, renderMarkup, xml } from './math-markup.ts'
 import { fractionRule, mathDimension } from './math-sizing.ts'
 import { resolveRowClasses, rowSpacing } from './math-spacing.ts'
 import type { MathClass } from './math-spacing.ts'
-import { isCenteredGlyph, mathSymbol, textSymbol } from './math-symbols.ts'
+import { isCenteredGlyph, mathSymbol, textSymbol, unicodeColonRelation } from './math-symbols.ts'
 import type { MathSymbol, MathSymbolKind } from './math-symbols.ts'
 import { isMathAttributeCommand, isMathUrlCommand, mathAttributes, mathKeyValues, mathUrl, trustedMath } from './math-trust.ts'
 
 const greek: Record<string, string> = {
   alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε', varepsilon: 'ϵ', zeta: 'ζ', eta: 'η',
-  theta: 'θ', vartheta: 'ϑ', iota: 'ι', kappa: 'κ', lambda: 'λ', mu: 'μ', nu: 'ν', xi: 'ξ', pi: 'π',
+  theta: 'θ', vartheta: 'ϑ', thetasym: 'ϑ', iota: 'ι', kappa: 'κ', lambda: 'λ', mu: 'μ', nu: 'ν', xi: 'ξ', pi: 'π',
   rho: 'ρ', varrho: 'ϱ', sigma: 'σ', varsigma: 'ς', tau: 'τ', upsilon: 'υ', phi: 'ϕ', varphi: 'φ',
-  chi: 'χ', psi: 'ψ', omega: 'ω', Gamma: 'Γ', Delta: 'Δ', Theta: 'Θ', Lambda: 'Λ', Xi: 'Ξ',
-  Pi: 'Π', Sigma: 'Σ', Upsilon: 'Υ', Phi: 'Φ', Psi: 'Ψ', Omega: 'Ω',
+  chi: 'χ', psi: 'ψ', omega: 'ω',
+}
+const upperGreek: Record<string, string> = {
+  Alpha: 'Α', Beta: 'Β', Gamma: 'Γ', Delta: 'Δ', Epsilon: 'Ε', Zeta: 'Ζ', Eta: 'Η', Theta: 'Θ',
+  Iota: 'Ι', Kappa: 'Κ', Lambda: 'Λ', Mu: 'Μ', Nu: 'Ν', Xi: 'Ξ', Omicron: 'Ο', Pi: 'Π',
+  Rho: 'Ρ', Sigma: 'Σ', Tau: 'Τ', Upsilon: 'Υ', Phi: 'Φ', Chi: 'Χ', Psi: 'Ψ', Omega: 'Ω',
+}
+const italicGreek = new Set(['Gamma', 'Delta', 'Theta', 'Lambda', 'Xi', 'Pi', 'Sigma', 'Upsilon', 'Phi', 'Psi', 'Omega'])
+
+function greekLetter(name: string): [glyph: string, upright: boolean] | undefined {
+  if (Object.hasOwn(greek, name)) return [greek[name], false]
+  if (Object.hasOwn(upperGreek, name)) return [upperGreek[name], true]
+  if (name.startsWith('var') && italicGreek.has(name.slice(3))) return [upperGreek[name.slice(3)], false]
 }
 const operators: Record<string, string> = {
   pm: '±', mp: '∓', cdot: '·', times: '×', div: '÷', le: '≤', leq: '≤', ge: '≥', geq: '≥', ne: '≠', neq: '≠',
@@ -79,6 +90,9 @@ const variants: Record<string, string> = {
   mathfrak: 'fraktur', mathnormal: 'italic', boldsymbol: 'bold-italic', bm: 'bold-italic',
   Bbb: 'double-struck', frak: 'fraktur', bold: 'bold',
 }
+const legacyFonts: Readonly<Record<string, string>> = {
+  '\\rm': 'normal', '\\sf': 'sans-serif', '\\tt': 'monospace', '\\bf': 'bold', '\\it': 'italic', '\\cal': 'script',
+}
 const accents: Record<string, string> = {
   hat: 'ˆ', bar: '¯', vec: '→', dot: '˙', ddot: '¨', dddot: '⃛', ddddot: '⃜', tilde: '˜',
   acute: '´', grave: '`', breve: '˘', check: 'ˇ', mathring: '˚',
@@ -121,7 +135,12 @@ const sizedDelimiters: Record<string, string> = { big: '1.2em', Big: '1.8em', bi
 const matrixDelimiters: Record<string, [string, string]> = {
   pmatrix: ['(', ')'], bmatrix: ['[', ']'], Bmatrix: ['{', '}'], vmatrix: ['|', '|'], Vmatrix: ['‖', '‖'], cases: ['{', ''],
 }
-const spacing: Record<string, string> = { ',': '0.17em', ':': '0.22em', ';': '0.28em', '!': '-0.17em', ' ': '0.33em', quad: '1em', qquad: '2em' }
+const spacing: Record<string, string> = {
+  ',': '0.17em', ':': '0.22em', '>': '0.22em', ';': '0.28em', '!': '-0.17em', ' ': '0.33em',
+  thinspace: '0.17em', medspace: '0.22em', thickspace: '0.28em',
+  negthinspace: '-0.17em', negmedspace: '-0.22em', negthickspace: '-0.28em',
+  space: '0.33em', nobreakspace: '0.33em', enspace: '0.5em', enskip: '0.5em', quad: '1em', qquad: '2em',
+}
 const spacingCommands = new Set(['hspace', 'kern', 'mkern', 'mskip', 'hskip'])
 const styledLetters: Record<string, { upper: number, lower: number, digits?: number, exceptions: string }> = {
   'double-struck': { upper: 0x1D538, lower: 0x1D552, digits: 0x1D7D8, exceptions: 'CℂHℍNℕPℙQℚRℝZℤ' },
@@ -184,7 +203,7 @@ function tokenize(source: string, onTrailingComment?: () => void): string[] {
 }
 
 type MathMode = 'math' | 'text'
-const expansionPrimitives = ['\\expandafter', '\\noexpand', '\\@firstoftwo', '\\@secondoftwo', '\\@ifnextchar', '\\@ifstar', '\\TextOrMath', '\\long'] as const
+const expansionPrimitives = ['\\expandafter', '\\noexpand', '\\@firstoftwo', '\\@secondoftwo', '\\@ifnextchar', '\\@ifstar', '\\TextOrMath', '\\html@mathml', '\\long'] as const
 const expansionPrimitiveNames = new Set<string>(expansionPrimitives)
 const macroDeclaration = /^\\(?:[gex]?def|(?:future)?let|(?:new|renew|provide)command|global)$/
 type ExpansionPrimitive = typeof expansionPrimitives[number]
@@ -210,18 +229,41 @@ function safeColor(value: string): string {
 
 function applyVariant(content: string, variant: string): string {
   const style = styledLetters[variant]
-  if (!style) return variant === 'normal' ? content.replaceAll('<mi>', '<mi mathvariant="normal">') : content
-  return content.replace(/<(mi|mn)>([A-Za-z\d]+)<\/\1>/g, (_, tagName: string, text: string) => {
-    const glyphs = [...text].map((letter) => {
-      const exception = style.exceptions.indexOf(letter)
-      if (exception >= 0) return style.exceptions[exception + 1]
-      const code = letter.charCodeAt(0)
-      if (code >= 65 && code <= 90) return String.fromCodePoint(style.upper + code - 65)
-      if (code >= 97 && code <= 122) return String.fromCodePoint(style.lower + code - 97)
-      return style.digits ? String.fromCodePoint(style.digits + code - 48) : letter
-    }).join('')
-    return `<${tagName}>${glyphs}</${tagName}>`
-  })
+  const uprightFont = variant === 'normal' || variant === 'bold' || variant === 'sans-serif' || variant === 'monospace'
+  if (!style && !uprightFont && variant !== 'italic') return content
+  // A nested font command owns its subtree, even when the outer font rewrites glyphs.
+  const groups: boolean[] = []
+  let innerFont = 0
+  return content.replace(/<mrow(?: [^>]*?)?>|<\/mrow>|<(mi|mn)( mathvariant="normal")?>([^<]+)<\/\1>/g,
+    (markup, element: string | undefined, upright: string | undefined, letters: string | undefined) => {
+      if (!element) {
+        if (markup === '</mrow>') innerFont -= Number(groups.pop() ?? false)
+        else if (!markup.endsWith('/>')) {
+          const explicit = markup.includes(' mathvariant="')
+          groups.push(explicit)
+          innerFont += Number(explicit)
+        }
+        return markup
+      }
+      if (innerFont) return markup
+      if (uprightFont) return element === 'mi' && !upright ? `<mi mathvariant="normal">${letters}</mi>` : markup
+      if (variant === 'italic') return upright ? `<${element}>${letters}</${element}>` : markup
+      if (!style || !letters || !/^[A-Za-z\d]+$/.test(letters)) return markup
+      const glyphs = [...letters].map((letter) => {
+        const exception = style.exceptions.indexOf(letter)
+        if (exception >= 0) return style.exceptions[exception + 1]
+        const code = letter.charCodeAt(0)
+        if (code >= 65 && code <= 90) return String.fromCodePoint(style.upper + code - 65)
+        if (code >= 97 && code <= 122) return String.fromCodePoint(style.lower + code - 97)
+        return style.digits ? String.fromCodePoint(style.digits + code - 48) : letter
+      }).join('')
+      return `<${element}>${glyphs}</${element}>`
+    })
+}
+
+function fontMarkup(content: Markup, variant: string): Markup {
+  const styled: Markup = typeof content === 'string' ? applyVariant(content, variant) : style => applyVariant(content(style), variant)
+  return xml`<mrow class="math-${variant}" mathvariant="${variant}">${styled}</mrow>`
 }
 
 const textFonts: Record<string, string> = {
@@ -230,6 +272,7 @@ const textFonts: Record<string, string> = {
   textbf: 'font-weight:bold', textmd: 'font-weight:normal', textup: 'font-style:normal',
   textit: 'font-style:italic', emph: 'font-style:italic',
 }
+const typesettingNames = new Set(['TeX', 'LaTeX', 'KaTeX'])
 const textBoxes = new Set(['colorbox', 'fcolorbox', 'fbox', 'reflectbox'])
 const textSymbols: Record<string, string> = {
   '\\textdollar': '$', '\\textunderscore': '_', '\\textbackslash': '\\',
@@ -251,6 +294,7 @@ interface Atom {
   markup: Markup
   mathClass?: MathClass
   limits?: boolean
+  forceLimits?: boolean
   brace?: 'lower' | 'upper'
 }
 
@@ -327,6 +371,10 @@ function tag(name: string, value: string): string {
   return `<${name}>${escapeHtml(value)}</${name}>`
 }
 
+function typesettingName(name: string): string {
+  return `<mrow style="${textFonts.textrm}">${tag('mtext', name)}</mrow>`
+}
+
 function spaceMarkup(width: string): string {
   // MathML Core layout clamps space widths to zero. A negative margin retains
   // the signed advance of a TeX kern.
@@ -373,7 +421,7 @@ function rowClass({ markup, token = '', mathClass, operator }: RowPart): MathCla
   if (mathClass) return mathClass
   if (operator) return 'op'
   const name = token.startsWith('\\') ? token.slice(1) : ''
-  if (Object.hasOwn(spacing, name) || spacingCommands.has(name)) return
+  if (token === '~' || Object.hasOwn(spacing, name) || spacingCommands.has(name)) return
   if (token === '{') return 'ord'
   if (name === 'left') return 'inner'
   if (name === 'middle' || name === 'not' || name === 'stackrel' || Object.hasOwn(extensibleArrows, name)) return 'rel'
@@ -415,7 +463,7 @@ function inlineBreaksBefore(parts: readonly RowPart[], classes: readonly (MathCl
       suppress = false
     }
     else if (part.token === '\\allowbreak') allow = true
-    else if (part.token === '\\nobreak') suppress = true
+    else if (part.token === '\\nobreak' || part.token === '\\nobreakspace' || part.token === '~') suppress = true
   }
   return offsets
 }
@@ -599,6 +647,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const second = rawGroup()
     switch (command) {
       case '\\@firstoftwo': return first
+      case '\\html@mathml':
       case '\\@secondoftwo': return second
       case '\\TextOrMath': return mode === 'text' ? first : second
       case '\\@ifstar':
@@ -987,6 +1036,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const token = tokens[cursor++]
       if (!token || token === boundary || token === '}') throw new Error('Missing math text argument')
       depth--
+      if (token.startsWith('\\') && typesettingNames.has(token.slice(1)))
+        return wrap(typesettingName(opening + token.slice(1) + closing))
       const value = textSymbols[token] ?? textSymbol(token) ?? token.replace(/^\\([%$#&_{} ])$/, '$1')
       return wrap(tag('mtext', opening + value + closing))
     }
@@ -996,15 +1047,19 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const baseScale = fontScale
     let parts: Markup[] = []
     let literal = opening
+    let legacyFont: string | undefined
     function flush(): void {
       if (!literal) return
       const joined = literal.replace(/\s+/g, ' ').replace(/^ | $/g, '\u00A0')
       parts.push(tag('mtext', joined))
       literal = ''
     }
-    function flushSize(): void {
+    function flushFormatting(): void {
       flush()
-      if (parts.length) sized.push(scaledMath(joinMarkup(parts), fontScale / baseScale))
+      if (parts.length) {
+        const content = joinMarkup(parts)
+        sized.push(scaledMath(legacyFont ? fontMarkup(content, legacyFont) : content, fontScale / baseScale))
+      }
       parts = []
     }
     inScope(() => {
@@ -1020,12 +1075,17 @@ export function renderMath(source: string, display = false, configured: MathMacr
         if (token === '\\\\' || token === '\\newline') {
           const gap = lineGap(token)
           if (gap === undefined) continue
-          flushSize()
+          flushFormatting()
           lines.push({ content: joinMarkup(sized.splice(0)), gap })
         }
         else if (Object.hasOwn(sizeCommands, token)) {
-          flushSize()
+          flushFormatting()
           fontScale = sizeCommands[token]
+          space()
+        }
+        else if (Object.hasOwn(legacyFonts, token)) {
+          flushFormatting()
+          legacyFont = legacyFonts[token]
           space()
         }
         else if (token === '$' || token === '\\(') {
@@ -1050,6 +1110,11 @@ export function renderMath(source: string, display = false, configured: MathMacr
           flush()
           parts.push(textBox(token.slice(1)))
         }
+        else if (token.startsWith('\\') && typesettingNames.has(token.slice(1))) {
+          flush()
+          parts.push(typesettingName(token.slice(1)))
+          space()
+        }
         else if (token === '\\textcolor' || (token === '\\color' && options?.colorIsTextColor)) {
           flush()
           parts.push(coloredArgument(true))
@@ -1065,6 +1130,11 @@ export function renderMath(source: string, display = false, configured: MathMacr
         else if (token.startsWith('\\') && spacingCommands.has(token.slice(1))) {
           flush()
           parts.push(spacingMarkup(token.slice(1)))
+        }
+        else if (/^\\[^ >]/.test(token) && Object.hasOwn(spacing, token.slice(1))) {
+          flush()
+          parts.push(spaceMarkup(spacing[token.slice(1)]))
+          if (/^\\[A-Za-z]+$/.test(token)) space()
         }
         else if (token === '\\llap' || token === '\\clap' || token === '\\rlap') {
           flush()
@@ -1089,8 +1159,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
         else literal += textSymbols[token] ?? textSymbol(token) ?? token.replace(/^\\([%$#&_{} ])$/, '$1')
       }
     })
-    if (sized.length || fontScale !== baseScale) {
-      flushSize()
+    if (sized.length || fontScale !== baseScale || legacyFont) {
+      flushFormatting()
       parts = sized
     }
     fontScale = baseScale
@@ -1213,6 +1283,11 @@ export function renderMath(source: string, display = false, configured: MathMacr
         fontScale = baseScale
         continue
       }
+      if (Object.hasOwn(legacyFonts, token)) {
+        const content = row(stop, true, exposeDeclarationLines, undefined, followsOrdinary && !parts.some(rowClass))
+        parts.push({ markup: fontMarkup(content, legacyFonts[token]) })
+        continue
+      }
       if (token === '\\color' && !options?.colorIsTextColor) {
         const color = safeColor(literalGroup())
         const content = row(stop, true, exposeDeclarationLines, undefined, followsOrdinary && !parts.some(rowClass))
@@ -1236,7 +1311,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       else part = atom(token)
       let lower: Markup = ''
       let upper: Markup = ''
-      let forceLimits: boolean | 'display' | undefined
+      let forceLimits: boolean | 'display' | undefined = part.forceLimits
       for (let kind = peek(); kind; kind = peek()) {
         if (kind === '\\limits' || kind === '\\nolimits' || kind === '\\displaylimits') {
           cursor++
@@ -1618,6 +1693,9 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
     if (!token.startsWith('\\')) {
       if (/^\d/.test(token)) return { markup: tag('mn', token) }
+      if (token === '~') return { markup: spaceMarkup(spacing.nobreakspace) }
+      const relation = unicodeColonRelation(token)
+      if (relation) return supplementalAtom(relation)
       if (token !== '.' && delimiterGlyphs.has(token)) return { markup: fence(token, false) }
       const limits = largeOperatorGlyphs.has(token) ? true : integralGlyphs.has(token) ? false : undefined
       return { markup: tag(/^\p{L}$/u.test(token) ? 'mi' : 'mo', token === '-' ? '−' : token), limits }
@@ -1758,6 +1836,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       return { markup: degree ? xml`<mroot>${base}<mrow>${degree}</mrow></mroot>` : xml`<msqrt>${base}</msqrt>` }
     }
     if (Object.hasOwn(textFonts, name)) return { markup: textArgument(name) }
+    if (typesettingNames.has(name)) return { markup: typesettingName(name) }
     if (name === 'operatorname' || name === 'operatornamewithlimits') {
       const star = name === 'operatorname' && peek() === '*'
       if (star) take()
@@ -1765,7 +1844,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
         if (Object.hasOwn(operatorSpaces, token)) return operatorSpaces[token]
         if (Object.hasOwn(textSymbols, token)) return textSymbols[token]
         const command = token.startsWith('\\') ? token.slice(1) : ''
-        if (Object.hasOwn(greek, command)) return greek[command]
+        const letter = greekLetter(command)
+        if (letter) return letter[0]
         if (Object.hasOwn(operators, command)) return operators[command]
         return mathSymbol(command)?.[0] ?? textSymbol(token) ?? token.replace(/^\\([_%#$&{}])$/, '$1')
       }).join('').trim()
@@ -1834,17 +1914,21 @@ export function renderMath(source: string, display = false, configured: MathMacr
       return { markup: dimensions ? xml`<mpadded${dimensions}>${invisible}</mpadded>` : invisible }
     }
     if (name === 'relax' || name === 'allowbreak' || name === 'nobreak') return { markup: '' }
+    if (name === 'implies' || name === 'impliedby') {
+      const arrow = name === 'implies' ? '⟹' : '⟸'
+      return classifiedAtom('rel', `${muSpace(5)}<mo lspace="0em" rspace="0em">${arrow}</mo>${muSpace(5)}`)
+    }
+    if (name === 'plim') return { markup: tag('mo', 'plim'), limits: true, forceLimits: true }
     if (Object.hasOwn(variants, name)) {
       const variant = variants[name]
       const { mathClass, markup: content } = name === 'boldsymbol' || name === 'bm'
         ? binRelArgument()
         : { markup: argument(), mathClass: undefined }
-      // MathML Core honors normal on identifiers and uses font styles for other variants.
-      const styled: Markup = typeof content === 'string' ? applyVariant(content, variant) : style => applyVariant(content(style), variant)
-      return { mathClass, markup: xml`<mrow class="math-${variant}" mathvariant="${variant}">${styled}</mrow>` }
+      return { mathClass, markup: fontMarkup(content, variant) }
     }
     if (Object.hasOwn(accents, name)) return { markup: xml`<mover accent="true">${argument()}${tag('mo', accents[name])}</mover>` }
-    if (Object.hasOwn(greek, name)) return { markup: tag('mi', greek[name]) }
+    const letter = greekLetter(name)
+    if (letter) return { markup: `<mi${letter[1] ? ' mathvariant="normal"' : ''}>${letter[0]}</mi>` }
     if (name === 'smallint') return { markup: '<mo largeop="false">∫</mo>', limits: true }
     if (Object.hasOwn(operators, name)) {
       return { markup: tag('mo', operators[name]), limits: big.has(name) ? true : integrals.has(name) ? false : undefined }

@@ -680,6 +680,9 @@ v-switch { display: block; }
 .slide math mstyle[displaystyle="true"] { math-style: normal; }
 .slide math mstyle[displaystyle="false"] { math-style: compact; }
 .slide math :is(.math-italic, .math-bold-italic, .math-sans-serif-italic) { font-style: italic; }
+.slide math :is(.math-normal, .math-bold, .math-italic, .math-bold-italic, .math-script) { font-family: math; }
+.slide math :is(.math-normal, .math-bold, .math-sans-serif, .math-monospace, .math-script) { font-style: normal; }
+.slide math :is(.math-normal, .math-italic, .math-sans-serif, .math-monospace, .math-script) { font-weight: normal; }
 .slide math :is(.math-sans-serif, .math-sans-serif-italic) { font-family: sans-serif; }
 .slide math .math-monospace { font-family: monospace; }
 math .math-overline { border-top: max(0.06em, var(--math-min-rule, 0px)) solid currentColor; }

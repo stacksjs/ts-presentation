@@ -29,6 +29,7 @@ in a new ts-presentation project.
 | Extensible arrows | Label-sized shafts for TeX, chemistry, and horizontal commutative diagram arrows, including distinct forward- and reverse-biased equilibria |
 | AMS commutative diagrams | Centered vertical arrows with side labels, vertical parallel lines, extensible horizontal arrows, and row-local macros |
 | Macro parameters and operator wrappers | Delimited and nested TeX parameters, inherited binary and relation spacing in bold symbols and stacked labels, and sans-serif italic math |
+| Mathtools relations and TeX fonts | Colon relation aliases and Unicode forms, scoped legacy font declarations, upright and italic Greek variants, named spacing, and nonbreaking inline spaces |
 | KaTeX trust option | Opt-in links, URL labels, formula images, and HTML attributes through the KaTeX-shaped boolean or callback |
 | KaTeX display options | Formatted `\tag` and `\tag*` labels, `leqno` for left-side equation tags, and `fleqn` for flush-left display formulas |
 | AMS alignment and arrays | Paired operator spacing, equal alignment points across rows, explicit `alignat` counts, stable tag columns on short rows, starred matrix column alignment, and scoped row rules |

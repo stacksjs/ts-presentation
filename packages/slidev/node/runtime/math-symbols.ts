@@ -107,6 +107,42 @@ const math: Readonly<Record<string, MathSymbol>> = {
   nshortmid: ['∤', 'relation'], nshortparallel: ['∦', 'relation'],
 }
 
+// Mathtools relation macros and colonequals aliases use one atom per operator.
+const colonRelations: Readonly<Record<string, string>> = {
+  vcentcolon: '∶', dblcolon: '∷', coloneqq: '≔', Coloneqq: '⩴',
+  coloneq: '∶−', Coloneq: '∷−', eqqcolon: '≕', Eqqcolon: '=∷',
+  eqcolon: '∹', Eqcolon: '−∷', colonapprox: '∶≈', Colonapprox: '∷≈',
+  colonsim: '∶∼', Colonsim: '∷∼', simcolon: '∼∶', simcoloncolon: '∼∷',
+  approxcolon: '≈∶', approxcoloncolon: '≈∷',
+}
+const colonGlyphs = new Set(Object.values(colonRelations).filter(glyph => glyph.length === 1))
+const aliases: Readonly<Record<string, string>> = {
+  ratio: 'vcentcolon', coloncolon: 'dblcolon', colonequals: 'coloneqq', coloncolonequals: 'Coloneqq',
+  equalscolon: 'eqqcolon', equalscoloncolon: 'Eqqcolon', colonminus: 'coloneq', coloncolonminus: 'Coloneq',
+  minuscolon: 'eqcolon', minuscoloncolon: 'Eqcolon', coloncolonapprox: 'Colonapprox',
+  coloncolonsim: 'Colonsim',
+  Dagger: 'ddag', clubs: 'clubsuit', diamonds: 'diamondsuit', hearts: 'heartsuit',
+  spades: 'spadesuit', bull: 'bullet', minuso: 'ominus', weierp: 'wp',
+}
+
+const legacy: Readonly<Record<string, MathSymbol>> = {
+  alef: ['ℵ', 'ordinary'], alefsym: ['ℵ', 'ordinary'], copyright: ['©', 'ordinary'],
+  exist: ['∃', 'ordinary'], infin: ['∞', 'ordinary'], isin: ['∈', 'relation'],
+  image: ['ℑ', 'ordinary'], real: ['ℜ', 'ordinary'], mapsfrom: ['↤', 'relation'],
+  lq: ['‘', 'ordinary'], rq: ['’', 'ordinary'],
+  darr: ['↓', 'relation'], dArr: ['⇓', 'relation'], Darr: ['⇓', 'relation'],
+  harr: ['↔', 'relation'], hArr: ['⇔', 'relation'], Harr: ['⇔', 'relation'],
+  larr: ['←', 'relation'], lArr: ['⇐', 'relation'], Larr: ['⇐', 'relation'],
+  lrarr: ['↔', 'relation'], lrArr: ['⇔', 'relation'], Lrarr: ['⇔', 'relation'],
+  rarr: ['→', 'relation'], rArr: ['⇒', 'relation'], Rarr: ['⇒', 'relation'],
+  uarr: ['↑', 'relation'], uArr: ['⇑', 'relation'], Uarr: ['⇑', 'relation'],
+  plusmn: ['±', 'binary'], sdot: ['⋅', 'binary'],
+  sub: ['⊂', 'relation'], sube: ['⊆', 'relation'], supe: ['⊇', 'relation'],
+  Bbbk: ['𝕜', 'identifier'], Complex: ['ℂ', 'identifier'], cnums: ['ℂ', 'identifier'],
+  N: ['ℕ', 'identifier'], natnums: ['ℕ', 'identifier'], Z: ['ℤ', 'identifier'],
+  R: ['ℝ', 'identifier'], Reals: ['ℝ', 'identifier'], reals: ['ℝ', 'identifier'],
+}
+
 const text: Readonly<Record<string, string>> = {
   P: '¶', S: '§', checkmark: '✓', circledR: '®', dag: '†',
   ddag: '‡', degree: '°', i: 'ı', j: 'ȷ', lbrack: '[',
@@ -114,18 +150,29 @@ const text: Readonly<Record<string, string>> = {
   textbraceleft: '{', textbraceright: '}', textdagger: '†', textdaggerdbl: '‡', textdegree: '°',
   textellipsis: '…', textemdash: '\u2014', textendash: '\u2013', textquotedblleft: '“', textquotedblright: '”',
   textquoteleft: '‘', textquoteright: '’', textsterling: '£', varvdots: '⋮', yen: '¥',
+  copyright: '©', lq: '‘', rq: '’',
 }
 
-const centeredGlyphs = new Set(Object.values(math)
-  .filter(([, kind]) => kind === 'binary' || kind === 'relation')
-  .map(([glyph]) => glyph))
+const centeredGlyphs = new Set([
+  ...[...Object.values(math), ...Object.values(legacy)]
+    .filter(([, kind]) => kind === 'binary' || kind === 'relation')
+    .map(([glyph]) => glyph),
+  ...Object.values(colonRelations),
+])
 
 export function isCenteredGlyph(glyph: string): boolean {
   return centeredGlyphs.has(glyph)
 }
 
+export function unicodeColonRelation(glyph: string): MathSymbol | undefined {
+  if (colonGlyphs.has(glyph)) return [glyph, 'relation']
+}
+
 export function mathSymbol(name: string): MathSymbol | undefined {
-  return Object.hasOwn(math, name) ? math[name] : undefined
+  const canonical = Object.hasOwn(aliases, name) ? aliases[name] : name
+  if (Object.hasOwn(colonRelations, canonical)) return [colonRelations[canonical], 'relation']
+  if (Object.hasOwn(math, canonical)) return math[canonical]
+  return Object.hasOwn(legacy, canonical) ? legacy[canonical] : undefined
 }
 
 export function textSymbol(token: string): string | undefined {

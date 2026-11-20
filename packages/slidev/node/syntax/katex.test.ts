@@ -45,7 +45,7 @@ it('renders two reaction labels with chemical formulas, literal text, and scoped
   const html = await renderDeck(parseDeck('$' + formula + '$'))
   expect(html).toMatch(/<munderover><mrow class="math-arrow-body"[^>]*><mo[^>]*>→<\/mo><mspace[^>]*data-right="open"[^>]*\/><\/mrow><mrow><msub><mi>p<\/mi><mi>i<\/mi><\/msub><\/mrow><mrow class="math-chemistry"><msub><mi mathvariant="normal">H<\/mi><mn>2<\/mn><\/msub>/)
   expect(html).toMatch(/<munder><mrow class="math-arrow-body"[^>]*><mo[^>]*>⇄<\/mo>[^<]*(?:<mspace[^>]*\/>){2}<\/mrow><mtext>&lt;mixed&gt;<\/mtext><\/munder>/)
-  expect(html).toMatch(/<mover><mrow class="math-arrow-body"[^>]*><mo[^>]*>⇌<\/mo>[^<]*(?:<mspace[^>]*\/>){2}<\/mrow><mrow class="math-chemistry"><mi>Δ<\/mi><\/mrow><\/mover>/)
+  expect(html).toMatch(/<mover><mrow class="math-arrow-body"[^>]*><mo[^>]*>⇌<\/mo>[^<]*(?:<mspace[^>]*\/>){2}<\/mrow><mrow class="math-chemistry"><mi mathvariant="normal">Δ<\/mi><\/mrow><\/mover>/)
   expect(html).toMatch(/<mo[^>]*>\+<\/mo>(?:<mspace[^>]*\/>)*<msub><mi>p<\/mi><mi>i<\/mi><\/msub>/)
 })
 

@@ -25,6 +25,50 @@ test('renders supplemental AMS relations, binary operators, and punctuation with
   expect(html).toContain(`<mi>e</mi><mo separator="true" ${zeroGap}>⋅</mo>${thin}${operator('&amp;')}<mtext>ℶ</mtext>`)
 })
 
+test('renders mathtools colons as single relation atoms, including literal Unicode and aliases', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const formula = String.raw`a\coloneqq b\equalscolon c\dblcolon d\coloncolonapprox e` + '⩴f'
+  const html = math(formula, false)
+  for (const glyph of ['≔', '≕', '∷', '∷≈', '⩴'])
+    expect(html).toContain(thick + operator(glyph) + thick)
+  const script = math(String.raw`x^{a\ratio b\Coloneq c}`, false)
+  expect(script).toContain('<mi>a</mi>' + operator('∶') + '<mi>b</mi>' + operator('∷−') + '<mi>c</mi>')
+  expect(script).not.toContain('<mspace')
+  expect(math(String.raw`a\dots\colonequals b`, false)).toContain(operator('⋯'))
+  expect(math(String.raw`\N \Reals \Bbbk a\lArr b`, false)).toContain('<mi>ℕ</mi><mi>ℝ</mi><mi>𝕜</mi>')
+})
+
+test('renders named TeX spaces and keeps nonbreaking spaces in the same inline fragment', () => {
+  const math = createMathRenderer({ throwOnError: true }, true)
+  const source = String.raw`\text{x\thinspace y\enspace z} +\nobreakspace y =
+    u\negmedspace v\thickspace w\>t`
+  const html = math(source, false).split('<annotation')[0]
+  expect(html).toContain('<mtext>x</mtext><mspace width="0.17em"/>')
+  expect(html).toContain('<mtext>y</mtext><mspace width="0.5em"/><mtext>z</mtext>')
+  expect(html).toContain('<mspace width="0.5em"/>')
+  expect(html).toContain('<mspace width="0" style="margin-inline-end:-0.22em"/>')
+  expect(html).toContain('<mspace width="0.28em"/>')
+  expect(html.match(/data-math-break/g)).toHaveLength(1)
+  expect(math(String.raw`x+~y`, false).split('<annotation')[0]).not.toContain('data-math-break')
+})
+
+test('scopes legacy font declarations and selects MathML branches without expanding skipped input', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const html = math(String.raw`{\cal A{\bf B} C} D+\mathrm{x\mathit{y}}+\Alpha\Gamma\varGamma`, false)
+  expect(html).toContain('<mi>𝒜</mi>')
+  expect(html).toContain('class="math-bold" mathvariant="bold"><mi mathvariant="normal">B</mi>')
+  expect(html).toContain('<mi>𝒞</mi></mrow></mrow><mi>D</mi>')
+  expect(html).toContain('<mi mathvariant="normal">x</mi><mrow class="math-italic" mathvariant="italic"><mrow><mi>y</mi>')
+  expect(html).toContain('<mi mathvariant="normal">Α</mi><mi mathvariant="normal">Γ</mi><mi>Γ</mi>')
+  const text = math(String.raw`\text{before \bf word {\tt code} after} \LaTeX \TeX \KaTeX`, false)
+  expect(text).toContain('class="math-bold" mathvariant="bold"><mtext>word')
+  expect(text).toContain('class="math-monospace" mathvariant="monospace"><mtext>code</mtext>')
+  for (const name of ['LaTeX', 'TeX', 'KaTeX'])
+    expect(text).toContain(`<mrow style="font-family:serif"><mtext>${name}</mtext></mrow>`)
+  const branch = math(String.raw`\html@mathml{\unsupported}{\plim_n X_n}`, false)
+  expect(branch).toContain('<munder><mo movablelimits="false">plim</mo><mi>n</mi></munder>')
+})
+
 test('uses supplemental symbols in contextual dots, negations, text, and operator names', () => {
   const math = createMathRenderer({ throwOnError: true })
   expect(math(String.raw`a \dots \subsetneqq b + \not\gtrsim c`, false)).toContain('>⋯</mo>')
@@ -653,6 +697,42 @@ test('enforces KaTeX strict settings for comments, markup, text commands, spacin
 })
 
 const chrome = await findChrome()
+
+test.skipIf(!chrome)('renders legacy font boundaries and colon relation gaps in Chromium', async () => {
+  const source = String.raw`{\bf A{\tt B}C} \Gamma\varGamma + a\coloneqq b`
+  const body = renderMath(source)
+  const stylesheet = await Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url)).text()
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response(`<!doctype html><meta charset="utf-8"><style>${stylesheet}</style><div class="slide" style="font-size:36px">${body}</div>`, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    }),
+  })
+  const view = new Bun.WebView({ backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await view.navigate(server.url.href)
+    const geometry = await view.evaluate<{ weights: string[], family: string, transforms: string[], gaps: number[] }>(`(() => {
+      const bold = document.querySelector('.math-bold')
+      const [a, b, c] = bold.querySelectorAll('mi')
+      const capitals = [...document.querySelectorAll('mi')].filter(letter => letter.textContent === 'Γ')
+      const relation = [...document.querySelectorAll('mo')].find(symbol => symbol.textContent === '≔')
+      return {
+        weights: [a, b, c].map(letter => getComputedStyle(letter).fontWeight),
+        family: getComputedStyle(b).fontFamily,
+        transforms: capitals.map(letter => getComputedStyle(letter).textTransform),
+        gaps: [relation.previousElementSibling, relation.nextElementSibling].map(space => space.getBoundingClientRect().width),
+      }
+    })()`)
+    expect(geometry.weights).toEqual(['700', '400', '700'])
+    expect(geometry.family).toContain('monospace')
+    expect(geometry.transforms[0]).not.toBe(geometry.transforms[1])
+    expect(geometry.gaps.map(Math.round)).toEqual([10, 10])
+  }
+  finally {
+    view.close()
+    server.stop(true)
+  }
+}, 45_000)
 
 test.skipIf(!chrome)('aligns paired AMS cells and row numbers at the expected positions in Chromium', async () => {
   const examples = [

@@ -146,6 +146,13 @@ speaker notes. Each hook can be asynchronous.
   Use `\@ifstar` for starred forms, `\@ifnextchar` to inspect the next token,
   and `\TextOrMath` to choose an expansion for text or math.
   `\raisebox`, `\rule`, and `\kern` control placement and spacing.
+  Use `\thinspace`, `\medspace`, or `\enspace` for named spacing and
+  `\nobreakspace` to keep neighboring terms together in inline math.
+  Mathtools relations such as `\coloneqq`, `\eqqcolon`, and `\dblcolon`
+  receive the same spacing as other relations. Use `\Gamma` for upright
+  uppercase gamma and `\varGamma` for its italic form.
+  Legacy font declarations such as `{\bf x}` and `{\cal A}` apply within
+  their group and respect nested font changes.
 - Use `{a \over b}` for an infix fraction, `{a \above{2pt} b}` for a
   custom rule, or `{n \choose k}` for a binomial coefficient. Braces
   delimit each fraction group. Use `\limits` or `\nolimits` with a
