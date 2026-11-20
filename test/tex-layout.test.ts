@@ -179,6 +179,44 @@ test('reads multi-digit and expanded argument counts in macro declarations', () 
   expect(() => math(String.raw`\newcommand\foo[900000000]{x}`, false)).toThrow('Invalid macro argument count')
 })
 
+// Configured MacroExpansion fixtures adapted from KaTeX v0.19.1 (MIT).
+test('expands configured stacks in reverse order and retains frozen primitives', () => {
+  const math = createMathRenderer({
+    throwOnError: true,
+    macros: {
+      '\\OldInt': { tokens: [{ text: '\\int', noexpand: true }], numArgs: 0, unexpandable: true },
+      '\\int': { tokens: [{ text: '\\limits' }, { text: '\\OldInt' }], numArgs: 0 },
+      '\\labeltext': {
+        tokens: [{ text: '}', noexpand: true }, { text: '1' }, { text: '#' }, { text: '{', noexpand: true }, { text: '\\text' }],
+        numArgs: 1,
+      },
+      '\\oldletter': { tokens: [{ text: 'x', noexpand: true }], numArgs: 0, unexpandable: true },
+      '\\frozen': { tokens: [{ text: 'x', noexpand: true }], numArgs: 0 },
+      '\\inhibited': { tokens: [{ text: '\\labeltext', noexpand: true, treatAsRelax: true }], numArgs: 0 },
+      'α': '\\beta',
+    },
+  })
+  expect(math(String.raw`\int_0^1 x`, false)).toContain('<munderover><mo movablelimits="false">∫</mo><mn>0</mn><mn>1</mn></munderover>')
+  expect(math(String.raw`\labeltext{sample}+${'α'}`, false)).toContain('<mtext>sample</mtext><mo>+</mo><mi>β</mi>')
+  expect(math(String.raw`\edef\late{\oldletter}\edef\early{\frozen}\def x{y}\def\oldletter{z}\late\early x`, false))
+    .toContain('<mi>z</mi><mi>x</mi><mi>y</mi>')
+  expect(math(String.raw`\inhibited x`, false)).toContain('<mrow><mi>x</mi></mrow>')
+})
+
+test('reads configured macro prefixes and delimiters with or without nested groups', () => {
+  const stack = Object.freeze(['\\frac', '{', '#', '2', '}', '{', '#', '1', '}'].reverse()
+    .map(text => Object.freeze({ text })))
+  const math = createMathRenderer({
+    throwOnError: true,
+    macros: { '\\ratioof': { tokens: stack, numArgs: 2, delimiters: [['|'], [','], [';']] } },
+  })
+  expect(math(String.raw`\ratioof|{2,3},4;`, false))
+    .toContain('<mfrac><mrow><mn>4</mn></mrow><mrow><mn>2</mn><mo>,</mo><mn>3</mn></mrow></mfrac>')
+  expect(() => math(String.raw`\ratioof 2,3;`, false)).toThrow('Missing macro prefix')
+  expect(() => math(String.raw`\ratioof|2,3`, false)).toThrow('Missing macro delimiter')
+  expect(stack[0].text).toBe('}')
+})
+
 // Parser diagnostics adapted from the KaTeX v0.19.1 test suite (MIT).
 test('checks macro declaration intent against local, built-in, and configured commands', () => {
   const math = createMathRenderer({ macros: { '\\deckTerm': 'Q' }, throwOnError: true })

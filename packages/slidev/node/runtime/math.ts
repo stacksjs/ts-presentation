@@ -145,17 +145,65 @@ const styledLetters: Record<string, { upper: number, lower: number, digits?: num
   'fraktur': { upper: 0x1D504, lower: 0x1D51E, exceptions: 'CℭHℌIℑRℜZℨ' },
 }
 
-export type MathMacros = Readonly<Record<string, string>>
+export interface MathMacroToken {
+  text: string
+  noexpand?: boolean
+  treatAsRelax?: boolean
+}
+
+export interface MathMacroExpansion {
+  /** TeX tokens in stack order, with the first token to read at the end. */
+  tokens: readonly MathMacroToken[]
+  numArgs: number
+  /** Literal prefix followed by the delimiter tokens for each argument. */
+  delimiters?: readonly (readonly string[])[]
+  unexpandable?: boolean
+}
+
+export type MathMacros = Readonly<Record<string, string | MathMacroExpansion>>
 const controlSequence = /^\\(?:[A-Za-z@]+|[^\s])$/u
 const controlWord = /^\\[A-Za-z@]+$/
 const activeCharacter = /^[^\s\\{}$&#^_]$/u
+
+function isConfiguredMacroName(name: string): boolean {
+  return controlSequence.test(name) || (name !== '%' && activeCharacter.test(name))
+}
+
+function isMacroTokenText(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= 8192 && !value.includes('\u0000')
+}
+
+function isConfiguredMacro(value: unknown): value is string | MathMacroExpansion {
+  if (typeof value === 'string') return value.length <= 8192
+  if (!value || typeof value !== 'object') return false
+  const { tokens, numArgs, delimiters, unexpandable } = value as Partial<MathMacroExpansion>
+  if (typeof numArgs !== 'number' || !Number.isSafeInteger(numArgs) || numArgs < 0 || numArgs > 6000
+    || !Array.isArray(tokens) || tokens.length > 8192 || (unexpandable !== undefined && typeof unexpandable !== 'boolean')) return false
+  let length = 0
+  for (const token of tokens) {
+    if (!token || typeof token !== 'object' || !isMacroTokenText(token.text)
+      || (token.noexpand !== undefined && typeof token.noexpand !== 'boolean')
+      || (token.treatAsRelax !== undefined && typeof token.treatAsRelax !== 'boolean')) return false
+    length += token.text.length
+    if (length > 8192) return false
+  }
+  if (delimiters === undefined) return true
+  if (!Array.isArray(delimiters) || delimiters.length !== numArgs + 1) return false
+  for (const delimiter of delimiters) {
+    if (!Array.isArray(delimiter) || delimiter.length > 80) return false
+    for (const token of delimiter) {
+      if (!isMacroTokenText(token)) return false
+    }
+  }
+  return true
+}
 
 export function resolveMathMacros(headmatter?: Record<string, unknown>): MathMacros {
   const options = headmatter?.math ?? headmatter?.katex
   const macros = options && typeof options === 'object' && 'macros' in options ? options.macros : undefined
   return macros && typeof macros === 'object' && !Array.isArray(macros)
-    ? Object.fromEntries(Object.entries(macros).filter((entry): entry is [string, string] =>
-      controlSequence.test(entry[0]) && typeof entry[1] === 'string'))
+    ? Object.fromEntries(Object.entries(macros).filter((entry): entry is [string, string | MathMacroExpansion] =>
+      isConfiguredMacroName(entry[0]) && isConfiguredMacro(entry[1])))
     : {}
 }
 
@@ -222,7 +270,12 @@ type ConditionalPrimitive = Exclude<ExpansionPrimitive, '\\expandafter' | '\\noe
 interface TokenMacro { body: string[], parameters: string[][], prefix: string[], optional?: string[], unexpandable?: boolean }
 type DelimitedNotation = 'Braket' | 'Set' | 'set'
 type Macro = TokenMacro | { primitive: ExpansionPrimitive } | { notation: DelimitedNotation } | { separator: () => string[] }
-interface MathState { globals: Map<string, Macro>, options: KatexOptions, inlineBreaks: boolean }
+interface MathState {
+  configured: ReadonlyMap<string, TokenMacro>
+  globals: Map<string, Macro>
+  options: KatexOptions
+  inlineBreaks: boolean
+}
 type EquationNumberMarkup = (number: number) => string
 
 // KaTeX's legacy Khan Academy color macros. See licenses/KaTeX-MIT.txt.
@@ -267,8 +320,8 @@ function isExpansionPrimitive(token: string | undefined): token is ExpansionPrim
 }
 
 export function createMathRenderer(options: KatexOptions = {}, inlineBreaks = false): (source: string, display: boolean, numberMarkup?: EquationNumberMarkup) => string {
-  const state: MathState = { globals: new Map(), options, inlineBreaks }
-  return (source, display, numberMarkup) => renderMath(source, display, options.macros, state, numberMarkup)
+  const state: MathState = { configured: compileMathMacros(options.macros), globals: new Map(), options, inlineBreaks }
+  return (source, display, numberMarkup) => renderMath(source, display, undefined, state, numberMarkup)
 }
 
 function safeColor(value: string): string {
@@ -718,6 +771,44 @@ const boundary = '\u0000math-expansion-boundary'
 const literalToken = '\u0000math-literal:'
 const inhibitedToken = '\u0000math-inhibited:'
 
+function plainMacro(body: string[], arity?: number, optional?: string[]): TokenMacro {
+  const count = arity ?? Math.max(0, ...body.map(token => /^#[1-9]$/.test(token) ? Number(token[1]) : 0))
+  return { body, parameters: Array.from({ length: count }, () => []), prefix: [], optional }
+}
+
+function compileMathMacros(configured: MathMacros = {}): Map<string, TokenMacro> {
+  const macros = new Map<string, TokenMacro>()
+  for (const [name, replacement] of Object.entries(configured)) {
+    if (!isConfiguredMacroName(name) || !isConfiguredMacro(replacement)) continue
+    if (typeof replacement === 'string') {
+      macros.set(name, plainMacro(tokenize(replacement)))
+      continue
+    }
+    const body: string[] = []
+    const { tokens, numArgs, delimiters, unexpandable } = replacement
+    for (let cursor = tokens.length - 1; cursor >= 0; cursor--) {
+      const { text, noexpand, treatAsRelax } = tokens[cursor]
+      const next = tokens[cursor - 1]
+      if (treatAsRelax) body.push(inhibitedToken + text)
+      else if (noexpand) body.push(literalToken + text)
+      // KaTeX holds the parameter marker and digit as separate stack tokens.
+      else if (text === '#' && next && /^[1-9]$/.test(next.text) && !next.noexpand && !next.treatAsRelax) {
+        body.push(`#${next.text}`)
+        cursor--
+      }
+      else body.push(text)
+    }
+    const definition = plainMacro(body, numArgs)
+    if (delimiters) {
+      definition.prefix = [...delimiters[0]]
+      definition.parameters = delimiters.slice(1).map(delimiter => [...delimiter])
+    }
+    definition.unexpandable = unexpandable
+    macros.set(name, definition)
+  }
+  return macros
+}
+
 function mathSize(style: MathStyle, markup: string): string {
   return `<mstyle displaystyle="${style === 0}" scriptlevel="${Math.max(0, style - 1)}">${markup}</mstyle>`
 }
@@ -781,7 +872,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   let textItalic = false
   let linkDepth = 0
 
-  const macros = new Map<string, Macro>()
+  const macros = new Map<string, Macro>(state?.configured ?? compileMathMacros(configured))
   const macroFor = (token: string) => macros.get(token) ?? builtinMacros.get(token)
   const scopes: Map<string, Macro | undefined>[] = []
   function assign(name: string, definition: Macro, global = false): void {
@@ -793,16 +884,9 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (global || (!scope && options?.globalGroup)) state?.globals.set(name, definition)
     macros.set(name, definition)
   }
-  function plainMacro(body: string[], arity?: number, optional?: string[]): TokenMacro {
-    const count = arity ?? Math.max(0, ...body.map(token => /^#[1-9]$/.test(token) ? Number(token[1]) : 0))
-    return { body, parameters: Array.from({ length: count }, () => []), prefix: [], optional }
-  }
-  for (const [name, replacement] of Object.entries(configured)) {
-    if (controlSequence.test(name) && replacement.length <= 8192) macros.set(name, plainMacro(tokenize(replacement)))
-  }
   for (const [name, definition] of state?.globals ?? []) macros.set(name, definition)
 
-  const space = () => { while (texWhitespace.test(tokens[cursor] ?? '')) cursor++ }
+  const space = () => { while (texWhitespace.test(tokenText(tokens[cursor] ?? ''))) cursor++ }
   const extendedPrimes = !options?.strict || options.strict === 'ignore'
   const primeCount = (token: string) => token === "'" || extendedPrimes ? primes.get(token) ?? 0 : 0
 
@@ -857,12 +941,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
       case '\\TextOrMath': return mode === 'text' ? first : second
       case '\\@ifstar':
         space()
-        if (tokens[cursor] !== '*') return second
+        if (tokenText(tokens[cursor] ?? '') !== '*') return second
         cursor++
         return first
       case '\\@ifnextchar':
         space()
-        return pattern?.length === 1 && tokenValue(pattern[0]) === tokenValue(tokens[cursor] ?? '') ? first : second
+        return pattern?.length === 1 && tokenText(pattern[0]) === tokenText(tokens[cursor] ?? '') ? first : second
     }
   }
 
@@ -927,7 +1011,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const start = cursor++
     if (controlWord.test(token)) space()
     for (const token of macro.prefix) {
-      if (tokens[cursor++] !== token) throw new Error('Missing macro prefix')
+      if (tokenText(tokens[cursor++] ?? '') !== token) throw new Error('Missing macro prefix')
     }
     const values = macro.parameters.map((delimiter, index) => {
       if (index === 0 && macro.optional !== undefined) return rawBracket() ?? macro.optional
@@ -959,9 +1043,15 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
   }
 
-  function tokenValue(token: string): string {
+  function tokenText(token: string): string {
+    if (token.charCodeAt(0) !== 0) return token
     if (token.startsWith(literalToken)) return token.slice(literalToken.length)
-    return token.startsWith(inhibitedToken) ? '\\relax' : token
+    return token.startsWith(inhibitedToken) ? token.slice(inhibitedToken.length) : token
+  }
+
+  function tokenValue(token: string): string {
+    if (token.charCodeAt(0) !== 0) return token
+    return token.startsWith(inhibitedToken) ? '\\relax' : tokenText(token)
   }
 
   const peek = () => { expand(); return tokenValue(tokens[cursor] ?? '') }
@@ -969,13 +1059,14 @@ export function renderMath(source: string, display = false, configured: MathMacr
 
   function rawGroup(missing = 'Missing math argument'): string[] {
     space()
-    if (tokens[cursor] === undefined || tokens[cursor] === boundary || tokens[cursor] === '}') throw new Error(missing)
-    if (tokens[cursor] !== '{') return [tokens[cursor++]]
+    const first = tokenText(tokens[cursor] ?? '')
+    if (!first || first === boundary || first === '}') throw new Error(missing)
+    if (first !== '{') return [tokens[cursor++]]
     cursor++
     let level = 1
     const begin = cursor
     while (cursor < tokens.length && level) {
-      const next = tokens[cursor++]
+      const next = tokenText(tokens[cursor++])
       if (next === boundary) throw new Error('Unclosed math argument')
       if (next === '{') level++
       if (next === '}') level--
@@ -993,13 +1084,13 @@ export function renderMath(source: string, display = false, configured: MathMacr
     let level = 0
     let groupEnd: number | undefined
     while (cursor < tokens.length && tokens[cursor] !== boundary) {
-      if (level === 0 && delimiter.every((token, index) => tokens[cursor + index] === token)) {
-        const unwrap = unwrapGroup && tokens[start] === '{' && groupEnd === cursor
+      if (level === 0 && delimiter.every((token, index) => tokenText(tokens[cursor + index] ?? '') === token)) {
+        const unwrap = unwrapGroup && tokenText(tokens[start]) === '{' && groupEnd === cursor
         const argument = unwrap ? tokens.slice(start + 1, cursor - 1) : tokens.slice(start, cursor)
         cursor += delimiter.length
         return argument
       }
-      const token = tokens[cursor++]
+      const token = tokenText(tokens[cursor++])
       if (token === '{') level++
       else if (token === '}' && --level === 0) groupEnd ??= cursor
       if (level < 0) break
@@ -1009,7 +1100,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
 
   function rawBracket(): string[] | undefined {
     space()
-    if (tokens[cursor] !== '[') return
+    if (tokenText(tokens[cursor] ?? '') !== '[') return
     cursor++
     return delimitedArgument([']'])
   }
@@ -1198,7 +1289,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       return length
     }
     expand()
-    if (tokens[cursor] === '{') {
+    if (tokenText(tokens[cursor] ?? '') === '{') {
       const value = expandDefinition(rawGroup()).join('')
       if (!value.trim() && blank !== undefined) return blank
       const length = parseLength(value)
@@ -2069,7 +2160,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const name = token.slice(1)
     function definitionTarget(grouped = false): string {
       space()
-      const target = grouped ? literalGroup().trim() : tokens[cursor++]
+      const target = grouped ? literalGroup().trim() : tokenText(tokens[cursor++] ?? '')
       if (!target || (!controlSequence.test(target) && !activeCharacter.test(target)))
         throw new Error(`Invalid macro name in ${token}`)
       return target
@@ -2081,11 +2172,11 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const parameters: string[][] = []
       let sequence = prefix
       let openDelimiter = false
-      while (tokens[cursor] !== '{') {
-        const token = tokens[cursor++]
+      while (tokenText(tokens[cursor] ?? '') !== '{') {
+        const token = tokenText(tokens[cursor++] ?? '')
         if (!token || token === boundary || token === '}' || sequence.length > 80) throw new Error('Invalid macro parameter')
         if (token === '#') {
-          if (tokens[cursor] !== '{') throw new Error('Invalid macro parameter')
+          if (tokenText(tokens[cursor] ?? '') !== '{') throw new Error('Invalid macro parameter')
           sequence.push('{')
           openDelimiter = true
           break
