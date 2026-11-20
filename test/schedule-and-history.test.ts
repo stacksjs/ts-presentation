@@ -68,6 +68,31 @@ test('uses strict input dates, validates dependencies and supports timezone offs
   expect(mermaid('gantt\nA :a, after missing, 2d', 'missing')).toBeUndefined()
 })
 
+test('imports subsecond times and distinguishes literal date suffixes from durations', async () => {
+  const now = Date.UTC(2026, 2, 6, 8)
+  const timings = `gantt
+dateFormat HH:mm:ss.SS
+axisFormat %S.%L
+tickInterval 10millisecond
+Sample :sample, 08:00:00.01, 50ms
+Check :check, after sample, 08:00:00.09`
+  expect(scheduleGantt(timings, now)?.tasks.map(({ start, end }) => [start, end])).toEqual([
+    [now + 10, now + 60], [now + 60, now + 90],
+  ])
+  const dated = `gantt
+Window :window, 06d, 08d
+Review :review, after window, 1h
+dateFormat DD[d]`
+  expect(scheduleGantt(dated, now)?.tasks.map(({ start, end }) => [start, end])).toEqual([
+    [Date.UTC(2026, 2, 6), Date.UTC(2026, 2, 8)],
+    [Date.UTC(2026, 2, 8), Date.UTC(2026, 2, 8, 1)],
+  ])
+  const deck = parseDeck(['# Sample window', '', '~~~mermaid', timings, '~~~'].join('\n'))
+  const html = await renderDeck(deck)
+  expect(html).toMatch(/data-task-id="sample" data-task-start="\d{4}-\d{2}-\d{2}T08:00:00\.010Z"/)
+  expect(html).toContain('>00.090</tspan>')
+})
+
 test('uses automatic Gantt task IDs for dependencies and task links', () => {
   const source = `gantt
 dateFormat DD/MM/YYYY

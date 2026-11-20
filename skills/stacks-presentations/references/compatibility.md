@@ -24,7 +24,7 @@ in a new ts-presentation project.
 | First-party diagram authoring | YAML `charts` fences through `ts-charts` for flowcharts, sequence, state, class, ER, pie, timeline, journey, Gantt, and Git history |
 | Draggable elements | Inline directives, drag and arrow components, frontmatter positions, scaled editing, and local Markdown saves |
 | Imported Slidev diagrams | Compatibility fences translate the supported syntax to `ts-charts` input |
-| Gantt styles and dates | Task status palettes, labelled date markers, D3-style UTC axis formats, and whole-day exclusions that preserve gaps between dependent tasks through `ts-charts` |
+| Gantt styles and dates | Task status palettes, partial dates and fractional seconds, D3-style UTC axes, and whole-day exclusions that preserve gaps between dependent tasks through `ts-charts` |
 | GitGraph | Named Mermaid palettes and color overrides, commit message tooltips, and custom symbols on commits and merges |
 | PlantUML sequence diagrams | Local `ts-charts` rendering for messages, participants, notes, and groups |
 | Presenter mode | Two synced browser windows, notes, timer, resizable layouts, next-frame preview, and reveal seeking |

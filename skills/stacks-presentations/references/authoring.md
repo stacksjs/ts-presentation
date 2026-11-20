@@ -216,6 +216,9 @@ speaker notes. Each hook can be asynchronous.
   days leaves a gap between the bar and the next dependent task. Use
   `weekend friday` for Friday and Saturday weekends and `includes` to restore
   individual dates.
+  Time-only dates use the UTC date of the build. Use `S`, `SS`, or `SSS`
+  for fractional seconds in `dateFormat` and `%L` for milliseconds in
+  `axisFormat`.
   Imported GitGraph diagrams support branch ordering, checkout, merges, tags,
   cherry-picking, horizontal or vertical lanes, `rotateCommitLabel`, and the
   diagram's branch, commit, and tag theme variables.

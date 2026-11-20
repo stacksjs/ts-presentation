@@ -1,5 +1,5 @@
 import type { GanttChartOptions, GanttMarkerStyle, GanttSchedule, GanttTask, GanttTaskCallback, GanttTaskTag, GanttWeekday } from 'ts-charts/diagrams'
-import { ganttChart, ganttDurationEnd, scheduleGantt as scheduleTasks } from 'ts-charts/diagrams'
+import { ganttChart, ganttDateParser, ganttDurationEnd, scheduleGantt as scheduleTasks } from 'ts-charts/diagrams'
 import { diagramPixels, readChronology } from './chronology.ts'
 
 function isTag(value: string): value is GanttTaskTag {
@@ -65,7 +65,7 @@ function parseClick(line: string): { ids: string[], interaction: TaskInteraction
   return { ids: ids.split(','), interaction }
 }
 
-function parseGantt(source: string, interactionsEnabled = false): GanttChartOptions | undefined {
+function parseGantt(source: string, now: number, interactionsEnabled = false): GanttChartOptions | undefined {
   const chart = readChronology(source, '')
   if (!chart || chart.header !== 'gantt') return
 
@@ -129,26 +129,32 @@ function parseGantt(source: string, interactionsEnabled = false): GanttChartOpti
     if (after) task.after = after.split(/\s+/)
     else if (start) task.start = start
     if (until) task.until = until.split(/\s+/)
-    else if (ganttDurationEnd(0, end) !== undefined) task.duration = end
     else task.end = end
     sections.at(-1)!.tasks.push(task)
   }
-  if (interactions.size) {
-    for (const section of sections)
-      for (const task of section.tasks)
-        if (task.id) Object.assign(task, interactions.get(task.id))
+  const parseDate = ganttDateParser(dateFormat, now)
+  for (const section of sections) {
+    for (const task of section.tasks) {
+      // A literal suffix in dateFormat can make a date look like a duration.
+      if (task.end !== undefined && ganttDurationEnd(0, task.end) !== undefined && parseDate(task.end) === undefined) {
+        task.duration = task.end
+        delete task.end
+      }
+      const interaction = task.id ? interactions.get(task.id) : undefined
+      if (interaction) Object.assign(task, interaction)
+    }
   }
   return { sections, title: chart.title, accessibleTitle: chart.accessibleTitle, description: chart.description, dateFormat, axisFormat, tickInterval: ticks,
-    weekday, weekend, topAxis, todayMarker, todayMarkerStyle, inclusiveEndDates, excludes: exclusions, includes: inclusions, exclusionMode: 'whole-days' }
+    weekday, weekend, topAxis, todayMarker, todayMarkerStyle, inclusiveEndDates, excludes: exclusions, includes: inclusions, exclusionMode: 'whole-days', now }
 }
 
 export function scheduleGantt(source: string, now: number = Date.now()): GanttSchedule | undefined {
-  const options = parseGantt(source)
-  if (options) return scheduleTasks({ ...options, now })
+  const options = parseGantt(source, now)
+  if (options) return scheduleTasks(options)
 }
 
 export function gantt(source: string, idPrefix: string, options?: unknown, fallbackTitle = '', interactionsEnabled = false, theme?: unknown): string | undefined {
-  const chart = parseGantt(source, interactionsEnabled)
+  const chart = parseGantt(source, Date.now(), interactionsEnabled)
   if (!chart) return
   const config = options && typeof options === 'object' ? options as Record<string, unknown> : {}
   const variables = theme && typeof theme === 'object' ? theme as Record<string, unknown> : {}
