@@ -277,6 +277,50 @@ $$`)
   }
 }, 45_000)
 
+it.skipIf(!chrome)('exports shifted AMS tags at their editable vertical positions', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-raised-tags-'))
+  const canvas = { width: 960, height: 540 }
+  try {
+    const entry = join(root, 'slides.md')
+    const source = [0, 6].map(raise => String.raw`# Report
+
+<style>
+math[display="block"] { width: 285px; font-size: 24px; }
+</style>
+
+\begin{flalign}
+a&=\quad\quad\quad\frac{b}{c} & d&=e\tag*{Quality control check}\raisetag{${raise}px}
+\end{flalign}`).join('\n\n---\n\n')
+    await Bun.write(entry, source)
+    const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
+    const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
+    const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
+    if (status) throw new Error(stderr)
+    const frames: PowerPointFrame[] = []
+    await captureFrames({ root: join(root, 'dist'), executable: chrome!, scale: 1, canvas, editable: true, withClicks: false }, frame => { frames.push(frame) })
+    expect(frames).toHaveLength(2)
+    const equations = frames.map(frame => frame.editable?.nodes.find((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math')?.equation)
+    for (const equation of equations) {
+      expect(equation?.cells).toHaveLength(3)
+      expect(equation?.cells?.[0].expression).toContain('<m:f>')
+      expect(equation?.tags).toHaveLength(1)
+      expect(equation?.tags?.[0].expression).toContain('>Quality control check</m:t>')
+    }
+    const [normal, raised] = equations.map(equation => equation!.tags![0].rect)
+    expect(normal.y).toBeGreaterThan(equations[0]!.rect.y + equations[0]!.rect.h)
+    expect(normal.y - raised.y).toBeCloseTo(6, 1)
+    expect(normal.x).toBeCloseTo(raised.x, 1)
+    expect(equations[0]!.rect).toEqual(equations[1]!.rect)
+    const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Report' }))
+    const slide = parts.get('ppt/slides/slide2.xml')?.toString() ?? ''
+    expect(slide.match(/<a14:m>/g)).toHaveLength(5)
+    expect(slide.match(/<mc:Fallback><p:sp>/g)).toHaveLength(1)
+  }
+  finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}, 45_000)
+
 it.skipIf(!chrome)('exports supported TeX as editable Office equations with picture alternatives', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-equations-'))
   const canvas = { width: 960, height: 540 }

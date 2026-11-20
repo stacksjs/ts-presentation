@@ -507,18 +507,21 @@ type ArrayRule = 'solid' | 'dashed'
 type CellSide = 'top' | 'right' | 'bottom' | 'left'
 const alignments: Record<string, Alignment> = { l: 'left', c: 'center', r: 'right' }
 interface ArrayColumn { align: Alignment, before: ArrayRule[] }
-interface ArrayRow { cells: Markup[], label?: Markup, before: ArrayRule[], gap?: string }
+interface ArrayRow { cells: Markup[], label?: Markup, before: ArrayRule[], gap?: string, raise?: string }
 interface MathLine { content: Markup, gap?: string }
 interface MultlineRow extends MathLine { align?: 'left' | 'right' }
-interface EquationTag { label?: Markup, key?: string, starred?: boolean, suppressed: boolean }
+interface EquationTag { label?: Markup, key?: string, starred?: boolean, suppressed: boolean, raise?: string }
 
-function equationNumberCell(label: Markup | undefined, position?: 'start' | 'end'): string {
-  const style = position ? ` style="display:math;padding:0;justify-self:${position}"` : ''
-  return `<mtd class="math-equation-number"${style}>${renderMarkup(label ?? '', 1)}</mtd>`
+function equationNumberCell(label: Markup | undefined, position?: 'start' | 'end', raise?: string): string {
+  const styles = [
+    position && `display:math;padding:0;justify-self:${position}`,
+    label !== undefined && raise && `--math-tag-raise:${raise}`,
+  ].filter(Boolean).join(';')
+  return `<mtd class="math-equation-number"${styles ? ` style="${styles}"` : ''}>${renderMarkup(label ?? '', 1)}</mtd>`
 }
 
-function taggedDisplay(expression: string, label: Markup, left: boolean, flush: boolean): string {
-  const number = equationNumberCell(label, left ? 'start' : 'end')
+function taggedDisplay(expression: string, label: Markup, left: boolean, flush: boolean, raise?: string): string {
+  const number = equationNumberCell(label, left ? 'start' : 'end', raise)
   const spacer = flush ? '' : '<mtd aria-hidden="true" style="display:block;padding:0"></mtd>'
   const body = `<mtd data-equation-body style="display:math;math-style:normal;padding:0;justify-self:start">${expression}</mtd>`
   // Equal gutters center the formula. The tag's intrinsic width can expand
@@ -526,16 +529,16 @@ function taggedDisplay(expression: string, label: Markup, left: boolean, flush: 
   const columns = flush
     ? left ? 'max-content minmax(max-content,1fr)' : 'minmax(max-content,1fr) max-content'
     : 'minmax(max-content,1fr) max-content minmax(max-content,1fr)'
-  return `<mtable class="math-tagged-display" style="display:block;width:100%"><mtr style="display:grid;grid-template-columns:${columns};align-items:center;column-gap:0.5em">${left ? number : spacer}${body}${left ? spacer : number}</mtr></mtable>`
+  return `<mtable class="math-tagged-display" data-equation-tags="${left ? 'left' : 'right'}"${flush ? ' data-equation-flush' : ''} style="display:block;width:100%"><mtr style="display:grid;grid-template-columns:${columns};align-items:center;column-gap:0.5em">${left ? number : spacer}${body}${left ? spacer : number}</mtr></mtable>`
 }
 
-function multlineTable(rows: readonly MultlineRow[], label: Markup | undefined, left: boolean, flush: boolean, environment: string): string {
+function multlineTable(rows: readonly MultlineRow[], label: Markup | undefined, left: boolean, flush: boolean, environment: string, raise?: string): string {
   const tagRow = left ? 0 : rows.length - 1
   const markup = rows.map(({ content, gap, align }, index) => {
     const first = index === 0
     const last = index === rows.length - 1
     const placement = align ?? (last && !first ? 'right' : flush || (first && !last) ? 'left' : 'center')
-    const number = label === undefined ? '' : equationNumberCell(index === tagRow ? label : undefined)
+    const number = label === undefined ? '' : equationNumberCell(index === tagRow ? label : undefined, undefined, raise)
     const rowSpacing = gap ? `;padding-bottom:max(0px,calc(0.125em + ${gap}))` : ''
     const body = `<mtd style="math-style:normal;padding-block:0.125em${rowSpacing}"><mrow>${renderMarkup(content, 0)}</mrow></mtd>`
     return `<mtr data-multline-align="${placement}">${left ? number : ''}${body}${left ? '' : number}</mtr>`
@@ -906,7 +909,7 @@ const sharedFunctions = new Set([
   ...Object.keys(textFonts), ...typesettingNames, ...textBoxes, ...verticalBoxCommands, ...spacingCommands,
   'begingroup', 'endgroup', 'relax', 'newline', 'cr', 'color', 'textcolor',
   'sout', 'underline', 'underbar', 'textcircled', 'llap', 'clap', 'rlap', '@char',
-  'tag', 'label', 'ref', 'eqref', 'notag', 'nonumber', 'nobreak', 'hline', 'hdashline',
+  'tag', 'raisetag', 'label', 'ref', 'eqref', 'notag', 'nonumber', 'nobreak', 'hline', 'hdashline',
 ])
 const fractionFences: Record<string, [string, string]> = {
   '\\choose': ['(', ')'],
@@ -2117,6 +2120,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const key = equationKey()
       if (key && display) tagState.key ??= key
     }
+    else if (token === '\\raisetag') {
+      if (!display) throw new MathParseError('Equation tag shifts require display math')
+      tagState.raise = readDimension()
+    }
     else if (token === '\\notag' || token === '\\nonumber') tagState.suppressed = true
     else return false
     return true
@@ -2395,7 +2402,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
         if (separator === '&') throw new MathParseError(`Too many columns in ${environment}`)
         if (separator === '\\end' && literalGroup() === environment) {
           if (!rows.length || renderMarkup(line.content, 0)) rows.push(line)
-          return multlineTable(rows, nextTag(environment === 'multline'), options?.leqno === true, options?.fleqn === true, environment)
+          return multlineTable(rows, nextTag(environment === 'multline'), options?.leqno === true, options?.fleqn === true, environment, tagState.raise)
         }
         if (separator !== '\\\\' && separator !== '\\newline' && separator !== '\\cr') break
         rows.push({ ...line, gap: arrayRowGap(separator) })
@@ -2510,7 +2517,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       if (tagless && tagState.label !== undefined) throw new MathParseError('Equation tags are not allowed in xxalignat')
       const label = rowTags ? nextTag(automatic) : undefined
       if (cells.length > 1 || cells[0] || label !== undefined || rows.length === 0 || lineBreak) {
-        rows.push({ cells, label, before: rules, gap })
+        rows.push({ cells, label, before: rules, gap, raise: tagState.raise })
         rules = []
       }
       cells = []
@@ -2569,7 +2576,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const prose = (index: number) => intertexts.get(index)?.map(({ content, spacing }) =>
         `<mtr data-equation-intertext="${spacing}"><mtd columnspan="${columnCount + Number(tags)}"><mrow><mrow>${renderMarkup(content, 1)}</mrow></mrow></mtd></mtr>`).join('') ?? ''
       const markup = rows.map((entry, rowIndex) => {
-        const cell = tags ? equationNumberCell(entry.label) : ''
+        const cell = tags ? equationNumberCell(entry.label, undefined, entry.raise) : ''
         // MathML Core browsers use CSS for cell alignment and visible rules.
         const content = Array.from({ length: rectangular ? columnCount : entry.cells.length }, (_, index) => {
           const align = alignmentAt(index)
@@ -2961,7 +2968,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const expression = `<mrow>${renderMarkup(row([], false, true), display ? 0 : 1)}</mrow>`
     const flush = display && !fullWidthAlignment && state?.options.fleqn === true
     const label = nextTag(false)
-    const markup = label === undefined ? expression : taggedDisplay(expression, label, state?.options.leqno === true, flush)
+    const markup = label === undefined ? expression : taggedDisplay(expression, label, state?.options.leqno === true, flush, tagState.raise)
     const layoutStyle = flush ? 'display:block;padding-inline-start:2em;text-align:start'
       : label === undefined ? '' : 'display:block;text-align:center'
     const styles = [layoutStyle, minRule ? `--math-min-rule:${minRule}em` : ''].filter(Boolean).join(';')

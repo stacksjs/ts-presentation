@@ -396,6 +396,7 @@ export async function captureNotesPdf(options: BrowserOptions & { range?: string
       await (${waitForFrame.toString()})(pages, ${options.wait ?? 0})
       await (${prepareFonts.toString()})(pages)
       await (${prepareImages.toString()})(pages)
+      window.presentationFitText?.(pages)
     })(${JSON.stringify(selected)}, ${JSON.stringify(notePrintCss)})`)
     return printPdf(chrome)
   })

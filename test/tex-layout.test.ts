@@ -823,6 +823,23 @@ e&=f & g&=h\tag*{Trial}
   expect(deck).toContain('<a href="#slide-1" data-slide-link="1"><math><mrow><mtext>(1)</mtext>')
 })
 
+test('keeps manual equation tag shifts scoped to the labelled row', () => {
+  const math = createMathRenderer({ throwOnError: true, macros: { '\\raise': '6px' } })
+  const source = String.raw`\begin{align}
+a&=b\raisetag{\raise}\\
+c&=d\notag\raisetag{8px}\\
+e&=f\tag*{Result}\\
+g&=h\raisetag{-2pt}
+\end{align}`
+  const tags = [...math(source, true).matchAll(/<mtd class="math-equation-number"([^>]*)>([\s\S]*?)<\/mtd>/g)]
+  expect(tags.map(([, style]) => style)).toEqual([' style="--math-tag-raise:6px"', '', '', ' style="--math-tag-raise:-2pt"'])
+  expect(tags.map(([, , value]) => value)).toEqual(['<mtext>(1)</mtext>', '', '<mtext>Result</mtext>', '<mtext>(2)</mtext>'])
+  const multline = String.raw`\begin{multline}a+b+c\raisetag{4px}\\+d=e\end{multline}`
+  expect(math(multline, true)).toContain('<mtd class="math-equation-number" style="--math-tag-raise:4px"><mtext>(1)</mtext>')
+  expect(() => math(String.raw`a\raisetag{4px}`, false)).toThrow('require display math')
+  expect(() => math(String.raw`a\tag{X}\raisetag{invalid}`, true)).toThrow('Invalid math dimension')
+})
+
 test('reads matrix row spacing only after adjacent double backslashes and permits an empty CD', () => {
   const math = createMathRenderer({ throwOnError: true })
   const source = String.raw`\begin{matrix}a&b\cr[c]&d\\ [e]&f\\[1ex]g&h\end{matrix}`
@@ -1512,6 +1529,79 @@ test('enforces KaTeX strict settings for comments, markup, text commands, spacin
 })
 
 const chrome = await findChrome()
+
+test.skipIf(!chrome)('moves conflicting AMS tags and raises only tags on their own line', async () => {
+  const align = String.raw`\begin{align}a&=\hspace{6em}b\tag*{Quality control check}\raisetag{6px}\\c&=d\tag*{OK}\end{align}`
+  const displays = [
+    ['right', true, {}, align],
+    ['left', true, { leqno: true }, align],
+    ['wide', false, {}, align],
+    ['spread', true, {}, String.raw`\begin{flalign}a&=\hspace{5em}b & c&=d\tag*{Quality control check}\raisetag{6px}\end{flalign}`],
+    ['multi', true, {}, String.raw`\begin{multline}a+b\\=\hspace{6em}c\tag*{Quality control check}\raisetag{6px}\end{multline}`],
+    ['single', true, { leqno: true }, String.raw`a=\hspace{6em}b\tag*{Quality control check}\raisetag{6px}`],
+  ] as const
+  const body = displays.map(([id, narrow, options, equation]) => `<section id="${id}" style="width:${narrow ? 310 : 740}px">${createMathRenderer(options)(equation, true)}</section>`).join('')
+  const css = await Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url)).text()
+  const bundle = await Bun.build({ entrypoints: [new URL('../packages/client/runtime/equation-tags.ts', import.meta.url).pathname], target: 'browser' })
+  if (!bundle.success) throw new AggregateError(bundle.logs, 'Could not build equation tag fitting')
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: request => new URL(request.url).pathname === '/tags.js'
+      ? new Response(bundle.outputs[0], { headers: { 'Content-Type': 'text/javascript' } })
+      : new Response(`<!doctype html><style>${css} section { font-size:24px; }</style>${body}
+        <script type="module">import {createEquationTagFit} from '/tags.js'; createEquationTagFit()(document);</script>`, { headers: { 'Content-Type': 'text/html' } }),
+  })
+  const browser = new Bun.WebView({ width: 860, height: 760, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await browser.navigate(server.url.href)
+    const boxes = await browser.evaluate<Record<string, { raised: boolean, delta: number, order: string, short: boolean, within: boolean }>>(`(() => {
+      return Object.fromEntries([...document.querySelectorAll('section')].map(section => {
+        const raised = section.querySelector('.math-equation-number[style*="--math-tag-raise"]');
+        const label = raised.firstElementChild;
+        const row = raised.parentElement;
+        const cells = [...row.querySelectorAll(':scope > mtd:not(.math-equation-number, [aria-hidden])')];
+        const first = cells[0].getBoundingClientRect();
+        const bounds = section.getBoundingClientRect();
+        const shell = raised.getBoundingClientRect();
+        const y = label.getBoundingClientRect().top;
+        raised.style.setProperty('--math-tag-raise', '0px');
+        const delta = y - label.getBoundingClientRect().top;
+        raised.style.setProperty('--math-tag-raise', '6px');
+        return [section.id, {
+          raised: raised.hasAttribute('data-equation-tag-shifted'), delta,
+          order: shell.bottom <= first.top + 1 ? 'above' : shell.top >= first.bottom - 1 ? 'below' : 'same',
+          short: section.querySelectorAll('.math-equation-number')[1]?.hasAttribute('data-equation-tag-shifted') ?? false,
+          within: shell.right <= bounds.right + 1 && cells.every(cell => cell.getBoundingClientRect().right <= bounds.right + 1),
+        }];
+      }));
+    })()`)
+    for (const name of ['right', 'left', 'spread', 'multi', 'single']) {
+      expect(boxes[name].raised).toBe(true)
+      expect(boxes[name].delta).toBeCloseTo(-6, 1)
+      expect(boxes[name].within).toBe(true)
+    }
+    expect(boxes.left.order).toBe('above')
+    expect(boxes.single.order).toBe('above')
+    expect(boxes.right.order).toBe('below')
+    expect(boxes.spread.order).toBe('below')
+    expect(boxes.multi.order).toBe('below')
+    expect(boxes.right.short).toBe(false)
+    expect(boxes.wide).toMatchObject({ raised: false, delta: 0, order: 'same' })
+    const returned = await browser.evaluate(`(async () => {
+      const row = document.querySelector('#right');
+      const number = row.querySelector('.math-equation-number');
+      row.style.width = '740px';
+      for (let attempt = 0; attempt < 40 && number.hasAttribute('data-equation-tag-shifted'); attempt++)
+        await new Promise(resolve => setTimeout(resolve, 25));
+      return !number.hasAttribute('data-equation-tag-shifted');
+    })()`)
+    expect(returned).toBe(true)
+  }
+  finally {
+    browser.close()
+    await server.stop(true)
+  }
+}, 20_000)
 
 test.skipIf(!chrome)('distributes AMS full-width alignment gaps and reserves space for tags', async () => {
   const equations = [

@@ -1036,6 +1036,29 @@ math .math-alignment-axis > mtr > mtd { padding: 0; }
     padding-inline: 0 0.5em;
   }
   math .math-display-grid[data-equation-tags] > mtr > .math-equation-number:empty { padding-inline: 0; }
+  math :is(.math-display-grid, .math-tagged-display)[data-equation-tags] > mtr > .math-equation-number[data-equation-tag-shifted] {
+    grid-column: 1 / -1;
+    padding-inline: 0;
+  }
+  math :is(.math-display-grid, .math-tagged-display)[data-equation-tags="left"] > mtr > .math-equation-number[data-equation-tag-shifted],
+  math :is(.math-display-grid, .math-tagged-display)[data-equation-tags="right"] > mtr:has(> [data-equation-tag-shifted]) > :not(.math-equation-number) {
+    grid-row: 1;
+  }
+  math :is(.math-display-grid, .math-tagged-display)[data-equation-tags="right"] > mtr > .math-equation-number[data-equation-tag-shifted],
+  math :is(.math-display-grid, .math-tagged-display)[data-equation-tags="left"] > mtr:has(> [data-equation-tag-shifted]) > :not(.math-equation-number) {
+    grid-row: 2;
+  }
+  math .math-display-grid[data-equation-tags="left"] > mtr:has(> [data-equation-tag-shifted]) > :nth-child(2),
+  math .math-tagged-display > mtr:has(> [data-equation-tag-shifted]) > [data-equation-body] {
+    grid-column: 2;
+  }
+  math .math-tagged-display[data-equation-flush][data-equation-tags="right"] > mtr:has(> [data-equation-tag-shifted]) > [data-equation-body] {
+    grid-column: 1;
+  }
+}
+math .math-equation-number[data-equation-tag-shifted] > :first-child {
+  position: relative;
+  inset-block-start: calc(0px - var(--math-tag-raise, 0px));
 }
 @supports (display: math) {
   math:has(> semantics > mrow > .math-multline:only-child),
