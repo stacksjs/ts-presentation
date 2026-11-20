@@ -845,6 +845,9 @@ section Ship
   expect(svg).toMatch(/class="diagram-gantt-section-label"[^>]*style="font-size:20px;"/)
   expect(svg).toContain('style="fill:#4a6072;opacity:0.2"')
   expect(svg).toContain('style="fill:#a06528;opacity:0.2"')
+  const colorsOnly = mermaid(source.replace('        numberSectionStyles: 2\n', ''), 'custom-section-colors')!
+  expect(colorsOnly).toContain('style="fill:#4a6072;opacity:0.2"')
+  expect(colorsOnly).toContain('style="fill:#a06528;opacity:0.2"')
   expect(svg).toMatch(/<line class="diagram-gantt-grid"[^>]*y1="14"/)
   const height = (html: string) => Number(/viewBox="0 0 460 ([\d.]+)/.exec(html)?.[1])
   expect(height(svg)).toBeLessThan(height(mermaid(source.replace('    displayMode: compact\n', ''), 'ordinary-gantt')!))
@@ -1526,20 +1529,22 @@ Publish :vert, publish, 2026-03-06, 0d`
   }
 }, 45_000)
 
-test.skipIf(!chrome)('fits complete GitGraph labels and separate tag stacks in every orientation in Chromium', async () => {
+test.skipIf(!chrome)('fits complete GitGraph titles, labels, and tag stacks in every orientation in Chromium', async () => {
+  const title = ['Release history', 'Preparation', 'Validation', 'Publication']
   const branch = 'feature/review-release-candidate-across-all-supported-platforms'
   const commit = 'reviewed-and-approved-release-candidate-for-production'
   const tag = 'release-candidate-build-with-integration-verification'
   const graphs = ['LR', 'TB', 'BT'].flatMap(direction => [true, false].map((rotateCommitLabel) => {
     const source = [
       `gitGraph ${direction}:`,
+      `title ${title.join('<br>')}`,
       'commit id:"root" tag:"preview" tag:"signed<br>and tested" tag:"verified"',
       'commit id:"second" tag:"nightly"',
       `branch "${branch}"`,
       `commit id:"${commit}" tag:"${tag}" tag:"stable"`,
     ].join('\n')
     return mermaid(source, `long-${direction}-${rotateCommitLabel}`, {
-      theme: 'forest', gitGraph: { rotateCommitLabel, useMaxWidth: false },
+      theme: 'forest', gitGraph: { rotateCommitLabel, titleTopMargin: 0, useMaxWidth: false },
       themeCSS: rotateCommitLabel ? '.tag-hole { fill: #123456; }' : undefined,
     })
   }))
@@ -1554,15 +1559,19 @@ test.skipIf(!chrome)('fits complete GitGraph labels and separate tag stacks in e
   const browser = new Bun.WebView({ width: 1100, height: 780, backend: { type: 'chrome', path: chrome!, url: false } })
   try {
     await browser.navigate(server.url.href)
-    const boxes = await browser.evaluate<{ labels: string[], fits: boolean, separate: boolean, shaped: boolean, holeColors: string[] }[]>(`[...document.querySelectorAll('svg')].map(svg => {
+    const boxes = await browser.evaluate<{ title: string[], titleGap: number, labels: string[], fits: boolean, separate: boolean, shaped: boolean, holeColors: string[] }[]>(`[...document.querySelectorAll('svg')].map(svg => {
       const bounds = svg.getBoundingClientRect()
+      const title = svg.querySelector('.diagram-title')
+      const content = svg.querySelector('[data-diagram-kind="gitgraph"]')
       const labels = [...svg.querySelectorAll('.diagram-git-branch-label, .diagram-git-label, .diagram-git-tag')]
       const polygons = [...svg.querySelectorAll('polygon.diagram-git-tag-box')]
       const holes = [...svg.querySelectorAll('circle.diagram-git-tag-hole')]
       const tags = polygons.map(node => node.getBoundingClientRect())
       return {
+        title: [...title.children].map(node => node.textContent),
+        titleGap: content.getBoundingClientRect().top - title.getBoundingClientRect().bottom,
         labels: labels.map(node => node.textContent),
-        fits: [...labels, ...svg.querySelectorAll('.diagram-git-tag-box')].every(node => {
+        fits: [title, ...labels, ...svg.querySelectorAll('.diagram-git-tag-box')].every(node => {
           const rect = node.getBoundingClientRect()
           return rect.left >= bounds.left - 1 && rect.right <= bounds.right + 1 &&
             rect.top >= bounds.top - 1 && rect.bottom <= bounds.bottom + 1
@@ -1577,6 +1586,8 @@ test.skipIf(!chrome)('fits complete GitGraph labels and separate tag stacks in e
     })`)
     expect(boxes).toHaveLength(6)
     for (const [index, graph] of boxes.entries()) {
+      expect(graph.title).toEqual(title)
+      expect(graph.titleGap).toBeGreaterThan(0)
       expect(graph.labels).toEqual(['main', branch, 'root', 'verified', 'signedand tested', 'preview', 'second', 'nightly', commit, 'stable', tag])
       expect(graph.fits).toBe(true)
       expect(graph.separate).toBe(true)

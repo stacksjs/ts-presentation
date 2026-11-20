@@ -227,7 +227,7 @@ export function gantt(source: string, idPrefix: string, options: MermaidOptions 
     leftPadding: number('leftPadding'), rightPadding: number('rightPadding'),
     width: number('useWidth'), titleTopMargin: number('titleTopMargin'), bottomMarginAdj: number('bottomMarginAdj'),
     gridLineStartPadding: number('gridLineStartPadding'), fontSize: number('fontSize'), sectionFontSize: number('sectionFontSize'),
-    numberSectionStyles: number('numberSectionStyles') ?? (preset || styled ? 4 : 1), sectionColors,
+    numberSectionStyles: number('numberSectionStyles') ?? (styled || sectionColors.some(Boolean) ? 4 : 1), sectionColors,
     palette: {
       background: color('background'),
       task: { fill: color('taskBkgColor'), border: color('taskBorderColor') },

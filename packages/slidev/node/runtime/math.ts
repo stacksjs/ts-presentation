@@ -310,14 +310,15 @@ function tokenize(source: string, onTrailingComment?: () => void): string[] {
 type MathMode = 'math' | 'text'
 const expansionPrimitives = ['\\expandafter', '\\noexpand', '\\@firstoftwo', '\\@secondoftwo', '\\@ifnextchar', '\\@ifstar', '\\TextOrMath', '\\html@mathml', '\\message', '\\errmessage', '\\char'] as const
 const expansionPrimitiveNames = new Set<string>(expansionPrimitives)
-const macroDeclaration = /^\\(?:[gex]?def|(?:future)?let|(?:new|renew|provide)command|global|long)$/
+const macroDeclaration = /^\\(?:[gex]?def|(?:future)?let|(?:new|renew|provide)command|DeclarePairedDelimiter|global|long)$/
 const assignmentCommand = /^\\(?:[gex]?def|(?:future)?let)$/
 type ExpansionPrimitive = typeof expansionPrimitives[number]
 type ConditionalPrimitive = Exclude<ExpansionPrimitive, '\\expandafter' | '\\noexpand' | '\\message' | '\\errmessage' | '\\char'>
 interface TokenMacro { body: string[], parameters: string[][], prefix: string[], optional?: string[], unexpandable?: boolean, source?: string }
 type DelimitedNotation = 'Braket' | 'Set' | 'set'
 type DotsMacro = 'dots' | 'dotsc' | 'dotso' | 'cdots'
-type NativeMacro = { primitive: ExpansionPrimitive } | { notation: DelimitedNotation } | { separator: () => string[] } | { dots: DotsMacro }
+type PairedDelimiter = readonly [opening: string[], closing: string[]]
+type NativeMacro = { primitive: ExpansionPrimitive } | { notation: DelimitedNotation } | { separator: () => string[] } | { dots: DotsMacro } | { pairedDelimiter: PairedDelimiter }
 type Macro = TokenMacro | NativeMacro | MathMacroFunction
 interface MathState {
   configured: ReadonlyMap<string, Macro>
@@ -1168,6 +1169,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
 
   function expandNativeMacro(macro: NativeMacro): string[] {
     if ('notation' in macro) return expandDelimitedNotation(macro.notation)
+    if ('pairedDelimiter' in macro) return expandPairedDelimiter(macro.pairedDelimiter)
     if ('separator' in macro) return macro.separator()
     if ('dots' in macro) return expandDots(macro.dots)
     const { primitive } = macro
@@ -1536,6 +1538,32 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const close = name === 'Braket' ? ['\\right', '\\rangle'] : name === 'Set' ? ['\\:', '\\right', '\\}'] : ['\\,', '\\}']
       return expandDefinition([...open, ...body, ...close], 'tokens')
     })
+  }
+
+  function expandPairedDelimiter([opening, closing]: PairedDelimiter): string[] {
+    const starred = tokenText(tokens[cursor] ?? '') === '*'
+    if (starred) cursor++
+    const optionalSize = starred ? undefined : rawBracket()
+    const body = rawGroup()
+    function readFence(tokens: string[]): string {
+      const expanded = expandDefinition(tokens).join('').trim()
+      const glyph = delimiter(expanded, 'DeclarePairedDelimiter')
+      return glyph === '{' ? '\\{' : glyph === '}' ? '\\}' : glyph === '\\' ? '\\backslash' : glyph
+    }
+    const left = readFence(opening)
+    const right = readFence(closing)
+    // The empty opening atom gives the paired row ordinary fence spacing.
+    // The real stretchy fences stay together so scripts and export see one base.
+    if (starred) return ['\\mathopen', '{', '}', '\\mathclose', '{', '\\left', left, ...body, '\\right', right, '}']
+    if (optionalSize === undefined) {
+      const start = left === '.' ? [] : ['\\mathopen', '{', left, '}']
+      const end = right === '.' ? [] : ['\\mathclose', '{', right, '}']
+      return [...start, ...body, ...end]
+    }
+    const scale = expandDefinition(optionalSize).join('').trim()
+    if (!Object.hasOwn(sizedDelimiters, scale.slice(1)) || !scale.startsWith('\\'))
+      throw new MathParseError('Expected a delimiter size such as \\big or \\Bigg')
+    return [`${scale}l`, left, ...body, `${scale}r`, right]
   }
 
   function chemistryMath(source: string): Markup {
@@ -2750,6 +2778,13 @@ export function renderMath(source: string, display = false, configured: MathMacr
       if (!target || (!controlSequence.test(target) && !activeCharacter.test(target)))
         throw new MathParseError(`Invalid macro name in ${token}`)
       return target
+    }
+    if (name === 'DeclarePairedDelimiter') {
+      const target = definitionTarget(true)
+      if (!controlSequence.test(target)) throw new MathParseError('Expected a command name in \\DeclarePairedDelimiter')
+      if (defined(target)) throw new MathParseError(`Macro ${target} is already defined`)
+      assign(target, { pairedDelimiter: [rawGroup(), rawGroup()] })
+      return true
     }
     if (['def', 'gdef', 'edef', 'xdef'].includes(name)) {
       const command = definitionTarget()

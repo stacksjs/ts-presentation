@@ -663,7 +663,7 @@ it.skipIf(!chrome)('exports TeX invisible and middle delimiters as native Office
     await Bun.write(entry, String.raw`# Delimiters
 
 $$
-\left.\frac{x}{2}\right|_0^1
+\DeclarePairedDelimiter{\evalat}{.}{\rvert}\evalat*{\frac{x}{2}}_0^1
 $$
 
 $$

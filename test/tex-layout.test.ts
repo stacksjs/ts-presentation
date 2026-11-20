@@ -676,6 +676,28 @@ test('declares reusable AMS operators with normal or display limits', () => {
   expect(deck(String.raw`\rank M`, false)).toContain(operator('rank') + thin + '<mi>M</mi>')
 })
 
+test('declares reusable paired delimiters with fixed and automatic sizes', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const declaration = String.raw`\DeclarePairedDelimiter{\norm}{\lVert}{\rVert}`
+  const normal = math(declaration + String.raw`\sin\norm{x}`, false)
+  expect(normal).toContain(operator('sin') + '<mo stretchy="false" fence="true" form="prefix" ' + zeroGap + '>‖</mo>')
+  expect(normal).toContain('<mo stretchy="false" fence="true" form="postfix" ' + zeroGap + '>‖</mo>')
+  const automatic = math(declaration + String.raw`\sin\norm*{\frac{1}{2}}^3`, false)
+  expect(automatic).toContain(operator('sin') + '<mrow>')
+  expect(automatic).toMatch(/<msup>.*?<mrow data-math-delimiters=""><mo stretchy="true">‖<\/mo><mfrac>.*?<\/mfrac><mo stretchy="true">‖<\/mo><\/mrow>.*?<mn>3<\/mn><\/msup>/)
+  const fixed = math(declaration + String.raw`\def\size{\Bigg}\edef\bignorm{\norm[\size]{x}}\bignorm`, false)
+  expect(fixed.match(/minsize="3em" maxsize="3em"/g)).toHaveLength(2)
+  const invisible = math(String.raw`\DeclarePairedDelimiter\evalat.\rvert\evalat{x}\evalat[\Big]{y}`, false)
+  expect(invisible).toContain('<mrow><mi>x</mi>')
+  expect(invisible.match(/fence="true" form="postfix"/g)).toHaveLength(2)
+  expect(() => math(declaration + String.raw`\norm[\large]{x}`, false)).toThrow('Expected a delimiter size')
+  expect(() => math(declaration + declaration, false)).toThrow('already defined')
+  expect(() => math(String.raw`\norm{x}`, false)).toThrow('Unsupported math command')
+  const deck = createMathRenderer({ globalGroup: true, throwOnError: true })
+  deck(declaration, true)
+  expect(deck(String.raw`\norm*{x}`, false)).toContain('<mrow data-math-delimiters=""><mo stretchy="true">‖</mo><mi>x</mi><mo stretchy="true">‖</mo>')
+})
+
 test('toggles nested TeX emphasis in the active text shape', () => {
   const math = createMathRenderer({ throwOnError: true })
   const nested = String.raw`\emph{foo \emph{bar} baz}`
