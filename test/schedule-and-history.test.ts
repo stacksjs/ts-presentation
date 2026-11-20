@@ -1449,6 +1449,66 @@ test.skipIf(!chrome)('fits complete GitGraph labels and separate tag stacks in e
   }
 })
 
+test.skipIf(!chrome)('keeps multiline GitGraph commit labels, tags, and dots separate in a rendered deck', async () => {
+  const charts = ['LR', 'TB', 'BT'].flatMap(direction => [false, true].map(rotate => [
+    '~~~mermaid', '---', 'title: Release history', 'config:', '  theme: forest',
+    '  themeVariables:', '    commitLabelFontSize: 22px', '    tagLabelFontSize: 18px',
+    '  gitGraph:', `    rotateCommitLabel: ${rotate}`, '---',
+    `gitGraph ${direction}:`,
+    'commit id:"Prepare\nrelease\\ncandidate<br>for review" tag:"v1\\npreview" tag:"build"',
+    'commit id:"Review<br>formula<br>results" tag:"nightly"',
+    'branch review',
+    'commit id:"Publish<br>final<br>verified<br>release" tag:"ready" tag:"verified" tag:"passed"',
+    'checkout main',
+    'merge review id:"Announce<br>release" tag:"current"',
+    '~~~',
+  ].join('\n')))
+  const html = await renderDeck(parseDeck('# Git history\n\n' + charts.join('\n\n')))
+  const css = Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url))
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: request => new URL(request.url).pathname === '/presentation.css'
+      ? new Response(css, { headers: { 'Content-Type': 'text/css' } })
+      : new Response(html, { headers: { 'Content-Type': 'text/html' } }),
+  })
+  const browser = new Bun.WebView({ width: 1100, height: 780, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await browser.navigate(server.url.href)
+    const layouts = await browser.evaluate<{ labels: string[][], tag: string, collisions: number, clipped: number, onLeft: boolean }[]>(`[...document.querySelectorAll('svg.slide-diagram')].map(svg => {
+      const frame = svg.getBoundingClientRect()
+      const boxes = [...svg.querySelectorAll('.diagram-git-label-box, .diagram-git-tag-box, .diagram-git-dot')]
+        .map(shape => shape.getBoundingClientRect())
+      const text = [...svg.querySelectorAll('.diagram-git-label, .diagram-git-tag')].map(shape => shape.getBoundingClientRect())
+      return {
+        labels: [...svg.querySelectorAll('.diagram-git-label')].map(label => [...label.querySelectorAll('tspan')].map(line => line.textContent)),
+        tag: [...svg.querySelectorAll('.diagram-git-tag')][1]?.textContent,
+        collisions: boxes.filter((box, index) => boxes.slice(index + 1).some(other =>
+          box.left < other.right && box.right > other.left && box.top < other.bottom && box.bottom > other.top)).length,
+        clipped: [...boxes, ...text].filter(box =>
+          box.left < frame.left - 1 || box.right > frame.right + 1 || box.top < frame.top - 1 || box.bottom > frame.bottom + 1).length,
+        onLeft: [...svg.querySelectorAll('.diagram-git-node')].every(node =>
+          node.querySelector('.diagram-git-label-box').getBoundingClientRect().right
+            < node.querySelector('.diagram-git-dot').getBoundingClientRect().left),
+      }
+    })`)
+    expect(layouts).toHaveLength(6)
+    for (const [index, layout] of layouts.entries()) {
+      expect(layout.labels).toEqual([
+        ['Prepare', 'release', 'candidate', 'for review'], ['Review', 'formula', 'results'],
+        ['Publish', 'final', 'verified', 'release'], ['Announce', 'release'],
+      ])
+      expect(layout.tag).toBe('v1preview')
+      expect(layout.collisions).toBe(0)
+      expect(layout.clipped).toBe(0)
+      expect(layout.onLeft).toBe(index >= 2)
+    }
+  }
+  finally {
+    browser.close()
+    await server.stop(true)
+  }
+})
+
 test.skipIf(!chrome)('routes GitGraph connectors around intervening commit dots in Chromium', async () => {
   const graphs = ['LR', 'TB', 'BT'].flatMap(direction => [true, false].map(parallelCommits =>
     mermaid(`gitGraph ${direction}:\n${routedHistory}`, `routed-${direction}-${parallelCommits}`, {
