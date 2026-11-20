@@ -275,6 +275,52 @@ A&=\smashoperator[l]{${body}}+B\tag{L}
   }
 }, 45_000)
 
+it.skipIf(!chrome)('exports cramped superscripts, stacks, and measured laps as editable Office Math', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-cramped-math-'))
+  const canvas = { width: 960, height: 540 }
+  const formulas = [
+    String.raw`\cramped{x^{2^3}}`,
+    String.raw`A\crampedllap{x^2}B`,
+    String.raw`\sum_{\crampedsubstack{x^2\\y^3}}t`,
+    String.raw`\frac{\crampedclap{x^2}n}{2}`,
+  ]
+  try {
+    const entry = join(root, 'slides.md')
+    await Bun.write(entry, formulas.map(formula => '# Cramped scripts\n\n$$\n' + formula + '\n$$').join('\n\n---\n\n'))
+    const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
+    const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
+    const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
+    if (status) throw new Error(stderr)
+    const frames: PowerPointFrame[] = []
+    await captureFrames({ root: join(root, 'dist'), executable: chrome!, scale: 1, canvas, editable: true, withClicks: false }, frame => { frames.push(frame) })
+    expect(frames).toHaveLength(4)
+    const [power, lap, stack, fraction] = frames.map((frame) => {
+      const body = frame.editable?.nodes.find((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math')?.equation
+      expect(body).toBeDefined()
+      return body!
+    })
+    expect(power.expression.match(/<m:sSup>/g)).toHaveLength(2)
+    expect(lap.cells).toHaveLength(2)
+    expect(lap.expression).toContain('>A</m:t>')
+    const [ink, after] = lap.cells!
+    expect(ink.expression).toContain('<m:sSup>')
+    expect(after.expression).toContain('>B</m:t>')
+    expect(ink.rect.x).toBeLessThan(after.rect.x)
+    expect(ink.rect.x + ink.rect.w).toBeCloseTo(after.rect.x, 1)
+    expect(stack.expression).toContain('<m:nary>')
+    expect(stack.expression.match(/<m:sSup>/g)).toHaveLength(2)
+    expect(fraction.expression).toContain('<m:f>')
+    expect(fraction.expression).toContain('<m:zeroWid m:val="1"/>')
+    expect(fraction.expression).toContain('<m:sSup>')
+
+    const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Cramped expressions' }))
+    expect(parts.get('ppt/slides/slide2.xml')?.toString().match(/<a14:m>/g)).toHaveLength(3)
+  }
+  finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}, 45_000)
+
 it.skipIf(!chrome)('keeps AMS subequation letters and reveal opacity editable in a PowerPoint range', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-subequations-'))
   const canvas = { width: 960, height: 540 }

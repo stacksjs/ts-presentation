@@ -523,6 +523,8 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba, 
       return
     }
     if (name === 'munder' || name === 'mover' || name === 'munderover') return underOver(node)
+    if (name === 'mpadded' && attributes['data-math-cramped-lap'] === '' && only(node, 'width', 'data-math-cramped-lap')
+      && attributes.width === '0' && children.length === 1) return phantom({ ...node, attributes: { width: '0' } })
     if (name === 'mphantom' || name === 'mpadded') return phantom(node)
     if (name === 'mmultiscripts' && only(node)) return prescript(node)
     // Starred TeX spacing includes a rule with no width or height.
@@ -565,7 +567,8 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba, 
           if (style === 'font-weight:bold' || style === 'font-weight:normal') next.bold = style.endsWith('bold')
           else if (style === 'font-style:italic' || style === 'font-style:normal') next.textItalic = style.endsWith('italic')
           else if (Object.hasOwn(textTypefaces, style)) next.typeface = textTypefaces[style]
-          else return
+          // Office Math applies its own superscript positioning.
+          else if (style !== 'math-shift:compact') return
         }
         return inFont(next, () => sequence(children))
       }

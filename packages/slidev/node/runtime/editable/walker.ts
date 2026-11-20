@@ -79,11 +79,12 @@ export function collectSnapshot(options: {
   const styles: RawStyle[] = []
   const styleIndex = new Map<string, number>()
 
-  const smashedOperator = '[data-math-smash-operator]'
-  function smashedOperatorInk(element: Element): Element | undefined {
-    if (!element.matches(smashedOperator)) return
-    const ink = element.lastElementChild?.firstElementChild
-    if (ink?.getAttribute('class') === 'math-overlap-c' && ink.children.length === 1) return ink
+  const positionedMath = '[data-math-smash-operator], [data-math-cramped-lap]'
+  function positionedMathInk(element: Element): Element | undefined {
+    if (!element.matches(positionedMath)) return
+    const ink = element.hasAttribute('data-math-cramped-lap')
+      ? element.firstElementChild : element.lastElementChild?.firstElementChild
+    if (ink && /^math-overlap-[lcr]$/.test(ink.getAttribute('class') ?? '') && ink.children.length === 1) return ink
   }
 
   function mathExpression(root: Element): RawMathElement | undefined {
@@ -101,8 +102,8 @@ export function collectSnapshot(options: {
       characters += text.length
       if (characters > 4096) return
       const children: RawMathElement[] = []
-      // The width probes duplicate the live stack. Only its ink belongs in Office Math.
-      const ink = smashedOperatorInk(element)
+      // Capture the visible expression without its browser-only positioning boxes.
+      const ink = positionedMathInk(element)
       const contents = ink ? ink.children : element.children
       for (const child of contents) {
         const nested = read(child, depth + 1)
@@ -409,9 +410,9 @@ export function collectSnapshot(options: {
       return fragments
     }
 
-    function smashedOperatorFragments(element: Element, expression: RawMathElement, opacity: number, scale: number):
+    function positionedMathFragments(element: Element, expression: RawMathElement, opacity: number, scale: number):
       { cells: RawMathFragment[], rect: RawMathFragment['rect'] } | undefined {
-      if (!element.matches(smashedOperator) && !element.querySelector(smashedOperator)) return
+      if (!element.matches(positionedMath) && !element.querySelector(positionedMath)) return
       const cells: RawMathFragment[] = []
       const bounds: DOMRect[] = []
       let pieces: { element: Element, expression: RawMathElement }[] = []
@@ -430,13 +431,13 @@ export function collectSnapshot(options: {
         pieces = []
       }
       function visit(node: Element, data: RawMathElement): void {
-        const ink = smashedOperatorInk(node)
+        const ink = positionedMathInk(node)
         if (ink && data.children.length === 1) {
           flush()
           split = true
           add([ink.getBoundingClientRect()], data.children[0], ink)
         }
-        else if (node.localName === 'mrow' && !data.text.trim() && !Object.keys(data.attributes).length && node.querySelector(smashedOperator)) {
+        else if (node.localName === 'mrow' && !data.text.trim() && !Object.keys(data.attributes).length && node.querySelector(positionedMath)) {
           for (const [index, child] of Array.from(node.children).entries()) visit(child, data.children[index])
         }
         else pieces.push({ element: node, expression: data })
@@ -459,10 +460,10 @@ export function collectSnapshot(options: {
       const ams = display && table.localName === 'mtable' && table.hasAttribute('data-equation-environment')
       const tagsAtMargin = ams && table.hasAttribute('data-equation-tags')
       const positionedCells = ams && (table.hasAttribute('data-equation-row-spacing') || table.hasAttribute('data-equation-spread')
-        || table.querySelector(smashedOperator) !== null)
+        || table.querySelector(positionedMath) !== null)
       if (!singleTag && !tagsAtMargin && !positionedCells) {
-        const smashed = smashedOperatorFragments(presentation, expression, 1, scale)
-        if (smashed) return { ...smashed, display }
+        const positioned = positionedMathFragments(presentation, expression, 1, scale)
+        if (positioned) return { ...positioned, display }
         const rect = relative(presentation.getBoundingClientRect())
         if (rect.w > 0 && rect.h > 0) return { expression, rect, display }
         return
@@ -553,10 +554,10 @@ export function collectSnapshot(options: {
                 continue
               }
             }
-            const smashed = content && cell.children.length === 1
-              ? smashedOperatorFragments(content, cellData.children[0], rowOpacity, scale) : undefined
-            if (smashed) {
-              measuredCells.push(...smashed.cells)
+            const positioned = content && cell.children.length === 1
+              ? positionedMathFragments(content, cellData.children[0], rowOpacity, scale) : undefined
+            if (positioned) {
+              measuredCells.push(...positioned.cells)
               continue
             }
             const boxes = Array.from(cell.children, child => child.getBoundingClientRect())

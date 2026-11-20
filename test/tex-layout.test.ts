@@ -1456,6 +1456,28 @@ test('uses the short display skip only for the requested top-level alignment', (
   ]) expect(() => math(invalid, true)).toThrow('must start a top-level')
 })
 
+test('supports all Mathtools cramped styles, laps, and stacks', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const markup = (source: string, display = false) => math(source, display).split('<annotation')[0]
+  expect(markup(String.raw`\cramped{x^2}`)).toContain('<mrow style="math-shift:compact"><mrow><msup>')
+  for (const [style, value, level] of [
+    ['displaystyle', 'D', 0], ['textstyle', 'T', 0], ['scriptstyle', 'S', 1], ['scriptscriptstyle', 'Q', 2],
+  ] as const) {
+    const source = '\\def\\style{\\' + style + '}' + String.raw`\cramped[\style]{\mathchoice{D}{T}{S}{Q}}`
+    const output = markup(source, style === 'textstyle')
+    expect(output).toContain(`<mstyle displaystyle="${style === 'displaystyle'}" scriptlevel="${level}">`)
+    expect(output).toContain(`<mi>${value}</mi>`)
+  }
+  for (const side of ['l', 'c', 'r'])
+    expect(markup(`\\cramped${side}lap{x^2}`)).toContain(`<mpadded width="0" data-math-cramped-lap=""><mrow class="math-overlap-${side}"><mrow style="math-shift:compact">`)
+  const centered = markup(String.raw`\crampedsubstack{x^2\\y^2}`, true)
+  expect(centered).toContain('<mrow style="math-shift:compact"><mstyle displaystyle="false" scriptlevel="1"><mtable')
+  expect(centered.match(/<mtr>/g)).toHaveLength(2)
+  expect(markup(String.raw`\begin{crampedsubarray}{l}x^2\\y^2\end{crampedsubarray}`)).toContain('columnalign="left"')
+  expect(() => markup(String.raw`\cramped[\foo]{x^2}`)).toThrow('Invalid cramped math style')
+  expect(() => markup(String.raw`\begin{crampedsubarray}{r}x\end{crampedsubarray}`)).toThrow('Invalid subarray alignment')
+})
+
 test('parses Mathtools smashoperator options and forces display limits', () => {
   const math = createMathRenderer({ throwOnError: true })
   const two = String.raw`\def\side{r}\smashoperator[\side]{\sum\nolimits\sb{n=0}\sp{\mathchoice{D}{T}{S}{Q}}}`
@@ -3513,6 +3535,71 @@ test.skipIf(!chrome)('places AMS corner scripts beside the operator and explicit
         limit.y >= glyph.bottom && center(limit) > lowLeft.left && center(limit) < lowRight.right,
       ]
     })()`)).toEqual([true, true, true, true])
+  }
+  finally {
+    view.close()
+    await server.stop(true)
+  }
+}, 15_000)
+
+test.skipIf(!chrome)('uses cramped superscript placement without changing math size or lap advance', async () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const css = await Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url)).text()
+  const formulas = [
+    String.raw`x^2`,
+    String.raw`\cramped{x^2}`,
+    String.raw`\scriptstyle x^2`,
+    String.raw`\cramped[\scriptstyle]{x^2}`,
+    String.raw`A B`,
+    String.raw`A\crampedllap{x^2} B`,
+    String.raw`A\crampedclap{x^2} B`,
+    String.raw`A\crampedrlap{x^2} B`,
+    String.raw`\crampedsubstack{x^2\\y^2}`,
+    String.raw`\smashoperator{\sum_{x^2}^{y^2}}`,
+  ].map(source => `<div>${math(source, false)}</div>`).join('')
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response(`<!doctype html><meta charset="utf-8"><style>${css} main{font-size:64px}</style><main>${formulas}</main>`, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    }),
+  })
+  const view = new Bun.WebView({ width: 800, height: 760, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await view.navigate(server.url.href)
+    const layout = await view.evaluate<{
+      size: number, lift: number, advance: number, shifts: string[], lap?: { left: number, right: number, width: number }
+    }[]>(`(async () => {
+      await document.fonts.ready
+      return Array.from(document.querySelectorAll('main > div'), host => {
+        const firstScript = host.querySelector('msup')
+        const script = firstScript?.lastElementChild.getBoundingClientRect()
+        const base = firstScript?.firstElementChild.getBoundingClientRect()
+        const lap = host.querySelector('[data-math-cramped-lap]')
+        const ink = lap?.firstElementChild.getBoundingClientRect()
+        const anchor = lap?.getBoundingClientRect()
+        const size = script?.width ?? 0
+        const lift = script && base ? base.bottom - script.bottom : 0
+        const advance = host.querySelector('semantics > mrow').getBoundingClientRect().width
+        const shifts = Array.from(host.querySelectorAll('msup'), node => getComputedStyle(node).getPropertyValue('math-shift'))
+        return { size, lift, advance, shifts, ...(lap ? { lap: { left: ink.left - anchor.left, right: ink.right - anchor.right, width: anchor.width } } : {}) }
+      })
+    })()`)
+    for (const [regular, cramped] of [[layout[0], layout[1]], [layout[2], layout[3]]]) {
+      expect(cramped.size).toBeCloseTo(regular.size, 1)
+      expect(cramped.lift).toBeLessThan(regular.lift - 1)
+    }
+    for (const lap of layout.slice(5, 8)) {
+      expect(lap.advance).toBeCloseTo(layout[4].advance, 1)
+      expect(lap.lap?.width).toBe(0)
+      expect(lap.shifts).toEqual(['compact'])
+    }
+    expect(layout[5].lap?.left).toBeLessThan(0)
+    expect(layout[5].lap?.right).toBeCloseTo(0, 1)
+    expect(layout[6].lap?.left).toBeCloseTo(-layout[6].lap!.right, 1)
+    expect(layout[7].lap?.left).toBeCloseTo(0, 1)
+    expect(layout[7].lap?.right).toBeGreaterThan(0)
+    expect(layout[8].shifts).toEqual(['compact', 'compact'])
+    expect(layout[9].shifts).toEqual(['compact', 'compact'])
   }
   finally {
     view.close()

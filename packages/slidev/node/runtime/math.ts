@@ -359,6 +359,7 @@ builtinMacros.set('\\boxed', { body: tokenize('\\fbox{$\\displaystyle{#1}$}'), p
 for (const [name, script] of [['\\sb', '_'], ['\\sp', '^']])
   builtinMacros.set(name, { body: [script], parameters: [], prefix: [] })
 builtinMacros.set('\\substack', { body: tokenize('\\begin{subarray}{c}#1\\end{subarray}'), parameters: [[]], prefix: [] })
+builtinMacros.set('\\crampedsubstack', { body: tokenize('\\begin{crampedsubarray}{c}#1\\end{crampedsubarray}'), parameters: [[]], prefix: [] })
 builtinMacros.set('\\ensuremath', { body: tokenize('\\TextOrMath{\\(#1\\)}{#1}'), parameters: [[]], prefix: [] })
 builtinMacros.set('\\vdotswithin', { body: tokenize('{\\mathmakebox[\\widthof{\\ensuremath{{}#1{}}}][c]{\\vdots}}'), parameters: [[]], prefix: [] })
 builtinMacros.set('\\shortvdotswithin', { body: tokenize('\\@ifstar\\@shortvdotsleft\\@shortvdotsright'), parameters: [], prefix: [] })
@@ -946,7 +947,8 @@ const sizeCommands: Readonly<Record<string, number>> = {
 }
 const infixFractions = new Set(['\\over', '\\atop', '\\choose', '\\brace', '\\brack', '\\above'])
 const primitiveArgumentFunctions = new Set(['frac', 'dfrac', 'tfrac', 'binom', 'dbinom', 'tbinom', 'genfrac', 'cfrac', ...Object.keys(variants)])
-const groupedArgumentFunctions = new Set(['sqrt', 'left', 'mathllap', 'mathclap', 'mathrlap', 'mathmbox', 'mathmakebox', 'angl'])
+const groupedArgumentFunctions = new Set(['sqrt', 'left', 'mathllap', 'mathclap', 'mathrlap',
+  'cramped', 'crampedllap', 'crampedclap', 'crampedrlap', 'mathmbox', 'mathmakebox', 'angl'])
 type IntertextKind = 'normal' | 'short'
 const intertextCommands: ReadonlyMap<string, IntertextKind> = new Map([
   ['\\intertext', 'normal'],
@@ -1052,6 +1054,10 @@ function compileMathMacros(configured: MathMacros = {}): Map<string, Macro> {
 
 function mathSize(style: MathStyle, markup: string): string {
   return `<mstyle displaystyle="${style === 0}" scriptlevel="${Math.max(0, style - 1)}">${markup}</mstyle>`
+}
+
+function crampedMath(content: Markup): Markup {
+  return xml`<mrow style="math-shift:compact">${content}</mrow>`
 }
 
 function scaledMath(content: Markup, ratio: number): Markup {
@@ -1981,8 +1987,9 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return invisible
   }
 
-  function overlap(direction: string, content: Markup): Markup {
-    return xml`<mpadded width="0"><mrow class="math-overlap-${direction}">${content}</mrow></mpadded>`
+  function overlap(direction: string, content: Markup, cramped = false): Markup {
+    const marker = cramped ? ' data-math-cramped-lap=""' : ''
+    return xml`<mpadded width="0"${marker}><mrow class="math-overlap-${direction}">${content}</mrow></mpadded>`
   }
 
   function mathStrut(variable: boolean): string {
@@ -2547,7 +2554,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
       if (!lower && !upper) return { markup: mathSize(0, base), mathClass: 'op' }
 
       const element = lower && upper ? 'munderover' : lower ? 'munder' : 'mover'
-      const limits = mathSize(0, `<${element}>${base}${renderMarkup(lower, 0)}${renderMarkup(upper, 0)}</${element}>`)
+      const script = (value: Markup) => value ? renderMarkup(crampedMath(value), 0) : ''
+      const limits = mathSize(0, `<${element}>${base}${script(lower)}${script(upper)}</${element}>`)
       const measure = (markup: string) => `<mpadded height="0" depth="0" aria-hidden="true"><mphantom>${markup}</mphantom></mpadded>`
       // Reserve half of the operator on the smashed side, and half of the
       // full stack on the other side. The ink is centered over their seam.
@@ -2564,7 +2572,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const base = stackOperator(fragmentArgument('Missing operator in \\adjustlimits').markup)
       const marker = take()
       if (marker !== '_' && marker !== '\\sb') throw new MathParseError('Expected a subscript in \\adjustlimits')
-      return { base, limit: inScript(scriptArgument()) }
+      return { base, limit: crampedMath(inScript(scriptArgument())) }
     }
     const first = readOperator()
     const second = readOperator()
@@ -2884,12 +2892,13 @@ export function renderMath(source: string, display = false, configured: MathMacr
       return xml`<mrow>${content}</mrow>`
     }
     const inner = /^(?:aligned(?:at)?|[lr]?gathered)$/.test(environment)
-    if (!inner && !spreadEnvironment && !/^(?:[pbBvV]?matrix[*]?|smallmatrix|d?r?cases\*?|align(?:at)?[*]?|gather[*]?|split|d?array|subarray)$/.test(environment))
+    if (!inner && !spreadEnvironment && !/^(?:[pbBvV]?matrix[*]?|smallmatrix|d?r?cases\*?|align(?:at)?[*]?|gather[*]?|split|d?array|(?:cramped)?subarray)$/.test(environment))
       throw new MathParseError(`Unsupported math environment: ${environment}`)
     const positionTokens = inner ? rawBracket() : undefined
     const position = positionTokens === undefined ? 'c' : expandDefinition(positionTokens).join('').trim()
     if (!/^[tcb]$/.test(position)) throw new MathParseError('Invalid inner alignment position')
-    const subarray = environment === 'subarray'
+    const cramped = environment === 'crampedsubarray'
+    const subarray = cramped || environment === 'subarray'
     const smallMatrix = environment === 'smallmatrix'
     const columnArray = subarray || /^(?:d?array)$/.test(environment)
     const alignmentTokens = environment.endsWith('matrix*') ? rawBracket() : undefined
@@ -3246,7 +3255,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
       }).join('') + prose(rows.length)
       const baseline = position === 't' ? ' align="baseline 1"' : position === 'b' ? ' align="baseline -1"' : ''
       const matrix = `<mtable${lines} data-math-array${align}${layoutClass}${gridLayout}${amsAlignment}${rowSpacing}${baseline}>${markup}</mtable>`
-      const table = compact ? mathSize(tableCellStyle, matrix) : matrix
+      const sizedTable = compact ? mathSize(tableCellStyle, matrix) : matrix
+      const table = cramped ? renderMarkup(crampedMath(sizedTable), style) : sizedTable
       if (displayRows) return table
       // An inline grid's natural baseline comes from its first row. Use a
       // MathML table or the grid's last baseline for the other placements.
@@ -3633,18 +3643,21 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (name === 'vcenter') {
       return { markup: xml`<mtable class="math-vcenter"><mtr><mtd>${argument()}</mtd></mtr></mtable>` }
     }
-    const lap = /^(math)?([lcr])lap$/.exec(name)
-    if (lap) {
-      if (!lap[1]) return { markup: overlap(lap[2], textArgument()) }
+    const lap = /^(math|cramped)?([lcr])lap$/.exec(name)
+    if (lap || name === 'cramped') {
+      if (lap && !lap[1]) return { markup: overlap(lap[2], textArgument()) }
+      const cramped = lap?.[1] === 'cramped' || name === 'cramped'
       const choice = expandDefinition(rawBracket() ?? []).join('').trim()
-      if (choice && !Object.hasOwn(styleCommands, choice)) throw new MathParseError('Invalid math lap style')
+      if (choice && !Object.hasOwn(styleCommands, choice))
+        throw new MathParseError(cramped ? 'Invalid cramped math style' : 'Invalid math lap style')
       const content = argument()
-      if (!choice) return { markup: overlap(lap[2], content) }
-      const forced = styleCommands[choice]
-      return { markup: overlap(lap[2], style => {
+      const styled = choice ? (style: MathStyle) => {
+        const forced = styleCommands[choice]
         const body = renderMarkup(content, forced)
         return forced === style ? body : mathSize(forced, body)
-      }) }
+      } : content
+      const markup = cramped ? crampedMath(styled) : styled
+      return { markup: lap ? overlap(lap[2], markup, cramped) : markup }
     }
     if (name === 'left') return { markup: pairedDelimiters() }
     if (name === 'right') throw new MathParseError('Unexpected \\right')
