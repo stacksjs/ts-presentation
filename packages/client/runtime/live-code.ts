@@ -2,6 +2,7 @@ import type { CodeRunnerOutput } from '../../types/src/code-runner.ts'
 import { nativeCodeLanguage } from '../../types/src/code-runner.ts'
 import { customRunner, showRunnerOutput } from './code-runners.ts'
 import { setupLiveEditor } from './live-editor.ts'
+import { setupLiveDiagnostics } from './live-diagnostics.ts'
 
 const workerBody = String.raw`
 const send = self.postMessage.bind(self)
@@ -157,6 +158,7 @@ export function setupLiveCode(root: ParentNode = document): void {
     const originalLabel = label?.textContent ?? originalLanguage
     let language = originalLanguage
     const syncEditor = setupLiveEditor(block, editor, () => language)
+    const syncDiagnostics = setupLiveDiagnostics(block, editor, () => language, canCompile)
     let active: AbortController | undefined
     const autorun = block.dataset.liveAutorun
     let shown = false
@@ -218,6 +220,7 @@ export function setupLiveCode(root: ParentNode = document): void {
         language = 'js'
         editor.value = compiled
         syncEditor()
+        syncDiagnostics()
         editor.setAttribute('aria-label', 'Edit JavaScript example')
         if (label) label.textContent = 'JavaScript'
         switchLanguage.hidden = true
@@ -235,6 +238,7 @@ export function setupLiveCode(root: ParentNode = document): void {
       if (switchLanguage) switchLanguage.hidden = canCompile || authoredModule || Boolean(error)
       editor.value = original
       syncEditor()
+      syncDiagnostics()
       if (output) output.textContent = ''
       editor.focus()
       draftChanged()

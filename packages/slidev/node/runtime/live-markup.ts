@@ -1,23 +1,26 @@
-import { compileLiveCode } from './compile-code.ts'
+import { checkLiveCode, compileLiveCode } from './compile-code.ts'
 import type { CompileLiveCode, LiveProgram } from './compile-code.ts'
 import { escapeHtml } from './html.ts'
 import { nativeCodeLanguage } from '../../../types/src/code-runner.ts'
+import type { LiveDiagnostic } from '../../../types/src/live-diagnostic.ts'
 import { liveLineNumbers } from '../../../client/runtime/live-editor.ts'
 import type { CodeBlockInfo } from './code-blocks.ts'
 
 export async function liveBlock(source: string, language: string, info: CodeBlockInfo, options: {
   lineNumbers: boolean
   highlighted?: string[]
+  includeDiagnostics: boolean
   writable?: { token: string, revision: string }
   compile?: CompileLiveCode
 }): Promise<string> {
-  const { lineNumbers, highlighted, writable, compile = compileLiveCode } = options
+  const { lineNumbers, highlighted, includeDiagnostics, writable, compile = compileLiveCode } = options
   const { editorOptions, runnerOptions, runnerTiming: timing, start, maxHeight } = info
   const readonly = editorOptions?.readonly === true
   const saveable = readonly ? undefined : writable
   const runnable = info.runner === 'run'
   const native = nativeCodeLanguage(language)
   const label = native === 'ts' ? 'TypeScript' : native === 'js' ? 'JavaScript' : escapeHtml(language)
+  const diagnostics: LiveDiagnostic[] | undefined = native && includeDiagnostics ? [] : undefined
   let initial: LiveProgram | undefined
   let problem = ''
   if (runnable && native) {
@@ -25,9 +28,13 @@ export async function liveBlock(source: string, language: string, info: CodeBloc
       initial = await compile(source, native)
     }
     catch (error) {
-      problem = error instanceof Error ? error.message : 'Could not compile the code block'
+      diagnostics?.push(...checkLiveCode(source, native))
+      problem = diagnostics?.length
+        ? diagnostics.map(diagnostic => diagnostic.message).join('\n')
+        : error instanceof Error ? error.message : 'Could not compile the code block'
     }
   }
+  else if (native && diagnostics) diagnostics.push(...checkLiveCode(source, native))
   const dataOptions = runnerOptions ? ` data-live-options="${escapeHtml(JSON.stringify(runnerOptions))}"` : ''
   const automatic = timing?.autorun ? ` data-live-autorun="${timing.autorun}"` : ''
   const reveal = timing?.outputAt ? ` data-click="${escapeHtml(timing.outputAt)}"` : ''
@@ -48,11 +55,14 @@ export async function liveBlock(source: string, language: string, info: CodeBloc
       ${runnable && native === 'ts' && !readonly ? '<button type="button" data-live-convert hidden>Edit as JavaScript</button>' : ''}
       ${runnable ? '<button type="button" data-live-run>Run</button>' : ''}
     </div>
-    <div class="live-code-editor" data-live-height="${mode}"${gutter ? ` data-live-numbering="${numbering}" data-live-start="${start}"` : ''} style="${styles}">
+    <div class="live-code-editor" data-live-height="${mode}" data-live-start="${start}"${gutter ? ` data-live-numbering="${numbering}"` : ''} style="${styles}">
       <div class="live-code-highlight" aria-hidden="true"><div></div></div>
+      ${diagnostics ? '<div class="live-code-marks" aria-hidden="true" hidden><div></div></div>' : ''}
       ${gutter}<textarea aria-label="${readonly ? '' : 'Edit '}${label} example" wrap="off" spellcheck="false" autocapitalize="off"${readonly ? ' readonly' : ''}>
 ${escapeHtml(source)}</textarea>
     </div>
+    ${diagnostics ? '<ul class="live-code-diagnostics" aria-live="polite"></ul>' : ''}
+    ${diagnostics?.length ? `<template data-live-diagnostics>${escapeHtml(JSON.stringify(diagnostics))}</template>` : ''}
     ${saveable ? '<output class="live-output" data-snippet-status aria-live="polite"></output>' : ''}
     ${runnable ? `<div class="live-output" data-live-result aria-live="polite"${reveal}></div>
       ${initial ? `<template data-live-program${initial.module ? ' data-live-module' : ''}>${escapeHtml(initial.code)}</template>` : ''}

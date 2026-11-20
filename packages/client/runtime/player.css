@@ -1049,7 +1049,7 @@ math .math-xcancel > .math-cancel-track {
   background: #13202f;
 }
 .live-code-editor textarea,
-.live-code-highlight > div {
+.live-code-editor :is(.live-code-highlight, .live-code-marks) > div {
   padding: 10px 12px;
   font: inherit;
   font-variant-ligatures: none;
@@ -1069,15 +1069,23 @@ math .math-xcancel > .math-cancel-track {
   color: inherit;
   background: transparent;
 }
-.live-code-highlight {
-  display: none;
+.live-code-highlight,
+.live-code-marks {
   position: absolute;
   inset: 0;
   overflow: hidden;
   pointer-events: none;
   user-select: none;
 }
-.live-code-highlight > div { white-space: pre; }
+.live-code-highlight { display: none; }
+.live-code-editor :is(.live-code-highlight, .live-code-marks) > div { white-space: pre; }
+.live-code-marks { color: transparent; }
+.live-code-marks span {
+  text-decoration: underline wavy #ff7b91;
+  text-underline-offset: 0.16em;
+  text-decoration-skip-ink: none;
+}
+.live-code-marks span:empty::after { content: '\\a0'; }
 .live-code-editor[data-live-highlighted] .live-code-highlight { display: block; }
 .live-code-editor[data-live-highlighted] textarea {
   color: transparent;
@@ -1088,6 +1096,8 @@ math .math-xcancel > .math-cancel-track {
   background-color: #648dc666;
 }
 @media (forced-colors: active) {
+  .live-code-marks { forced-color-adjust: none; }
+  .live-code-marks span { text-decoration-color: Mark; }
   .live-code-editor[data-live-highlighted] .live-code-highlight { display: none; }
   .live-code-editor[data-live-highlighted] textarea {
     color: CanvasText;
@@ -1112,7 +1122,7 @@ math .math-xcancel > .math-cancel-track {
   --live-code-gutter-width: calc(var(--live-code-digits) * 1ch + 17px);
 }
 .live-code-editor[data-live-numbering] textarea,
-.live-code-editor[data-live-numbering] .live-code-highlight > div {
+.live-code-editor[data-live-numbering] :is(.live-code-highlight, .live-code-marks) > div {
   padding-inline-start: calc(var(--live-code-gutter-width) + 12px);
 }
 .live-code-gutter {
@@ -1129,6 +1139,26 @@ math .math-xcancel > .math-cancel-track {
   border-inline-end: 1px solid #36465b;
 }
 .live-code-gutter > div { padding: 10px 8px; text-align: end; white-space: pre; }
+.slide .live-code-diagnostics {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  background: #291e2a;
+  color: #ffd8de;
+  font: 400 13px/1.5 var(--presentation-font-sans, system-ui, sans-serif);
+}
+.live-code-diagnostics:not(:empty) { border-top: 1px solid #785460; }
+.live-code-diagnostics > li { padding: 4px 12px; }
+.live-code-diagnostics button {
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: none;
+  text-align: start;
+  font: inherit;
+  cursor: pointer;
+}
+.live-code-diagnostics button:is(:hover, :focus-visible) { text-decoration: underline; }
 .slide .live-output {
   margin: 0;
   max-height: 5.5em;
@@ -1143,7 +1173,7 @@ math .math-xcancel > .math-cancel-track {
 }
 .slide .live-output[data-reveal-hidden] { display: none; }
 .live-code-static { display: none; }
-body:is(.capturing, .previewing) .live-code :is(.live-code-toolbar, .live-code-editor, .live-output) { display: none; }
+body:is(.capturing, .previewing) .live-code :is(.live-code-toolbar, .live-code-editor, .live-output, .live-code-diagnostics) { display: none; }
 body:is(.capturing, .previewing) .live-code-static { display: block; margin: 0; }
 
 .slide .code-diff {
@@ -1204,7 +1234,7 @@ body:is(.capturing, .previewing) .live-code-static { display: block; margin: 0; 
 }
 body:is(.capturing, .previewing) .code-diff-edit { display: none; }
 @media print {
-  .live-code :is(.live-code-toolbar, .live-code-editor, .live-output) { display: none; }
+  .live-code :is(.live-code-toolbar, .live-code-editor, .live-output, .live-code-diagnostics) { display: none; }
   .live-code-static { display: block; margin: 0; }
   .code-diff-edit { display: none; }
 }

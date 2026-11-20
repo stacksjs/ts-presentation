@@ -25,6 +25,7 @@ in a new ts-presentation project.
 | Context menu | Browser-side `setup/context-menu.ts` with named actions, slide and presenter context, keyboard operation, and mode-specific frontmatter |
 | Monaco editor and runner | Local editor and timed browser-worker runner. Bun compiles TypeScript edits in dev and can save opted-in snippets |
 | Live editor sizing and gutters | Initial, automatic, and CSS-sized editors, inherited or per-fence line numbers, relative and interval numbering, custom starting lines, and read-only examples that can still run |
+| Live editor feedback | Deck palettes and custom grammars. JavaScript and TypeScript syntax markers with selectable locations for authored code in static builds and for drafts in dev |
 | Runner imports | Bun bundles local JavaScript, TypeScript, and JSON imports from authored examples. Dev edits can reuse those paths or list additional local modules in `monacoRunAdditionalDeps` |
 | Custom code runners | Browser-side `setup/code-runners.ts` for decks, themes, and addons, with fence options, chained runners, cancellation, and text, HTML, or DOM results |
 | Runner timing | Visibility-scoped autorun, one-time and manual modes, debounced edits, and `showOutputAt` reveal scheduling |

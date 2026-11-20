@@ -369,6 +369,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
         return liveBlock(source, language, info, {
           lineNumbers,
           highlighted: await codeRenderer.highlight(source, language),
+          includeDiagnostics: options.mode !== 'export',
           writable: writable && info.writeToken ? { token: info.writeToken, revision: writable.revision } : undefined,
           compile: options.compileExample,
         })

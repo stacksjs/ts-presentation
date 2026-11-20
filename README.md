@@ -283,6 +283,9 @@ execution, `{autorun:'once'}` for a single automatic run, or
 uses manual execution by default and accepts the same options.
 Live editors and their preview and export views use the deck's code palette
 and the languages registered in `setup/shiki.ts`.
+JavaScript and TypeScript editors mark syntax errors with a selectable line
+and column. The dev server checks edits as you type. Static builds include
+diagnostics for the authored code.
 Live editors inherit the deck's `lineNumbers` setting. Use
 `{lines:true, startLine:7}` for an individual fence or set
 `lineNumbers` to `'on'`, `'off'`, `'relative'`, or `'interval'`.

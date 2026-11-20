@@ -7,7 +7,7 @@ import { asset, within } from './assets.ts'
 import { findChrome } from './chrome.ts'
 import { resolveDownloadCapture } from './export-options.ts'
 import { resolveDeckEntry } from './extension-resolver.ts'
-import { maxCodeLength } from './compile-code.ts'
+import { checkLiveCode, maxCodeLength } from './compile-code.ts'
 import { saveDrag } from './drag-source.ts'
 import { saveDrawing } from './drawing-store.ts'
 import type { CompiledDeck } from './loader.ts'
@@ -226,7 +226,10 @@ async function main(): Promise<void> {
             const language = url.searchParams.get('language') ?? 'ts'
             if (language !== 'ts' && language !== 'js') return new Response('Invalid code language.', { status: 400 })
             try {
-              const { code, module } = await (await compile()).compileExample(await request.text(), language)
+              const source = await request.text()
+              if (url.searchParams.get('check') === '1')
+                return Response.json(checkLiveCode(source, language), { headers: { 'Cache-Control': 'no-store' } })
+              const { code, module } = await (await compile()).compileExample(source, language)
               return new Response(code, {
                 headers: { 'Cache-Control': 'no-store', 'X-Presentation-Program': module ? 'module' : 'script' },
               })

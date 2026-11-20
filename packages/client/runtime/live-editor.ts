@@ -15,6 +15,7 @@ export function setupLiveEditor(block: HTMLElement, editor: HTMLTextAreaElement,
   if (!wrapper) return () => {}
   const gutter = wrapper.querySelector<HTMLElement>('[data-live-gutter]')
   const highlight = wrapper.querySelector<HTMLElement>('.live-code-highlight > div')
+  const marks = wrapper.querySelector<HTMLElement>('.live-code-marks > div')
   const auto = wrapper.dataset.liveHeight === 'auto'
   const mode = wrapper.dataset.liveNumbering as LiveLineNumberMode
   const start = Number(wrapper.dataset.liveStart ?? 1)
@@ -26,7 +27,9 @@ export function setupLiveEditor(block: HTMLElement, editor: HTMLTextAreaElement,
   let paintFrame = 0
   function syncScroll(): void {
     if (gutter) gutter.style.transform = 'translateY(' + (-editor.scrollTop) + 'px)'
-    if (highlight) highlight.style.transform = `translate(${-editor.scrollLeft}px, ${-editor.scrollTop}px)`
+    const offset = `translate(${-editor.scrollLeft}px, ${-editor.scrollTop}px)`
+    if (highlight) highlight.style.transform = offset
+    if (marks) marks.style.transform = offset
   }
   function syncSizeAndNumbers(): void {
     const changed = editor.value !== source
@@ -60,7 +63,7 @@ export function setupLiveEditor(block: HTMLElement, editor: HTMLTextAreaElement,
     paint()
   }
   if (gutter || auto) editor.addEventListener('input', syncSizeAndNumbers)
-  if (gutter || highlight) editor.addEventListener('scroll', syncScroll, { passive: true })
+  if (gutter || highlight || marks) editor.addEventListener('scroll', syncScroll, { passive: true })
   if (gutter) {
     if (mode === 'relative' || mode === 'interval') editor.addEventListener('selectionchange', syncSizeAndNumbers)
   }
