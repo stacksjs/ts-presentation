@@ -17,6 +17,7 @@ const htmlTag = /^<(?:[^>"']|"[^"]*"|'[^']*')+>/
 const slotMarker = /^::\s*([\w.:-]+?)\s*::\s*$/
 const bareDisplay = /^ {0,3}\\begin\{((?:equation|align|alignat|flalign|xalignat|gather|multline)\*?|xxalignat|CD|subequations|spreadlines)\}/
 const openSpreadlines = /^ {0,3}\\begin\{spreadlines\}[ \t]*\{/
+const mathtoolsSettings = /^ {0,3}\\mathtoolsset[ \t]*\{/
 const closeSpreadlines = /^ {0,3}\\end\{spreadlines\}[ \t]*(?:%.*)?$/
 
 function inlineMathEnd(line: string, start: number, delimiter: string): number {
@@ -118,15 +119,15 @@ function tabsMarkup(id: string, tabs: GroupFence[]): string {
 
 export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): PreparedMarkdown {
   const attrs = syntax.comark && source.includes('{') ? createComarkAttributes() : undefined
-  if (!attrs && !source.includes('$') && !source.includes('\\(') && !source.includes('\\[') && !source.includes('\\begin{') && !source.includes('\\ref') && !source.includes('\\eqref') && !source.includes('{monaco') && !source.includes('{live') && !source.includes('mermaid') && !source.includes('v-click') && !source.includes('v-after') && !source.includes('```') && !source.includes('~~~')) {
+  if (!attrs && !source.includes('$') && !source.includes('\\(') && !source.includes('\\[') && !source.includes('\\begin{') && !source.includes('\\mathtoolsset') && !source.includes('\\ref') && !source.includes('\\eqref') && !source.includes('{monaco') && !source.includes('{live') && !source.includes('mermaid') && !source.includes('v-click') && !source.includes('v-after') && !source.includes('```') && !source.includes('~~~')) {
     return { source, restore: html => html }
   }
 
   const math: string[] = []
-  const lineSpacing: string[] = []
+  const displayCommands: string[] = []
+  const spacingScopes: number[] = []
   function registerMath(body: string, display: boolean, options?: EquationOptions): number {
-    const jot = display ? lineSpacing.at(-1) : undefined
-    const formula = jot === undefined ? body.trim() : `\\setlength\\jot${jot}\n${body.trim()}`
+    const formula = display && displayCommands.length ? `${displayCommands.join('\n')}\n${body.trim()}` : body.trim()
     const content = (syntax.renderMath ?? renderMath)(formula, display)
     const block = options
       ? `<div class="equation-steps" data-equation-steps="${options.ranges.join('|')}" data-equation-at="${options.at}" data-equation-first="${options.startLine}" data-equation-finally="${options.finally}">${content}</div>`
@@ -301,17 +302,22 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
       continue
     }
     if (syntax.mathEnabled !== false && !prefix) {
-      const opening = openSpreadlines.exec(content)?.[0]
+      const spreadlines = openSpreadlines.exec(content)?.[0]
+      const opening = spreadlines ?? mathtoolsSettings.exec(content)?.[0]
       if (opening) {
         const end = inlineMathEnd(content, opening.length, '}')
         if (end >= 0 && /^[ \t]*(?:%.*)?$/.test(content.slice(end + 1))) {
-          lineSpacing.push(content.slice(opening.length - 1, end + 1))
+          if (spreadlines) {
+            spacingScopes.push(displayCommands.length)
+            displayCommands.push(`\\setlength\\jot${content.slice(opening.length - 1, end + 1)}`)
+          }
+          else displayCommands.push(content.slice(0, end + 1))
           output.push('')
           continue
         }
       }
-      if (lineSpacing.length && closeSpreadlines.test(content)) {
-        lineSpacing.pop()
+      if (spacingScopes.length && closeSpreadlines.test(content)) {
+        displayCommands.length = spacingScopes.pop()!
         output.push('')
         continue
       }

@@ -1270,6 +1270,86 @@ g&=h
   expect(() => math(String.raw`\begin{spreadlines}{2em}\begin{gather}a=b\end{gather}`, true)).toThrow('Unclosed math environment: spreadlines')
 })
 
+test('scopes Mathtools spacing options, including original intertext and saved jot lengths', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const alignment = String.raw`\begin{align*}
+a&=b\\[1px]
+\intertext{Reason}
+c&=d\\
+\shortintertext{Next}
+e&=f\\
+\shortvdotswithin*{=}
+&=g
+\end{align*}`
+  const source = String.raw`\def\gap{2px}
+\mathtoolsset{above-intertext-sep={\gap},below-intertext-sep=-1px,shortvdotsadjustabove=2.15\origjot}
+\begin{spreadlines}{7px}
+\mathtoolsset{original-intertext, above-short-intertext-sep=2\jot, belowshortintertextdim=3pt, shortvdotsadjustbelow=0pt}
+${alignment}
+\begin{spreadlines}{5px}
+\mathtoolsset{original-intertext=false,original-shortintertext=true,shortvdotsadjustabove=9pt}
+${alignment}
+\end{spreadlines}
+${alignment}
+\end{spreadlines}`
+  const html = math(source, true).replace(/<annotation[^>]*>.*?<\/annotation>/gs, '')
+  const styles = (kind: string) => [...html.matchAll(new RegExp(kind + ' style="([^"]+)"', 'g'))].map(match => match[1])
+  expect(styles('data-equation-intertext="normal"')).toEqual([
+    'margin-block-start:7px;margin-block-end:7px',
+    'margin-block-start:2px;margin-block-end:-1px',
+    'margin-block-start:7px;margin-block-end:7px',
+  ])
+  expect(styles('data-equation-intertext="short"')).toEqual([
+    'margin-block-start:calc(14px - 3pt)', 'margin-block-start:5px;margin-block-end:5px', 'margin-block-start:calc(14px - 3pt)',
+  ])
+  expect(styles('data-equation-continuation')).toEqual([
+    'margin-block-end:calc(3pt - 0pt)',
+    'margin-block-start:calc(6.45pt - 9pt);margin-block-end:calc(3pt - 0pt)',
+    'margin-block-end:calc(3pt - 0pt)',
+  ])
+  expect(html.match(/margin-block-end:1px/g)).toHaveLength(3)
+  expect(math(alignment, true)).not.toContain('margin-block-start:')
+  expect(() => math(String.raw`\mathtoolsset{original-intertext=maybe} x`, true)).toThrow('Expected true or false')
+  expect(() => math(String.raw`\mathtoolsset{shortvdotsadjustabove} x`, true)).toThrow('Invalid math dimension')
+  expect(() => math(String.raw`\mathtoolsset{above-intertext-sep=3px;color:red} x`, true)).toThrow('Invalid math dimension')
+  expect(() => math(String.raw`\mathtoolsset{missing=true} x`, true)).toThrow('Unsupported Mathtools option')
+})
+
+test('applies standalone Mathtools settings to later displays on the same slide', async () => {
+  const display = String.raw`\begin{gather*}a=b\\\shortintertext{Next}c=d\end{gather*}`
+  const source = String.raw`# First
+
+\mathtoolsset{above-shortintertext-sep=6pt} % applies to later displays
+
+${display}
+
+\begin{spreadlines}{8px}
+\mathtoolsset{original-shortintertext}
+
+${display}
+\end{spreadlines}
+
+~~~tex
+\mathtoolsset{above-shortintertext-sep=99pt}
+~~~
+
+${display}
+
+---
+
+# Second
+
+${display}`
+  const html = (await renderPresentation(parseDeck(source))).html.replace(/<annotation[^>]*>.*?<\/annotation>/gs, '')
+  expect([...html.matchAll(/<mtr data-equation-intertext="short"(?: style="([^"]+)")?>/g)].map(match => match[1] ?? '')).toEqual([
+    'margin-block-start:calc(6pt - 3pt)', 'margin-block-start:8px;margin-block-end:8px',
+    'margin-block-start:calc(6pt - 3pt)', '',
+  ])
+  const code = /<pre><code class="language-tex">([\s\S]*?)<\/code>/.exec(html)?.[1].replace(/<[^>]+>/g, '')
+  expect(code).toContain('99pt')
+  expect(html).not.toContain('applies to later displays')
+})
+
 test('passes bare spreadlines scopes through Markdown and restores spacing after each group', async () => {
   const source = String.raw`# Display spacing
 

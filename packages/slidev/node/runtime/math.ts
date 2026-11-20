@@ -310,7 +310,7 @@ function tokenize(source: string, onTrailingComment?: () => void): string[] {
 type MathMode = 'math' | 'text'
 const expansionPrimitives = ['\\expandafter', '\\noexpand', '\\@firstoftwo', '\\@secondoftwo', '\\@ifnextchar', '\\@ifstar', '\\TextOrMath', '\\html@mathml', '\\message', '\\errmessage', '\\char', '\\MoveEqLeft'] as const
 const expansionPrimitiveNames = new Set<string>(expansionPrimitives)
-const macroDeclaration = /^\\(?:[gex]?def|(?:future)?let|(?:new|renew|provide)command|DeclarePairedDelimiter(?:X(?:PP)?)?|MakeAboxedCommand|setlength|global|long)$/
+const macroDeclaration = /^\\(?:[gex]?def|(?:future)?let|(?:new|renew|provide)command|DeclarePairedDelimiter(?:X(?:PP)?)?|MakeAboxedCommand|mathtoolsset|setlength|global|long)$/
 const assignmentCommand = /^\\(?:[gex]?def|(?:future)?let)$/
 type ExpansionPrimitive = typeof expansionPrimitives[number]
 type ConditionalPrimitive = Exclude<ExpansionPrimitive, '\\expandafter' | '\\noexpand' | '\\message' | '\\errmessage' | '\\char' | '\\MoveEqLeft'>
@@ -554,6 +554,12 @@ function taggedDisplay(expression: string, label: Markup, left: boolean, flush: 
 
 function equationRowGap(base?: string, extra?: string): string | undefined {
   return base && extra ? `calc(${base} + ${extra})` : base ?? extra
+}
+
+function equationRowMargins(before?: string, after?: string): string {
+  if (!before && !after) return ''
+  const styles = [before && `margin-block-start:${before}`, after && `margin-block-end:${after}`].filter(Boolean)
+  return ` style="${styles.join(';')}"`
 }
 
 function multlineTable(rows: readonly MultlineRow[], label: Markup | undefined, left: boolean, flush: boolean, environment: string, raise?: string, jot?: string): string {
@@ -936,10 +942,17 @@ const sizeCommands: Readonly<Record<string, number>> = {
 const infixFractions = new Set(['\\over', '\\atop', '\\choose', '\\brace', '\\brack', '\\above'])
 const primitiveArgumentFunctions = new Set(['frac', 'dfrac', 'tfrac', 'binom', 'dbinom', 'tbinom', 'genfrac', 'cfrac', ...Object.keys(variants)])
 const groupedArgumentFunctions = new Set(['sqrt', 'left', 'mathllap', 'mathclap', 'mathrlap', 'mathmbox', 'mathmakebox', 'angl'])
-const intertextCommands: ReadonlyMap<string, string> = new Map([
+type IntertextKind = 'normal' | 'short'
+const intertextCommands: ReadonlyMap<string, IntertextKind> = new Map([
   ['\\intertext', 'normal'],
   ['\\shortintertext', 'short'],
 ])
+const originalIntertextOptions = new Set(['original-intertext', 'original-shortintertext'])
+const mathtoolsSpacingOptions = new Set([
+  'above-intertext-sep', 'below-intertext-sep', 'above-shortintertext-sep', 'below-shortintertext-sep',
+  'shortvdotsadjustabove', 'shortvdotsadjustbelow',
+])
+
 const arrowBetweenLines = '\\ArrowBetweenLines'
 const flushSpaceAbove = '\\MTFlushSpaceAbove'
 const flushSpaceBelow = '\\MTFlushSpaceBelow'
@@ -1098,6 +1111,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   let currentColor = ''
   let equationNumber = 0
   let equationJot: string | undefined
+  let mathtoolsSpacing: ReadonlyMap<string, string> | undefined
   let nextSubequationNumber: ((key?: string) => string) | undefined
   let fullWidthAlignment = false
   let fontScale = 1
@@ -1150,6 +1164,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const previousItalic = textItalic
     const previousMonospace = textMonospace
     const previousJot = equationJot
+    const previousMathtoolsSpacing = mathtoolsSpacing
     scopes.push({ undo: new Map() })
     try { return render() }
     finally {
@@ -1157,6 +1172,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       textItalic = previousItalic
       textMonospace = previousMonospace
       equationJot = previousJot
+      mathtoolsSpacing = previousMathtoolsSpacing
       while (scopes.length > before) restoreScope()
     }
   }
@@ -2800,8 +2816,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
     // equation's tag. Only the top-level AMS row environments collect tags.
     if (rowTags) tagState = { suppressed: false }
     const rows: ArrayRow[] = []
-    const intertexts = new Map<number, { spacing: string, content: Markup }[]>()
-    function intertext(spacing: string): void {
+    const intertexts = new Map<number, { spacing: IntertextKind, content: Markup }[]>()
+    function intertext(spacing: IntertextKind): void {
       const rowTag = tagState
       tagState = { suppressed: false }
       try {
@@ -3014,10 +3030,31 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const gridLayout = displayRows
       ? ` style="${gridTracks}"${tagPlacement}${spreadLayout}${options?.fleqn && spread !== 'full' ? ' data-equation-flush' : ''}`
       : grid ? ` style="--math-columns:${columnAlignment.length}"` : ''
+    const spacingOptions = mathtoolsSpacing
+    const dotAbove = spacingOptions?.get('shortvdotsadjustabove')
+    const dotBelow = spacingOptions?.get('shortvdotsadjustbelow')
+    // Keep the default compact geometry. A larger trim subtracts space relative
+    // to the Mathtools defaults (2.15 and 1 times the original 3pt jot).
+    const compactAbove = dotAbove && dotAbove !== '6.45pt' ? `calc(6.45pt - ${dotAbove})` : undefined
+    const compactBelow = dotBelow && dotBelow !== '3pt' ? `calc(3pt - ${dotBelow})` : undefined
+
+    function proseMargins(spacing: IntertextKind): string {
+      if (!spacingOptions) return ''
+      const command = spacing === 'short' ? 'shortintertext' : 'intertext'
+      if (spacingOptions.get(`original-${command}`) === 'true') return equationRowMargins(jot, jot)
+      const above = spacingOptions.get(`above-${command}-sep`)
+      const below = spacingOptions.get(`below-${command}-sep`)
+      if (spacing === 'normal') return equationRowMargins(above, below)
+      return equationRowMargins(
+        above && above !== '3pt' ? `calc(${above} - 3pt)` : undefined,
+        below && below !== '3pt' ? `calc(${below} - 3pt)` : undefined,
+      )
+    }
+
     return (style) => {
       const tableCellStyle = compact ? 2 : ordinaryCellStyle
       const prose = (index: number) => intertexts.get(index)?.map(({ content, spacing }) =>
-        `<mtr data-equation-intertext="${spacing}"><mtd columnspan="${columnCount + Number(tags)}"><mrow><mrow>${renderMarkup(content, 1)}</mrow></mrow></mtd></mtr>`).join('') ?? ''
+        `<mtr data-equation-intertext="${spacing}"${proseMargins(spacing)}><mtd columnspan="${columnCount + Number(tags)}"><mrow><mrow>${renderMarkup(content, 1)}</mrow></mrow></mtd></mtr>`).join('') ?? ''
       const markup = rows.map((entry, rowIndex) => {
         const flushTop = entry.flushAbove || (!intertexts.has(rowIndex) && rows[rowIndex - 1]?.flushBelow)
         const flushBottom = entry.flushBelow || (!intertexts.has(rowIndex + 1) && rows[rowIndex + 1]?.flushAbove)
@@ -3091,8 +3128,9 @@ export function renderMath(source: string, display = false, configured: MathMacr
         const frameRow = entry.frames ? ' data-equation-frame-row' : ''
         const following = rows[rowIndex + 1]
         const spreadGap = following && !flushBottom && !entry.arrow && !following.arrow && !intertexts.has(rowIndex + 1) ? jot : undefined
-        const margin = jot === undefined ? undefined : equationRowGap(spreadGap, entry.gap)
-        return `${prose(rowIndex)}<mtr${arrow}${continuation}${frameRow}${margin ? ` style="margin-block-end:${margin}"` : ''}>${leqno ? cell : ''}${content}${leqno ? '' : cell}</mtr>`
+        const rowGap = jot === undefined ? undefined : equationRowGap(spreadGap, entry.gap)
+        const margins = equationRowMargins(entry.flushAbove ? compactAbove : undefined, equationRowGap(rowGap, entry.flushBelow ? compactBelow : undefined))
+        return `${prose(rowIndex)}<mtr${arrow}${continuation}${frameRow}${margins}>${leqno ? cell : ''}${content}${leqno ? '' : cell}</mtr>`
       }).join('') + prose(rows.length)
       const baseline = position === 't' ? ' align="baseline 1"' : position === 'b' ? ' align="baseline -1"' : ''
       const matrix = `<mtable${lines} data-math-array${align}${layoutClass}${gridLayout}${amsAlignment}${rowSpacing}${baseline}>${markup}</mtable>`
@@ -3203,6 +3241,36 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return String.fromCodePoint(code)
   }
 
+  function setMathtoolsSpacing(): void {
+    const selected = new Map(mathtoolsSpacing)
+    for (const assignment of expandDefinition(rawGroup()).join('').split(',')) {
+      if (!assignment.trim()) continue
+      const equals = assignment.indexOf('=')
+      const name = (equals < 0 ? assignment : assignment.slice(0, equals)).trim()
+      const key = name.replace(/^(above|below)(?:shortintertextdim|-short-intertext-(?:dim|sep))$/, '$1-shortintertext-sep')
+      const value = equals < 0 ? undefined : assignment.slice(equals + 1).trim().replace(/^\{([^{}]*)\}$/, '$1').trim()
+      if (originalIntertextOptions.has(key)) {
+        if (value !== undefined && value !== 'true' && value !== 'false')
+          throw new MathParseError(`Expected true or false for Mathtools option ${name}`)
+        selected.set(key, value ?? 'true')
+        continue
+      }
+      if (!mathtoolsSpacingOptions.has(key)) throw new MathParseError(`Unsupported Mathtools option: ${name}`)
+      const register = /^([+-]?)\s*(\d+(?:\.\d*)?|\.\d+)?\s*\\(origjot|jot)$/.exec(value ?? '')
+      let length = value
+      if (register) {
+        const base = (register[3] === 'jot' && equationJot) || '3pt'
+        const multiplier = Number(register[1] + (register[2] ?? '1'))
+        const magnitude = (Number.parseFloat(base) * multiplier).toFixed(12).replace(/\.?0+$/, '')
+        length = magnitude + /[a-z]+$/.exec(base)![0]
+      }
+      const size = length === undefined ? undefined : dimension(length)
+      if (size === undefined) throw new MathParseError(`Invalid math dimension for Mathtools option ${name}`)
+      selected.set(key, size)
+    }
+    mathtoolsSpacing = selected
+  }
+
   function declareMacro(token: string): boolean {
     if (!macroDeclaration.test(token)) return false
     let global = false
@@ -3214,6 +3282,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (prefixed && !assignmentCommand.test(token))
       throw new MathParseError('Invalid token after math macro prefix')
     const name = token.slice(1)
+    if (name === 'mathtoolsset') {
+      setMathtoolsSpacing()
+      return true
+    }
     if (name === 'setlength') {
       if (literalGroup() !== '\\jot') throw new MathParseError('Unsupported math length register')
       equationJot = readDimension()

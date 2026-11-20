@@ -573,6 +573,62 @@ $$`)
   }
 }, 45_000)
 
+it.skipIf(!chrome)('positions Mathtools intertext and continuation spacing in editable Office Math', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-mathtools-spacing-'))
+  const canvas = { width: 960, height: 540 }
+  const alignment = String.raw`\begin{align*}
+A&=x\\
+\intertext{Explanation}
+B&=y\\
+\shortintertext{Then}
+C&=z\\
+\shortvdotswithin{=}
+D&=w
+\end{align*}`
+  const variants = [
+    '',
+    '\\mathtoolsset{above-intertext-sep=8px,below-intertext-sep=-3px,above-shortintertext-sep=6.75pt,below-shortintertext-sep=1.5pt,shortvdotsadjustabove=3.45pt,shortvdotsadjustbelow=0pt}',
+    '\\mathtoolsset{above-intertext-sep=8px,above-shortintertext-sep=6.75pt,original-intertext,original-shortintertext}',
+  ]
+  try {
+    const entry = join(root, 'slides.md')
+    await Bun.write(entry, variants.map(settings => String.raw`# Layout
+
+${settings}
+\begin{spreadlines}{10px}
+${alignment}
+\end{spreadlines}`).join('\n\n---\n\n'))
+    const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
+    const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
+    const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
+    if (status) throw new Error(stderr)
+    const frames: PowerPointFrame[] = []
+    await captureFrames({ root: join(root, 'dist'), executable: chrome!, scale: 1, canvas, editable: true, withClicks: false }, frame => { frames.push(frame) })
+    expect(frames).toHaveLength(3)
+    const rowGaps = frames.map((frame) => {
+      const body = frame.editable?.nodes.find((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math')?.equation
+      const positions = ['A', 'Explanation', 'B', 'Then', 'C', '⋮', 'D'].map((symbol) => {
+        const item = body && [body, ...(body.cells ?? [])].find(fragment => fragment.expression.includes(`>${symbol}</m:t>`))
+        expect(item).toBeDefined()
+        return item!.rect.y
+      })
+      return positions.slice(1).map((current, index) => current - positions[index])
+    })
+    for (const [index, delta] of [8, -3, 5, -2, 4, 4].entries())
+      expect(rowGaps[1][index] - rowGaps[0][index]).toBeCloseTo(delta, 1)
+    for (const [index, delta] of [10, 10, 10, 10, 0, 0].entries())
+      expect(rowGaps[2][index] - rowGaps[0][index]).toBeCloseTo(delta, 1)
+
+    const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Spacing options' }))
+    const slide = parts.get('ppt/slides/slide2.xml')?.toString() ?? ''
+    expect(slide.match(/<a14:m>/g)!.length).toBeGreaterThanOrEqual(7)
+    for (const symbol of ['Explanation', 'Then', '⋮']) expect(slide).toContain(`>${symbol}</m:t>`)
+  }
+  finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}, 45_000)
+
 it.skipIf(!chrome)('exports AMS full-width alignments with editable columns and tags', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-flalign-'))
   const canvas = { width: 960, height: 540 }
