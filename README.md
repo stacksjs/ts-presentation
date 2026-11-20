@@ -252,8 +252,8 @@ per-slide layers. STX templates can use slide context such as
 Put reusable STX components in the deck, theme, or addon's `components/`
 directory. Use them directly in slide Markdown, such as
 `<Counter :start="1" v-click />`. Components support props, Markdown in
-default and named slots, scoped styles, and client-side STX signals. The
-starter includes an interactive counter. See the
+default and named slots, scoped text interpolation, scoped styles, and
+client-side STX signals. The starter includes an interactive counter. See the
 [components reference](skills/stacks-presentations/references/extensions.md#stx-components)
 for examples and precedence.
 
@@ -296,9 +296,10 @@ and a command to stop previews. It launches the project’s local Bun CLI.
 
 Run `bun test` from the project root to discover the adapted Slidev suites
 under `packages/` and the presentation regression suite under `test/`. The Bun runtime
-uses the published [Stacks STX package](https://github.com/stacksjs/stx) for the
-shell, built-in layouts, and custom templates. Some copied components, Vite
-integrations, and VS Code language tooling still need porting. See the
+uses the published [`@stacksjs/stx` package](https://github.com/stacksjs/stx) for the
+shell, built-in layouts, and custom templates. Bun installs it from the registry.
+Some copied components, Vite integrations, and VS Code language tooling still
+need porting. See the
 [compatibility guide](skills/stacks-presentations/references/compatibility.md)
 for authoring support and known gaps.
 

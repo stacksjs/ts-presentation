@@ -116,20 +116,50 @@ function findRanges(source: string, accept: (tag: Tag) => boolean): Range[] {
   return ranges
 }
 
-function readSlots(source: string, component: (tag: Tag) => boolean): { name: string, content: string }[] {
-  const slots: { name: string, content: string }[] = []
+interface MarkdownSlot {
+  name: string
+  content: string
+  binding?: string
+}
+
+function readSlots(source: string, component: (tag: Tag) => boolean): MarkdownSlot[] {
+  const slots: MarkdownSlot[] = []
   let rest = ''
   let cursor = 0
   for (const range of findRanges(source, tag => tag.name === 'template' || component(tag))) {
     if (range.tag.name !== 'template') continue
-    const name = /^\s+(?:#|v-slot:)([a-z][\w-]*)\s*$/i.exec(range.tag.attrs)?.[1]
-    if (!name) continue
+    const slot = /^\s+(?:#|v-slot:)([a-z][\w-]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'))?\s*$/i.exec(range.tag.attrs)
+    if (!slot) continue
+    const [, name, double, single] = slot
     rest += source.slice(cursor, range.tag.start)
     cursor = range.end
-    slots.push({ name, content: range.body })
+    const binding = unescapeHtml(double ?? single ?? '').trim()
+    slots.push({ name, content: range.body, binding: binding || undefined })
   }
   slots.unshift({ name: 'default', content: rest + source.slice(cursor) })
   return slots
+}
+
+type ProjectSlot = (html: string, restoreComponents: (html: string) => string) => string
+
+function projectScopedSlot(html: string, literal: (html: string) => string): string {
+  if (!html.includes('{{')) return literal(html)
+  const tokens = new RegExp(`<!--[\\s\\S]*?(?:-->|$)|${htmlTag.source}|\\{\\{([^{}<]+)\\}\\}`, 'gi')
+  let projected = ''
+  let cursor = 0
+  for (let token = tokens.exec(html); token; token = tokens.exec(html)) {
+    const [, closing, name, attrs, expression] = token
+    if (expression !== undefined) {
+      projected += literal(html.slice(cursor, token.index)) + `{{ ${unescapeHtml(expression).trim()} }}`
+      cursor = tokens.lastIndex
+    }
+    else if (name && !closing && !attrs.endsWith('/') && raw.has(name.toLowerCase())) {
+      const end = new RegExp(`</${name}\\s*>`, 'gi')
+      end.lastIndex = tokens.lastIndex
+      tokens.lastIndex = end.exec(html) ? end.lastIndex : html.length
+    }
+  }
+  return projected + literal(html.slice(cursor))
 }
 
 const attributes = /\s+([^\s=/\x22'<>]+)(?:\s*=\s*(?:\x22([^\x22]*)\x22|'([^']*)'|([^\s>]+)))?/g
@@ -178,10 +208,12 @@ export function createDeckComponentRenderer(
 
   const isComponent = ({ name }: Tag) => (/^[A-Z]/.test(name) || name.includes('-')) && paths.has(name) && !builtins.has(name.replaceAll('-', '').toLowerCase())
 
-  return async function render(source, markdown, depth = 0): Promise<string> {
-    if (depth >= 48 || !source.includes('<')) return markdown(source)
-    const ranges = findRanges(source, isComponent)
-    if (!ranges.length) return markdown(source)
+  return async function render(source, markdown, depth = 0, project?: ProjectSlot): Promise<string> {
+    const ranges = depth < 48 && source.includes('<') ? findRanges(source, isComponent) : []
+    if (!ranges.length) {
+      const html = markdown(source)
+      return project ? project(html, html => html) : html
+    }
     let masked = ''
     let end = 0
     const uses = ranges.map((range) => {
@@ -205,12 +237,24 @@ export function createDeckComponentRenderer(
       let slots = ''
       for (const slot of readSlots(body, isComponent)) {
         if (!slot.content.trim()) continue
-        const id = `${key}-slot-${values.size}-end`
         const content = slot.content.replace(/^\r?\n|\r?\n[ \t]*$/g, '')
-        let output = await render(content, markdown, depth + 1)
-        if (!slot.content.includes('\n')) output = output.replace(/^<p>([\s\S]*)<\/p>\s*$/, '$1')
-        values.set(id, output)
-        slots += slot.name === 'default' ? id : `<template #${slot.name}>${id}</template>`
+        const inline = !slot.content.includes('\n')
+        const unwrap = (html: string) => inline ? html.replace(/^<p>([\s\S]*)<\/p>\s*$/, '$1') : html
+        const stash = (html: string) => {
+          if (!html) return ''
+          const id = `${key}-slot-${values.size}-end`
+          values.set(id, html)
+          return id
+        }
+        // Only expose Markdown text expressions to STX. Restore pre-rendered
+        // code, other HTML and nested components after STX projects the slot.
+        const projectSlot: ProjectSlot | undefined = slot.binding
+          ? (html, restore) => projectScopedSlot(unwrap(html), literal => stash(restore(literal)))
+          : undefined
+        const output = await render(content, markdown, depth + 1, projectSlot)
+        const value = slot.binding ? output : stash(unwrap(output))
+        const binding = slot.binding ? `="${escapeHtml(slot.binding)}"` : ''
+        slots += slot.name === 'default' && !slot.binding ? value : `<template #${slot.name}${binding}>${value}</template>`
       }
       const dependencies = new Set<string>()
       const rendered = await renderComponentWithSlot(file, props, slots, options.componentsDir, context, entry, options, undefined, dependencies, undefined, undefined, tag.name)
@@ -230,6 +274,7 @@ export function createDeckComponentRenderer(
       const block = [...content.matchAll(placeholders)].some(([placeholder]) => blockRoot.test(replacements.get(placeholder) ?? ''))
       return block ? content : paragraph
     })
-    return paragraphs.replace(placeholders, placeholder => replacements.get(placeholder) ?? placeholder)
+    const restore = (markup: string) => markup.replace(placeholders, placeholder => replacements.get(placeholder) ?? placeholder)
+    return project ? project(paragraphs, restore) : restore(paragraphs)
   }
 }

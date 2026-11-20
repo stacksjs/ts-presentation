@@ -55,6 +55,41 @@ test('renders STX components with bound props, nested Markdown slots, and click 
   expect(html).toContain('<pre><StatusBadge label="Raw literal" /></pre>')
 }))
 
+test('projects scoped STX values into named Markdown slots while preserving literal code', async () => project(async (root) => {
+  const entry = join(root, 'slides.md')
+  await Promise.all([
+    Bun.write(entry, [
+      '# Scoped slots', '',
+      '<ExampleRows first="&lt;strong&gt;One&lt;/strong&gt;" second="Two" :index="2">',
+      '<template #row="{ label: caption, index }">', '',
+      '**{{ caption }}** is row {{ index + 1 }}. The literal is `{{ caption }}`.', '',
+      '<StatusLabel />', '',
+      '~~~txt', '{{ index }}', '~~~', '',
+      '</template>',
+      '<template v-slot:summary=\'row\'>Summary for *{{ row.label }}*</template>',
+      '</ExampleRows>',
+    ].join('\n')),
+    Bun.write(join(root, 'components', 'ExampleRows.stx'), [
+      '<template><section>',
+      '<div class="first"><slot name="row" :label="props.first" :index="props.index" /></div>',
+      '<div class="second"><slot name="row" :label="props.second" :index="props.index" /></div>',
+      '<footer><slot name="summary" :label="props.second">Missing summary</slot></footer>',
+      '</section></template>',
+    ].join('')),
+    Bun.write(join(root, 'components', 'StatusLabel.stx'), '<span class="status-label">Ready</span>'),
+  ])
+  const html = (await createDeckCompiler(entry)()).html
+  expect(html).toContain('<strong>&lt;strong&gt;One&lt;/strong&gt;</strong> is row 3.')
+  expect(html).toContain('<strong>Two</strong> is row 3.')
+  expect(html).toContain('<footer>Summary for <em>Two</em></footer>')
+  expect(html.match(/<code>\{\{ caption \}\}<\/code>/g)).toHaveLength(2)
+  const examples = [...html.matchAll(/<pre><code class="language-txt">([\s\S]*?)<\/code><\/pre>/g)]
+    .map(([, code]) => code.replace(/<\/?span\b[^>]*>/g, '').trim())
+  expect(examples).toEqual(['{{ index }}', '{{ index }}'])
+  expect(html.match(/<span class="status-label">Ready<\/span>/g)).toHaveLength(2)
+  expect(html).not.toContain('tp-component-')
+}))
+
 test('observes theme, addon, and project STX components across creation, edits, and removal', async () => project(async (root) => {
   const entry = join(root, 'slides.md')
   const component = (where: string) => join(root, where, 'components', 'Badge.stx')
@@ -92,7 +127,7 @@ test('rejects STX component discovery outside the active roots', async () => pro
 }))
 
 const chrome = await findChrome()
-test.skipIf(!chrome)('hydrates independent instances of an STX counter in a static build', async () => project(async (root) => {
+test.skipIf(!chrome)('hydrates independent STX counters and their scoped Markdown slots in a static build', async () => project(async (root) => {
   const starter = fileURLToPath(new URL('../packages/create-app/index.mjs', import.meta.url))
   const deck = join(root, 'starter')
   const scaffold = Bun.spawn([process.execPath, starter, deck], { stdout: 'ignore', stderr: 'pipe' })
@@ -100,7 +135,11 @@ test.skipIf(!chrome)('hydrates independent instances of an STX counter in a stat
   if (scaffoldExit) throw new Error(scaffoldError)
   const entry = join(deck, 'slides.md')
   expect(await Bun.file(entry).text()).toContain('<Counter :start="1" />')
-  await Bun.write(entry, '# Counter\n\n<Counter :start="2" v-click />\n\n<Counter :start="9" />\n\n---\n\n# Next\n\n<Counter :start="4" />')
+  const counter = join(deck, 'components', 'Counter.stx')
+  await Promise.all([
+    Bun.write(entry, '# Counter\n\n<Counter :start="2" v-click><template #value="{ current }">**{{ current }}**</template></Counter>\n\n<Counter :start="9" />\n\n---\n\n# Next\n\n<Counter :start="4" />'),
+    Bun.file(counter).text().then(source => Bun.write(counter, source.replace('{{ count }}', '<slot name="value" :current="count()">{{ count }}</slot>'))),
+  ])
   const cli = fileURLToPath(new URL('../src/cli.ts', import.meta.url))
   const command = Bun.spawn([process.execPath, cli, 'build', entry], { stdout: 'ignore', stderr: 'pipe', timeout: 20_000 })
   const [exit, stderr] = await Promise.all([command.exited, new Response(command.stderr).text()])
@@ -131,6 +170,7 @@ test.skipIf(!chrome)('hydrates independent instances of an STX counter in a stat
     expect(revealed).toEqual([true, true])
     const updated = await view.evaluate(`Array.from(document.querySelectorAll('.demo-counter output'), b => b.textContent.trim())`)
     expect(updated).toEqual(['3', '9', '4'])
+    expect(await view.evaluate(`document.querySelector('.demo-counter output strong')?.textContent`)).toBe('3')
   }
   finally {
     view.close()

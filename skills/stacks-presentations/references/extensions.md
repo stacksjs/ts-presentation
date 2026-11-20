@@ -76,6 +76,22 @@ multiword kebab-case tag such as `<status-badge>`.
 </Callout>
 ```
 
+A named slot can expose values to Markdown text. For example, a component
+with `<slot name="row" :label="props.heading" />` can accept this slot:
+
+```md
+<template #row="{ label }">
+
+**{{ label }}**
+
+</template>
+```
+
+Use a destructured binding as above or an object binding such as
+`<template v-slot:row="row">` with `{{ row.label }}`. Slot values are
+escaped as text. Values bound to a client signal update as the signal changes.
+Inline and fenced code keep their literal braces.
+
 Use plain attributes for text, bare attributes for booleans, and
 `:prop` bindings for JSON values, quoted strings, or paths such as
 `:heading="frontmatter.topic"`. A component template can also read
