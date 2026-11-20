@@ -176,6 +176,26 @@ focuses the next two rows. Inline annotations start at the current row.
 Use `transformerMetaHighlight` for ranges in fence metadata and
 `transformerMetaWordHighlight` for `/word/` markers.
 
+Register a custom TextMate grammar in either highlighter setup through
+`langs`. An array accepts grammar objects with names and aliases. A map
+can load a local grammar on demand or register an alias for a bundled or
+custom language.
+
+```ts
+import { defineShikiSetup } from 'ts-presentation'
+
+export default defineShikiSetup(() => ({
+  langs: {
+    pipeline: () => import('./pipeline.tmLanguage.json'),
+    pipe: 'pipeline',
+  },
+}))
+```
+
+Use `pipeline` or `pipe` as the fence language. Grammar patterns use
+JavaScript regular expressions. To load an embedded scope on demand, use
+its TextMate scope name as the map key.
+
 Use a deck directory or an entry path without the `.md` suffix on the CLI.
 Theme and addon resolution checks the deck project first, then the package
 installation that launched the CLI. Both local extensions and compatible

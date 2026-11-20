@@ -46,6 +46,7 @@ export { defineCodeRunnersSetup } from '../../../types/src/code-runner.ts'
 export type { CodeRunner, CodeRunnerContext, CodeRunnerOutput, CodeRunnerOutputDom, CodeRunnerOutputError, CodeRunnerOutputHtml, CodeRunnerOutputText, CodeRunnerOutputTextArray, CodeRunnerOutputs, CodeRunnerProviders, CodeRunnersSetup } from '../../../types/src/code-runner.ts'
 export { defineCodeHighlightSetup, defineShikiSetup, defineKatexSetup, defineMermaidRendererSetup, defineMermaidSetup } from './authoring-setup.ts'
 export type { CodeHighlightOptions, KatexOptions, KatexTrustContext, MermaidOptions, MermaidRenderer } from './authoring-setup.ts'
+export type { CodeHighlightGrammar, CodeHighlightGrammarPattern, CodeHighlightLanguageEntry, CodeHighlightLanguageInput, CodeHighlightLanguages } from './code-languages.ts'
 export type { CodeHighlightBlockOptions, CodeHighlightContext, CodeHighlightContextBase, CodeHighlightElement, CodeHighlightProperty, CodeHighlightRoot, CodeHighlightText, CodeHighlightToken, CodeHighlightTransformer } from './highlight-transformers.ts'
 export { transformerCompactLineOptions, transformerMetaHighlight, transformerMetaWordHighlight, transformerNotationDiff, transformerNotationErrorLevel, transformerNotationFocus, transformerNotationHighlight, transformerNotationMap, transformerNotationWordHighlight, transformerRemoveNotationEscape } from './notation-transformers.ts'
 export type { TransformerCompactLineOption, TransformerNotationMapOptions, TransformerNotationOptions } from './notation-transformers.ts'
@@ -157,7 +158,9 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   const fencePrefix = `tp-fence-${renderToken}-`
   const rawFence = new RegExp(`(?<!language-)\\b${fencePrefix}\\d+\\b`, 'g')
   const selectedCodeTheme = deck.headmatter?.codeTheme ?? configuration?.codeHighlight?.theme
-  const codeRenderer = createHighlightedCodeRenderer(selectedCodeTheme, configuration?.codeHighlight?.transformers)
+  const languages = configuration?.codeLanguageSources
+    ?? (configuration?.codeHighlight?.langs ? [configuration.codeHighlight.langs] : undefined)
+  const codeRenderer = createHighlightedCodeRenderer(selectedCodeTheme, configuration?.codeHighlight?.transformers, languages)
   const fontMarkup = deckFontMarkup(options.extensions?.theme.defaults?.fonts, nested?.fonts, deck.headmatter?.fonts)
   const color = deck.headmatter?.colorSchema ?? nested?.colorSchema
   const socialTheme = color === 'light' || (color !== 'dark' && options.extensions?.theme.name === 'paper') ? 'light' : 'dark'

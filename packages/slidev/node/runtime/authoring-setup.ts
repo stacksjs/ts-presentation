@@ -1,4 +1,5 @@
 import { join } from 'node:path'
+import type { CodeHighlightLanguages } from './code-languages.ts'
 import { importDeckModule } from './deck-modules.ts'
 import type { ObserveDeckFile } from './deck-modules.ts'
 import type { MathMacros } from './math.ts'
@@ -39,6 +40,7 @@ export type MermaidRendererSetup = () => MermaidRenderer | void | Promise<Mermai
 
 export interface CodeHighlightOptions {
   theme?: string
+  langs?: CodeHighlightLanguages
   transformers?: readonly (CodeHighlightTransformer | false | null | undefined)[]
 }
 
@@ -46,6 +48,7 @@ export type CodeHighlightSetup = () => CodeHighlightOptions | void | Promise<Cod
 
 export interface AuthoringSetup {
   codeHighlight?: CodeHighlightOptions
+  codeLanguageSources?: readonly CodeHighlightLanguages[]
   katex?: KatexOptions
   mermaid?: MermaidOptions
   diagramRenderer?: MermaidRenderer
@@ -82,11 +85,14 @@ export async function loadAuthoringSetup(root: string, observe: ObserveDeckFile,
     if (mermaid) setup.mermaid = { ...setup.mermaid, ...mermaid }
     if (diagramRenderer) setup.diagramRenderer = diagramRenderer
     if (shiki || nativeHighlight) {
+      const languages = [...setup.codeLanguageSources ?? []]
       for (const config of [shiki, nativeHighlight]) {
         const hooks = config?.transformers
         if (hooks !== undefined && (!Array.isArray(hooks) || hooks.some(hook => hook && (typeof hook !== 'object' || Array.isArray(hook)))))
           throw new Error('Code highlighter setup must provide an array of transformer objects')
+        if (config?.langs !== undefined) languages.push(config.langs)
       }
+      if (languages.length) setup.codeLanguageSources = languages
       setup.codeHighlight = { ...setup.codeHighlight, ...shiki, ...nativeHighlight,
         transformers: [...setup.codeHighlight?.transformers ?? [], ...shiki?.transformers ?? [], ...nativeHighlight?.transformers ?? []],
       }

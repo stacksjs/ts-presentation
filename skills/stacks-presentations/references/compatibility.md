@@ -12,6 +12,7 @@ in a new ts-presentation project.
 | Preparser extensions | Async raw-line, slide, and speaker-note hooks from `setup/preparser.ts` |
 | Markdown transformers | Async `setup/transformers.ts` hooks for slide Markdown and fenced code, including fences nested in lists and block quotes. Hooks support stable edit offsets between commits, native highlighting, and STX rendering for returned components |
 | Syntax highlighting transformers | `setup/shiki.ts` and `setup/code-highlighter.ts` run source, token, HTML tree, and post-processing hooks for static highlighted code, numbered lines, Magic Move, and static editor fallbacks |
+| Custom code grammars | Static highlighting through TextMate objects and lazy loaders in `langs`, language aliases, nested repositories, and registered TextMate includes |
 | Code annotations | First-party diff, focus, line and word highlights, severity levels, custom notation maps, fence metadata, and literal annotation escapes. Standalone annotations are removed before display rows are numbered |
 | Integrated editor and live preview | Dev Markdown pane with autosave, included-file support, conflict detection, and in-place body and title refreshes |
 | Scoped styles, layouts, and themes | Slide-local CSS and keyframes, TypeScript theme and addon modules, and STX built-in and custom layouts with named slots |
@@ -80,6 +81,6 @@ in a new ts-presentation project.
 | VS Code authoring | Slide outline and folding, top-level frontmatter completions and hover help, Markdown syntax highlighting, and Bun preview commands |
 
 Vue-specific component APIs, Vite integrations,
-Monaco IntelliSense, Shiki custom grammars and additional packaged transformers, advanced VS Code tooling, other
+Monaco IntelliSense, full TextMate regex and injection behavior, additional Shiki transformers, advanced VS Code tooling, other
 PlantUML grammars, and the full KaTeX and Mermaid grammars still need porting. Refer to the [original Slidev skill](slidev-source/skills/slidev/SKILL.md)
 for upstream deck syntax.

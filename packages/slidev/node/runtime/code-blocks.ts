@@ -1,8 +1,11 @@
-import { getTheme, resolveGrammar, themeTokenColors, themeTokenCss, tokenClass, Tokenizer } from 'ts-syntax-highlighter/browser'
+import { getTheme, themeTokenColors, themeTokenCss, tokenClass, Tokenizer } from 'ts-syntax-highlighter/browser'
+import type { Grammar } from 'ts-syntax-highlighter'
 import { clickSpan } from '../../../client/runtime/clicks.ts'
 import { parseEquationOptions } from '../../../client/runtime/equation-steps.ts'
 import { readFenceOptions } from './fence-options.ts'
 import { escapeHtml } from './html.ts'
+import { createCodeLanguageResolver } from './code-languages.ts'
+import type { CodeHighlightLanguages } from './code-languages.ts'
 import type { CodeHighlightTransformer, CodeTokenizer } from './highlight-transformers.ts'
 import { orderCodeHighlightTransformers, transformHighlightedCode } from './highlight-transformers.ts'
 import { codeWordDecoration } from './notation-transformers.ts'
@@ -164,15 +167,23 @@ export function codeThemeStyles(name: unknown): string {
 ${selector} { background: var(--tp-code-background); color: var(--tp-code-foreground); }</style>`
 }
 
-function createCodeTokenizer(): CodeTokenizer {
-  const grammars = new Map<string, ReturnType<typeof resolveGrammar>>()
+function createCodeTokenizer(languages?: readonly CodeHighlightLanguages[]): CodeTokenizer {
+  const resolve = createCodeLanguageResolver(languages)
+  const tokenizers = new WeakMap<Grammar, Tokenizer>()
   return async (source, language) => {
-    if (!grammars.has(language)) {
-      const alias = ({ 'c#': 'csharp', 'c++': 'cpp', 'f#': 'fsharp' } as Record<string, string>)[language] ?? language
-      grammars.set(language, resolveGrammar(alias))
+    const grammar = await resolve(language)
+    if (!grammar) return
+    let tokenizer = tokenizers.get(grammar)
+    if (!tokenizer) {
+      try {
+        tokenizer = new Tokenizer(grammar)
+      }
+      catch (error) {
+        throw new Error(`Could not compile code grammar "${language}".`, { cause: error })
+      }
+      tokenizers.set(grammar, tokenizer)
     }
-    const grammar = await grammars.get(language)
-    return grammar && new Tokenizer(grammar).tokenize(source)
+    return tokenizer.tokenize(source)
   }
 }
 
@@ -184,12 +195,12 @@ export function createCodeHighlighter(tokenize: CodeTokenizer = createCodeTokeni
   }
 }
 
-export function createHighlightedCodeRenderer(theme: unknown, hooks?: readonly (CodeHighlightTransformer | false | null | undefined)[]): {
+export function createHighlightedCodeRenderer(theme: unknown, hooks?: readonly (CodeHighlightTransformer | false | null | undefined)[], languages?: readonly CodeHighlightLanguages[]): {
   highlight: ReturnType<typeof createCodeHighlighter>
   hasTransformers: boolean
   render: (source: string, language: string, rawInfo?: string, frame?: CodeBlockInfo, lineNumbers?: boolean) => Promise<string | undefined>
 } {
-  const tokenize = createCodeTokenizer()
+  const tokenize = createCodeTokenizer(languages)
   const highlight = createCodeHighlighter(tokenize)
   const transformers = orderCodeHighlightTransformers(hooks)
   const themeName = typeof theme === 'string' ? theme : undefined
