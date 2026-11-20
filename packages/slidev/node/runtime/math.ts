@@ -885,6 +885,10 @@ const sizeCommands: Readonly<Record<string, number>> = {
 const infixFractions = new Set(['\\over', '\\atop', '\\choose', '\\brace', '\\brack', '\\above'])
 const primitiveArgumentFunctions = new Set(['frac', 'dfrac', 'tfrac', 'binom', 'dbinom', 'tbinom', 'genfrac', 'cfrac', ...Object.keys(variants)])
 const groupedArgumentFunctions = new Set(['sqrt', 'left', 'mathllap', 'mathclap', 'mathrlap', 'angl'])
+const intertextCommands: ReadonlyMap<string, string> = new Map([
+  ['\\intertext', 'normal'],
+  ['\\shortintertext', 'short'],
+])
 const mathModeFunctions = new Set([
   ...groupedArgumentFunctions, ...primitiveArgumentFunctions, ...Object.keys(mathClasses), ...Object.keys(accents),
   ...Object.keys(stretchedAccents), ...Object.keys(extensibleArrows),
@@ -892,7 +896,7 @@ const mathModeFunctions = new Set([
   'begin', 'end', 'right', 'middle', '@binrel', 'mathchoice', 'vcenter',
   'cancel', 'bcancel', 'xcancel', 'pmb', 'phase', 'mathreflectbox',
   'prescript', 'mathstrut', 'overset', 'underset', 'stackrel',
-  'shoveleft', 'shoveright',
+  'shoveleft', 'shoveright', ...Array.from(intertextCommands.keys(), command => command.slice(1)),
   'overline', 'operatorname', 'operatorname@', 'operatornamewithlimits', 'limits', 'nolimits', 'displaylimits',
   'not', 'mod', 'bmod', 'pmod', 'pod', 'ce', 'pu', 'allowbreak',
 ])
@@ -2414,20 +2418,47 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (!(stretch > 0 && stretch <= 100)) throw new MathParseError('Invalid array stretch')
     const outerTag = tagState
     const rowTags = /^(?:align|alignat|gather)[*]?$/.test(environment)
-    const automatic = rowTags && display && environmentDepth === 0 && !environment.endsWith('*')
+    const allowIntertext = rowTags && display && environmentDepth === 0
+    const automatic = allowIntertext && !environment.endsWith('*')
     environmentDepth++
     // Embedded tables such as split and aligned share the enclosing
     // equation's tag. Only the top-level AMS row environments collect tags.
     if (rowTags) tagState = { suppressed: false }
     const rows: ArrayRow[] = []
+    const intertexts = new Map<number, { spacing: string, content: Markup }[]>()
+    function intertext(spacing: string): void {
+      const rowTag = tagState
+      tagState = { suppressed: false }
+      try {
+        const content = inScope(() => textArgument())
+        const paragraphs = intertexts.get(rows.length) ?? []
+        paragraphs.push({ spacing, content })
+        intertexts.set(rows.length, paragraphs)
+      }
+      finally {
+        tagState = rowTag
+      }
+    }
     let cells: Markup[] = []
     let rules: ArrayRule[] = []
     let closed = false
     const stops = ['&', '\\\\', '\\newline', '\\cr', '\\end']
+    if (allowIntertext) stops.push(...intertextCommands.keys())
     while (peek()) {
       if (!cells.length) {
         while (peek() === '\\hline' || peek() === '\\hdashline')
           rules.push(take() === '\\hline' ? 'solid' : 'dashed')
+        const spacing = allowIntertext && intertextCommands.get(peek())
+        if (spacing) {
+          take()
+          intertext(spacing)
+          continue
+        }
+        if (peek() === '\\end' && intertexts.has(rows.length)) {
+          take()
+          closed = literalGroup() === environment
+          break
+        }
       }
       const followsOrdinary = aligned && cells.length % 2 === 1
       cells.push(inScope(() => row(stops, false, false, undefined, followsOrdinary)))
@@ -2439,7 +2470,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
         continue
       }
       if (pairs && cells.length > pairs * 2) throw new MathParseError('Too many alignment columns')
-      const lineBreak = separator === '\\\\' || separator === '\\newline' || separator === '\\cr'
+      const spacing = allowIntertext && intertextCommands.get(separator)
+      const lineBreak = Boolean(spacing) || separator === '\\\\' || separator === '\\newline' || separator === '\\cr'
       const gap = arrayRowGap(separator)
       const label = rowTags ? nextTag(automatic) : undefined
       if (cells.length > 1 || cells[0] || label !== undefined || rows.length === 0 || lineBreak) {
@@ -2448,6 +2480,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       }
       cells = []
       if (rowTags) tagState = { suppressed: false }
+      if (spacing) intertext(spacing)
       if (separator === '\\end' && literalGroup() === environment) {
         closed = true
         break
@@ -2461,9 +2494,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const [left, right] = kind === 'rcases' ? ['', '}'] : matrixDelimiters[kind] ?? ['', '']
     const alignment = layout.columns.map(column => column.align)
     const tags = rows.some(entry => entry.label !== undefined)
+    const hasIntertext = intertexts.size > 0
     const leqno = state?.options.leqno === true
-    const displayRows = tags && rowTags && display && depth === 1
-    const columnCount = Math.max(layout.columns.length, ...rows.map(entry => entry.cells.length))
+    const displayRows = (tags || hasIntertext) && rowTags && display && depth === 1
+    const columnCount = Math.max(layout.columns.length, Number(hasIntertext), ...rows.map(entry => entry.cells.length))
     const grid = aligned || alignment.length > 0 || displayRows
     const rowRules = rows.reduce((count, entry) => count + entry.before.length, rules.length)
     const columnRules = layout.columns.reduce((count, column) => count + column.before.length, layout.after.length)
@@ -2484,12 +2518,15 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const classes = [compact && 'math-compact-array', grid && 'math-alignment-grid', displayRows && 'math-display-grid'].filter(Boolean).join(' ')
     const layoutClass = classes ? ` class="${classes}"` : ''
     const amsAlignment = (aligned || environment.startsWith('gather')) ? ` data-equation-environment="${environment}"` : ''
-    const rowSpacing = amsAlignment && (stretch !== 1 || rows.some(row => row.gap !== undefined)) ? ' data-equation-row-spacing' : ''
+    const rowSpacing = amsAlignment && (hasIntertext || stretch !== 1 || rows.some(row => row.gap !== undefined)) ? ' data-equation-row-spacing' : ''
+    const tagPlacement = tags ? ` data-equation-tags="${leqno ? 'left' : 'right'}"` : ''
     const gridLayout = displayRows
-      ? ` style="--math-columns:${columnCount}" data-equation-tags="${leqno ? 'left' : 'right'}"${options?.fleqn ? ' data-equation-flush' : ''}`
+      ? ` style="--math-columns:${columnCount}"${tagPlacement}${options?.fleqn ? ' data-equation-flush' : ''}`
       : grid ? ` style="--math-columns:${columnAlignment.length}"` : ''
     return (style) => {
       const cellStyle = compact ? 2 : ordinaryCellStyle
+      const prose = (index: number) => intertexts.get(index)?.map(({ content, spacing }) =>
+        `<mtr data-equation-intertext="${spacing}"><mtd columnspan="${columnCount + Number(tags)}"><mrow><mrow>${renderMarkup(content, 1)}</mrow></mrow></mtd></mtr>`).join('') ?? ''
       const markup = rows.map((entry, rowIndex) => {
         const cell = tags ? equationNumberCell(entry.label) : ''
         // MathML Core browsers use CSS for cell alignment and visible rules.
@@ -2524,8 +2561,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
           const sized = compact || style === cellStyle ? value : mathSize(cellStyle, value)
           return `<mtd${settings}>${grid ? `<mrow>${sized}</mrow>` : sized}</mtd>`
         }).join('')
-        return `<mtr>${leqno ? cell : ''}${content}${leqno ? '' : cell}</mtr>`
-      }).join('')
+        return `${prose(rowIndex)}<mtr>${leqno ? cell : ''}${content}${leqno ? '' : cell}</mtr>`
+      }).join('') + prose(rows.length)
       const matrix = `<mtable${lines} data-math-array${align}${layoutClass}${gridLayout}${amsAlignment}${rowSpacing}>${markup}</mtable>`
       const table = compact ? mathSize(cellStyle, matrix) : matrix
       if (displayRows) return table
@@ -2680,6 +2717,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
 
     if (declareMacro(token) || equationDirective(token)) return { markup: '' }
     const name = token.slice(1)
+    if (intertextCommands.has(token)) throw new MathParseError(`${token} requires a top-level align, alignat, or gather display`)
     if (name === 'begingroup') {
       let parts: RowPart[] | undefined
       const content = inScope(() => row(['\\endgroup'], false, false, value => { parts = value }))

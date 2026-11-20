@@ -342,6 +342,59 @@ export function collectSnapshot(options: {
       if (width > 0 && height > 0) return relative({ left, top, width, height })
     }
 
+    function intertextFragments(element: Element, data: RawMathElement, opacity: number, scale: number): RawMathFragment[] {
+      const fontSize = Number.parseFloat(getComputedStyle(element).fontSize) * scale
+      const fragments: RawMathFragment[] = []
+      type Wrap = (expression: RawMathElement) => RawMathElement
+      function add(boxes: DOMRect[], expression: RawMathElement, wrap: Wrap): void {
+        const rect = mathBounds(boxes)
+        if (rect) fragments.push({ expression: wrap(expression), rect, fontSize, opacity })
+      }
+
+      function collect(current: Element, expression: RawMathElement, wrap: Wrap): void {
+        const boxes = [...current.getClientRects()]
+        if (boxes.length <= 1) {
+          add(boxes, expression, wrap)
+          return
+        }
+        if (expression.name === 'mrow') {
+          for (const [index, child] of [...current.children].entries())
+            collect(child, expression.children[index], part => wrap({ ...expression, children: [part] }))
+          return
+        }
+        const text = current.firstChild
+        if (expression.name !== 'mtext' || text?.nodeType !== Node.TEXT_NODE) {
+          add(boxes, expression, wrap)
+          return
+        }
+        // Match the browser's line breaks, including styled words and clusters
+        // made of multiple Unicode code points.
+        const value = text.textContent ?? ''
+        const breaks = [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(value)].map(part => part.index)
+        breaks.push(value.length)
+        const range = document.createRange()
+        for (let start = 0; start < breaks.length - 1;) {
+          range.setStart(text, breaks[start])
+          const line = (end: number) => {
+            range.setEnd(text, breaks[end])
+            return [...range.getClientRects()].filter(rect => rect.width > 0)
+          }
+          let low = start + 1
+          let high = breaks.length - 1
+          while (low < high) {
+            const mid = Math.ceil((low + high) / 2)
+            const measured = line(mid)
+            if (measured.every(rect => rect.top === measured[0]?.top)) low = mid
+            else high = mid - 1
+          }
+          add(line(low), { ...expression, text: value.slice(breaks[start], breaks[low]) }, wrap)
+          start = low
+        }
+      }
+      collect(element, data, expression => expression)
+      return fragments
+    }
+
     function mathProjection(presentation: Element, expression: RawMathElement, display: boolean, scale: number): RawMathSnapshot | undefined {
       let table = presentation
       let data = expression
@@ -369,10 +422,18 @@ export function collectSnapshot(options: {
       let singleFormula: RawMathSnapshot | undefined
       for (const [index, row] of Array.from(table.children).entries()) {
         const mathRow = data.children[index]
+        const rowOpacity = mathRow.opacity ?? 1
+        if (row.hasAttribute('data-equation-intertext')) {
+          const paragraph = row.firstElementChild?.firstElementChild?.firstElementChild
+          const content = mathRow.children[0]?.children[0]?.children[0]
+          if (!spacedRows || !paragraph || !content) return
+          body.push(paragraph.getBoundingClientRect())
+          measuredCells.push(...intertextFragments(paragraph, content, rowOpacity, scale))
+          continue
+        }
         const cells = Array.from(row.children)
         const tagIndex = cells.findIndex(cell => cell.getAttribute('class') === 'math-equation-number')
         if ((singleTag || tagsAtMargin) && tagIndex < 0) return
-        const rowOpacity = mathRow.opacity ?? 1
         for (const [column, cell] of cells.entries()) {
           const cellData = mathRow.children[column]
           if (column === tagIndex) {

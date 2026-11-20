@@ -51,7 +51,11 @@ describe('deck and asset roots', () => {
 test('ignores nested MathML tables when mapping equation highlight lines', () => {
   function node(localName: string, children: object[] = []) {
     const attributes = new Map<string, boolean>()
-    return { localName, children, attributes, toggleAttribute: (attribute: string, value: boolean) => attributes.set(attribute, value) }
+    return {
+      localName, children, attributes,
+      hasAttribute: (attribute: string) => attributes.get(attribute) === true,
+      toggleAttribute: (attribute: string, value: boolean) => attributes.set(attribute, value),
+    }
   }
   const leaf = node('mtr')
   const nested = node('mtable', [leaf])

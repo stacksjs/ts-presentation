@@ -53,7 +53,9 @@ export function equationReveal(element: HTMLElement, cursor: number): EquationRe
   const span = clickSequence(at, cursor, ranges.length - 1)
   // Use the outer alignment table. Its cells can contain nested matrices.
   const table = element.querySelector('mtable[data-equation-lines]')
-  const lines = table ? [...table.children].filter(child => child.localName === 'mtr') : [element.querySelector('math') ?? element]
+  const lines = table
+    ? [...table.children].filter(child => child.localName === 'mtr' && !child.hasAttribute('data-equation-intertext'))
+    : [element.querySelector('math') ?? element]
   const final = element.dataset.equationFinally
   return { element, lines, ranges, final: !final || final === 'last' ? ranges.at(-1) ?? 'all' : final, firstLine: Number(element.dataset.equationFirst) || 1, start: span.start - 1, step: span.step, advance: span.advance }
 }

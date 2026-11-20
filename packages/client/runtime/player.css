@@ -999,6 +999,25 @@ math .math-alignment-axis > mtr > mtd { padding: 0; }
     grid-template-columns: max-content repeat(var(--math-columns), max-content) minmax(max-content, 1fr);
   }
   math .math-display-grid > mtr > :first-child { grid-column: 2; }
+  math .math-alignment-grid > mtr[data-equation-intertext] > mtd {
+    grid-column: 1 / -1;
+    min-inline-size: 0;
+    contain: inline-size;
+    padding: 0.75em 0;
+  }
+  math .math-alignment-grid > mtr[data-equation-intertext] > mtd > mrow {
+    display: block;
+    justify-self: stretch;
+    line-height: normal;
+    math-style: compact;
+    text-align: start;
+  }
+  math [data-equation-intertext] mrow > :is(mtext, mrow:not([class])):not([data-equation-intertext] [class] *) {
+    display: inline;
+    white-space: normal;
+  }
+  math [data-equation-intertext] .math-font-reset { display: inline math; }
+  math .math-alignment-grid > mtr[data-equation-intertext="short"] > mtd { padding-block: 0.3em; }
   math .math-display-grid[data-equation-tags="right"] > mtr > .math-equation-number {
     grid-column: -2;
     justify-self: end;

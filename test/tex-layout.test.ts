@@ -752,6 +752,38 @@ a+b+c \\[.4em]
   expect([...deck.matchAll(/<mtext>(Check|\(\d+\))<\/mtext>/g)].map(match => match[1])).toEqual(['(1)', 'Check', '(2)'])
 })
 
+test('supports AMS intertext without advancing equation row numbers', async () => {
+  const source = String.raw`\newcommand{\transition}{\intertext}
+\begin{align}
+a&=b\\
+\transition{Then use \textbf{the value} $x_i$.}
+c&=d\shortintertext{Next, substitute.}
+e&=f\\
+\shortintertext{Done.}
+\end{align}`
+  const math = createMathRenderer({ throwOnError: true, leqno: true })
+  const html = math(source, true).split('<annotation')[0]
+  expect([...html.matchAll(/<mtr(?: data-equation-intertext="(\w+)")?>/g)].map(match => match[1] ?? 'equation')).toEqual([
+    'equation', 'normal', 'equation', 'short', 'equation', 'short',
+  ])
+  expect([...html.matchAll(/<mtext>\((\d+)\)<\/mtext>/g)].map(match => match[1])).toEqual(['1', '2', '3'])
+  expect(html).toContain('data-equation-tags="left"')
+  expect(html).toContain('data-equation-row-spacing')
+  expect(html).toContain('columnspan="3"')
+  expect(html).toContain('<mrow style="font-weight:bold"><mtext>the value</mtext></mrow>')
+  expect(html).toContain('<msub><mi>x</mi><mi>i</mi></msub>')
+
+  const gather = String.raw`\begin{gather*}\intertext{Start here.}a=b\\\shortintertext{Therefore,}c=d\end{gather*}`
+  const deck = await renderDeck(parseDeck(['# Simple calculation', '', gather].join('\n')))
+  expect(deck).toContain('data-equation-environment="gather*"')
+  expect(deck).toContain('data-equation-intertext="normal"')
+  expect(deck).toContain('data-equation-intertext="short"')
+  expect(deck).not.toContain('data-equation-tags')
+  expect(math(String.raw`\begin{alignat*}{1}a&=b\\\intertext{Substitute.}c&=d\end{alignat*}`, true)).toContain('data-equation-intertext="normal"')
+  expect(() => math(String.raw`\begin{aligned}a&=b\\\intertext{Then}c&=d\end{aligned}`, true)).toThrow('requires a top-level align')
+  expect(() => math(String.raw`\begin{align}a&=b\\\intertext\end{align}`, true)).toThrow()
+})
+
 test('reads matrix row spacing only after adjacent double backslashes and permits an empty CD', () => {
   const math = createMathRenderer({ throwOnError: true })
   const source = String.raw`\begin{matrix}a&b\cr[c]&d\\ [e]&f\\[1ex]g&h\end{matrix}`

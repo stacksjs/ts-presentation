@@ -7,6 +7,7 @@ function mathElement(localName: string, children: Element[] = []) {
     element: {
       localName,
       children,
+      hasAttribute: (name: string) => attributes.has(name),
       toggleAttribute(name: string, force: boolean) {
         if (force) attributes.add(name)
         else attributes.delete(name)
@@ -17,12 +18,14 @@ function mathElement(localName: string, children: Element[] = []) {
 }
 
 describe('MathML equation lines', () => {
-  it('ignores rows in nested tables when mapping reveal ranges', () => {
+  it('ignores explanatory text and rows in nested tables when mapping reveal ranges', () => {
     const nested = mathElement('mtr')
     const nestedTable = mathElement('mtable', [nested.element])
     const rowA = mathElement('mtr', [mathElement('mtd', [nestedTable.element]).element])
+    const prose = mathElement('mtr')
+    prose.attributes.add('data-equation-intertext')
     const rowB = mathElement('mtr')
-    const table = mathElement('mtable', [rowA.element, rowB.element]).element
+    const table = mathElement('mtable', [rowA.element, prose.element, rowB.element]).element
     const root = {
       dataset: { equationSteps: '1|2' },
       querySelector: (selector: string) => selector === 'mtable[data-equation-lines]' ? table : null,
@@ -37,6 +40,7 @@ describe('MathML equation lines', () => {
     showEquation(reveal, 1)
     expect(rowA.attributes.has('data-equation-dim')).toBe(true)
     expect(rowB.attributes.has('data-equation-dim')).toBe(false)
+    expect(prose.attributes.has('data-equation-dim')).toBe(false)
     expect(nested.attributes.size).toBe(0)
   })
 })

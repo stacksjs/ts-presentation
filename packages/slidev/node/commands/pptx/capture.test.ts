@@ -85,6 +85,91 @@ it.skipIf(!chrome)('exports Chromium linear-gradient boxes as editable PowerPoin
   }
 }, 45_000)
 
+it.skipIf(!chrome)('keeps AMS intertext editable and outside equation reveal ranges in PowerPoint', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-intertext-'))
+  const canvas = { width: 960, height: 540 }
+  try {
+    const entry = join(root, 'slides.md')
+    await Bun.write(entry, String.raw`# Worked example
+
+$$ {1|2|all}
+\begin{align}
+a&=b+c\\
+\intertext{Now \textbf{substitute} $x_i$.}
+d&=\frac{f}{g}\\
+\shortintertext{Therefore,}
+h&=k
+\end{align}
+$$
+
+---
+
+# Narrow calculation
+
+<style>
+math[display="block"] { width: 325px; }
+</style>
+
+$$
+\begin{align*}
+a&=b\\
+\intertext{Read the explanation across multiple lines in the available space. \textbf{The bold words also occupy more than one line} before substituting $x_i$.}
+c&=d
+\end{align*}
+$$`)
+    const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
+    const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
+    const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
+    if (status) throw new Error(stderr)
+    const frames: PowerPointFrame[] = []
+    await captureFrames({ root: join(root, 'dist'), executable: chrome!, scale: 1, canvas, editable: true, withClicks: true }, frame => { frames.push(frame) })
+    expect(frames).toHaveLength(4)
+    const dim = '<a:alpha val="24000"/>'
+    for (const [step, frame] of frames.slice(0, 3).entries()) {
+      const body = frame.editable?.nodes.find((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math')?.equation
+      expect(body).toBeDefined()
+      expect(body?.cells).toHaveLength(7)
+      expect(body?.tags).toHaveLength(3)
+      const [, first, normal, , second, short, , third] = [body!, ...body!.cells!]
+      expect(normal.expression).toContain('>substitute</m:t>')
+      expect(normal.expression).toContain('<m:sSub>')
+      expect(short.expression).toContain('>Therefore,</m:t>')
+      expect(second.expression).toContain('<m:f>')
+      expect(first.rect.x).toBeCloseTo(second.rect.x, 1)
+      expect(second.rect.x).toBeCloseTo(third.rect.x, 1)
+      expect(normal.rect.x).toBeCloseTo(short.rect.x, 1)
+      expect(normal.rect.x).toBeLessThan(first.rect.x)
+      expect(normal.rect.y).toBeGreaterThan(first.rect.y + first.rect.h)
+      expect(normal.rect.y + normal.rect.h).toBeLessThan(second.rect.y)
+      expect(short.rect.y).toBeGreaterThan(second.rect.y + second.rect.h)
+      expect(short.rect.y + short.rect.h).toBeLessThan(third.rect.y)
+      expect(normal.rect.y - (first.rect.y + first.rect.h)).toBeGreaterThan(third.rect.y - (short.rect.y + short.rect.h))
+      expect([first, normal, second, short, third].map(fragment => fragment.expression.includes(dim))).toEqual([
+        step === 1, false, step === 0, false, step < 2,
+      ])
+      expect(body!.tags!.map(tag => tag.expression.includes(dim))).toEqual([step === 1, step === 0, step < 2])
+    }
+    const wrapped = frames[3].editable?.nodes.find((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math')?.equation
+    expect(wrapped).toBeDefined()
+    const prose = wrapped!.cells!.slice(1, -2)
+    const text = prose.flatMap(fragment => [...fragment.expression.matchAll(/<m:t(?: [^>]*)?>([^<]*)<\/m:t>/g)].map(match => match[1])).join('')
+    expect(text.replace(/\s+/g, ' ')).toContain('Read the explanation across multiple lines in the available space. The bold words also occupy more than one line before substituting')
+    expect(prose.some(fragment => fragment.expression.includes('<m:sSub>'))).toBe(true)
+    const left = Math.min(...prose.map(fragment => fragment.rect.x))
+    expect(Math.max(...prose.map(fragment => fragment.rect.x + fragment.rect.w)) - left).toBeLessThanOrEqual(326)
+    expect(new Set(prose.map(fragment => Math.round(fragment.rect.y))).size).toBeGreaterThan(2)
+    expect(wrapped!.cells!.at(-1)!.rect.y).toBeGreaterThan(Math.max(...prose.map(fragment => fragment.rect.y + fragment.rect.h)))
+    const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Worked example' }))
+    const final = parts.get('ppt/slides/slide3.xml')?.toString() ?? ''
+    expect(final.match(/<a14:m>/g)).toHaveLength(11)
+    expect(final.match(/<mc:Fallback><p:sp>/g)).toHaveLength(1)
+    expect(parts.get('ppt/slides/slide4.xml')?.toString()).toContain('<m:sSub>')
+  }
+  finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}, 45_000)
+
 it.skipIf(!chrome)('exports supported TeX as editable Office equations with picture alternatives', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-equations-'))
   const canvas = { width: 960, height: 540 }
