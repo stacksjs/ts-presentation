@@ -136,15 +136,17 @@ function parseGantt(source: string, now: number, interactionsEnabled = false): G
   for (const section of sections) {
     for (const task of section.tasks) {
       // A literal suffix in dateFormat can make a date look like a duration.
-      if (task.end !== undefined && ganttDurationEnd(0, task.end) !== undefined && parseDate(task.end) === undefined) {
-        task.duration = task.end
+      if (task.end !== undefined && parseDate(task.end) === undefined) {
+        // Mermaid keeps the task at its start when its end is neither a date nor a duration.
+        task.duration = ganttDurationEnd(0, task.end) === undefined ? '0ms' : task.end
         delete task.end
       }
       const interaction = task.id ? interactions.get(task.id) : undefined
       if (interaction) Object.assign(task, interaction)
     }
   }
-  return { sections, title: chart.title, accessibleTitle: chart.accessibleTitle, description: chart.description, dateFormat, axisFormat, tickInterval: ticks,
+  return { sections, title: chart.title, accessibleTitle: chart.accessibleTitle, description: chart.description, dateFormat,
+    axisFormat: axisFormat || (dateFormat === 'D' ? '%d' : ''), tickInterval: ticks,
     weekday, weekend, topAxis, todayMarker, todayMarkerStyle, inclusiveEndDates, excludes: exclusions, includes: inclusions, exclusionMode: 'whole-days', now }
 }
 

@@ -93,6 +93,26 @@ dateFormat DD[d]`
   expect(html).toContain('>00.090</tspan>')
 })
 
+test('renders calendar-aligned Gantt ticks and keeps tasks with invalid end dates at their start', async () => {
+  const source = `gantt
+dateFormat YYYY-MM-DD
+axisFormat %b
+tickInterval 3month
+todayMarker off
+Planning :plan, 2026-02-15, 3dX
+Delivery :delivery, after plan, 2026-11-01`
+  const schedule = scheduleGantt(source)
+  expect(schedule?.tasks.map(({ start, end }) => [start, end])).toEqual([
+    [Date.UTC(2026, 1, 15), Date.UTC(2026, 1, 15)],
+    [Date.UTC(2026, 1, 15), Date.UTC(2026, 10, 1)],
+  ])
+  expect(scheduleGantt('gantt\ndateFormat D\nReview :2, 4', Date.UTC(2026, 2, 1))?.axisFormat).toBe('%d')
+  const deck = parseDeck(['# Calendar', '', '~~~mermaid', source, '~~~'].join('\n'))
+  const html = await renderDeck(deck)
+  expect([...html.matchAll(/class="diagram-gantt-tick"[^>]*><tspan[^>]*>(\w+)<\/tspan>/g)].map(match => match[1])).toEqual(['Apr', 'Jul', 'Oct'])
+  expect(html).toContain('data-task-id="plan" data-task-start="2026-02-15T00:00:00.000Z" data-task-end="2026-02-15T00:00:00.000Z"')
+})
+
 test('uses automatic Gantt task IDs for dependencies and task links', () => {
   const source = `gantt
 dateFormat DD/MM/YYYY
@@ -127,6 +147,7 @@ test('builds GitGraph branch history with merge parents, tags, and cherry-picks'
   ])
   expect(graph?.commits.at(-1)?.parents.map(parent => parent.id)).toEqual(['c4', 'work; review'])
   expect(graph?.commits[3].picked).toBe('work; review')
+  expect(graph?.commits[3].message).toBe('cherry-picked work; review into main')
   expect(graph?.commits[4].tags).toEqual(['v1.0', 'stable'])
   const svg = mermaid(history, 'release-history', { gitGraph: { showCommitLabel: false } })
   expect(svg).toContain('data-commit-id="release" data-parent-ids="c4, work; review"')
@@ -161,13 +182,14 @@ merge "feature/review" id:"approved" type:NORMAL tag:"ready"`
   expect(parsed?.commits.map(({ id, message, symbol }) => [id, message, symbol])).toEqual([
     ['base', 'Begin "review": phase 1', 'NORMAL'],
     ['fix', 'Fix; verify 100%% complete', 'REVERSE'],
-    ['approved', undefined, 'NORMAL'],
+    ['approved', 'merged branch feature/review into main', 'NORMAL'],
   ])
   expect(parsed?.commits.at(-1)?.parents.map(parent => parent.id)).toEqual(['base', 'fix'])
   const input = ['# Review workflow', '', '~~~mermaid', graph, '~~~'].join('\n')
   const html = await renderDeck(parseDeck(input))
   expect(html).toContain('data-commit-message="Begin &quot;review&quot;: phase 1"')
   expect(html).toContain('data-commit-message="Fix; verify 100%% complete"')
+  expect(html).toContain('data-commit-message="merged branch feature/review into main"')
   expect(html).toContain('diagram-git-reverse-mark')
   expect(html).toMatch(/data-commit-id="approved" data-parent-ids="base, fix"[^>]*><title>[^<]*<\/title><circle[^>]*\/><g transform=/)
   expect(buildGitHistory('gitGraph\ncommit msg:bare-message')).toBeUndefined()
