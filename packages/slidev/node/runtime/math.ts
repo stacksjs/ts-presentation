@@ -146,7 +146,9 @@ const spacing: Record<string, string> = {
   negthinspace: '-0.17em', negmedspace: '-0.22em', negthickspace: '-0.28em',
   space: '0.33em', nobreakspace: '0.33em', enspace: '0.5em', enskip: '0.5em', quad: '1em', qquad: '2em',
 }
-const spacingCommands = new Set(['hspace', 'kern', 'mkern', 'mskip', 'hskip'])
+const spacingCommands = new Set(['kern', 'mkern', 'mskip', 'hskip'])
+// A partial dimension can end before its magnitude or unit is complete.
+const dimensionPrefix = /^[+-]?\s*(?:(?:\d+(?:\.\d*)?|\.\d*)(?:\s*[a-z]{1,2})?\s*)?$/
 const styledLetters: Record<string, { upper: number, lower: number, digits?: number, exceptions: string }> = {
   'double-struck': { upper: 0x1D538, lower: 0x1D552, digits: 0x1D7D8, exceptions: 'CℂHℍNℕPℙQℚRℝZℤ' },
   'script': { upper: 0x1D49C, lower: 0x1D4B6, exceptions: 'BℬEℰFℱHℋIℐLℒMℳRℛeℯgℊoℴ' },
@@ -350,6 +352,10 @@ const builtinMacros = new Map<string, Macro>(Object.entries(legacyColors).map(([
   [`\\${name}`, { body: ['\\textcolor', '{', value, '}', '{', '#1', '}'], parameters: [[]], prefix: [] }]))
 builtinMacros.set('\\boxed', { body: tokenize('\\fbox{$\\displaystyle{#1}$}'), parameters: [[]], prefix: [] })
 builtinMacros.set('\\substack', { body: tokenize('\\begin{subarray}{c}#1\\end{subarray}'), parameters: [[]], prefix: [] })
+// LaTeX's spacing macro follows KaTeX's expansion, including the starred zero-width rule.
+builtinMacros.set('\\hspace', { body: tokenize('\\@ifstar\\@hspacer\\@hspace'), parameters: [], prefix: [] })
+builtinMacros.set('\\@hspace', { body: tokenize('\\hskip #1\\relax'), parameters: [[]], prefix: [] })
+builtinMacros.set('\\@hspacer', { body: tokenize('\\rule{0pt}{0pt}\\hskip #1\\relax'), parameters: [[]], prefix: [] })
 builtinMacros.set('\\angln', { body: tokenize('{\\angl n}'), parameters: [], prefix: [] })
 for (const [name, brace] of [['\\bgroup', '{'], ['\\egroup', '}']])
   builtinMacros.set(name, { body: [brace], parameters: [], prefix: [] })
@@ -1635,32 +1641,32 @@ export function renderMath(source: string, display = false, configured: MathMacr
       if (mathSpacing && mode !== 'math') strictViolation('mathVsTextUnits', `\\${spacingCommand} works only in math mode`)
       return length
     }
-    expand()
-    if (tokenText(tokens[cursor] ?? '') === '{') {
-      const value = expandDefinition(rawGroup()).join('')
-      if (!value.trim() && blank !== undefined) return blank
-      const length = parseLength(value)
-      if (length !== undefined) return length
+    space()
+    let raw = ''
+    const grouped = tokenText(tokens[cursor] ?? '') === '{'
+    if (grouped) {
+      raw = expandDefinition(rawGroup()).join('')
+      if (!raw.trim() && blank !== undefined) return blank
     }
     else {
-      for (let end = cursor + 1; end <= Math.min(cursor + 15, tokens.length); end++) {
-        const candidate = tokens.slice(cursor, end).map(tokenValue).join('')
-        if (!/[a-z]$/i.test(candidate)) continue
-        const value = parseLength(candidate)
-        if (value !== undefined) {
-          cursor = end
-          return value
-        }
+      while (true) {
+        expand(false)
+        const token = tokenValue(tokens[cursor] ?? '')
+        if (!token || !dimensionPrefix.test(raw + token)) break
+        raw += token
+        cursor++
       }
     }
+    // TeX treats an empty braced size as zero points but requires a unit on
+    // an explicit kern or skip, including when its magnitude is zero.
+    if (spacingCommand && raw && !/[a-z]{2}\s*$/.test(raw)) throw new MathParseError('Invalid math dimension')
+    const emptySkip = spacingCommand && grouped && !raw
+    const length = parseLength(emptySkip ? '0pt' : raw)
+    if (length !== undefined) return emptySkip ? '0em' : length
     throw new MathParseError('Invalid math dimension')
   }
 
   function spacingMarkup(name: string): string {
-    if (name === 'hspace') {
-      if (peek() === '*') take()
-      if (peek() !== '{') throw new MathParseError('Math spacing requires a grouped dimension')
-    }
     return spaceMarkup(readDimension(undefined, name))
   }
 

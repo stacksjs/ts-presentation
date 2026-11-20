@@ -115,7 +115,7 @@ $$
 $$
 
 $$
-\int_0^1 x^2\,dx
+\int_0^1 x^2\,dx + y\hspace*{1em}z
 $$
 
 $$
@@ -200,6 +200,7 @@ $$`)
     expect(operators[0]).not.toContain('<m:t xml:space="preserve">+</m:t>')
     expect(operators[1]).toContain('<m:chr m:val="∫"/><m:limLoc m:val="subSup"/>')
     expect(operators[1]).toContain('<m:t xml:space="preserve">\u2009</m:t>')
+    expect(advanced).toContain('<m:t xml:space="preserve">\u2003</m:t>')
     expect(advanced).toContain('<m:acc><m:accPr><m:chr m:val="\u0302"/>')
     expect(advanced).toContain('<m:bar><m:barPr><m:pos m:val="bot"/>')
     expect(advanced).toContain('<m:bar><m:barPr><m:pos m:val="top"/>')

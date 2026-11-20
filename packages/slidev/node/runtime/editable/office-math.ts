@@ -17,6 +17,7 @@ const accents: Readonly<Record<string, string>> = {
   '´': '\u0301', 'ˊ': '\u0301', '`': '\u0300', 'ˋ': '\u0300', '˘': '\u0306', 'ˇ': '\u030c',
   '˚': '\u030a', 'ˉ': '\u0304', '→': '\u20d7', '⃗': '\u20d7',
 }
+const zeroLength = /^-?0(?:\.0+)?[a-z]+$/
 const stretchMarks = new Set(['⏞', '⏟', '←', '→', '↔', '⇐', '⇒', '⇔', '↼', '⇀'])
 const spaces = [[0.17, '\u2009'], [2 / 9, '\u205f'], [5 / 18, '\u2005'], [0.5, '\u2002'], [1, '\u2003'], [2, '\u2003\u2003']] as const
 const strikeProperties: Readonly<Record<string, readonly string[]>> = {
@@ -271,6 +272,10 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba):
     if (name === 'munder' || name === 'mover' || name === 'munderover') return underOver(node)
     if (name === 'mphantom' || name === 'mpadded') return phantom(node)
     if (name === 'mmultiscripts' && only(node)) return prescript(node)
+    // Starred TeX spacing includes a rule with no width or height.
+    if (name === 'mspace' && !children.length && only(node, 'width', 'height', 'style')
+      && attributes.style === 'background:currentColor'
+      && zeroLength.test(attributes.width ?? '') && zeroLength.test(attributes.height ?? '')) return ''
     if (name === 'mspace' && only(node, 'width') && !children.length && /^\d+(?:\.\d+)?em$/.test(attributes.width ?? '')) {
       const width = Number.parseFloat(attributes.width)
       if (width === 0) return ''
