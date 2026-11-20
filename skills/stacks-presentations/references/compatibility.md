@@ -93,7 +93,7 @@ in a new ts-presentation project.
 | Draggable elements | Inline directives, drag and arrow components, frontmatter positions, scaled editing, and local Markdown saves |
 | Imported Slidev diagrams | Compatibility fences translate the supported syntax to `ts-charts` input |
 | Diagram configuration | Nested options inherit through theme, addon, and deck setup, then deck and diagram frontmatter. Legacy init directives apply in source order, and fence options can override individual nested settings |
-| Diagram theme CSS | `themeCSS` styles apply to the individual diagram, including nested media rules and local animations. Gantt task IDs and indexed selectors for sections, task states, commits, branches, and edges map to native SVG elements |
+| Diagram theme CSS | `themeCSS` styles apply to the individual diagram, including nested media rules and local animations. Selectors can target Gantt task IDs and clickable tasks, plus GitGraph commit IDs, individual symbols, branch colors, and edges. CSS escapes work for IDs with punctuation |
 | XY charts | Native YAML and imported `xychart` fences render bar and line series with category or numeric axes, orientation, legends, labels, and palette overrides |
 | Quadrant charts | Native YAML and imported `quadrantChart` fences render labeled quadrants, normalized points, point style classes and overrides, named themes, and accessible descriptions |
 | Sankey diagrams | Weighted links from native YAML and imported CSV fences, with four alignments, gradient or solid links, and configurable node colors and labels |

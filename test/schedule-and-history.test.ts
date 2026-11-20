@@ -880,7 +880,8 @@ test('scopes diagram CSS, preserves CSS strings, and keeps local animation names
   const first = await renderMermaid(source, 'first', undefined, { themeCSS })
   const second = await renderMermaid(source, 'second', undefined, { themeCSS })
   expect(first).toContain('id="tp-diagram-first"')
-  expect(first?.match(/\.diagram-git-dot:is\(#tp-diagram-first, #tp-diagram-first \*\)/g)).toHaveLength(2)
+  expect(first).toContain('.diagram-git-dot:is(#tp-diagram-first, #tp-diagram-first *)')
+  expect(first).toContain('.diagram-git-pick-berry):is(#tp-diagram-first, #tp-diagram-first *)')
   expect(first).toContain('@keyframes tp-diagram-first-pulse')
   expect(first).toContain('animation: tp-diagram-first-pulse')
   expect(second).toContain('@keyframes tp-diagram-second-pulse')
@@ -1224,6 +1225,70 @@ test('imports Gantt callback commands and applies security settings', () => {
 })
 
 const chrome = await findChrome()
+
+test.skipIf(!chrome)('applies GitGraph symbol and commit selectors and styles only interactive Gantt tasks', async () => {
+  const history = [
+    'gitGraph', 'title Release history', 'commit id:"root"', 'branch feature',
+    'commit id:"fix.parser" type:HIGHLIGHT', 'checkout main',
+    'commit id:"revert" type:REVERSE', 'cherry-pick id:"fix.parser"', 'merge feature id:"release"',
+  ].join('\n')
+  const schedule = [
+    'gantt', 'todayMarker off', 'Review :review.stage, 2026-01-01, 6d',
+    'Run :verify, 2026-01-02, 6d', 'Plain :plain, 2026-01-03, 6d',
+    'click review.stage href "https://example.test/review"', 'click verify call review()',
+  ].join('\n')
+  const git = await renderMermaid(history, 'symbol-selectors', undefined, {
+    themeCSS: [
+      '.commit0 { stroke-width: 3px }', '.commit { stroke-width: 5px }',
+      '.commit-merge { stroke: #235079 }', '.commit-highlight-outer { fill: #aa2233 }',
+      '.commit-highlight-inner { fill: #005588 }', '.commit.fix\\.parser { stroke: #116633 }',
+      '.commit-cherry-pick { opacity: .55 }', '.gitTitleText { fill: #173652 }',
+    ].join('\n'),
+  })
+  const ganttStyles = '#review\\.stage-text { font-style: italic }\n.taskText { fill: #223344 }\n.clickable { fill: #996633 }'
+  const interactive = await renderMermaid(schedule, 'interactive-tasks', undefined, { themeCSS: ganttStyles, securityLevel: 'loose' })
+  const strict = await renderMermaid(schedule, 'plain-tasks', undefined, { themeCSS: ganttStyles })
+  expect(git).toBeDefined()
+  expect(interactive).toBeDefined()
+  expect(strict).toBeDefined()
+  const css = await Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url)).text()
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response(`<!doctype html><style>${css}</style>${git}${interactive}${strict}`, { headers: { 'Content-Type': 'text/html' } }),
+  })
+  const browser = new Bun.WebView({ width: 960, height: 620, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await browser.navigate(server.url.href)
+    const styles = await browser.evaluate(`(() => {
+      const computed = (scope, selector) => getComputedStyle(document.querySelector('#tp-diagram-' + scope + ' ' + selector));
+      const git = selector => computed('symbol-selectors', selector);
+      const task = (scope, id) => computed(scope, '[data-task-id="' + id + '"] .diagram-gantt-label');
+      return {
+        commit: git('[data-commit-id="root"] .diagram-git-dot').strokeWidth,
+        reverse: git('.diagram-git-reverse-mark').strokeWidth,
+        merge: git('[data-git-symbol="merge"] .diagram-git-ring').stroke,
+        highlight: [git('rect.diagram-git-dot').fill, git('.diagram-git-highlight-inner').fill, git('.diagram-git-highlight-inner').stroke],
+        cherry: [...document.querySelectorAll('[data-git-symbol="cherry-pick"] :is(.diagram-git-dot, .diagram-git-pick-stem, .diagram-git-pick-berry)')]
+          .map(element => getComputedStyle(element).opacity),
+        title: git('.diagram-title').fill,
+        actions: ['review.stage', 'verify', 'plain'].map(id => task('interactive-tasks', id).fill),
+        strict: task('plain-tasks', 'review.stage').fill,
+        escapedId: task('interactive-tasks', 'review.stage').fontStyle,
+      };
+    })()`)
+    expect(styles).toEqual({
+      commit: '5px', reverse: '5px', merge: 'rgb(35, 80, 121)',
+      highlight: ['rgb(170, 34, 51)', 'rgb(0, 85, 136)', 'rgb(17, 102, 51)'],
+      cherry: ['0.55', '0.55', '0.55', '0.55'], title: 'rgb(23, 54, 82)',
+      actions: ['rgb(153, 102, 51)', 'rgb(153, 102, 51)', 'rgb(34, 51, 68)'],
+      strict: 'rgb(34, 51, 68)', escapedId: 'italic',
+    })
+  }
+  finally {
+    browser.close()
+    await server.stop(true)
+  }
+}, 20_000)
 
 test.skipIf(!chrome)('scopes GitGraph effects per diagram and preserves theme paint in the player', async () => {
   const charts = [

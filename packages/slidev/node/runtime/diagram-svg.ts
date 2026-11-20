@@ -1,4 +1,4 @@
-import { escapeHtml } from './html.ts'
+import { escapeHtml, unescapeHtml } from './html.ts'
 import { gitGraphPreset, gitGraphStyleIndex } from './mermaid/gitgraph-themes.ts'
 import { diagramThemeSelector } from './mermaid/theme-selectors.ts'
 import { scopeDiagramStyles } from './scoped-style.ts'
@@ -10,11 +10,13 @@ export function applyDiagramTheme(svg: string, marker: string, options: Readonly
   const gantt = svg.includes('data-diagram-kind="gantt"')
   const git = svg.includes('data-diagram-kind="gitgraph"')
   const kind = gantt ? 'gantt' : git ? 'gitgraph' : undefined
+  const commitClasses = git ? new Set([...svg.matchAll(/ data-commit-id="([^"]*)"/g)]
+    .flatMap(([, value]) => unescapeHtml(value).split(/[ \t\r\n\f]+/))) : undefined
   let scoped: string
   try {
     const literalsOrComments = /\/\*[\s\S]*?\*\/|"(?:[^"\\]|\\[\s\S])*"|'(?:[^'\\]|\\[\s\S])*'|^[ \t]*\/\/[^\r\n]*/gm
     const css = value.replace(literalsOrComments, token => token.trimStart().startsWith('//') ? '' : token)
-    scoped = scopeDiagramStyles(css, id, kind ? selector => diagramThemeSelector(selector, kind) : undefined).trim()
+    scoped = scopeDiagramStyles(css, id, kind ? selector => diagramThemeSelector(selector, kind, commitClasses) : undefined).trim()
   }
   catch { return svg }
   if (!scoped) return svg
