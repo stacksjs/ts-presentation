@@ -340,6 +340,7 @@ for (const [name, shades] of Object.entries(legacyColorShades)) {
 const builtinMacros = new Map<string, Macro>(Object.entries(legacyColors).map(([name, value]) =>
   [`\\${name}`, { body: ['\\textcolor', '{', value, '}', '{', '#1', '}'], parameters: [[]], prefix: [] }]))
 builtinMacros.set('\\boxed', { body: tokenize('\\fbox{$\\displaystyle{#1}$}'), parameters: [[]], prefix: [] })
+builtinMacros.set('\\substack', { body: tokenize('\\begin{subarray}{c}#1\\end{subarray}'), parameters: [[]], prefix: [] })
 builtinMacros.set('\\angln', { body: tokenize('{\\angl n}'), parameters: [], prefix: [] })
 for (const [name, brace] of [['\\bgroup', '{'], ['\\egroup', '}']])
   builtinMacros.set(name, { body: [brace], parameters: [], prefix: [] })
@@ -805,7 +806,7 @@ const mathModeFunctions = new Set([
   ...groupedArgumentFunctions, ...primitiveArgumentFunctions, ...Object.keys(mathClasses), ...Object.keys(accents),
   ...Object.keys(stretchedAccents), ...Object.keys(extensibleArrows),
   ...ruledAccents, ...Array.from(infixFractions, command => command.slice(1)),
-  'begin', 'end', 'right', 'middle', '@binrel', 'mathchoice', 'vcenter', 'substack',
+  'begin', 'end', 'right', 'middle', '@binrel', 'mathchoice', 'vcenter',
   'cancel', 'bcancel', 'xcancel', 'pmb', 'phase', 'mathreflectbox',
   'prescript', 'mathstrut', 'overset', 'underset', 'stackrel',
   'overline', 'operatorname', 'operatorname@', 'operatornamewithlimits', 'limits', 'nolimits', 'displaylimits',
@@ -1455,8 +1456,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
   }
 
   function lineGap(command: string): string | undefined {
-    const extra = command === '\\\\' && tokens[cursor] === '[' ? bracket() : undefined
-    const gap = extra === undefined ? '' : dimension(extra)
+    const extra = command === '\\\\' && tokens[cursor] === '[' ? rawBracket() : undefined
+    const gap = extra === undefined ? '' : dimension(expandDefinition(extra).join(''))
     if (gap === undefined) throw new Error('Invalid math line spacing')
     if (!display) return gap
     return strictViolation('newLineInDisplayMode', 'A standalone TeX line break has no effect in LaTeX display math', false) ? undefined : gap
@@ -2212,10 +2213,11 @@ export function renderMath(source: string, display = false, configured: MathMacr
       tagState.label = nextTag(display && environment === 'equation')
       return xml`<mrow>${content}</mrow>`
     }
-    if (!/^(?:[pbBvV]?matrix[*]?|smallmatrix|d?rcases|d?cases|align(?:ed|edat|at[*]?|[*])?|gather(?:ed|[*])?|split|d?array|subarray|substack|multline[*]?)$/.test(environment))
+    if (!/^(?:[pbBvV]?matrix[*]?|smallmatrix|d?rcases|d?cases|align(?:ed|edat|at[*]?|[*])?|gather(?:ed|[*])?|split|d?array|subarray|multline[*]?)$/.test(environment))
       throw new Error(`Unsupported math environment: ${environment}`)
-    const stack = environment === 'substack'
-    const columnArray = /^(?:d?array|subarray)$/.test(environment)
+    const subarray = environment === 'subarray'
+    const smallMatrix = environment === 'smallmatrix'
+    const columnArray = subarray || /^(?:d?array)$/.test(environment)
     const alignmentTokens = environment.endsWith('matrix*') ? rawBracket() : undefined
     const matrixAlignment = alignmentTokens && expandDefinition(alignmentTokens).join('').trim()
     if (matrixAlignment !== undefined && !/^[lcr]$/.test(matrixAlignment)) throw new Error('Invalid matrix alignment')
@@ -2225,8 +2227,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const pairs = Number(pairCount)
     if (paired && (!/^\d+$/.test(pairCount) || !Number.isSafeInteger(pairs) || pairs < 1)) throw new Error('Invalid alignment column count')
     const layout = arrayColumns(columns)
-    if (environment === 'subarray' && !/^\s*[lc]\s*$/.test(columns)) throw new Error('Invalid subarray alignment')
-    const compact = stack || environment === 'subarray' || environment === 'smallmatrix'
+    if (subarray && !/^[lc]?$/.test(columns.trim())) throw new Error('Invalid subarray alignment')
+    const compact = subarray || smallMatrix
     const aligned = environment.startsWith('align') || environment === 'split'
     const gathered = environment.startsWith('gather') || environment.startsWith('multline')
     const cases = environment.endsWith('cases')
@@ -2243,10 +2245,9 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (rowTags) tagState = { suppressed: false }
     const rows: ArrayRow[] = []
     let cells: Markup[] = []
-    const end = stack ? '}' : '\\end'
     let rules: ArrayRule[] = []
     let closed = false
-    const stops = ['&', '\\\\', '\\newline', '\\cr', end]
+    const stops = ['&', '\\\\', '\\newline', '\\cr', '\\end']
     while (peek()) {
       if (!cells.length) {
         while (peek() === '\\hline' || peek() === '\\hdashline')
@@ -2256,7 +2257,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       cells.push(inScope(() => row(stops, false, false, undefined, followsOrdinary)))
       const separator = take()
       if (separator === '&') {
-        if (stack || environment === 'subarray' || gathered) throw new Error('Too many columns in math stack')
+        if (subarray || gathered) throw new Error('Too many columns in math stack')
         if (environment === 'split' && cells.length === 2) throw new Error('Too many columns in split')
         if (columnArray && cells.length === layout.columns.length) strictViolation('textEnv', 'Too few columns in the array specification')
         continue
@@ -2273,7 +2274,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       }
       cells = []
       if (rowTags) tagState = { suppressed: false }
-      if (separator === end && (stack || literalGroup() === environment)) {
+      if (separator === '\\end' && literalGroup() === environment) {
         closed = true
         break
       }
@@ -2289,7 +2290,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const leqno = state?.options.leqno === true
     const displayRows = tags && rowTags && display && depth === 1
     const columnCount = Math.max(layout.columns.length, ...rows.map(entry => entry.cells.length))
-    const grid = !compact && (aligned || alignment.length > 0 || displayRows)
+    const grid = aligned || alignment.length > 0 || displayRows
     const rowRules = rows.reduce((count, entry) => count + entry.before.length, rules.length)
     const columnRules = layout.columns.reduce((count, column) => count + column.before.length, layout.after.length)
     const rectangular = grid || columnArray || tags || rowRules > 0
@@ -2305,14 +2306,16 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const align = aligned || cases || alignment.length || tags ? ` columnalign="${columnAlignment.join(' ')}"` : ''
     const moreRowSpace = aligned || gathered || cases
     const pad = compact ? '0.06' : ((moreRowSpace ? 0.125 : 0.14) * stretch).toFixed(4).replace(/0+$/, '').replace(/\.$/, '')
-    const lines = compact ? ' class="math-compact-array"' : ' data-equation-lines'
+    const lines = compact ? '' : ' data-equation-lines'
+    const classes = [compact && 'math-compact-array', grid && 'math-alignment-grid', displayRows && 'math-display-grid'].filter(Boolean).join(' ')
+    const layoutClass = classes ? ` class="${classes}"` : ''
     const amsAlignment = (aligned || environment.startsWith('gather')) ? ` data-equation-environment="${environment}"` : ''
     const rowSpacing = amsAlignment && (stretch !== 1 || rows.some(row => row.gap !== undefined)) ? ' data-equation-row-spacing' : ''
     const gridLayout = displayRows
-      ? ` class="math-alignment-grid math-display-grid" style="--math-columns:${columnCount}" data-equation-tags="${leqno ? 'left' : 'right'}"${options?.fleqn ? ' data-equation-flush' : ''}`
-      : grid ? ` class="math-alignment-grid" style="--math-columns:${columnAlignment.length}"` : ''
+      ? ` style="--math-columns:${columnCount}" data-equation-tags="${leqno ? 'left' : 'right'}"${options?.fleqn ? ' data-equation-flush' : ''}`
+      : grid ? ` style="--math-columns:${columnAlignment.length}"` : ''
     return (style) => {
-      const cellStyle = compact ? Math.max(2, style) as MathStyle : ordinaryCellStyle
+      const cellStyle = compact ? 2 : ordinaryCellStyle
       const markup = rows.map((entry, rowIndex) => {
         const cell = tags ? equationNumberCell(entry.label) : ''
         // MathML Core browsers use CSS for cell alignment and visible rules.
@@ -2327,6 +2330,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
             if ((aligned && !paired && index > 0 && index % 2 === 0) || (cases && index > 0))
               styling.push('padding-inline-start:1em')
           }
+          if (compact) {
+            styling.push('padding-inline:0')
+            if (smallMatrix && index > 0) styling.push('padding-inline-start:0.2778em')
+          }
           if (cellStyle === 0) styling.push('math-style:normal')
           if (rowRules || columnRules) {
             styling.push(...arrayRuleStyles([
@@ -2340,12 +2347,13 @@ export function renderMath(source: string, display = false, configured: MathMacr
           if (entry.gap) styling.push(`padding-bottom:max(0px,calc(${pad}em + ${entry.gap}))`)
           const settings = styling.length ? ` style="${styling.join(';')}"` : ''
           const value = renderMarkup(entry.cells[index] ?? '', cellStyle)
-          const sized = style === cellStyle ? value : mathSize(cellStyle, value)
+          const sized = compact || style === cellStyle ? value : mathSize(cellStyle, value)
           return `<mtd${settings}>${grid ? `<mrow>${sized}</mrow>` : sized}</mtd>`
         }).join('')
         return `<mtr>${leqno ? cell : ''}${content}${leqno ? '' : cell}</mtr>`
       }).join('')
-      const table = `<mtable${lines} data-math-array${align}${gridLayout}${amsAlignment}${rowSpacing}>${markup}</mtable>`
+      const matrix = `<mtable${lines} data-math-array${align}${layoutClass}${gridLayout}${amsAlignment}${rowSpacing}>${markup}</mtable>`
+      const table = compact ? mathSize(cellStyle, matrix) : matrix
       if (displayRows) return table
       // Center the whole grid on the math axis beside surrounding inline atoms.
       const centered = grid && style !== 0
@@ -2577,10 +2585,6 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const sized = /^(bigg|Bigg|big|Big)([lrm]?)$/.exec(name)
     if (sized) return { markup: sizedFence(readDelimiter(name), sizedDelimiters[sized[1]], sized[2]) }
     if (name === 'begin') return { markup: inScope(() => matrix(literalGroup())) }
-    if (name === 'substack') {
-      if (take() !== '{') throw new Error('Expected a grouped math stack')
-      return { markup: inScope(() => matrix('substack')) }
-    }
     if (name === 'end' || name === 'endgroup') throw new Error(`Unexpected math token: ${token}`)
     if (['frac', 'dfrac', 'tfrac', 'binom', 'dbinom', 'tbinom'].includes(name)) {
       const binomial = name.endsWith('binom')

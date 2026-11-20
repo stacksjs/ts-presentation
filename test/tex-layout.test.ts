@@ -985,13 +985,29 @@ test('limits the number of array rules expanded across cells', () => {
 test('renders compact substack and subarray limits with no nested equation click rows', () => {
   const html = renderMath(String.raw`\sum_{\substack{i>0\\j<n}} x_{ij} +
     \lim_{\begin{subarray}{l}i\to0\cr j\to0\end{subarray}} y`, true)
-  expect(html.match(/class="math-compact-array"/g)).toHaveLength(2)
+  expect(html.match(/class="math-compact-array/g)).toHaveLength(2)
   expect(html.match(/<munder>/g)).toHaveLength(2)
-  expect(html.match(/<mtr>/g)).toHaveLength(4)
+  expect(html.match(/<mtr><mtd style=/g)).toHaveLength(4)
   expect(html).toContain('columnalign="left"')
   expect(html).not.toContain('data-equation-lines')
   expect(renderMath(String.raw`\substack{a & b}`)).toContain('math-unrendered')
   expect(renderMath(String.raw`\begin{subarray}{r}a\end{subarray}`)).toContain('math-unrendered')
+})
+
+test('expands single-token and eager substack arguments and resets compact rows to script style', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const formula = String.raw`\def\terms{i>0\\j<n}\edef\limits{\substack\terms}
+    \def\terms{z}\sum_{\limits}x+
+    y_{z_{\substack{\mathchoice{D}{T}{S}{Q}}}}+
+    \begin{subarray}{}a\\b\end{subarray}`
+  const markup = math(formula, true).split('<annotation')[0]
+  expect(markup.match(/class="math-compact-array/g)).toHaveLength(3)
+  expect(markup.match(/<mtr><mtd style=/g)).toHaveLength(5)
+  expect(markup).toContain('<mi>i</mi>')
+  expect(markup).toContain('<mi>j</mi>')
+  expect(markup).toContain('<mi>S</mi>')
+  expect(markup).not.toContain('<mi>Q</mi>')
+  expect(math(String.raw`\let\stack=\substack \stack x`, false)).toContain('<mi>x</mi>')
 })
 
 test('renders nested math, escaped text, accents, and stacked fonts inside TeX labels', () => {
@@ -1137,6 +1153,8 @@ test('renders explicit TeX breaks in inline, display, text, and alignment math',
   expect(math(String.raw`\text{up\\[1em]down}`, false)).toContain('<mtext>up</mtext></mtd></mtr>')
   expect(math(String.raw`\begin{equation*}a\\b\end{equation*}`, true)).toContain('<mtable data-equation-lines>')
   expect(math(String.raw`\begin{align*}a&=b\newline c&=d\end{align*}`, true).match(/<mtr>/g)).toHaveLength(2)
+  expect(math(String.raw`\def\gap{1.5em}a\\[\gap]b`, false)).toContain('padding-bottom:max(0px,calc(0.14em + 1.5em))')
+  expect(math(String.raw`\text{\def\gap{1em}a\\[\gap]b}`, false)).toContain('padding-bottom:max(0px,calc(0.14em + 1em))')
   expect(() => math(String.raw`a\\[large]b`, false)).toThrow('Invalid math line spacing')
 })
 
@@ -1620,6 +1638,54 @@ test.skipIf(!chrome)('renders legacy font boundaries and colon relation gaps in 
       ['outer', 'sans-serif', 'italic', '700'], ['x', 'math', 'normal', '400'], ['inner', 'sans-serif', 'normal', '700'],
       ['italic', 'sans-serif', 'italic', '700'], ['rest', 'sans-serif', 'italic', '700'], ['reset', 'math', 'normal', '400'],
     ])
+  }
+  finally {
+    view.close()
+    server.stop(true)
+  }
+}, 45_000)
+
+test.skipIf(!chrome)('lays out compact TeX arrays with script-sized rows and correct alignment in Chromium', async () => {
+  const examples = [
+    String.raw`\begin{subarray}{l}x\\xxx\end{subarray}`,
+    String.raw`\substack{x\\xxx}`,
+    String.raw`\begin{smallmatrix}x&x\\x&x\end{smallmatrix}`,
+    String.raw`x_{y_{\substack{x\\xxx}}}`,
+  ]
+  const body = examples.map(source => `<p>${renderMath(source)}</p>`).join('')
+  const css = await Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url)).text()
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response(`<!doctype html><meta charset="utf-8"><style>${css}</style><main style="font-size:40px">${body}</main>`, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    }),
+  })
+  const view = new Bun.WebView({ backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await view.navigate(server.url.href)
+    const geometry = await view.evaluate<{ start: number, center: number, font: number, padding: number, gap: number }[]>(`[...document.querySelectorAll('.math-compact-array')].map(table => {
+      const rows = [...table.children].map(row => row.querySelectorAll('mi'))
+      const [first, second] = rows.map(line => [...line].map(node => node.getBoundingClientRect()))
+      const style = getComputedStyle(rows[0][0])
+      return {
+        start: first[0].left - second[0].left,
+        center: (first[0].left + first.at(-1).right - second[0].left - second.at(-1).right) / 2,
+        font: parseFloat(style.fontSize),
+        padding: parseFloat(getComputedStyle(table.querySelector('mtd')).paddingInlineStart),
+        gap: first[1] ? first[1].left - first[0].right : 0,
+      }
+    })`)
+    const [left, centered, matrix, nested] = geometry
+    expect(left.start).toBeCloseTo(0)
+    expect(centered.start).toBeGreaterThan(0)
+    expect(centered.center).toBeCloseTo(0, 1)
+    expect(matrix.gap).toBeCloseTo(matrix.font * 0.2778, 1)
+    for (const measures of geometry) {
+      expect(measures.font).toBeCloseTo(left.font)
+      expect(measures.padding).toBe(0)
+    }
+    expect(left.font).toBeLessThan(40)
+    expect(nested.center).toBeCloseTo(0, 1)
   }
   finally {
     view.close()
