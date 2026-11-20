@@ -1434,6 +1434,41 @@ test('numbers AMS subequation groups in rendered order and links parent and chil
   expect(() => math(group.replace('\\begin{equation}', '\\begin{subequations}'), true)).toThrow('Invalid subequations display')
 })
 
+test('compiles empheq displays with numbered AMS rows, grouped options and nested scopes', async () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const source = String.raw`\begin{spreadlines}{4px}
+\begin{empheq}[outerbox=\fcolorbox{blue}{navy},innerbox=\fbox,left={\text{Case, one}\enspace\empheqbiglbrace},right=\empheqrbrack]{alignat=2}
+a&=b&&c=d\label{first}\\
+d&=e&&f=g
+\end{empheq}
+\begin{empheq}{gather*}u=v\end{empheq}
+\end{spreadlines}`
+  const html = math(source, true).replace(/<annotation[^>]*>.*?<\/annotation>/gs, '')
+  expect(html.match(/class="math-empheq"/g)).toHaveLength(1)
+  expect(html).toContain('data-empheq-box="outer" style="--math-frame-fill:navy;--math-frame-color:blue"')
+  expect(html).toContain('data-empheq-box="inner"')
+  expect(html).toContain('<mtext>Case, one</mtext>')
+  expect(html).toContain('data-empheq-delimiter="inner"')
+  expect(html).toContain('data-empheq-delimiter="body"')
+  expect(html).toContain('data-equation-environment="alignat" data-equation-row-spacing')
+  expect(html).toContain('<mtext>(1)</mtext>')
+  expect(html).toContain('<mtext>(2)</mtext>')
+  expect(html).toContain('margin-block-end:4px')
+  const standalone = String.raw`\begin{empheq}[box=\fbox]{equation*}x=2\end{empheq}`
+  const deck = await renderPresentation(parseDeck('# Group\n\n' + standalone))
+  expect(deck.html).toContain('<div class="math-empheq">')
+  expect(deck.html).toContain('data-equation-body data-empheq-start data-empheq-end')
+  expect(deck.html).not.toContain('<p><div class="math-empheq">')
+
+  for (const environment of ['equation', 'multline', 'align', 'gather', 'flalign']) {
+    const body = ['align', 'flalign'].includes(environment) ? 'x&=1' : 'x=1'
+    expect(math(`\\begin{empheq}[box=\\fbox]{${environment}}${body}\\end{empheq}`, true)).toContain('<mtext>(1)</mtext>')
+  }
+  expect(() => math(standalone, false)).toThrow('empheq requires display math')
+  expect(() => math(String.raw`\begin{empheq}{alignat}a&=b\end{empheq}`, true)).toThrow('Invalid empheq alignment')
+  expect(() => math(String.raw`\begin{empheq}[unknown=x]{align}a&=b\end{empheq}`, true)).toThrow('Unsupported empheq option')
+})
+
 test('uses the short display skip only for the requested top-level alignment', () => {
   const math = createMathRenderer({ throwOnError: true })
   const source = String.raw`\begin{spreadlines}{2px}

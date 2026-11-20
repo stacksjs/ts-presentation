@@ -97,7 +97,9 @@ export function collectSnapshot(options: {
         return expression ? read(expression, depth + 1) : undefined
       }
       // Ignore annotations at the root by capturing its presentation child.
-      const attributes = Object.fromEntries(Array.from(element.attributes, attribute => [attribute.name, attribute.value]))
+      const attributes = Object.fromEntries(Array.from(element.attributes)
+        .filter(attribute => attribute.name !== 'data-empheq-start' && attribute.name !== 'data-empheq-end')
+        .map(attribute => [attribute.name, attribute.value]))
       const text = Array.from(element.childNodes).filter(node => node.nodeType === 3).map(node => node.nodeValue).join('')
       characters += text.length
       if (characters > 4096) return

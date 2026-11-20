@@ -1,6 +1,7 @@
 const strut = 'data-math-strut'
 const frameRow = 'data-equation-frame-row'
-const selector = `mrow[${strut}], mtr[${frameRow}], mtable[data-equation-tags]:is(.math-display-grid, .math-tagged-display, .math-multline)`
+const empheq = '.math-empheq'
+const selector = `${empheq}, mrow[${strut}], mtr[${frameRow}], mtable[data-equation-tags]:is(.math-display-grid, .math-tagged-display, .math-multline)`
 const shifted = 'data-equation-tag-shifted'
 
 function fitStrut(element: Element): void {
@@ -50,7 +51,12 @@ function fitTable(table: Element): void {
   if (!(em > 0 && Number.isFinite(em))) return
   const single = table.classList.contains('math-tagged-display')
   const cells = [...rows[0].querySelectorAll(':scope > mtd:not(.math-equation-number, [aria-hidden])')]
-  const equationWidth = cells.reduce((total, cell) => total + cell.getBoundingClientRect().width, 0)
+  const equationWidth = cells.reduce((total, cell) => {
+    if (!cell.hasAttribute('data-empheq-start') && !cell.hasAttribute('data-empheq-end'))
+      return total + cell.getBoundingClientRect().width
+    const style = getComputedStyle(cell)
+    return total + cell.getBoundingClientRect().width + (Number.parseFloat(style.marginInlineStart) + Number.parseFloat(style.marginInlineEnd)) * scale
+  }, 0)
   // Equation cells occupy shared max-content tracks. Reserve their width and
   // the minimum interpair gaps before deciding which individual tags fit.
   const pairGaps = Number(style.getPropertyValue('--math-pair-gaps')) || 0
@@ -85,6 +91,98 @@ function fitFrames(row: Element): void {
   }
 }
 
+function fitEmpheq(element: HTMLElement): void {
+  const table = element.querySelector(':scope > math :is(.math-display-grid, .math-tagged-display, .math-multline), :scope > .math-short-display > math :is(.math-display-grid, .math-tagged-display, .math-multline)')
+  if (!table) return
+  const outer = element.querySelector<HTMLElement>(':scope > [data-empheq-box="outer"]')
+  const inner = element.querySelector<HTMLElement>(':scope > [data-empheq-box="inner"]')
+  const left = element.querySelector<HTMLElement>(':scope > [data-empheq-side="left"]')
+  const right = element.querySelector<HTMLElement>(':scope > [data-empheq-side="right"]')
+  const cells = Array.from(table.querySelectorAll(':scope > mtr > mtd:not(.math-equation-number, [aria-hidden])'))
+  const rootStyle = getComputedStyle(element)
+  const initial = element.getBoundingClientRect()
+  const xScale = initial.width / Number.parseFloat(rootStyle.width)
+  const yScale = initial.height / Number.parseFloat(rootStyle.height)
+  if (!(xScale > 0 && yScale > 0 && Number.isFinite(xScale) && Number.isFinite(yScale)) || !cells.length) return
+  const inset = (box: HTMLElement | null) => {
+    if (!box) return 0
+    const style = getComputedStyle(box)
+    return Number.parseFloat(style.paddingTop) + Number.parseFloat(style.borderTopWidth)
+  }
+  const outerInset = inset(outer)
+  const innerInset = inset(inner)
+  const totalInset = outerInset + innerInset
+  const length = (value: number) => `${Number(value.toFixed(4))}px`
+  const assign = (box: HTMLElement, property: string, amount: number) => {
+    const value = length(amount)
+    if (box.style.getPropertyValue(property) !== value) box.style.setProperty(property, value)
+  }
+  const width = (side: HTMLElement | null) => side ? side.getBoundingClientRect().width / xScale : 0
+  function reserve(): void {
+    assign(element, '--empheq-inline-start', width(left) + totalInset)
+    assign(element, '--empheq-inline-end', width(right) + totalInset)
+  }
+  function body() {
+    const root = element.getBoundingClientRect()
+    const boxes = cells.map(cell => cell.getBoundingClientRect()).filter(box => box.width && box.height)
+    if (!boxes.length) return
+    return {
+      x: (Math.min(...boxes.map(box => box.left)) - root.left) / xScale,
+      y: (Math.min(...boxes.map(box => box.top)) - root.top) / yScale,
+      right: (Math.max(...boxes.map(box => box.right)) - root.left) / xScale,
+      bottom: (Math.max(...boxes.map(box => box.bottom)) - root.top) / yScale,
+    }
+  }
+  function stretch(bounds: NonNullable<ReturnType<typeof body>>): void {
+    for (const fence of element.querySelectorAll(':scope > .math-empheq-side [data-empheq-delimiter]')) {
+      const pad = fence.getAttribute('data-empheq-delimiter') === 'inner' ? innerInset : 0
+      const space = fence.nextElementSibling
+      const height = bounds.bottom - bounds.y + 2 * pad
+      const size = length(height / 2)
+      if (space && space.getAttribute('height') !== size) {
+        space.setAttribute('height', size)
+        space.setAttribute('depth', size)
+        fence.setAttribute('minsize', length(height))
+      }
+    }
+  }
+  assign(element, '--empheq-block-pad', totalInset)
+  reserve()
+  let bounds = body()
+  if (!bounds) return
+  stretch(bounds)
+  reserve()
+  if (table.hasAttribute('data-equation-tags')) fitTable(table)
+  bounds = body() ?? bounds
+  stretch(bounds)
+
+  const framed = (box: HTMLElement, rect: typeof bounds, pad: number) => {
+    assign(box, 'left', rect.x - pad)
+    assign(box, 'top', rect.y - pad)
+    assign(box, 'width', rect.right - rect.x + 2 * pad)
+    assign(box, 'height', rect.bottom - rect.y + 2 * pad)
+    box.setAttribute('data-empheq-ready', '')
+  }
+  if (inner) framed(inner, bounds, innerInset)
+  const group = { x: bounds.x - innerInset, y: bounds.y - innerInset, right: bounds.right + innerInset, bottom: bounds.bottom + innerInset }
+  for (const [side, onLeft] of [[left, true], [right, false]] as const) {
+    if (!side) continue
+    const sideBox = side.getBoundingClientRect()
+    const w = sideBox.width / xScale
+    const h = sideBox.height / yScale
+    const y = (bounds.y + bounds.bottom - h) / 2
+    const x = onLeft ? group.x - w : group.right
+    assign(side, 'left', x)
+    assign(side, 'top', y)
+    side.setAttribute('data-empheq-ready', '')
+    group.x = Math.min(group.x, x)
+    group.y = Math.min(group.y, y)
+    group.right = Math.max(group.right, x + w)
+    group.bottom = Math.max(group.bottom, y + h)
+  }
+  if (outer) framed(outer, group, outerInset)
+}
+
 export function createEquationFit(): (root: ParentNode, watch?: boolean) => void {
   const observed = new Map<Element, Element>()
   const pending = new Set<Element>()
@@ -93,6 +191,7 @@ export function createEquationFit(): (root: ParentNode, watch?: boolean) => void
   function fit(element: Element): void {
     if (element.hasAttribute(strut)) fitStrut(element)
     else if (element.hasAttribute(frameRow)) fitFrames(element)
+    else if (element.matches(empheq)) fitEmpheq(element as HTMLElement)
     else fitTable(element)
   }
 

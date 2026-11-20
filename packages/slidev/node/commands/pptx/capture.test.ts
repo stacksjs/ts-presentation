@@ -321,6 +321,101 @@ it.skipIf(!chrome)('exports cramped superscripts, stacks, and measured laps as e
   }
 }, 45_000)
 
+it.skipIf(!chrome)('keeps empheq frames and delimiters aligned around editable numbered reveals', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-empheq-'))
+  const canvas = { width: 960, height: 540 }
+  try {
+    const entry = join(root, 'slides.md')
+    await Bun.write(entry, String.raw`# Reference
+
+See \eqref{a} and \eqref{b}.
+
+---
+
+# Bounded equations
+
+$$ {1|2|all}
+\newcommand{\panel}[1]{\fcolorbox{blue}{navy}{#1}}
+\begin{empheq}[box=\panel,innerbox=\fbox,left={P\Rightarrow\empheqbiglbrace},right=\empheqrbrack]{alignat=1}
+X&=\frac{1}{2}\label{a}\\
+Y&=\frac{3}{4}\label{b}
+\end{empheq}
+$$`)
+    const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
+    const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
+    const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
+    if (status) throw new Error(stderr)
+    const dist = join(root, 'dist')
+    const server = Bun.serve({
+      hostname: '127.0.0.1', port: 0,
+      fetch(request) {
+        const name = new URL(request.url).pathname.slice(1) || 'index.html'
+        if (!['index.html', 'presentation.js', 'presentation.css', 'deck.css'].includes(name)) return new Response(null, { status: 404 })
+        return new Response(Bun.file(join(dist, name)))
+      },
+    })
+    const view = new Bun.WebView({ ...canvas, backend: { type: 'chrome', path: chrome!, url: false } })
+    try {
+      const markup = await Bun.file(join(dist, 'index.html')).text()
+      expect(markup).toContain('data-slide-link="2"><math><mrow><mtext>(1)</mtext>')
+      expect(markup).toContain('data-slide-link="2"><math><mrow><mtext>(2)</mtext>')
+      await view.navigate(server.url.href + '#slide-2')
+      const layout = await view.evaluate<{
+        positioned: boolean, delimiters: number[], bodyHeight: number, border: string, fill: string
+      }>(`(async () => {
+        await document.fonts.ready
+        await new Promise(requestAnimationFrame)
+        const group = document.querySelector('.math-empheq')
+        const wrapper = selector => group.querySelector(selector)
+        const rect = selector => wrapper(selector).getBoundingClientRect()
+        const outer = rect('[data-empheq-box="outer"]')
+        const inner = rect('[data-empheq-box="inner"]')
+        const left = rect('[data-empheq-side="left"]')
+        const right = rect('[data-empheq-side="right"]')
+        const start = rect('mtr:first-child [data-empheq-start]')
+        const end = rect('mtr:last-child [data-empheq-end]')
+        const tag = rect('.math-equation-number')
+        const paint = getComputedStyle(wrapper('[data-empheq-box="outer"]'))
+        return {
+          positioned: outer.left < left.left && left.right <= inner.left + 0.5
+            && inner.left < start.left && inner.right > end.right && inner.top < start.top && inner.bottom > end.bottom
+            && right.left >= inner.right - 0.5 && outer.right > right.right && tag.left >= outer.right - 0.5,
+          delimiters: Array.from(group.querySelectorAll('[data-empheq-delimiter]'), el => el.getBoundingClientRect().height),
+          bodyHeight: end.bottom - start.top, border: paint.borderTopColor, fill: paint.backgroundColor,
+        }
+      })()`)
+      expect(layout.positioned).toBe(true)
+      expect(layout.delimiters).toHaveLength(2)
+      expect(Math.min(...layout.delimiters)).toBeGreaterThan(layout.bodyHeight * 0.85)
+      expect(layout.border).toBe('rgb(0, 0, 255)')
+      expect(layout.fill).toBe('rgb(0, 0, 128)')
+    }
+    finally {
+      view.close()
+      await server.stop(true)
+    }
+    const frames: PowerPointFrame[] = []
+    await captureFrames({ root: dist, executable: chrome!, scale: 1, canvas, range: '2', editable: true, withClicks: true }, frame => { frames.push(frame) })
+    expect(frames.map(frame => frame.position?.click)).toEqual([0, 1, 2])
+    for (const [step, frame] of frames.entries()) {
+      const equation = frame.editable?.nodes.flatMap(node => node.kind === 'raster' && node.equation?.tags ? [node.equation] : [])[0]
+      expect(equation).toBeDefined()
+      expect(equation?.tags?.map(tag => tag.expression.match(/\(\d+\)/)?.[0])).toEqual(['(1)', '(2)'])
+      expect(equation?.tags?.map(tag => tag.expression.includes('<a:alpha val="24000"/>'))).toEqual([step === 1, step === 0])
+      expect(equation?.cells?.filter(cell => cell.expression.includes('<m:f>'))).toHaveLength(2)
+    }
+    const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Bounded equations' }))
+    const slide = parts.get('ppt/slides/slide3.xml')?.toString() ?? ''
+    expect(slide.match(/name="Equation tag"/g)).toHaveLength(2)
+    expect(slide).toContain('val="000080"')
+    expect(slide).toContain('val="0000FF"')
+    expect(slide).toContain('<p:pic>')
+  }
+  finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}, 45_000)
+
 it.skipIf(!chrome)('keeps AMS subequation letters and reveal opacity editable in a PowerPoint range', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-subequations-'))
   const canvas = { width: 960, height: 540 }

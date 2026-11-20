@@ -15,7 +15,7 @@ const inlineCode = /^`+/
 const protectedHtml = /^<(pre|code|script|style)(?:\s[^>]*)?>[\s\S]*?<\/\1\s*>/i
 const htmlTag = /^<(?:[^>"']|"[^"]*"|'[^']*')+>/
 const slotMarker = /^::\s*([\w.:-]+?)\s*::\s*$/
-const bareDisplay = /^ {0,3}\\begin\{((?:equation|align|alignat|flalign|xalignat|gather|multline)\*?|xxalignat|CD|subequations|spreadlines)\}/
+const bareDisplay = /^ {0,3}\\begin\{((?:equation|align|alignat|flalign|xalignat|gather|multline)\*?|xxalignat|CD|subequations|spreadlines|empheq)\}/
 const openSpreadlines = /^ {0,3}\\begin\{spreadlines\}[ \t]*\{/
 const mathtoolsSettings = /^ {0,3}\\mathtoolsset[ \t]*\{/
 const tagFormStart = /^ {0,3}\\(newtagform|renewtagform|usetagform)(?=[ \t{])/
@@ -410,7 +410,7 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
       return (attrs ? attrs.restore(html) : html)
         .replace(/<p>(<tp-math data-equation="\d+"><\/tp-math>)<\/p>/g, (whole, placeholder) => {
           const index = Number(/\d+/.exec(placeholder)?.[0])
-          return /^<(?:div class="(?:equation-steps|math-subequations|math-spreadlines|math-short-display)"|math [^>]* display="block"|mrow data-pending-equation-pin=)/.test(math[index] ?? '') ? placeholder : whole
+          return /^<(?:div class="(?:equation-steps|math-subequations|math-spreadlines|math-short-display|math-empheq)"|math [^>]* display="block"|mrow data-pending-equation-pin=)/.test(math[index] ?? '') ? placeholder : whole
         })
         .replace(/<tp-math data-equation="(\d+)"><\/tp-math>/g, (whole, index: string) => math[Number(index)] ?? whole)
     },

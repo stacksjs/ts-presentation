@@ -787,6 +787,30 @@ v-switch { display: block; }
   inset-block-start: -0.4em;
   margin-block: 0 -0.4em;
 }
+/* Reserve the adornments in the equation tracks while keeping its tags in the gutters. */
+.slide .math-empheq {
+  position: relative;
+  isolation: isolate;
+  display: flow-root;
+  box-sizing: border-box;
+  margin-block: 0.7em;
+  padding-block: var(--empheq-block-pad, 0px);
+}
+.slide .math-empheq > math[display="block"],
+.slide .math-empheq-side > math { margin-block: 0; }
+.math-empheq [data-empheq-start] { margin-inline-start: var(--empheq-inline-start, 0px); }
+.math-empheq [data-empheq-end] { margin-inline-end: var(--empheq-inline-end, 0px); }
+.math-empheq .math-display-grid > mtr[data-equation-intertext] > mtd { grid-column: 2 / -2; }
+.math-empheq-box, .math-empheq-side { position: absolute; visibility: hidden; }
+.math-empheq-box {
+  box-sizing: border-box;
+  pointer-events: none;
+  z-index: -1;
+  border: var(--math-frame-rule, 0.04em) solid var(--math-frame-color, currentColor);
+  background-color: var(--math-frame-fill, transparent);
+  padding: var(--math-frame-padding, 0.3em);
+}
+.math-empheq [data-empheq-ready] { visibility: visible; }
 @supports (display: math) {
   math mfrac > .math-fraction-alignment {
     display: inline-grid;
