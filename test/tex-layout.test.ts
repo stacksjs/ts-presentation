@@ -853,6 +853,57 @@ test('renders bracket annotations, ruled segments, and text accents in both mode
   expect(math(String.raw`\text{a\kern1emb}`, false)).toContain('<mtext>a</mtext><mspace width="1em"/><mtext>b</mtext>')
 })
 
+// Unicode diagnostics and examples adapted from the KaTeX 0.19.1 fixtures.
+test('keeps combining accents attached to math atoms, scripts, and macro arguments', () => {
+  const math = createMathRenderer({ throwOnError: true, strict: true })
+  const html = math(String.raw`\def\mark#1{#1}` + 'x\u0302^2 + \u03B1\u0301 + i\u0301 + \\mark j\u0301', false)
+  expect(html).toContain('<msup><mover accent="true"><mi>x</mi><mo>ˆ</mo></mover><mn>2</mn></msup>')
+  expect(html).toContain('<mover accent="true"><mi>α</mi><mo>´</mo></mover>')
+  expect(html).toContain('<mover accent="true"><mi>ı</mi><mo>´</mo></mover>')
+  expect(html).toContain('<mover accent="true"><mi>ȷ</mi><mo>´</mo></mover>')
+  expect(math('\\text{A\u0301C\u0301 \u1EA5}', false)).toContain('<mtext>ÁĆ ấ</mtext>')
+  expect(() => math('\u0301', false)).toThrow('requires a base character')
+  expect(() => math('x\u0323', false)).toThrow('Unknown Unicode combining accent')
+})
+
+test('reports KaTeX Unicode diagnostic codes and original tokens in the active mode', () => {
+  const diagnostics: [string, string | undefined][] = []
+  const math = createMathRenderer({
+    throwOnError: true,
+    strict(code, _message, token) {
+      diagnostics.push([code, token?.text])
+      return 'ignore'
+    },
+  })
+  const html = math('é+試+x’+۹ + \\text{試 é 👩}', true)
+  expect(html).toContain('<mover accent="true"><mi>e</mi><mo>´</mo></mover>')
+  expect(html).toContain('<mtext>試</mtext>')
+  expect(html).toContain('<mtext>試 é 👩</mtext>')
+  expect(diagnostics).toEqual([
+    ['unicodeTextInMathMode', 'é'], ['unicodeTextInMathMode', '試'],
+    ['unknownSymbol', '’'], ['unknownSymbol', '۹'], ['unknownSymbol', '👩'],
+  ])
+  diagnostics.length = 0
+  expect(math('𝔸 + 𝟎 + x² + α ≠ β + \\text{Café 試}', false)).toContain('<mn>𝟎</mn>')
+  expect(diagnostics).toEqual([])
+})
+
+test('makes Unicode policy affect mixed equations and retains explicit Unicode spacing', () => {
+  const strict = createMathRenderer({ throwOnError: true, strict: 'error' })
+  expect(() => strict('é', false)).toThrow('[unicodeTextInMathMode]')
+  expect(() => strict('x′', false)).toThrow('[unknownSymbol]')
+  expect(() => strict('²', false)).toThrow('[unknownSymbol]')
+  expect(() => strict('x\u2009y', false)).toThrow('[unknownSymbol]')
+  expect(() => strict('\\text{ά}', false)).toThrow('[unknownSymbol]')
+  expect(() => strict('®', false)).toThrow('[mathVsTextAccents]')
+  expect(() => strict('x\u2028y', false)).toThrow('Unexpected Unicode character')
+  const relaxed = createMathRenderer({ throwOnError: true, strict: 'ignore' })
+  expect(relaxed('x\u2009y', false)).toContain('<mi>x</mi><mtext>\u2009</mtext><mi>y</mi>')
+  expect(relaxed('\\text{x\u00A0y}', false)).toContain('<mtext>x\u00A0y</mtext>')
+  expect(relaxed('x′', false)).toContain('<msup><mi>x</mi>')
+  expect(createMathRenderer({ strict: 'error' })('é', false)).toContain('math-unrendered')
+})
+
 test('enforces KaTeX strict settings for comments, markup, text commands, spacing, and array columns', () => {
   const samples = [
     ['commentAtEnd', 'x % comment'],

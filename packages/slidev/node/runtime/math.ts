@@ -10,6 +10,7 @@ import type { MathClass } from './math-spacing.ts'
 import { isCenteredGlyph, mathSymbol, textSymbol, unicodeColonRelation } from './math-symbols.ts'
 import type { MathSymbol, MathSymbolKind } from './math-symbols.ts'
 import { isMathAttributeCommand, isMathUrlCommand, mathAttributes, mathKeyValues, mathUrl, trustedMath } from './math-trust.ts'
+import { readUnicodeToken, unicodeAccents } from './math-unicode.ts'
 
 const greek: Record<string, string> = {
   alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε', varepsilon: 'ϵ', zeta: 'ζ', eta: 'η',
@@ -76,7 +77,7 @@ const unicodeSuperscripts = new Map([...'⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽
   [symbol, '0123456789+-=()ABDEGHIJKLMNOPRTUVWabcdefghijklmnoprstuvwxyzβγδϕχθ'[index]]))
 const unicodeSubscripts = new Map([...'₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓᵦᵧᵨᵩᵪ'].map((symbol, index) =>
   [symbol, '0123456789+-=()aehijklmnoprstuvxβγρϕχ'[index]]))
-const primes: Readonly<Record<string, number>> = { "'": 1, '′': 1, '″': 2, '‴': 3, '⁗': 4 }
+const primes = new Map([["'", 1], ['′', 1], ['″', 2], ['‴', 3], ['⁗', 4]])
 const negatedOperators: Record<string, string> = {
   '=': '≠', '&lt;': '≮', '&gt;': '≯', '≤': '≰', '≥': '≱', '≈': '≉', '≡': '≢', '∼': '≁', '≃': '≄', '≅': '≇',
   '∈': '∉', '∋': '∌', '⊂': '⊄', '⊃': '⊅', '⊆': '⊈', '⊇': '⊉', '∣': '∤', '∥': '∦',
@@ -163,7 +164,8 @@ export function resolveMathMacros(headmatter?: Record<string, unknown>): MathMac
 
 const verbPattern = /\\verb(?:\*([^\r\n])([^\r\n]*?)\1|([^*A-Za-z\r\n])([^\r\n]*?)\3)/
 const leadingVerb = new RegExp(`^${verbPattern.source}`, 'u')
-const ordinaryMathTokens = /\\[A-Za-z@]+|\\[^A-Za-z@\r\n]|#[1-9]|\s+|./
+const ordinaryMathTokens = /\\[A-Za-z@]+|\\[^A-Za-z@\r\n]|#[1-9]|[ \t\r\n]+|[\s\S][\u0300-\u036F]*/
+const texWhitespace = /^[ \t\r\n]+$/
 const mathComment = /%[^\r\n]*(?:\r?\n[ \t]*|$)/
 const mathTokens = new RegExp(`${verbPattern.source}|${mathComment.source}|${ordinaryMathTokens.source}`, 'gu')
 const rawMathTokens = new RegExp(ordinaryMathTokens, 'gu')
@@ -194,7 +196,7 @@ function tokenize(source: string, onTrailingComment?: () => void): string[] {
     tokens.push(token)
     if (!isMathUrlCommand(token)) continue
     const start = lexer.lastIndex
-    const argument = token === '\\includegraphics' ? /\s*(?:\[[^\]\r\n]*\]\s*)?([{%])/y : /\s*([{%])/y
+    const argument = token === '\\includegraphics' ? /[ \t\r\n]*(?:\[[^\]\r\n]*\][ \t\r\n]*)?([{%])/y : /[ \t\r\n]*([{%])/y
     argument.lastIndex = start
     const opening = argument.exec(source)?.[1]
     if (!opening) continue
@@ -668,7 +670,9 @@ export function renderMath(source: string, display = false, configured: MathMacr
   }
   for (const [name, definition] of state?.globals ?? []) macros.set(name, definition)
 
-  const space = () => { while (/^\s+$/.test(tokens[cursor] ?? '')) cursor++ }
+  const space = () => { while (texWhitespace.test(tokens[cursor] ?? '')) cursor++ }
+  const extendedPrimes = !options?.strict || options.strict === 'ignore'
+  const primeCount = (token: string) => token === "'" || extendedPrimes ? primes.get(token) ?? 0 : 0
 
   function inScope<T>(render: () => T): T {
     const saved = new Map<string, Macro | undefined>()
@@ -950,6 +954,18 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return reject
   }
 
+  function checkUnicode(token: string): ReturnType<typeof readUnicodeToken> {
+    const unicode = readUnicodeToken(token, mode)
+    if (options?.strict && unicode?.diagnostic) {
+      const character = unicode.diagnostic === 'unknownSymbol' ? unicode.base : String.fromCodePoint(token.codePointAt(0)!)
+      const message = unicode.diagnostic === 'unknownSymbol'
+        ? `Unrecognized Unicode character "${character}" (${character.codePointAt(0)})`
+        : `Unicode text character "${character}" used in math mode`
+      strictViolation(unicode.diagnostic, message, true, token)
+    }
+    return unicode
+  }
+
   function lineGap(command: string): string | undefined {
     const extra = command === '\\\\' && tokens[cursor] === '[' ? bracket() : undefined
     const gap = extra === undefined ? '' : dimension(extra)
@@ -1142,7 +1158,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
   function textCharacter(token: string): string | undefined {
     if (token === '\\char') return explicitCharacter()
     if (/^(?:[&#^_]|#[1-9])$/.test(token)) throw new Error(`Unexpected text token: ${token}`)
-    if (!token.startsWith('\\')) return token
+    if (!token.startsWith('\\')) {
+      const unicode = checkUnicode(token)
+      return unicode?.marks ? (unicode.base + unicode.marks).normalize('NFC') : token
+    }
     const name = token.slice(1)
     if (mathModeFunctions.has(name) || name === 'includegraphics')
       throw new Error(`Math command ${token} requires math mode`)
@@ -1151,7 +1170,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   }
 
   function textAccent(command: string): { literal: string } | { markup: Markup } {
-    const blank = Object.hasOwn(textAccents, command) && !/^\\[A-Za-z]+$/.test(command) && /^\s+$/.test(tokens[cursor] ?? '')
+    const blank = Object.hasOwn(textAccents, command) && !/^\\[A-Za-z]+$/.test(command) && texWhitespace.test(tokens[cursor] ?? '')
     if (blank) cursor++
     const content = blank ? tag('mtext', '\u00A0') : textArgument('text')
     if (command === '\\textcircled') return { markup: xml`<mrow class="math-text-circled">${content}</mrow>` }
@@ -1199,7 +1218,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     let textColor = ''
     function flush(): void {
       if (!literal) return
-      const joined = literal.replace(/\s+/g, ' ').replace(/^ | $/g, '\u00A0')
+      const joined = literal.replace(/[ \t\r\n]+/g, ' ').replace(/^ | $/g, '\u00A0')
       parts.push(tag('mtext', joined))
       literal = ''
     }
@@ -1392,7 +1411,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
 
   function primeScript(): Markup {
     let text = ''
-    for (let count = primes[peek()]; count; count = primes[peek()]) {
+    for (let count = primeCount(peek()); count; count = primeCount(peek())) {
       cursor++
       text += '′'.repeat(count)
     }
@@ -1498,7 +1517,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
         }
         part = { markup: tag('mn', number) }
       }
-      else if (token === '_' || token === '^' || primes[token] || unicodeSubscripts.has(token) || unicodeSuperscripts.has(token)) {
+      else if (token === '_' || token === '^' || primeCount(token)) {
         part = { markup: '<mrow/>' }
         cursor--
       }
@@ -1518,9 +1537,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
           lower = inScript(kind === '_' ? (cursor++, argument(true)) : unicodeScript(unicodeSubscripts))
           continue
         }
-        if (kind !== '^' && !primes[kind] && !unicodeSuperscripts.has(kind)) break
+        const prime = primeCount(kind) > 0
+        if (kind !== '^' && !prime && !unicodeSuperscripts.has(kind)) break
         if (upper) throw new Error('Double superscript')
-        upper = inScript(kind === '^' ? (cursor++, argument(true)) : primes[kind] ? primeScript() : unicodeScript(unicodeSuperscripts))
+        upper = inScript(kind === '^' ? (cursor++, argument(true)) : prime ? primeScript() : unicodeScript(unicodeSuperscripts))
       }
       if (part.brace === 'upper' && upper) {
         part.markup = xml`<mover>${part.markup}${upper}</mover>`
@@ -1859,7 +1879,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       let value: string
       if (name === 'futurelet') {
         let following = cursor + 1
-        while (/^\s+$/.test(tokens[following] ?? '')) following++
+        while (texWhitespace.test(tokens[following] ?? '')) following++
         if (!tokens[cursor] || tokens[cursor] === boundary || !tokens[following] || tokens[following] === boundary)
           throw new Error('Missing math lookahead token')
         value = tokens[following]
@@ -1867,7 +1887,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       else {
         if (tokens[cursor] === '=') {
           cursor++
-          if (/^\s+$/.test(tokens[cursor] ?? '')) cursor++
+          if (texWhitespace.test(tokens[cursor] ?? '')) cursor++
         }
         value = tokens[cursor++]
         if (!value || value === boundary) throw new Error('Missing math assignment token')
@@ -1906,13 +1926,30 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
     if (!token.startsWith('\\')) {
       if (/^(?:[}&#$]|#[1-9])$/.test(token)) throw new Error(`Unexpected math token: ${token}`)
-      if (/^\d/.test(token)) return { markup: tag('mn', token) }
       if (token === '~') return { markup: spaceMarkup(spacing.nobreakspace) }
+      if (token === '®') {
+        strictViolation('mathVsTextAccents', 'The registered sign is a text-mode symbol')
+        return { markup: '<mi mathvariant="normal">®</mi>' }
+      }
+      const unicode = checkUnicode(token)
+      if (unicode?.marks) {
+        const base = unicode.base === 'i' ? 'ı' : unicode.base === 'j' ? 'ȷ' : unicode.base
+        const element = unicode.textFallback ? 'mtext' : /^\p{Nd}$/u.test(base) ? 'mn' : /^\p{L}$/u.test(base) ? 'mi' : 'mo'
+        let markup = tag(element, base)
+        for (const mark of unicode.marks) {
+          const [glyph, below] = unicodeAccents[mark]
+          const name = below ? 'munder' : 'mover'
+          markup = `<${name} ${below ? 'accentunder' : 'accent'}="true">${markup}${tag('mo', glyph)}</${name}>`
+        }
+        return { markup }
+      }
       const relation = unicodeColonRelation(token)
       if (relation) return supplementalAtom(relation)
       if (token !== '.' && delimiterGlyphs.has(token)) return { markup: fence(token, false) }
       const limits = largeOperatorGlyphs.has(token) ? true : integralGlyphs.has(token) ? false : undefined
-      return { markup: tag(/^\p{L}$/u.test(token) ? 'mi' : 'mo', token === '-' ? '−' : token), limits }
+      const fallback = unicode?.textFallback && limits === undefined && !isCenteredGlyph(token)
+      const element = fallback ? 'mtext' : /^\p{Nd}+$/u.test(token) ? 'mn' : /^\p{L}$/u.test(token) ? 'mi' : 'mo'
+      return { markup: tag(element, token === '-' ? '−' : token), limits }
     }
 
     const verbatim = verbatimMarkup(token)

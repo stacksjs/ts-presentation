@@ -38,7 +38,8 @@ in a new ts-presentation project.
 | AMS equation numbering | Automatic labels in rendered slide order, tags and suppression inside nested tables, and numbers preserved in range exports |
 | AMS alignment and arrays | Paired operator spacing, equal alignment points across rows, explicit `alignat` counts, stable tag columns on short rows, starred matrix column alignment, and scoped row rules |
 | KaTeX line breaks | Inline wrapping after outer binary operators and relations, `\allowbreak` and `\nobreak` controls, standalone `\\` and `\newline` in math and text, optional row spacing, and `strict` handling for standalone display breaks |
-| KaTeX strict diagnostics | End-of-formula comments, HTML extensions, text accents and strikeout in math, spacing units and modes, and overflowed array columns |
+| KaTeX strict diagnostics | Unicode text and unrecognized characters, end-of-formula comments, HTML extensions, text accents and strikeout in math, spacing units and modes, and overflowed array columns |
+| Unicode math and text | Combining accents attached to math atoms and scripts, text-mode shaping of accented words, Unicode script and symbol validation, and original tokens in strict callbacks |
 | KaTeX accents and annotations | Stacked overbracket and underbracket labels, scalable line segments, text-mode underbars, circled text, and macro-expanded accent arguments |
 | KaTeX conditional macros | Mode-aware `\TextOrMath`, starred forms, token lookahead, and branch expansion in formulas, text, and `\edef` |
 | KaTeX legacy macros | Khan Academy color names and shades, literal token assignment with `\let`, multi-digit macro arity, and `\message` or `\errmessage` output during expansion |
