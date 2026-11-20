@@ -71,6 +71,16 @@ describe('export defaults', () => {
       scale: 1, range: '2', withClicks: true,
     })
   })
+
+  it('enables outlines for PDFs through deck settings or the command flag', () => {
+    const source = '/deck/slides.md'
+    const headmatter = { export: { withToc: true } }
+    expect(resolveExportSettings(source).withToc).toBe(false)
+    expect(resolveExportSettings(source, headmatter).withToc).toBe(true)
+    expect(resolveExportSettings(source, {}, { 'with-toc': true }).withToc).toBe(true)
+    expect(resolveExportSettings(source, headmatter, { format: 'png' }).withToc).toBe(false)
+    expect(resolveDownloadCapture(headmatter).withToc).toBe(true)
+  })
 })
 
 const deck = [
@@ -117,6 +127,7 @@ it.skipIf(!chrome)('bundles a downloadable vector PDF and keeps note-only reveal
     const filename = 'handouts/Release notes.pdf'
     await Bun.write(join(root, 'slides.md'), deck
       .replace('nested/final/report', filename)
+      .replace('title: Export compatibility', 'title: Export compatibility\nexport:\n  withToc: true')
       .replace('Second distinct reveal</p>', [
         'Second distinct reveal</p>', '', '<!-- presenter-only-example', '',
         '[click]', '', 'First note', '', '[click]', '', 'Second note', '', '[click]', '', 'Last note -->',
@@ -135,6 +146,7 @@ it.skipIf(!chrome)('bundles a downloadable vector PDF and keeps note-only reveal
     expect(pdf).toContain('/Type /Font')
     expect(pdf).toContain('/Subtype /Image')
     expect(pdf.match(/\/Dest \/presentation-print-2-2\b/g)).toHaveLength(4)
+    expect(pdf).toContain('/Type /Outlines')
     const files = await realpath(site)
     server = Bun.serve({
       hostname: '127.0.0.1',
@@ -167,6 +179,47 @@ it.skipIf(!chrome)('bundles a downloadable vector PDF and keeps note-only reveal
     await server?.stop(true)
     await rm(root, { recursive: true, force: true })
   }
+}, exportTestTimeout)
+
+it.skipIf(!chrome)('bookmarks nested selected slides and keeps links on their actual reveal page', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-outline-'))
+  try {
+    await Bun.write(join(root, 'slides.md'), [
+      '# Agenda', '', '[Jump to the last reveal](#review/2)', '', '---', '',
+      '## Parent omitted by range', '', '---',
+      'title: Review **results** (決定)', 'level: 3', 'routeAlias: review', '---', '',
+      '## Results at a glance', '', '<p v-click>First point</p>', '<p v-click>Second point</p>', '',
+      '---', '', '### Follow-up', '', '---', 'hideInToc: true', '---', '',
+      '## Private section', '', '---', '', '### Private detail', '', '---', '', '# Closing',
+    ].join('\n'))
+    await exportDeck(root, '--range', '1,3-7', '--with-clicks', '--with-toc')
+    const pdf = await Bun.file(join(root, 'slides.pdf')).text()
+    const pages = /\/Kids \[([^\]]+)\]/.exec(pdf)![1].match(/\d+ 0 R/g)!
+    expect(pages).toHaveLength(8)
+    expect(pdf).toContain('/Dest /presentation-print-3-2')
+    expect(pdf).toContain(`/presentation-print-3-2 [${pages[3]} /XYZ`)
+
+    const objects = [...pdf.matchAll(/^(\d+ 0) obj\n(<< [^\n]+ >>)\nendobj$/gm)]
+    const outline = objects.find(([, , value]) => value.startsWith('<< /Type /Outlines'))!
+    const bookmarks = objects.filter(([, , value]) => value.startsWith('<< /Title <'))
+    expect(bookmarks).toHaveLength(4)
+    const item = (title: string, page: number) => {
+      const encoded = Buffer.from(`\uFEFF${title}`, 'utf16le').swap16().toString('hex')
+      const [, id, value] = bookmarks.find(([, , body]) => body.includes(`/Title <${encoded}>`))!
+      expect(value).toContain(`/Dest [${pages[page]} /Fit]`)
+      return { ref: `${id} R`, value }
+    }
+    const agenda = item('Agenda', 0)
+    const review = item('Review results (決定)', 3)
+    const followUp = item('Follow-up', 4)
+    const closing = item('Closing', 7)
+    expect(outline[2]).toContain(`/First ${agenda.ref} /Last ${closing.ref} /Count 4`)
+    expect(agenda.value).toContain(`/Next ${closing.ref} /First ${review.ref} /Last ${followUp.ref} /Count 2`)
+    expect(review.value).toContain(`/Parent ${agenda.ref}`)
+    expect(review.value).toContain(`/Next ${followUp.ref}`)
+    expect(followUp.value).toContain(`/Parent ${agenda.ref}`)
+  }
+  finally { await rm(root, { recursive: true, force: true }) }
 }, exportTestTimeout)
 
 describe('export creates output directories', () => {

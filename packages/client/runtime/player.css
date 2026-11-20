@@ -668,7 +668,7 @@ v-switch { display: block; }
   .printing-frames [data-reveal-hidden] { opacity: 0; }
   .printing-frames [data-code-dim] { opacity: 0.36; }
   .printing-frames [data-equation-dim] { opacity: 0.24; }
-  .print-destination { position: absolute; inset: 0 auto auto 0; }
+  .print-destination { display: block; height: 0; }
   #overview, #image-view { display: none !important; }
   #stage .slide:is(.layout-cover, .layout-intro, .layout-section),
   #stage .slide[data-builtin-layout]:is(.layout-fact, .layout-quote, .layout-statement, .layout-end) {

@@ -1,11 +1,13 @@
 import { realpath } from 'node:fs/promises'
 import type { FrameLink, PowerPointFrame } from './powerpoint.ts'
 import type { SlideCanvas } from '../../../types/src/canvas.ts'
+import type { SlideRoute } from '../../../client/runtime/navigation.ts'
 import { deckPath } from '../../../client/runtime/routing.ts'
 import { asset } from './assets.ts'
 import { dataPicture, maxOriginalPictureBytes, originalPicture } from './editable/pictures.ts'
 import type { OriginalPicture } from './editable/pictures.ts'
 import type { ExportColorScheme, ExportWaitUntil } from './export-options.ts'
+import { addPdfOutline, pdfBookmarks } from './pdf-outline.ts'
 import { slideRange } from './selection.ts'
 
 interface BrowserOptions {
@@ -284,9 +286,12 @@ export async function captureFrames(options: CaptureOptions, onFrame: (frame: Po
 }
 
 /** Print a snapshot of each requested reveal as a vector PDF page. */
-export async function capturePdf(options: CaptureOptions): Promise<Uint8Array<ArrayBuffer>> {
+export async function capturePdf(options: CaptureOptions & { withToc?: boolean }): Promise<Uint8Array<ArrayBuffer>> {
   return withExportBrowser(options, async (chrome) => {
     const positions = await exportPositions(chrome, options)
+    const bookmarks = options.withToc
+      ? pdfBookmarks(await chrome.evaluate<SlideRoute[]>("JSON.parse(document.getElementById('presentation-navigation').textContent)"), positions)
+      : []
     await chrome.evaluate(`(async (positions, wait) => {
       const stage = document.getElementById('stage')
       const pages = document.createDocumentFragment()
@@ -308,8 +313,9 @@ export async function capturePdf(options: CaptureOptions): Promise<Uint8Array<Ar
         anchor.id = destinations.get(slide + '/' + step)
         anchor.className = 'print-destination'
         anchor.setAttribute('aria-hidden', 'true')
-        page.prepend(anchor)
-        pages.append(page)
+        // An out-of-flow anchor inside the page can be assigned to a later
+        // PDF page by Chromium. Keep the marker in flow at the page boundary.
+        pages.append(anchor, page)
       }
       const printUrl = new URL(location.href)
       printUrl.hash = ''
@@ -328,11 +334,11 @@ export async function capturePdf(options: CaptureOptions): Promise<Uint8Array<Ar
       await (${prepareImages.toString()})(stage)
       window.presentationFitText?.(stage)
     })(${JSON.stringify(positions)}, ${options.wait ?? 0})`)
-    return printPdf(chrome)
+    return addPdfOutline(await printPdf(chrome), bookmarks, positions.length)
   })
 }
 
-async function printPdf(chrome: Bun.WebView): Promise<Uint8Array<ArrayBuffer>> {
+async function printPdf(chrome: Bun.WebView): Promise<Buffer<ArrayBuffer>> {
   const result = await chrome.cdp('Page.printToPDF', { printBackground: true, preferCSSPageSize: true }) as { data?: string }
   if (!result.data) throw new Error('Chrome PDF export returned no pages')
   return Buffer.from(result.data, 'base64')

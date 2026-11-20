@@ -12,6 +12,7 @@ interface ExportFlags {
   scale?: string
   'with-clicks'?: boolean
   'without-clicks'?: boolean
+  'with-toc'?: boolean
   'executable-path'?: string
   timeout?: string
   wait?: string
@@ -34,6 +35,7 @@ interface ExportSettings extends ExportRenderSettings {
   format: Format
   output: string
   withClicks: boolean
+  withToc: boolean
   range?: string
   scale: number
   executablePath?: string
@@ -115,9 +117,14 @@ function renderSettings(defaults: Record<string, unknown>, flags: ExportFlags): 
   return { ...exportTiming(defaults, flags, 120_000), colorScheme }
 }
 
-export function resolveDownloadCapture(headmatter: Record<string, unknown> = {}, flags: ExportFlags = {}): Pick<ExportSettings, 'range' | 'withClicks' | 'executablePath' | 'scale'> & ExportRenderSettings {
+export function resolveDownloadCapture(headmatter: Record<string, unknown> = {}, flags: ExportFlags = {}): Pick<ExportSettings, 'range' | 'withClicks' | 'executablePath' | 'scale' | 'withToc'> & ExportRenderSettings {
   const defaults = exportDefaults(headmatter)
-  return { ...frameSelection(defaults, flags, false), ...renderSettings(defaults, flags), scale: 1 }
+  return {
+    ...frameSelection(defaults, flags, false),
+    ...renderSettings(defaults, flags),
+    scale: 1,
+    withToc: flags['with-toc'] ?? (defaults.withToc === true),
+  }
 }
 
 export function resolveExportSettings(source: string, headmatter: Record<string, unknown> = {}, flags: ExportFlags = {}): ExportSettings {
@@ -142,7 +149,12 @@ export function resolveExportSettings(source: string, headmatter: Record<string,
   const fallback = basename(source, '.md')
   const target = output ?? (format === 'png' ? `${fallback}-frames` : format === 'md' ? `${fallback}-export.md` : fallback + extension)
   const path = (format === 'pptx-editable' || format === 'md' || explicit === undefined && format !== 'png') && !target.toLowerCase().endsWith(extension) ? target + extension : target
-  return { format, output: resolve(path), scale, ...frameSelection(defaults, flags, powerPoint), ...renderSettings(defaults, flags) }
+  return {
+    format, output: resolve(path), scale,
+    ...frameSelection(defaults, flags, powerPoint),
+    ...renderSettings(defaults, flags),
+    withToc: format === 'pdf' && (flags['with-toc'] ?? (defaults.withToc === true)),
+  }
 }
 
 export function resolveNotesExportSettings(source: string, headmatter: Record<string, unknown> = {}, flags: ExportFlags = {}): NotesExportSettings {

@@ -81,6 +81,9 @@ Set `exportFilename` and `export` in the deck headmatter for repeatable exports.
 The `export` mapping accepts `format`, `range`, and `withClicks`.
 PNG and PowerPoint can also set `scale`. CLI options override the deck defaults. With PDF
 `--with-clicks`, each selected reveal becomes a page with selectable text.
+Use `--with-toc` or set `export.withToc: true` to add nested PDF bookmarks
+from slide titles. Bookmarks skip hidden sections and untitled slides, honor
+the export range, and open the last exported reveal of each slide.
 
 Use `--dark` or `--light` to set the color scheme for exported slides and
 downloadable PDFs. Use `--wait` to delay each frame and `--timeout` to set the
@@ -96,7 +99,7 @@ Use `build --download` or set `download: true` in deck headmatter to bundle
 a PDF and show a **Download PDF** link in the built player. The default file
 is `slidev-exported.pdf`. Use `exportFilename` for a filename or nested path
 inside the build directory. The generated PDF honors the configured slide
-range and reveal settings. Set `download` to a path in `public/` or an HTTP
+range, reveal, and bookmark settings. Set `download` to a path in `public/` or an HTTP
 or HTTPS URL to link to an existing PDF.
 
 ## Host under a subpath

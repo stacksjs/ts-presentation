@@ -31,6 +31,7 @@ const options = {
   scale: { type: 'string' },
   'with-clicks': { type: 'boolean' },
   'without-clicks': { type: 'boolean' },
+  'with-toc': { type: 'boolean' },
   port: { type: 'string' },
   mcp: { type: 'boolean' },
   format: { type: 'string' },
@@ -56,6 +57,7 @@ const help = `ts-presentation <dev|build|format|export|export-notes|mcp> [slides
   export  Write PDF, PNG, PPTX, editable PPTX or Markdown with slide images using Chrome.
           Optional --out and --executable-path.
           Use --range and --with-clicks to select slides and reveal frames.
+          Use --with-toc to bookmark slide titles in a PDF.
           Use --wait and --timeout in milliseconds. Use --dark or --light to choose a color scheme.
           --wait-until accepts load (default), domcontentloaded, networkidle, or none.
           PNG, PPTX and Markdown images also support --scale.
@@ -413,7 +415,7 @@ async function main(): Promise<void> {
     }
 
     const { capturePdf } = await import('./capture.ts')
-    const pdf = await capturePdf(capture)
+    const pdf = await capturePdf({ ...capture, withToc: settings.withToc })
     await Bun.write(output, pdf)
     console.log(output)
   }

@@ -18,16 +18,19 @@ export function createTocTree(routes: readonly SlideRoute[]): TocItem[] {
     if (!route.title || route.untitled) continue
     let siblings = tree
     let level = 1
-    while (siblings.length && (route.level ?? 1) > level) {
-      siblings = siblings[siblings.length - 1].children
+    const titleLevel = route.level ?? 1
+    let previous = siblings.at(-1)
+    while (previous && titleLevel > level && previous.titleLevel < titleLevel) {
+      siblings = previous.children
       level++
+      previous = siblings.at(-1)
     }
     siblings.push({
       no: route.no,
       title: route.title,
       path: `/${route.alias ?? route.no}`,
       level,
-      titleLevel: route.level ?? level,
+      titleLevel,
       hideInToc: Boolean(route.frontmatter.hideInToc),
       children: [],
     })
