@@ -9,6 +9,7 @@ import type { LiveDeck } from '../../../types/src/dev-protocol.ts'
 import { renderChart } from './charts.ts'
 import type { CodeBlockInfo } from './code-blocks.ts'
 import { codeBlock, codeFrame, createCodeHighlighter, codeThemeStyles, magicFrames, parseCodeInfo } from './code-blocks.ts'
+import { codeDiffBlock } from './code-diff.ts'
 import { renderMermaid } from './diagram.ts'
 import { optionsForSvg } from './diagram-svg.ts'
 import { renderPlantUml } from './plantuml.ts'
@@ -231,6 +232,10 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
         if (custom !== undefined) return custom
       }
       const writable = info?.writeToken && options.liveCompile && options.writableSnippets?.get(info.writeToken)
+      if (info?.runner === 'diff') {
+        const diff = await codeDiffBlock(decoded, info, lineNumbers, highlight)
+        if (diff) return diff
+      }
       if (info?.runner || writable) {
         return liveBlock(decoded.replace(/\n$/, ''), language, info?.runner === 'run',
           writable && info?.writeToken ? { token: info.writeToken, revision: writable.revision } : undefined, info?.runnerOptions)

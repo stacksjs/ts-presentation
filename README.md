@@ -112,6 +112,7 @@ the deck and style slides with an optional `style.css`.
 | Code groups | Enable `comark: true` and place titled fences between `::code-group` and `::` to create keyboard-accessible tabs |
 | Source snippets | `<<< @/snippets/build.ts#example` for a named region. Use `{monaco-write}` with a whole JavaScript or TypeScript file to allow saving from the local dev editor |
 | Live code | Add `{live-run}` or `{monaco-run}` to a fence for a built-in or custom runner. Use `{live}` or `{monaco}` for editing |
+| Code diffs | Add `{monaco-diff}` or `{live-diff}` to a backtick fence and separate the original and modified code with a line containing `~~~`. Edit the modified version in the player or use `{readonly:true}` for a fixed comparison |
 | Themes and addons | Set `theme: paper` or `theme: serif`, or load trusted local modules through `theme` and `addons` |
 | Canvas size | Set `canvasWidth: 800` and `aspectRatio: 4/3` in deck frontmatter for an 800 × 600 canvas |
 

@@ -1,5 +1,6 @@
 import { defaultCanvas } from '../../types/src/canvas.ts'
 import { setupCodeCopy, setupCodeTabs } from './code-controls.ts'
+import { setupCodeDiffs } from './code-diff.ts'
 import { createSlideConditions } from './conditions.ts'
 import { setupDiagramActions } from './diagram-actions.ts'
 import type { LiveDeck } from '../../types/src/dev-protocol.ts'
@@ -104,6 +105,7 @@ function mountSlide(article: HTMLElement, index: number): void {
 function updateSlideContent(container: HTMLElement): void {
   conditions.update(container)
   mountInlineMath(container)
+  if (!isCapture && !isPreview) mountCodeEditors(container)
 }
 
 articles.forEach(mountSlide)
@@ -524,14 +526,18 @@ if (isOverview && window.parent !== window) window.addEventListener('keydown', (
 })
 
 const mountCopy = !isCapture && !isPreview ? setupCodeCopy(stage) : undefined
-if (mountCopy) setupLiveCode()
+function mountCodeEditors(root: ParentNode = document): void {
+  setupLiveCode(root)
+  setupCodeDiffs(root)
+}
+if (mountCopy) mountCodeEditors()
 
 function refreshConditions(): void {
   let changed = false
   for (const [index, article] of articles.entries()) {
     if (!conditions.update(article)) continue
     mountSlide(article, index)
-    if (mountCopy) { mountCopy(article); setupLiveCode(article) }
+    mountCopy?.(article)
     changed = true
   }
   if (!changed) return
@@ -636,7 +642,7 @@ function applyLiveDeck(deck: LiveDeck, before: LiveManifest): boolean {
     if (imageView.open) imageView.close()
     codeTabs?.refresh()
     drags?.updateElements()
-    if (mountCopy) for (const article of replaced) { mountCopy(article); setupLiveCode(article) }
+    if (mountCopy) for (const article of replaced) mountCopy(article)
   }
   if (overviewGrid && (replaced.length || titlesChanged)) {
     overviewGrid.updateSlides()

@@ -13,7 +13,8 @@ export interface CodeBlockInfo {
   lines?: boolean
   maxHeight?: string
   magic: boolean
-  runner?: 'run' | 'edit'
+  runner?: 'run' | 'edit' | 'diff'
+  diffOptions?: { readonly: boolean, height?: string }
   runnerOptions?: Record<string, unknown>
   writeToken?: string
 }
@@ -47,10 +48,11 @@ export function parseCodeInfo(input: string): CodeBlockInfo | undefined {
     decoration.lastIndex = 0
     const group = decoration.exec(info)?.[0] ?? (runner ? runnerDecoration(info) : undefined)
     if (!group) return
-    const launch = /^\{\s*(live|monaco)(-run)?\s*\}$/i.exec(group)
+    const launch = /^\{\s*(?:live|monaco)(?:-(run|diff))?\s*\}$/i.exec(group)
     if (launch) {
-      if (runner || magic || !lang) return
-      runner = launch[2] ? 'run' : 'edit'
+      const mode = launch[1]?.toLowerCase()
+      if (runner || magic || (!lang && mode !== 'diff')) return
+      runner = mode === 'diff' ? 'diff' : mode === 'run' ? 'run' : 'edit'
     }
     else if (!ranges && parseEquationOptions(group)) ranges = group
     else {
@@ -72,12 +74,15 @@ export function parseCodeInfo(input: string): CodeBlockInfo | undefined {
     || !/^[+-]?\d{1,3}$/.test(at) || (final !== 'last' && !parseEquationOptions(`{${final}}`))) return
   const configuredHeight = typeof props.maxHeight === 'number' ? `${props.maxHeight}px` : props.maxHeight
   const maxHeight = typeof configuredHeight === 'string' && /^\d+(?:\.\d+)?(?:px|em|rem|vh|%)$/.test(configuredHeight) ? configuredHeight : undefined
+  const diffHeight = typeof props.height === 'number' ? `${props.height}px` : props.height
+  const height = typeof diffHeight === 'string' && /^(?:auto|\d+(?:\.\d+)?(?:px|em|rem|vh|%))$/.test(diffHeight) ? diffHeight : undefined
   return {
     language: (lang || 'text').toLowerCase(), title: caption?.[1], ranges: parseEquationOptions(ranges)?.ranges ?? [],
     start: Number(first), at, final, lines: typeof props.lines === 'boolean' ? props.lines : undefined, maxHeight, magic,
     ...(runner && { runner, runnerOptions: props.runnerOptions && typeof props.runnerOptions === 'object' && !Array.isArray(props.runnerOptions)
       ? props.runnerOptions as Record<string, unknown>
       : undefined }),
+    ...(runner === 'diff' && { diffOptions: { readonly: props.readonly === true, height } }),
     writeToken: typeof props.tpSnippet === 'string' && /^[a-f0-9]{64}$/.test(props.tpSnippet) ? props.tpSnippet : undefined,
   }
 }
@@ -122,7 +127,7 @@ export function magicFrames(source: string): CodeFrame[] | undefined {
 export function codeThemeStyles(name: unknown): string {
   const theme = typeof name === 'string' ? getTheme(name) : undefined
   if (!theme) return ''
-  const selector = '.slide pre'
+  const selector = '.slide :is(pre, .code-diff)'
   const css = themeTokenCss(theme, { selector, classPrefix: 'tok-', variablePrefix: '--tp-code-' })
   return `<style id="presentation-code-theme">${css}
 ${selector} { background: var(--tp-code-background); color: var(--tp-code-foreground); }</style>`

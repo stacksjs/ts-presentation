@@ -50,7 +50,7 @@ export function registerShortcuts(shortcuts: ShortcutOptions[], available: () =>
     if (event.defaultPrevented || event.isComposing || !available()) return
     const target = event.composedPath()[0]
     if (target instanceof Element) {
-      if (target.closest('input, select, textarea, [contenteditable]')) return
+      if (target.closest('input, select, textarea, [contenteditable], [data-presentation-shortcuts="ignore"]')) return
       if ((event.key === ' ' || event.key === 'Enter') && target.closest('button, a, summary, [role=button]')) return
     }
     let shortcut = bindings.get(eventBinding(event, event.key))

@@ -911,9 +911,68 @@ math .math-xcancel {
 .live-code-static { display: none; }
 body:is(.capturing, .previewing) .live-code :is(.live-code-toolbar, textarea, .live-output) { display: none; }
 body:is(.capturing, .previewing) .live-code-static { display: block; margin: 0; }
+
+.slide .code-diff {
+  margin: 0.5em 0;
+  min-width: 0;
+  overflow: hidden;
+  color: #edf5ff;
+  background: #111721;
+  border: 1px solid #61738a;
+  border-radius: 0.35em;
+  font-size: 16px;
+}
+.code-diff figcaption, .code-diff-heading { padding: 0.35em 0.7em; }
+.code-diff-scroll { max-height: 15em; overflow: auto; }
+.code-diff-scroll:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
+.code-diff-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(max-content, 1fr));
+  width: max-content;
+  min-width: 100%;
+}
+.code-diff-rows { display: contents; }
+.code-diff-heading { font-size: 0.82em; font-weight: 600; border-block-end: 1px solid #61738a; }
+.code-diff-heading:nth-child(2), .code-diff-line:nth-child(even) { border-inline-start: 1px solid #61738a; }
+.code-diff-line {
+  display: flex;
+  gap: 0.35em;
+  align-items: baseline;
+  justify-content: flex-start;
+  padding: 0 0.7em;
+  min-height: 1.5em;
+  font: 400 0.875em/1.5 var(--presentation-font-mono, ui-monospace, monospace);
+  tab-size: 2;
+}
+.code-diff-text { white-space: pre; }
+.code-diff-sign { flex: 0 0 1ch; }
+.code-diff-number { color: #aeb8c8; min-width: 2.5ch; text-align: end; }
+.code-diff-line[data-diff-empty] { background: #182435; }
+.code-diff-line[data-diff-side="before"][data-diff-changed] { background: #6a304866; }
+.code-diff-line[data-diff-side="after"][data-diff-changed] { background: #2c624d77; }
+[data-diff-side="before"] .code-diff-sign { color: #ffb0bf; }
+[data-diff-side="after"] .code-diff-sign { color: #a6e6bc; }
+.code-diff-edit { border-block-start: 1px solid #61738a; padding: 0.35em 0.7em; }
+.code-diff-edit summary { cursor: pointer; }
+.code-diff-edit textarea {
+  display: block;
+  width: 100%;
+  min-height: 4em;
+  max-height: 12em;
+  margin: 0.35em 0;
+  resize: vertical;
+  color: #edf5ff;
+  background: #101721;
+  border: 1px solid #61738a;
+  padding: 0.4em;
+  font: 400 0.875em/1.5 var(--presentation-font-mono, ui-monospace, monospace);
+  tab-size: 2;
+}
+body:is(.capturing, .previewing) .code-diff-edit { display: none; }
 @media print {
   .live-code :is(.live-code-toolbar, textarea, .live-output) { display: none; }
   .live-code-static { display: block; margin: 0; }
+  .code-diff-edit { display: none; }
 }
 
 .slide-diagram :is(.diagram-timeline-section, .diagram-timeline-period, .diagram-journey-section) rect {

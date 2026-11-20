@@ -18,6 +18,7 @@ in a new ts-presentation project.
 | Custom shortcuts | Browser-side `setup/shortcuts.ts` with named defaults, string key combinations, repeat control, and navigation actions |
 | Monaco editor and runner | Local editor and timed browser-worker runner. Bun compiles TypeScript edits in dev and can save opted-in snippets |
 | Custom code runners | Browser-side `setup/code-runners.ts` for decks, themes, and addons, with fence options, chained runners, cancellation, and text, HTML, or DOM results |
+| Monaco diff editor | Side-by-side line comparison for `{monaco-diff}` and `{live-diff}`, with an editable modified version, reset, line numbers, and printable markup |
 | Snippets, line highlights, Magic Move | Local file and region imports, numbered click highlights, native token animations |
 | Syntax highlighting themes | `codeTheme` or a local `setup/code-highlighter.ts` selects a first-party palette |
 | Code groups and copying | Comark code tabs, synchronized presenter selection, source and live editor copying |
