@@ -1,4 +1,5 @@
 import { expect, spyOn, test } from 'bun:test'
+import type { MathMacroContext } from '../src/index.ts'
 import { findChrome } from '../packages/slidev/node/runtime/chrome.ts'
 import { collectSnapshot } from '../packages/slidev/node/runtime/editable/walker.ts'
 import { parseDeck, renderDeck, renderPresentation } from '../packages/slidev/node/runtime/index.ts'
@@ -215,6 +216,93 @@ test('reads configured macro prefixes and delimiters with or without nested grou
   expect(() => math(String.raw`\ratioof 2,3;`, false)).toThrow('Missing macro prefix')
   expect(() => math(String.raw`\ratioof|2,3`, false)).toThrow('Missing macro delimiter')
   expect(stack[0].text).toBe('}')
+})
+
+test('runs function macros with KaTeX-style argument order, modes, and token operations', () => {
+  const math = createMathRenderer({
+    throwOnError: true,
+    macros: {
+      '\\select': context => ({ tokens: context.consumeArgs(2)[context.mode === 'math' ? 0 : 1], numArgs: 0 }),
+      '\\tail': '',
+      '\\step': context => {
+        const count = context.expandOnce()
+        const next = context.future()
+        context.popToken()
+        context.pushToken(next)
+        return `\\text{${count}:${next.text}}`
+      },
+      '\\colorname': 'blue',
+      '\\paint': context => {
+        const { tokens } = context.consumeArg()
+        const body = context.expandTokens(tokens).reverse()
+        return { tokens: body, numArgs: 0 }
+      },
+      '\\collect': context => {
+        const [first, second] = context.consumeArgs(2, [['|'], [','], [';']])
+        return { tokens: [...second, { text: '+' }, ...first], numArgs: 0 }
+      },
+      '\\peekafter': context => {
+        const next = context.expandAfterFuture().text
+        const consumed = context.expandNextToken().text
+        return `\\text{${next.slice(1)}:${consumed}}`
+      },
+      '\\outer': '\\inner',
+      '\\inner': 'q',
+    },
+  })
+  expect(math(String.raw`\select{a}{b}+\text{\select{a}{b}}`, false))
+    .toContain('<mi>a</mi><mo>+</mo><mtext>b</mtext>')
+  expect(math(String.raw`\step\tail x`, false)).toContain('<mtext>0:x</mtext><mi>x</mi>')
+  expect(math(String.raw`\paint{\textcolor{\colorname}{x}}`, false)).toContain('style="color:blue"><mrow><mi>x</mi>')
+  expect(math(String.raw`\collect|2,3;`, false)).toContain('<mn>2</mn><mo>+</mo><mn>3</mn>')
+  expect(math(String.raw`\peekafter\outer`, false)).toContain('<mtext>inner:q</mtext>')
+})
+
+test('keeps function macro assignments in their TeX groups and persists explicit global changes', () => {
+  const configured = {
+    macros: {
+      '\\fixed': 'x',
+      '\\configure': ({ macros, isDefined, isExpandable, expandMacroAsText }: MathMacroContext) => {
+        expect(macros.has('\\fixed')).toBe(true)
+        expect(macros.get('\\fixed')).toBe('x')
+        expect(macros.has('\\alpha')).toBe(false)
+        expect(isDefined('\\alpha')).toBe(true)
+        expect(isExpandable('\\fixed')).toBe(true)
+        macros.beginGroup()
+        macros.set('\\fixed', 'y')
+        const local = expandMacroAsText('\\fixed')
+        macros.endGroup()
+        macros.set('\\saved', local, true)
+        macros.set('\\alias', macros.get('\\point'), true)
+        macros.set('\\ketAlias', macros.get('\\Braket'), true)
+        return ''
+      },
+      '\\remove': ({ macros }: MathMacroContext) => {
+        macros.set('\\fixed', undefined, true)
+        return ''
+      },
+    },
+    throwOnError: true,
+  }
+  const math = createMathRenderer(configured)
+  expect(math(String.raw`\newcommand{\point}[2][r]{#1+#2}{\configure}\fixed\saved`, false))
+    .toContain('<mi>x</mi><mi>y</mi>')
+  expect(math(String.raw`\alias{s}`, false)).toContain('<mi>r</mi><mo>+</mo><mi>s</mi>')
+  expect(math(String.raw`\ketAlias{a|b}`, false)).toContain('<mo stretchy="true">⟨</mo>')
+  math(String.raw`\remove`, false)
+  expect(() => math(String.raw`\fixed`, false)).toThrow('Unsupported math command')
+  expect(createMathRenderer(configured)(String.raw`\fixed`, false)).toContain('<mi>x</mi>')
+})
+
+test('counts function macros and their nested expansion work against the formula budget', () => {
+  let calls = 0
+  const math = createMathRenderer({ macros: { '\\local': () => { calls++; return 'x' } }, maxExpand: 0, throwOnError: true })
+  expect(() => math(String.raw`\local`, false)).toThrow('Too many math macro expansions')
+  expect(calls).toBe(0)
+  const cycle = createMathRenderer({
+    macros: { '\\cycle': context => context.expandMacroAsText('\\cycle') ?? '' }, maxExpand: 8, throwOnError: true,
+  })
+  expect(() => cycle(String.raw`\cycle`, false)).toThrow('Too many math macro expansions')
 })
 
 // Parser diagnostics adapted from the KaTeX v0.19.1 test suite (MIT).

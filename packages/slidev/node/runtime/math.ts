@@ -160,7 +160,46 @@ export interface MathMacroExpansion {
   unexpandable?: boolean
 }
 
-export type MathMacros = Readonly<Record<string, string | MathMacroExpansion>>
+export interface MathMacroArgument {
+  /** Argument tokens in stack order. */
+  tokens: MathMacroToken[]
+  start: MathMacroToken
+  end: MathMacroToken
+}
+
+export interface MathMacroNamespace {
+  has(name: string): boolean
+  get(name: string): MathMacroDefinition | undefined
+  set(name: string, value: MathMacroDefinition | undefined, global?: boolean): void
+  beginGroup(): void
+  endGroup(): void
+  endGroups(): void
+}
+
+export interface MathMacroContext {
+  readonly mode: 'math' | 'text'
+  readonly macros: MathMacroNamespace
+  future(): MathMacroToken
+  popToken(): MathMacroToken
+  pushToken(token: MathMacroToken): void
+  pushTokens(tokens: readonly MathMacroToken[]): void
+  consumeSpaces(): void
+  consumeArg(delimiters?: readonly string[] | null): MathMacroArgument
+  consumeArgs(numArgs: number, delimiters?: readonly (readonly string[])[]): MathMacroToken[][]
+  expandOnce(expandableOnly?: boolean): number | false
+  expandAfterFuture(): MathMacroToken
+  expandNextToken(): MathMacroToken
+  /** Read stack-order tokens and return the expanded tokens in source order. */
+  expandTokens(tokens: readonly MathMacroToken[]): MathMacroToken[]
+  expandMacro(name: string): MathMacroToken[] | undefined
+  expandMacroAsText(name: string): string | undefined
+  isDefined(name: string): boolean
+  isExpandable(name: string): boolean
+}
+
+export type MathMacroFunction = (context: MathMacroContext) => string | MathMacroExpansion
+export type MathMacroDefinition = string | MathMacroExpansion | MathMacroFunction
+export type MathMacros = Readonly<Record<string, MathMacroDefinition>>
 const controlSequence = /^\\(?:[A-Za-z@]+|[^\s])$/u
 const controlWord = /^\\[A-Za-z@]+$/
 const activeCharacter = /^[^\s\\{}$&#^_]$/u
@@ -267,12 +306,13 @@ const macroDeclaration = /^\\(?:[gex]?def|(?:future)?let|(?:new|renew|provide)co
 const assignmentCommand = /^\\(?:[gex]?def|(?:future)?let)$/
 type ExpansionPrimitive = typeof expansionPrimitives[number]
 type ConditionalPrimitive = Exclude<ExpansionPrimitive, '\\expandafter' | '\\noexpand' | '\\message' | '\\errmessage'>
-interface TokenMacro { body: string[], parameters: string[][], prefix: string[], optional?: string[], unexpandable?: boolean }
+interface TokenMacro { body: string[], parameters: string[][], prefix: string[], optional?: string[], unexpandable?: boolean, source?: string }
 type DelimitedNotation = 'Braket' | 'Set' | 'set'
-type Macro = TokenMacro | { primitive: ExpansionPrimitive } | { notation: DelimitedNotation } | { separator: () => string[] }
+type NativeMacro = { primitive: ExpansionPrimitive } | { notation: DelimitedNotation } | { separator: () => string[] }
+type Macro = TokenMacro | NativeMacro | MathMacroFunction
 interface MathState {
-  configured: ReadonlyMap<string, TokenMacro>
-  globals: Map<string, Macro>
+  configured: ReadonlyMap<string, Macro>
+  globals: Map<string, Macro | undefined>
   options: KatexOptions
   inlineBreaks: boolean
 }
@@ -776,35 +816,52 @@ function plainMacro(body: string[], arity?: number, optional?: string[]): TokenM
   return { body, parameters: Array.from({ length: count }, () => []), prefix: [], optional }
 }
 
-function compileMathMacros(configured: MathMacros = {}): Map<string, TokenMacro> {
-  const macros = new Map<string, TokenMacro>()
+function bodyFromStack(tokens: readonly MathMacroToken[]): string[] {
+  const body: string[] = []
+  for (let cursor = tokens.length - 1; cursor >= 0; cursor--) {
+    const { text, noexpand, treatAsRelax } = tokens[cursor]
+    const next = tokens[cursor - 1]
+    if (treatAsRelax) body.push(inhibitedToken + text)
+    else if (noexpand) body.push(literalToken + text)
+    // KaTeX holds the parameter marker and digit as separate stack tokens.
+    else if (text === '#' && next && /^[1-9]$/.test(next.text) && !next.noexpand && !next.treatAsRelax) {
+      body.push(`#${next.text}`)
+      cursor--
+    }
+    else body.push(text)
+  }
+  return body
+}
+
+function compileTokenMacro(replacement: string | MathMacroExpansion): TokenMacro {
+  if (typeof replacement === 'string') return { ...plainMacro(tokenize(replacement)), source: replacement }
+  const { tokens, numArgs, delimiters, unexpandable } = replacement
+  return {
+    body: bodyFromStack(tokens), unexpandable,
+    prefix: delimiters ? [...delimiters[0]] : [],
+    parameters: delimiters ? delimiters.slice(1).map(delimiter => [...delimiter]) : Array.from({ length: numArgs }, () => []),
+  }
+}
+
+// Native implementations and optional arguments can be saved and restored
+// through the callback namespace without losing their implementation.
+const macroSnapshots = new WeakMap<MathMacroExpansion | MathMacroFunction, TokenMacro | NativeMacro>()
+
+function compileMacro(replacement: unknown): Macro | undefined {
+  if (typeof replacement === 'function') {
+    const callback = replacement as MathMacroFunction
+    return macroSnapshots.get(callback) ?? callback
+  }
+  if (isConfiguredMacro(replacement))
+    return (typeof replacement === 'object' ? macroSnapshots.get(replacement) : undefined) ?? compileTokenMacro(replacement)
+}
+
+function compileMathMacros(configured: MathMacros = {}): Map<string, Macro> {
+  const macros = new Map<string, Macro>()
   for (const [name, replacement] of Object.entries(configured)) {
-    if (!isConfiguredMacroName(name) || !isConfiguredMacro(replacement)) continue
-    if (typeof replacement === 'string') {
-      macros.set(name, plainMacro(tokenize(replacement)))
-      continue
-    }
-    const body: string[] = []
-    const { tokens, numArgs, delimiters, unexpandable } = replacement
-    for (let cursor = tokens.length - 1; cursor >= 0; cursor--) {
-      const { text, noexpand, treatAsRelax } = tokens[cursor]
-      const next = tokens[cursor - 1]
-      if (treatAsRelax) body.push(inhibitedToken + text)
-      else if (noexpand) body.push(literalToken + text)
-      // KaTeX holds the parameter marker and digit as separate stack tokens.
-      else if (text === '#' && next && /^[1-9]$/.test(next.text) && !next.noexpand && !next.treatAsRelax) {
-        body.push(`#${next.text}`)
-        cursor--
-      }
-      else body.push(text)
-    }
-    const definition = plainMacro(body, numArgs)
-    if (delimiters) {
-      definition.prefix = [...delimiters[0]]
-      definition.parameters = delimiters.slice(1).map(delimiter => [...delimiter])
-    }
-    definition.unexpandable = unexpandable
-    macros.set(name, definition)
+    if (!isConfiguredMacroName(name)) continue
+    const macro = compileMacro(replacement)
+    if (macro) macros.set(name, macro)
   }
   return macros
 }
@@ -871,37 +928,47 @@ export function renderMath(source: string, display = false, configured: MathMacr
   let fontScale = 1
   let textItalic = false
   let linkDepth = 0
+  let context: MathMacroContext | undefined
 
   const macros = new Map<string, Macro>(state?.configured ?? compileMathMacros(configured))
   const macroFor = (token: string) => macros.get(token) ?? builtinMacros.get(token)
-  const scopes: Map<string, Macro | undefined>[] = []
-  function assign(name: string, definition: Macro, global = false): void {
-    const scope = scopes.at(-1)
+  const scopes: { undo: Map<string, Macro | undefined>, callback?: boolean }[] = []
+  function assign(name: string, definition: Macro | undefined, global = false): void {
+    const scope = scopes.at(-1)?.undo
     if (global) {
-      for (const scope of scopes) scope.delete(name)
+      for (const scope of scopes) scope.undo.delete(name)
     }
     else if (scope && !scope.has(name)) scope.set(name, macros.get(name))
     if (global || (!scope && options?.globalGroup)) state?.globals.set(name, definition)
-    macros.set(name, definition)
+    if (definition) macros.set(name, definition)
+    else macros.delete(name)
   }
-  for (const [name, definition] of state?.globals ?? []) macros.set(name, definition)
+  for (const [name, definition] of state?.globals ?? []) {
+    if (definition) macros.set(name, definition)
+    else macros.delete(name)
+  }
 
   const space = () => { while (texWhitespace.test(tokenText(tokens[cursor] ?? ''))) cursor++ }
   const extendedPrimes = !options?.strict || options.strict === 'ignore'
   const primeCount = (token: string) => token === "'" || extendedPrimes ? primes.get(token) ?? 0 : 0
 
+  function restoreScope(): void {
+    const scope = scopes.pop()
+    if (!scope) throw new Error('Unbalanced math macro group')
+    for (const [command, previous] of scope.undo) {
+      if (previous) macros.set(command, previous)
+      else macros.delete(command)
+    }
+  }
+
   function inScope<T>(render: () => T): T {
-    const saved = new Map<string, Macro | undefined>()
+    const before = scopes.length
     const previousColor = currentColor
-    scopes.push(saved)
+    scopes.push({ undo: new Map() })
     try { return render() }
     finally {
       currentColor = previousColor
-      scopes.pop()
-      for (const [command, previous] of saved) {
-        if (previous) macros.set(command, previous)
-        else macros.delete(command)
-      }
+      while (scopes.length > before) restoreScope()
     }
   }
 
@@ -914,7 +981,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
 
   function expandable(token: string): boolean {
     const macro = macroFor(token)
-    return macro ? !('unexpandable' in macro && macro.unexpandable) : isExpansionPrimitive(token)
+    return macro ? typeof macro === 'function' || !('unexpandable' in macro && macro.unexpandable) : isExpansionPrimitive(token)
   }
 
   function defined(token: string): boolean {
@@ -950,10 +1017,11 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
   }
 
-  function replaceExpansion(start: number, body: string[]): void {
+  function replaceExpansion(start: number, body: string[]): number {
     if (tokens.length - (cursor - start) + body.length > 12000) throw new Error('Expanded equation is too long')
     tokens.splice(start, cursor - start, ...body)
     cursor = start
+    return body.length
   }
 
   function countExpansions(count: number): void {
@@ -961,58 +1029,64 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (expandedCount > maxExpand) throw new Error('Too many math macro expansions')
   }
 
-  function expandOnce(eager = false): boolean {
-    const token = tokens[cursor]
-    const definition = macroFor(token)
-    if (definition && ('notation' in definition || 'separator' in definition)) {
-      countExpansions(1)
-      const start = cursor++
-      replaceExpansion(start, 'notation' in definition ? expandDelimitedNotation(definition.notation) : definition.separator())
-      return true
-    }
-    const macro = definition && 'body' in definition ? definition : undefined
-    const primitive = definition && 'primitive' in definition ? definition.primitive
-      : !definition && isExpansionPrimitive(token) ? token : undefined
-    if (!macro && !primitive) {
-      if (eager && controlSequence.test(token) && !defined(token)) throw new Error(`Undefined control sequence: ${token}`)
-      return false
-    }
-    if (eager && macro?.unexpandable) return false
-    countExpansions(1)
+  function expandNativeMacro(macro: NativeMacro): string[] {
+    if ('notation' in macro) return expandDelimitedNotation(macro.notation)
+    if ('separator' in macro) return macro.separator()
+    const { primitive } = macro
     if (primitive === '\\expandafter' || primitive === '\\noexpand') {
-      tokens.splice(cursor, 1)
       space()
-      const next = tokens[cursor]
+      const next = tokens[cursor++]
       if (!next || next === boundary) throw new Error('Missing math expansion token')
-      if (primitive === '\\noexpand') {
-        if (expandable(next)) tokens[cursor] = inhibitedToken + next
-        return true
-      }
-      tokens.splice(cursor, 1)
+      if (primitive === '\\noexpand') return [expandable(next) ? inhibitedToken + next : next]
       space()
       if (!tokens[cursor] || tokens[cursor] === boundary) throw new Error('Missing token after delayed math expansion')
       expandOnce(true)
-      tokens.splice(cursor, 0, next)
-      return true
+      return [next]
     }
+    if (primitive === '\\message' || primitive === '\\errmessage') {
+      const message = literalGroup()
+      if (primitive === '\\message') console.log(message)
+      else console.error(message)
+      return []
+    }
+    return chooseBranch(primitive)
+  }
 
-    if (primitive) {
-      const start = cursor++
-      if (primitive === '\\message' || primitive === '\\errmessage') {
-        const message = literalGroup()
-        if (primitive === '\\message') console.log(message)
-        else console.error(message)
-        replaceExpansion(start, [])
-      }
-      else replaceExpansion(start, chooseBranch(primitive))
-      return true
-    }
-    if (!macro) return false
-    const start = cursor++
-    if (controlWord.test(token)) space()
-    for (const token of macro.prefix) {
+  function macroDefinition(token: string): Macro | undefined {
+    return macroFor(token) ?? (isExpansionPrimitive(token) ? { primitive: token } : undefined)
+  }
+
+  function consumeMacroPrefix(prefix: readonly string[]): void {
+    for (const token of prefix) {
       if (tokenText(tokens[cursor++] ?? '') !== token) throw new Error('Missing macro prefix')
     }
+  }
+
+  function expandOnce(eager = false): number | false {
+    const token = tokens[cursor]
+    const definition = macroDefinition(token)
+    if (!definition) {
+      if (eager && controlSequence.test(token) && !defined(token)) throw new Error(`Undefined control sequence: ${token}`)
+      return false
+    }
+    if (eager && typeof definition !== 'function' && 'body' in definition && definition.unexpandable) return false
+    countExpansions(1)
+    const start = cursor++
+    if (controlWord.test(token)) space()
+    if (typeof definition !== 'function' && !('body' in definition))
+      return replaceExpansion(start, expandNativeMacro(definition))
+    let macro: TokenMacro
+    if (typeof definition === 'function') {
+      const result = definition(context ??= createMacroContext())
+      if (!isConfiguredMacro(result)) throw new Error(`Invalid expansion from math macro ${token}`)
+      macro = compileTokenMacro(result)
+      if (eager && macro.unexpandable) {
+        replaceExpansion(start, [token])
+        return false
+      }
+    }
+    else macro = definition
+    consumeMacroPrefix(macro.prefix)
     const values = macro.parameters.map((delimiter, index) => {
       if (index === 0 && macro.optional !== undefined) return rawBracket() ?? macro.optional
       return delimiter.length ? delimitedArgument(delimiter, true) : rawGroup()
@@ -1032,13 +1106,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
       }
       else body.push(token)
     }
-    replaceExpansion(start, body)
-    return true
+    return replaceExpansion(start, body)
   }
 
   function expand(skipSpace = true, eager = false): void {
     if (skipSpace) space()
-    while (expandOnce(eager)) {
+    while (expandOnce(eager) !== false) {
       if (skipSpace) space()
     }
   }
@@ -1079,7 +1152,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return rawGroup().map(tokenValue).join('')
   }
 
-  function delimitedArgument(delimiter: string[], unwrapGroup = false): string[] {
+  function delimitedArgument(delimiter: readonly string[], unwrapGroup = false): string[] {
     const start = cursor
     let level = 0
     let groupEnd: number | undefined
@@ -1132,6 +1205,115 @@ export function renderMath(source: string, display = false, configured: MathMacr
     })
     if (eager) countExpansions(definition.length)
     return definition
+  }
+
+  function publicToken(token: string | undefined): MathMacroToken {
+    if (!token || token === boundary) return { text: 'EOF' }
+    const value = tokenText(token)
+    const text = texWhitespace.test(value) ? ' ' : value
+    if (token.startsWith(inhibitedToken)) return { text, noexpand: true, treatAsRelax: true }
+    if (token.startsWith(literalToken)) return { text, noexpand: true }
+    return { text }
+  }
+
+  function publicTokens(body: readonly string[]): MathMacroToken[] {
+    return body.flatMap(token => /^#[1-9]$/.test(token) ? [{ text: '#' }, { text: token[1] }] : [publicToken(token)])
+  }
+
+  function publicDefinition(macro: Macro | undefined): MathMacroDefinition | undefined {
+    if (!macro || typeof macro === 'function') return macro
+    if ('body' in macro) {
+      if (macro.source !== undefined) return macro.source
+      const expansion: MathMacroExpansion = {
+        tokens: publicTokens(macro.body).reverse(),
+        numArgs: macro.parameters.length,
+        delimiters: [macro.prefix, ...macro.parameters].map(delimiter => [...delimiter]),
+        unexpandable: macro.unexpandable,
+      }
+      if (macro.optional !== undefined) macroSnapshots.set(expansion, macro)
+      return expansion
+    }
+    const callback: MathMacroFunction = () => ({ tokens: publicTokens(expandNativeMacro(macro)).reverse(), numArgs: 0 })
+    macroSnapshots.set(callback, macro)
+    return callback
+  }
+
+  function createMacroContext(): MathMacroContext {
+    const future = (): MathMacroToken => {
+      const token = tokens[cursor]
+      return /^#[1-9]$/.test(token ?? '') ? { text: '#' } : publicToken(token)
+    }
+    const popToken = (): MathMacroToken => {
+      const next = future()
+      if (next.text === '#' && /^#[1-9]$/.test(tokens[cursor])) tokens[cursor] = tokens[cursor][1]
+      else if (cursor < tokens.length && tokens[cursor] !== boundary) {
+        cursor++
+        if (controlWord.test(next.text)) space()
+      }
+      return next
+    }
+    const readStack = (stack: readonly MathMacroToken[]): string[] => {
+      if (!isConfiguredMacro({ tokens: stack, numArgs: 0 })) throw new Error('Invalid math macro token list')
+      return bodyFromStack(stack)
+    }
+    const pushTokens = (stack: readonly MathMacroToken[]): void => {
+      const body = readStack(stack)
+      if (tokens.length + body.length > 12000) throw new Error('Expanded equation is too long')
+      tokens.splice(cursor, 0, ...body)
+    }
+    const consumeArg = (delimiters?: readonly string[] | null): MathMacroArgument => {
+      if (!delimiters?.length) space()
+      const start = publicToken(tokens[cursor])
+      const body = delimiters?.length ? delimitedArgument(delimiters, true) : rawGroup()
+      const end = publicToken(tokens[cursor - 1])
+      if (!delimiters?.length && controlWord.test(start.text)) space()
+      return { start, end, tokens: publicTokens(body).reverse() }
+    }
+    const expandMacro = (name: string): MathMacroToken[] | undefined => macroDefinition(name)
+      ? publicTokens(expandDefinition([name], 'definition')) : undefined
+    return {
+      get mode() { return mode },
+      macros: {
+        has: name => macroDefinition(name) !== undefined,
+        get: name => publicDefinition(macroDefinition(name)),
+        set(name, value, global) {
+          if (!isConfiguredMacroName(name)) throw new Error(`Invalid math macro name: ${name}`)
+          const macro = compileMacro(value)
+          if (value !== undefined && !macro) throw new Error(`Invalid definition for math macro ${name}`)
+          assign(name, macro, global)
+        },
+        beginGroup() { scopes.push({ undo: new Map(), callback: true }) },
+        endGroup() {
+          if (!scopes.at(-1)?.callback) throw new Error('Unbalanced math macro group')
+          restoreScope()
+        },
+        endGroups() {
+          while (scopes.at(-1)?.callback) restoreScope()
+        },
+      },
+      future, popToken, pushToken: token => pushTokens([token]), pushTokens,
+      consumeSpaces: space, consumeArg,
+      consumeArgs(numArgs, delimiters) {
+        if (!isConfiguredMacro({ tokens: [], numArgs, delimiters })) throw new Error('Invalid math macro arguments')
+        if (delimiters) consumeMacroPrefix(delimiters[0])
+        return Array.from({ length: numArgs }, (_, index) => consumeArg(delimiters?.[index + 1]).tokens)
+      },
+      expandOnce,
+      expandAfterFuture() {
+        expandOnce()
+        return future()
+      },
+      expandNextToken() {
+        expand(false)
+        const next = popToken()
+        return next.treatAsRelax ? { ...next, text: '\\relax' } : next
+      },
+      expandTokens: stack => publicTokens(expandDefinition(readStack(stack), 'definition')),
+      expandMacro,
+      expandMacroAsText: name => expandMacro(name)?.map(token => token.text).join(''),
+      isDefined: defined,
+      isExpandable: expandable,
+    }
   }
 
   function expandDelimitedNotation(name: DelimitedNotation): string[] {

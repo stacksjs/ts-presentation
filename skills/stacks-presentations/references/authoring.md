@@ -203,6 +203,11 @@ speaker notes. Each hook can be asynchronous.
   read at the end. For example, `'\originalSum': { numArgs: 0, tokens: [{ text: '\sum', noexpand: true }] }`
   keeps the built-in sum usable inside a custom definition. If the macro
   uses delimiters, list the literal prefix first and then one token list per argument.
+- In `setup/katex.ts`, a macro can be a synchronous function that receives
+  a `MathMacroContext` and returns TeX or a token-list expansion. Use
+  `consumeArg()` for an argument, `future()` to look ahead, and `mode`
+  to choose between math and text. Use `context.macros.set(name, value, true)`
+  to share a definition with later formulas in the deck.
 - Set `globalGroup: true` under `math` to reuse top-level TeX definitions across
   formulas in one deck. Use `maxExpand` to set the expansion budget per formula
   and `colorIsTextColor: true` for decks that use the older two-argument

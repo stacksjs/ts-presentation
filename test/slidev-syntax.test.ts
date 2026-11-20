@@ -125,7 +125,7 @@ test('loads math and Mermaid setup hooks from a standalone deck', async () => {
         '---', 'math:', '  leqno: false', '  macros:',
         "    '\\converted': { numArgs: 1, tokens: [{ text: '}' }, { text: '1' }, { text: '#' }, { text: '{' }, { text: '\\text' }] }",
         "    '\\fromsetup': { numArgs: 0, tokens: [{ noexpand: true }] }",
-        '---', '', '# Standalone', '', '$\\X + \\converted{ready} + \\fromsetup$', '',
+        '---', '', '# Standalone', '', '$\\X + \\converted{ready} + \\fromsetup + \\describe{xy}$', '',
         '$$', String.raw`x=y\tag{A}`, '$$', '',
         '```mermaid {theme:"forest", scale:0.5}', 'special', '```',
       ].join('\n')),
@@ -133,6 +133,10 @@ test('loads math and Mermaid setup hooks from a standalone deck', async () => {
         macros: {
           '\\X': '\\mathbb{X}',
           '\\fromsetup': { tokens: [{ text: '\\Delta', noexpand: true }], numArgs: 0 },
+          '\\describe': context => {
+            const { tokens } = context.consumeArg()
+            return '\\text{arg: ' + context.expandTokens(tokens).map(token => token.text).join('') + '}'
+          },
         },
         fleqn: true,
         leqno: true,
@@ -144,6 +148,7 @@ test('loads math and Mermaid setup hooks from a standalone deck', async () => {
     expect(deck.html).toContain('<mi>𝕏</mi>')
     expect(deck.html).toContain('<mtext>ready</mtext>')
     expect(deck.html).toContain('<mi mathvariant="normal">Δ</mi>')
+    expect(deck.html).toContain('<mtext>arg: xy</mtext>')
     expect(deck.html).toContain('display="block" style="display:block;padding-inline-start:2em;text-align:start"')
     expect(deck.html).toContain('class="math-equation-number" style="display:math;padding:0;justify-self:end"><mtext>(A)</mtext>')
     expect(deck.html).toContain('data-diagram-theme="forest" height="20"')
