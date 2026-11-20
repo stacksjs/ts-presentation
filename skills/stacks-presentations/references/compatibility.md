@@ -83,6 +83,7 @@ in a new ts-presentation project.
 | GitGraph gradients and shadows | Neo themes give branch labels gradient borders using `gradientStart` and `gradientStop`. Set `useGradient: false` for solid borders. `look: neo` adds branch-label shadows, including the offset Redux shadow. Neo tag shadows and branch shadows support a CSS `drop-shadow()` value with pixel lengths and a color. Each SVG defines its own effects |
 | PlantUML sequence diagrams | Local `ts-charts` rendering for messages, participants, notes, and groups |
 | Presenter mode | Two synced browser windows, notes, timer, resizable layouts, next-frame preview, and reveal seeking |
+| Presenter timer | Stopwatch and countdown modes use the deck's `timer` and `duration` settings. Start, pause, resume, and reset in presenter mode. The notes view follows the same timer, including progress and overtime |
 | Reveal scheduling | Absolute and relative steps, hide ranges, grouped and nested lists, CSS presets, and switch slots |
 | Navigation context | Slide-local metadata, route aliases, reveal bounds, nested outlines, slide titles and counters, and native links to slides and reveal steps |
 | Conditional slots | `RenderWhen` for slide, presenter, next-frame preview, overview, print exports, and viewport visibility. `LightOrDark` for fixed or system appearance |

@@ -30,6 +30,7 @@ import { normalizeBasePath, resolveRouterMode } from '../../../client/runtime/ro
 import { createTocTree } from '../../../client/runtime/toc.ts'
 import type { Deck, PreparserContext, Slide } from '../../../parser/src/deck.ts'
 import { plainMarkdown } from '../../../parser/src/plain-markdown.ts'
+import { parseTimeString } from '../../../parser/src/timesplit/timestring.ts'
 import { createSlideDestinations, firstSlideHeading, prepareSlideHtml, titleLabel } from './slide-html.ts'
 import { prepareMarkdown, renderAlerts, splitSlots } from './syntax.ts'
 import type { MarkdownFence } from './syntax.ts'
@@ -116,6 +117,18 @@ export async function renderDeck(deck: Deck, options?: RenderOptions): Promise<s
 
 const noteBreaks = /^\[click\]\s*$/gm
 
+function resolveTimerDuration(value: unknown): number {
+  if (typeof value === 'number' || typeof value === 'string') {
+    try {
+      const { seconds } = parseTimeString(value)
+      const duration = Math.round(seconds * 1000)
+      if (Number.isSafeInteger(duration) && duration > 0) return duration
+    }
+    catch {}
+  }
+  return 30 * 60 * 1000
+}
+
 export async function renderPresentation(deck: Deck, options: RenderOptions = {}): Promise<{ html: string, routes: SlideRoute[], routing: Routing, live?: LiveDeck, notesMarkdown: readonly string[] }> {
   const nested = deck.headmatter?.config as Record<string, unknown> | undefined
   const mode = options.mode ?? (options.liveCompile ? 'dev' : 'build')
@@ -128,6 +141,8 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   const { base, mode: routerMode } = routing
   const baseMarkup = (markup: string) => prefixMarkupUrls(markup, base)
   const { width, height } = resolveCanvas(deck.headmatter)
+  const timerMode = (deck.headmatter?.timer ?? options.extensions?.theme.defaults?.timer) === 'countdown' ? 'countdown' : 'stopwatch'
+  const timerDuration = resolveTimerDuration(deck.headmatter?.duration ?? options.extensions?.theme.defaults?.duration)
   const drawSettings = resolveDrawings(deck.headmatter, options.extensions?.theme.defaults?.drawings)
   const drawings: DrawingClientConfig = {
     enabled: drawingEnabled(drawSettings, mode),
@@ -445,7 +460,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   if (options.liveCompile) {
     const drawingOptions = [drawings.enabled, drawings.presenterOnly, drawings.syncAll, drawings.persist]
     const theme = extensions?.theme.name
-    const frame = snippetRevision(JSON.stringify([routing, width, height, clicksPreset, drawingOptions, contextMenu, theme, colorSchema, codeTheme, fontMarkup, mcpNavigation, extensions?.styles, extensions?.client, globalTop, globalBottom, customControls, reactiveSlides]))
+    const frame = snippetRevision(JSON.stringify([routing, width, height, clicksPreset, drawingOptions, contextMenu, theme, colorSchema, codeTheme, fontMarkup, mcpNavigation, timerMode, timerDuration, extensions?.styles, extensions?.client, globalTop, globalBottom, customControls, reactiveSlides]))
     const parts = slides.map((slide, index) => {
       const source = options.sourceBindings?.get(activeSlides[index])
       const part = { ...slide, notes: notes[index], route: routes[index], sourceToken: source?.token }
@@ -490,6 +505,8 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     entryNotesLink: noteClicks ? '' : '<a data-deck-page-link="notes">Notes</a>',
     presenterNotesLink: noteClicks ? '' : '<a id="presenter-notes-link" data-deck-page-link="notes" target="_blank" rel="noopener">Open notes view</a>',
     presenterPanelTitle: noteClicks ? 'Presenter timer' : 'Speaker notes',
+    timerMode,
+    timerDuration,
     presenterLayoutBelow: noteClicks ? 'Timer below' : 'Notes below',
     presenterLayoutBeside: noteClicks ? 'Timer beside slides' : 'Notes beside slides',
     notesMarkup: notes.join('\n'),

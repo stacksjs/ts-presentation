@@ -2,7 +2,7 @@ import { compileLayoutTemplate } from '../../../client/index.ts'
 import { realpath, stat } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { FontOptions } from '../../../types/src/frontmatter.ts'
+import type { FontOptions, Headmatter } from '../../../types/src/frontmatter.ts'
 import type { DrawingOptions } from '../../../types/src/drawings.ts'
 import type { Deck, Slide } from './index.ts'
 import { importDeckModule } from './deck-modules.ts'
@@ -35,7 +35,13 @@ export interface PresentationAddon {
 }
 
 export interface PresentationTheme extends PresentationAddon {
-  defaults?: { layout?: string, className?: string, drawings?: DrawingOptions, fonts?: FontOptions, addons?: string | string[] }
+  defaults?: Pick<Headmatter, 'timer' | 'duration'> & {
+    layout?: string
+    className?: string
+    drawings?: DrawingOptions
+    fonts?: FontOptions
+    addons?: string | string[]
+  }
 }
 
 export interface ExtensionAssets {

@@ -35,11 +35,13 @@
   <aside id="presenter-notes" hidden aria-label="{{ presenterPanelTitle }}">
     <header class="presenter-header">
       <h2>{{ presenterPanelTitle }}</h2>
-      <div class="presenter-timing">
-        <span id="presenter-time" aria-label="Elapsed time">0:00</span>
+      <div id="presenter-timing" data-timer-mode="{{ timerMode }}" data-timer-duration="{{ timerDuration }}">
+        <output id="presenter-time" role="timer" aria-live="off" aria-label="Elapsed time">0:00</output>
+        <button id="presenter-timer-toggle" type="button" aria-label="Start timer">Start</button>
         <button id="presenter-reset" type="button">Reset timer</button>
         {!! presenterNotesLink !!}
       </div>
+      <progress id="presenter-time-progress" aria-label="Presentation time used" max="{{ timerDuration }}" value="0"></progress>
     </header>
     {!! notesMarkup !!}
   </aside>

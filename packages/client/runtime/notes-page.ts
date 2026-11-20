@@ -1,21 +1,18 @@
 import type { ClickBounds, SlidePosition, SlideRoute } from './navigation.ts'
 import type { DeckPage } from './routing.ts'
 
-interface NotesPosition extends SlidePosition { startedAt: number }
-
-function notesState(raw: string | null): NotesPosition | undefined {
+function notesState(raw: string | null): SlidePosition | undefined {
   if (!raw) return
   try {
-    const value: Partial<NotesPosition> | null = JSON.parse(raw)
+    const value: Partial<SlidePosition> | null = JSON.parse(raw)
     if (value && Number.isSafeInteger(value.slide) && value.slide! > 0
-      && Number.isSafeInteger(value.click) && value.click! >= 0
-      && Number.isSafeInteger(value.startedAt) && value.startedAt! > 0)
-      return value as NotesPosition
+      && Number.isSafeInteger(value.click) && value.click! >= 0)
+      return { slide: value.slide!, click: value.click! }
   }
   catch {}
 }
 
-export function notesSync(receive?: (state: NotesPosition) => void) {
+export function notesSync(receive?: (state: SlidePosition) => void) {
   const key = `ts-presentation-notes:${new URL('.', document.baseURI).pathname}`
   if (receive) {
     window.addEventListener('storage', (event) => {
@@ -25,11 +22,11 @@ export function notesSync(receive?: (state: NotesPosition) => void) {
     })
   }
   return {
-    saved(): NotesPosition | undefined {
+    saved(): SlidePosition | undefined {
       try { return notesState(localStorage.getItem(key)) }
       catch { return undefined }
     },
-    publish(state: NotesPosition): void {
+    publish(state: SlidePosition): void {
       try { localStorage.setItem(key, JSON.stringify(state)) }
       catch {}
     },

@@ -28,6 +28,12 @@ Open `/entry` to choose a view. `/notes` follows the current slide, reveals,
 and timer across tabs in the same browser profile. In a built deck, open
 `index.html?entry=1` or `index.html?notes=1` directly.
 
+Use **Start**, **Pause**, and **Reset timer** in presenter view. The timer
+starts when you press **Start** and keeps its state across presenter and
+notes tabs. Set `duration` in deck frontmatter to choose a time budget
+(default `30min`). Set `timer: countdown` to show time remaining and
+overtime. The default `stopwatch` mode shows elapsed time.
+
 In dev, **Edit slide** or **E** opens the slide's Markdown beside the
 preview. The editor saves frontmatter, body, and speaker notes to the
 source file. Use **Ctrl+S** or **Cmd+S** to save immediately. Changes

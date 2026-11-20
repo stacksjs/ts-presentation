@@ -644,7 +644,7 @@ v-switch { display: block; }
 
 #image-view { max-width: 94vw; max-height: 94dvh; padding: 12px; }
 #image-view img { display: block; max-width: 88vw; max-height: 81dvh; margin-top: 8px; object-fit: contain; }
-#overview button, #image-view button, #presenter-reset {
+#overview button, #image-view button, #presenter-timing button {
   cursor: pointer;
   padding: 6px 10px;
   border: 1px solid #5d535b;
@@ -653,7 +653,11 @@ v-switch { display: block; }
   background: #242127;
 }
 
-.presenter-timing { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-variant-numeric: tabular-nums; }
+#presenter-timing { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+#presenter-time { font: 650 1.125rem/1.2 ui-monospace, monospace; }
+#presenter-time-progress { display: block; width: 100%; height: 6px; margin-block: 8px 10px; accent-color: #8bc8a4; }
+.presenter-header:has([data-timer-pacing="near-limit"]) #presenter-time-progress { accent-color: #ebc573; }
+.presenter-header:has([data-timer-pacing="overtime"]) :is(#presenter-time-progress, #presenter-time) { accent-color: #f6a0a4; color: #f6a0a4; }
 .slide-ink { position: absolute; z-index: 10; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .slide-ink[data-drawing-active] { pointer-events: auto; touch-action: none; cursor: crosshair; }
 
@@ -1265,7 +1269,7 @@ body:is(.capturing, .previewing) .code-diff-edit { display: none; }
 }
 .notes-page #presenter-notes p { font-size: inherit; }
 .notes-page #presenter-notes h2 { font-size: clamp(18px, 4vw, 27px); }
-.notes-page :is(#presenter-reset, #presenter-notes-link) { display: none; }
+.notes-page #presenter-timing :is(button, #presenter-notes-link) { display: none; }
 #notes-controls {
   display: flex;
   flex-wrap: wrap;

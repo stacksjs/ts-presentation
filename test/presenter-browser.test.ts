@@ -132,6 +132,98 @@ test.skipIf(!chrome)('presenter previews the next reveal and keeps all three lay
   }
 }, browserTestTimeout)
 
+test.skipIf(!chrome)('starts, pauses, resumes, and resets the presenter timer across subpath views', async () => {
+  const root = await mkdtemp(resolve(tmpdir(), 'presentation-timer-'))
+  const source = resolve(root, 'slides.md')
+  await Bun.write(source, '---\nduration: 3s\ntimer: countdown\n---\n\n' + fixture)
+  const server = cli('dev', source, '--port', '0', '--base', '/rehearsal/')
+  let view: Bun.WebView | undefined
+  try {
+    const base = await serverOrigin(server) + '/rehearsal/'
+    const presenter = base + 'presenter/review'
+    view = new Bun.WebView({ width: 940, height: 750, backend: { type: 'chrome', path: chrome!, url: false } })
+    await view.navigate(presenter + '?clicks=1')
+    const openNotes = () => view!.evaluate(`(async () => {
+      const frame = document.createElement('iframe')
+      frame.hidden = true
+      frame.id = 'timing-notes'
+      frame.src = document.querySelector('#presenter-notes-link').href
+      const ready = new Promise(resolve => frame.addEventListener('load', resolve, { once: true }))
+      document.body.append(frame)
+      await ready
+      window.testTime = 1700000000000
+      Date.now = frame.contentWindow.Date.now = () => window.testTime
+      return getComputedStyle(frame.contentDocument.querySelector('#presenter-timer-toggle')).display
+    })()`)
+    const verify = (status: string, text: string, value: number, pacing = 'in-budget') =>
+      view!.evaluate<unknown[]>(`(async () => {
+        const docs = [document, document.querySelector('#timing-notes').contentDocument]
+        const read = doc => {
+          const timing = doc.querySelector('#presenter-timing')
+          const progress = doc.querySelector('#presenter-time-progress')
+          return [timing.dataset.timerStatus, doc.querySelector('#presenter-time').textContent,
+            progress.value, timing.dataset.timerPacing]
+        }
+        const expected = ${JSON.stringify([status, text, value, pacing])}
+        for (let attempt = 0; attempt < 100; attempt++) {
+          const states = docs.map(read)
+          if (states.every(state => JSON.stringify(state) === JSON.stringify(expected))) return states
+          await new Promise(resolve => setTimeout(resolve, 25))
+        }
+        return docs.map(read)
+      })()`).then(states => expect(states).toEqual([[status, text, value, pacing], [status, text, value, pacing]]))
+    expect(await openNotes()).toBe('none')
+    await verify('stopped', '0:03', 0)
+    expect(await view.evaluate("document.getElementById('presenter-time').getAttribute('aria-label')")).toBe('Time remaining')
+    await view.evaluate("document.getElementById('presenter-timer-toggle').focus()")
+    await view.press('Enter')
+    await verify('running', '0:03', 0)
+    await view.evaluate('window.testTime += 1250')
+    await verify('running', '0:02', 1250)
+    await view.press('Enter')
+    await verify('paused', '0:02', 1250)
+    await view.evaluate('window.testTime += 9000')
+    expect(await view.evaluate('window.presentationNavigation.clicks')).toBe(1)
+    await view.press('ArrowRight')
+    expect(await view.evaluate('window.presentationNavigation.clicks')).toBe(2)
+    await verify('paused', '0:02', 1250)
+
+    await view.navigate(base + 'presenter/2?clicks=2')
+    await openNotes()
+    await verify('paused', '0:02', 1250)
+    await view.evaluate("document.getElementById('presenter-timer-toggle').click()")
+    await view.evaluate('window.testTime += 1300')
+    await verify('running', '0:01', 2550, 'near-limit')
+    await view.evaluate('window.testTime += 2750')
+    await verify('running', '-0:02', 3000, 'overtime')
+    await view.evaluate("document.getElementById('presenter-reset').click()")
+    await verify('stopped', '0:03', 0)
+
+    await Bun.write(source, '---\nduration: invalid\n---\n\n' + fixture)
+    await view.navigate(base + 'presenter')
+    expect(await view.evaluate(`[
+      document.getElementById('presenter-time').textContent,
+      document.getElementById('presenter-time').getAttribute('aria-label'),
+      document.getElementById('presenter-time-progress').max,
+    ]`)).toEqual(['0:00', 'Elapsed time', 1800000])
+    expect(await view.evaluate(`(() => {
+      let now = 1700000000000
+      Date.now = () => now
+      const button = document.getElementById('presenter-timer-toggle')
+      button.click()
+      now += 3661000
+      button.click()
+      return [document.getElementById('presenter-time').textContent, button.textContent]
+    })()`)).toEqual(['1:01:01', 'Resume'])
+  }
+  finally {
+    view?.close()
+    server.kill()
+    await server.exited
+    await rm(root, { recursive: true, force: true })
+  }
+}, browserTestTimeout)
+
 test.skipIf(!chrome)('CLI exports only the authored reveal range for a slide', async () => {
   const root = await mkdtemp(resolve(tmpdir(), 'presentation-steps-'))
   try {

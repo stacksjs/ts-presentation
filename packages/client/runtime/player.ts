@@ -23,6 +23,7 @@ import type { DeckPage } from './routing.ts'
 import { deckLocation, readDeckLocation, resolveRouterMode } from './routing.ts'
 import { setupOverviewGrid } from './overview.ts'
 import { setupPresenter } from './presenter.ts'
+import { setupPresenterTimer } from './presenter-timer.ts'
 import { collectReveals, prepareSwitchPrint, showReveals } from './reveals.ts'
 import { setupSideEditor } from './side-editor.ts'
 import type { NavOperations, ShortcutOptions } from '../../types/src/shortcuts.ts'
@@ -47,7 +48,6 @@ const overviewFrame = overview.querySelector('iframe')!
 const overviewLink = overview.querySelector<HTMLAnchorElement>('#overview-page-link')!
 const imageView = document.querySelector<HTMLDialogElement>('#image-view')!
 const detail = imageView.querySelector('img')!
-const timer = document.querySelector<HTMLElement>('#presenter-time')!
 const routes: SlideRoute[] = JSON.parse(document.querySelector('#presentation-navigation')!.textContent ?? '[]')
 const aliases = new Map(routes.flatMap(route => route.alias ? [[route.alias, route.no]] : []))
 const routing = { base: document.documentElement.dataset.presentationBase ?? '/', mode: resolveRouterMode(document.documentElement.dataset.routerMode) }
@@ -118,8 +118,6 @@ articles.forEach(mountSlide)
 let current = 1
 let click = 0
 let popup: Window | null = null
-let startedAt = Date.now()
-let timerTick: ReturnType<typeof setInterval> | undefined
 document.body.classList.add('playing')
 if (isPreview) document.body.classList.add('previewing')
 if (isCapture) document.body.classList.add('capturing')
@@ -149,17 +147,9 @@ if (isNotes) {
 }
 else if (!isPreview && !isCapture) mountViewLinks(notesPanel, viewUrl)
 const noteView = isNotes ? mountNotesPage(notesPanel, stage, viewUrl, toggleFullscreen) : undefined
-const notesFeed = !isCapture && (!isPreview || isNotes) ? notesSync((state) => {
-  startedAt = state.startedAt
-  if (isNotes) show(state.slide, state.click, false, false)
-  if (!notesPanel.hidden) updateTimer()
-}) : undefined
-
-function publishNotes(reset = false): void {
-  if (!notesFeed || isNotes) return
-  if (!reset) startedAt = notesFeed.saved()?.startedAt ?? startedAt
-  notesFeed.publish({ ...position(), startedAt })
-}
+const sharesNotes = !isCapture && (!isPreview || isNotes)
+const notesFeed = sharesNotes ? notesSync(isNotes ? state => show(state.slide, state.click, false, false) : undefined) : undefined
+const timer = sharesNotes ? setupPresenterTimer(notesPanel) : undefined
 
 
 function resize(): void {
@@ -264,7 +254,7 @@ function show(number: number, step?: number, writeHistory = true, sync = true, r
   window.dispatchEvent(new CustomEvent('presentation:slide', {
     detail: { ...here, title: routes[current - 1].title, route: routes[current - 1] },
   }))
-  if (!refresh) publishNotes()
+  if (!refresh) notesFeed?.publish(here)
   if (sync) syncPeer({ presentationSlide: current, presentationClick: click })
 }
 
@@ -311,11 +301,6 @@ const navigation = window.presentationNavigation = createNavigationContext(route
     previousSlide,
   })
 
-function updateTimer(): void {
-  const elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000))
-  timer.textContent = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')}`
-}
-
 function togglePresenter(): void {
   notesPanel.hidden = !notesPanel.hidden
   document.body.classList.toggle('presenting', !notesPanel.hidden)
@@ -326,9 +311,7 @@ function togglePresenter(): void {
   presenterControls?.setActive(!notesPanel.hidden)
   presenterControls?.update(position())
   drawing?.refresh()
-  if (timerTick !== undefined) clearInterval(timerTick)
-  timerTick = notesPanel.hidden ? undefined : setInterval(updateTimer, 1000)
-  if (!notesPanel.hidden) updateTimer()
+  timer?.setActive(!notesPanel.hidden)
   resize()
 }
 
@@ -515,11 +498,6 @@ goto.addEventListener('change', () => show(Number(goto.value)))
 presenter.addEventListener('click', openPresenter)
 fullscreen.addEventListener('click', () => { void toggleFullscreen() })
 control.querySelector('#overview-button')!.addEventListener('click', openOverview)
-document.querySelector('#presenter-reset')!.addEventListener('click', () => {
-  startedAt = Date.now()
-  publishNotes(true)
-  updateTimer()
-})
 window.addEventListener('message', (event) => {
   if (event.origin !== 'https://platform.twitter.com') return
   const message = event.data?.['twttr.embed']
@@ -581,14 +559,10 @@ if (overviewGrid) {
 else for (const article of articles) article.hidden = true
 const savedNotes = isNotes ? notesFeed?.saved() : undefined
 if (savedNotes) {
-  startedAt = savedNotes.startedAt
   show(savedNotes.slide, savedNotes.click, false, false)
 }
 else readLocation()
-if (isNotes) {
-  updateTimer()
-  timerTick = setInterval(updateTimer, 1000)
-}
+if (isNotes) timer?.setActive(true)
 if (isPresenter) {
   togglePresenter()
   opener?.postMessage({ presenterReady: true }, messageOrigin)
