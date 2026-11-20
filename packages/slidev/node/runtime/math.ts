@@ -193,11 +193,12 @@ function tokenize(source: string, onTrailingComment?: () => void): string[] {
     tokens.push(token)
     if (!isMathUrlCommand(token)) continue
     const start = lexer.lastIndex
-    const argument = token === '\\includegraphics' ? /\s*(?:\[[^\]\r\n]*\]\s*)?\{/y : /\s*\{/y
+    const argument = token === '\\includegraphics' ? /\s*(?:\[[^\]\r\n]*\]\s*)?([{%])/y : /\s*([{%])/y
     argument.lastIndex = start
-    if (!argument.test(source)) continue
+    const opening = argument.exec(source)?.[1]
+    if (!opening) continue
     // Percent signs inside literal URLs belong to the address rather than TeX comments.
-    let group = 1
+    let group = opening === '{' ? 1 : 0
     let end = argument.lastIndex
     while (end < source.length && group) {
       const character = source[end++]
@@ -212,15 +213,37 @@ function tokenize(source: string, onTrailingComment?: () => void): string[] {
 }
 
 type MathMode = 'math' | 'text'
-const expansionPrimitives = ['\\expandafter', '\\noexpand', '\\@firstoftwo', '\\@secondoftwo', '\\@ifnextchar', '\\@ifstar', '\\TextOrMath', '\\html@mathml', '\\long'] as const
+const expansionPrimitives = ['\\expandafter', '\\noexpand', '\\@firstoftwo', '\\@secondoftwo', '\\@ifnextchar', '\\@ifstar', '\\TextOrMath', '\\html@mathml', '\\long', '\\message', '\\errmessage'] as const
 const expansionPrimitiveNames = new Set<string>(expansionPrimitives)
 const macroDeclaration = /^\\(?:[gex]?def|(?:future)?let|(?:new|renew|provide)command|global)$/
 type ExpansionPrimitive = typeof expansionPrimitives[number]
-type ConditionalPrimitive = Exclude<ExpansionPrimitive, '\\expandafter' | '\\noexpand' | '\\long'>
-interface TokenMacro { body: string[], parameters: string[][], prefix: string[], optional?: string[] }
+type ConditionalPrimitive = Exclude<ExpansionPrimitive, '\\expandafter' | '\\noexpand' | '\\long' | '\\message' | '\\errmessage'>
+interface TokenMacro { body: string[], parameters: string[][], prefix: string[], optional?: string[], unexpandable?: boolean }
 type Macro = TokenMacro | { primitive: ExpansionPrimitive }
 interface MathState { globals: Map<string, Macro>, options: KatexOptions, inlineBreaks: boolean }
 type EquationNumberMarkup = (number: number) => string
+
+// KaTeX's legacy Khan Academy color macros. See licenses/KaTeX-MIT.txt.
+const legacyColors: Record<string, string> = {
+  blue: '#6495ed', orange: '#ffa500', pink: '#ff00af', red: '#df0030', green: '#28ae7b',
+  gray: 'gray', purple: '#9d38bd', kaBlue: '#314453', kaGreen: '#71b307',
+}
+const legacyColorShades: Record<string, string[]> = {
+  blue: ['ccfaff', '80f6ff', '63d9ea', '11accd', '0c7f99'],
+  teal: ['94fff5', '26edd5', '01d1c1', '01a995', '208170'],
+  green: ['b6ffb0', '8af281', '74cf70', '1fab54', '0d923f'],
+  gold: ['ffd0a9', 'ffbb71', 'ff9c39', 'e07d10', 'a75a05'],
+  red: ['fca9a9', 'ff8482', 'f9685d', 'e84d39', 'bc2612'],
+  maroon: ['ffbde0', 'ff92c6', 'ed5fa6', 'ca337c', '9e034e'],
+  purple: ['ddd7ff', 'c6b9fc', 'aa87ff', '7854ab', '543b78'],
+  mint: ['f5f9e8', 'edf2df', 'e0e5cc'],
+  gray: ['f6f7f7', 'f0f1f2', 'e3e5e6', 'd6d8da', 'babec2', '888d93', '626569', '3b3e40', '21242c'],
+}
+for (const [name, shades] of Object.entries(legacyColorShades)) {
+  shades.forEach((hex, index) => { legacyColors[`${name}${'ABCDEFGHI'[index]}`] = `#${hex}` })
+}
+const colorMacros = new Map<string, TokenMacro>(Object.entries(legacyColors).map(([name, value]) =>
+  [`\\${name}`, { body: ['\\textcolor', '{', value, '}', '{', '#1', '}'], parameters: [[]], prefix: [] }]))
 
 function isExpansionPrimitive(token: string | undefined): token is ExpansionPrimitive {
   return token !== undefined && expansionPrimitiveNames.has(token)
@@ -606,6 +629,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   let linkDepth = 0
 
   const macros = new Map<string, Macro>()
+  const macroFor = (token: string) => macros.get(token) ?? colorMacros.get(token)
   const scopes: Map<string, Macro | undefined>[] = []
   function assign(name: string, definition: Macro, global = false): void {
     if (!controlSequence.test(name)) return
@@ -649,7 +673,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
   }
 
   function expandable(token: string): boolean {
-    return isExpansionPrimitive(token) || macros.has(token)
+    const macro = macroFor(token)
+    return macro ? !('unexpandable' in macro && macro.unexpandable) : isExpansionPrimitive(token)
   }
 
   function chooseBranch(command: ConditionalPrimitive): string[] {
@@ -683,13 +708,13 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (expandedCount > maxExpand) throw new Error('Too many math macro expansions')
   }
 
-  function expandOnce(): boolean {
+  function expandOnce(eager = false): boolean {
     const token = tokens[cursor]
-    const definition = macros.get(token)
+    const definition = macroFor(token)
     const macro = definition && 'body' in definition ? definition : undefined
     const primitive = definition && 'primitive' in definition ? definition.primitive
       : !definition && isExpansionPrimitive(token) ? token : undefined
-    if (!macro && !primitive) return false
+    if ((!macro && !primitive) || (eager && macro?.unexpandable)) return false
     countExpansions(1)
     if (primitive === '\\expandafter' || primitive === '\\noexpand') {
       tokens.splice(cursor, 1)
@@ -703,19 +728,25 @@ export function renderMath(source: string, display = false, configured: MathMacr
       tokens.splice(cursor, 1)
       space()
       if (!tokens[cursor] || tokens[cursor] === boundary) throw new Error('Missing token after delayed math expansion')
-      expandOnce()
+      expandOnce(true)
       tokens.splice(cursor, 0, next)
       return true
     }
 
     if (primitive) {
       const start = cursor++
-      replaceExpansion(start, primitive === '\\long' ? [] : chooseBranch(primitive))
+      if (primitive === '\\message' || primitive === '\\errmessage') {
+        const message = literalGroup()
+        if (primitive === '\\message') console.log(message)
+        else console.error(message)
+        replaceExpansion(start, [])
+      }
+      else replaceExpansion(start, primitive === '\\long' ? [] : chooseBranch(primitive))
       return true
     }
     if (!macro) return false
     const start = cursor++
-    space()
+    if (/^\\[A-Za-z@]+$/.test(token)) space()
     for (const token of macro.prefix) {
       if (tokens[cursor++] !== token) throw new Error('Missing macro prefix')
     }
@@ -738,9 +769,9 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return true
   }
 
-  function expand(skipSpace = true): void {
+  function expand(skipSpace = true, eager = false): void {
     if (skipSpace) space()
-    while (expandOnce()) {
+    while (expandOnce(eager)) {
       if (skipSpace) space()
     }
   }
@@ -806,7 +837,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const definition: string[] = []
     try {
       while (tokens[cursor] !== boundary) {
-        expand(false)
+        expand(false, preserveLiterals)
         if (tokens[cursor] === boundary) break
         const token = tokens[cursor++]
         if (token.startsWith(inhibitedToken)) definition.push(token.slice(inhibitedToken.length))
@@ -1053,7 +1084,9 @@ export function renderMath(source: string, display = false, configured: MathMacr
   }
 
   function textAccent(command: string): { literal: string } | { markup: Markup } {
-    const content = textArgument('text')
+    const blank = Object.hasOwn(textAccents, command) && !/^\\[A-Za-z]+$/.test(command) && /^\s+$/.test(tokens[cursor] ?? '')
+    if (blank) cursor++
+    const content = blank ? tag('mtext', '\u00A0') : textArgument('text')
     if (command === '\\textcircled') return { markup: xml`<mrow class="math-text-circled">${content}</mrow>` }
     const [mark, glyph, below] = textAccents[command]
     const plain = typeof content === 'string' ? /^<mtext>([^&<]\p{M}*)<\/mtext>$/u.exec(content)?.[1] : undefined
@@ -1476,8 +1509,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
       if (cells.some(Boolean) || !last) rows.push(cells)
       if (last) { closed = true; break }
     }
-    if (!closed || !rows.length) throw new Error('Unclosed CD environment')
-    const columns = Math.max(...rows.map(cells => cells.length))
+    if (!closed) throw new Error('Unclosed CD environment')
+    const columns = Math.max(0, ...rows.map(cells => cells.length))
     if (columns * rows.length > 6000) throw new Error('CD environment has too many cells')
     const markup = rows.map(cells => `<mtr>${Array.from({ length: columns }, (_, index) => `<mtd>${cells[index] ?? ''}</mtd>`).join('')}</mtr>`).join('')
     return `<mtable class="math-cd">${markup}</mtable>`
@@ -1573,7 +1606,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       }
       if (pairs && cells.length > pairs * 2) throw new Error('Too many alignment columns')
       const lineBreak = separator === '\\\\' || separator === '\\newline' || separator === '\\cr'
-      const extra = lineBreak && separator !== '\\newline' ? rawBracket() : undefined
+      const extra = separator === '\\\\' && tokens[cursor] === '[' ? rawBracket() : undefined
       const gap = extra === undefined ? undefined : dimension(expandDefinition(extra).join(''))
       if (extra !== undefined && gap === undefined) throw new Error('Invalid array row spacing')
       const label = rowTags ? nextTag(automatic) : undefined
@@ -1714,32 +1747,37 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (name === 'let' || name === 'futurelet') {
       const target = literalGroup()
       space()
-      let source: string[]
+      let value: string
       if (name === 'futurelet') {
         let following = cursor + 1
         while (/^\s+$/.test(tokens[following] ?? '')) following++
         if (!tokens[cursor] || tokens[cursor] === boundary || !tokens[following] || tokens[following] === boundary)
           throw new Error('Missing math lookahead token')
-        source = [tokens[following]]
+        value = tokens[following]
       }
       else {
-        if (tokens[cursor] === '=') cursor++
-        source = rawGroup()
+        if (tokens[cursor] === '=') {
+          cursor++
+          if (/^\s+$/.test(tokens[cursor] ?? '')) cursor++
+        }
+        value = tokens[cursor++]
+        if (!value || value === boundary) throw new Error('Missing math assignment token')
       }
-      const value = source.length === 1 ? source[0] : undefined
-      const existing = value === undefined ? undefined : macros.get(value)
-      const snapshot = value?.startsWith('\\') ? [literalToken + value] : source
-      assign(target, existing ?? (isExpansionPrimitive(value) ? { primitive: value } : plainMacro(snapshot)), global)
+      const existing = macroFor(value)
+      const command = value.startsWith('\\')
+      const snapshot = { ...plainMacro([command ? literalToken + value : value]), unexpandable: !command }
+      assign(target, existing ?? (isExpansionPrimitive(value) ? { primitive: value } : snapshot), global)
       return true
     }
     if (name === 'newcommand' || name === 'renewcommand' || name === 'providecommand') {
       const command = literalGroup().trim()
-      const count = bracket()
-      if (count !== undefined && !/^\d$/.test(count)) throw new Error('Invalid macro argument count')
+      const rawCount = rawBracket()
+      const count = rawCount && expandDefinition(rawCount).join('').trim()
       const arity = Number(count ?? 0)
+      if (count !== undefined && (!/^\d+$/.test(count) || arity > 6000)) throw new Error('Invalid macro argument count')
       const optional = arity ? rawBracket() : undefined
       const body = rawGroup()
-      if (name !== 'providecommand' || !macros.has(command)) assign(command, plainMacro(body, arity, optional), global)
+      if (name !== 'providecommand' || !macroFor(command)) assign(command, plainMacro(body, arity, optional), global)
       return true
     }
     if (global) throw new Error('Global macro prefix requires a definition')
@@ -1898,6 +1936,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (name === 'char') {
       const glyph = explicitCharacter()
       return { markup: tag(/^\p{L}$/u.test(glyph) ? 'mi' : 'mtext', glyph) }
+    }
+    if (name === 'aa' || name === 'AA') {
+      strictViolation('mathVsTextAccents', 'The ring accent works only in text mode', true, token)
+      return { markup: tag('mi', textSymbols[token]) }
     }
     if (name === 'mathstrut') {
       return { markup: '<mpadded width="0"><mphantom><mo stretchy="false">(</mo></mphantom></mpadded>' }

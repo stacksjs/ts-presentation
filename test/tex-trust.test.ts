@@ -74,6 +74,17 @@ test('expands URL macros and keeps TeX comments outside URL arguments', () => {
   expect(html).not.toContain('outside the address')
 })
 
+test('parses empty and single-token URLs without treating a literal percent as a comment', () => {
+  const render = createMathRenderer({ trust: true, throwOnError: true, strict: true })
+  const html = markup(render(String.raw`\href %end \url%z \href{}{x}\url{/path\^y}`, false))
+  expect(html).toContain('<a href="%"><math displaystyle="false"><mrow><mi>e</mi></mrow></math></a></mtext><mi>n</mi><mi>d</mi>')
+  expect(html).toContain('<a href="%">%</a></mtext><mi>z</mi>')
+  expect(html).toContain('<a href=""><math displaystyle="false"><mrow><mrow><mi>x</mi></mrow></mrow></math></a>')
+  expect(html).toContain('<a href="/path^y">/path^y</a>')
+  expect(markup(render('\\url%%comment\n', false))).toContain('<a href="%">%</a>')
+  expect(markup(createMathRenderer({ throwOnError: true })(String.raw`\url%`, false))).not.toContain('<a ')
+})
+
 const chrome = await findChrome()
 test.skipIf(!chrome)('follows a math link in Chromium and keeps it clickable over editable PowerPoint artwork', async () => {
   const source = [

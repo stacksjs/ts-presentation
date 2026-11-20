@@ -102,6 +102,44 @@ test('keeps a snapshot of the lookahead and primitive meanings when using let', 
   expect(math(String.raw`\let\word=\textunderscore\text{literal: \word.}`, false)).toContain('literal: _.')
 })
 
+// Parser cases adapted from KaTeX v0.19.1 (licenses/KaTeX-MIT.txt).
+test('assigns whitespace and brace tokens with let and preserves literal meanings during expansion', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  expect(math(String.raw`\def\:{\let\space= }\: \text{\space}`, false)).toContain('<mtext>\u00A0</mtext>')
+  expect(math(String.raw`\let\open{\sqrt\open1}`, false)).toContain('<msqrt><mrow><mn>1</mn></mrow></msqrt>')
+  expect(math(String.raw`\let\foo=x\noexpand\foo`, false)).toContain('<mi>x</mi>')
+  expect(math(String.raw`\let\foo=x\edef\saved{\foo}\def\foo{y}\saved`, false)).toContain('<mi>y</mi>')
+})
+
+test('reads multi-digit and expanded argument counts in macro declarations', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const html = math(String.raw`\def\arity{10}\newcommand\foo[ \arity ]{#1^2}\foo 0123456789+x`, false)
+  expect(html).toContain('<msup><mn>0</mn><mn>2</mn></msup>')
+  expect(html).not.toContain('<mn>123456789</mn>')
+  expect(() => math(String.raw`\newcommand\foo[1.5]{x}`, false)).toThrow('Invalid macro argument count')
+  expect(() => math(String.raw`\newcommand\foo[900000000]{x}`, false)).toThrow('Invalid macro argument count')
+})
+
+test('handles math debug messages, an accented blank, and text-mode ring accents', () => {
+  const math = createMathRenderer({ throwOnError: true, strict: 'ignore' })
+  const log = spyOn(console, 'log').mockImplementation(() => {})
+  const error = spyOn(console, 'error').mockImplementation(() => {})
+  try {
+    const html = math(String.raw`\edef\prepare{\message{preparing}}\prepare\text{a\errmessage{diagnostic}\' \aa\AA}\aa`, false)
+    expect(log).toHaveBeenCalledWith('preparing')
+    expect(log).toHaveBeenCalledTimes(1)
+    expect(error).toHaveBeenCalledWith('diagnostic')
+    expect(html).toContain('<mtext>\u00A0</mtext>')
+    expect(html).toContain('<mtext>åÅ</mtext></mrow><mi>å</mi>')
+  }
+  finally {
+    log.mockRestore()
+    error.mockRestore()
+  }
+  const strict = createMathRenderer({ throwOnError: true, strict: true })
+  expect(() => strict(String.raw`\aa`, false)).toThrow('mathVsTextAccents')
+})
+
 test('selects TeX macro branches before parsing and keeps lookahead tokens available', () => {
   const math = createMathRenderer({ throwOnError: true })
   const source = String.raw`
@@ -186,6 +224,14 @@ test('applies the legacy color option to one argument in text and math', () => {
   expect(renderMath(tex)).toContain('<mrow style="color:red"><mrow><mi>b</mi></mrow><mi>c</mi></mrow>')
   expect(legacy(String.raw`\text{a\color{blue}{b}c}`, false))
     .toContain('<mtext>a</mtext><mrow style="color:blue"><mtext>b</mtext></mrow><mtext>c</mtext>')
+})
+
+test('expands legacy palette macros in math and text and allows scoped overrides', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const html = math(String.raw`\let\shade=\blue{\def\blue{B}\blue}\shade x+\redA{y}+\text{\mintC{fresh}}`, false)
+  expect(html).toContain('<mrow><mi>B</mi></mrow><mrow style="color:#6495ed"><mrow><mi>x</mi></mrow></mrow>')
+  expect(html).toContain('<mrow style="color:#fca9a9"><mrow><mi>y</mi></mrow></mrow>')
+  expect(html).toContain('<mrow style="color:#e0e5cc"><mtext>fresh</mtext></mrow>')
 })
 
 test('caps positive TeX dimensions in ems, including TeX-only units', () => {
@@ -283,6 +329,17 @@ test('counts explicit empty final rows in numbered AMS alignments', () => {
   expect(starred.match(/<mtr>/g)).toHaveLength(1)
   const suppressed = math(String.raw`\begin{gather}a=b\\\notag\end{gather}`, true)
   expect(suppressed.match(/<mtr>/g)).toHaveLength(1)
+})
+
+test('reads matrix row spacing only after adjacent double backslashes and permits an empty CD', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const source = String.raw`\begin{matrix}a&b\cr[c]&d\\ [e]&f\\[1ex]g&h\end{matrix}`
+  const html = math(source, true)
+  expect(html.match(/<mtr/g)).toHaveLength(4)
+  expect(html.match(/<mo stretchy="false">\[<\/mo>/g)).toHaveLength(2)
+  expect(html).toContain('padding-bottom:max(0px,calc(0.14em + 1ex))')
+  expect(math(String.raw`\begin{CD}\end{CD}`, true)).toContain('<mtable class="math-cd"></mtable>')
+  expect(() => math(String.raw`\begin{CD}x\end{matrix}`, true)).toThrow('Unclosed CD environment')
 })
 
 test('numbers rendered deck equations in layout order and keeps notes out of the sequence', async () => {

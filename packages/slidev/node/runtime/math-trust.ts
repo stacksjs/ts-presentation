@@ -21,8 +21,8 @@ export function trustedMath(context: KatexTrustContext, trust: KatexOptions['tru
 }
 
 export function mathUrl(command: UrlCommand, raw: string): Extract<KatexTrustContext, { url: string }> | undefined {
-  const url = raw.replace(/\\([%#$&_{}~])/g, '$1').trim()
-  if (!url || /[\\\u0000-\u001f\u007f]/.test(url)) return
+  const url = raw.replace(/\\([%#$&_{}~^])/g, '$1').trim()
+  if (/[\\\u0000-\u001f\u007f]/.test(url)) return
   const parsed = URL.parse(url, 'https://presentation.invalid/')
   if (!parsed) return
   const image = command === '\\includegraphics'

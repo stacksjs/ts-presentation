@@ -41,6 +41,7 @@ in a new ts-presentation project.
 | KaTeX strict diagnostics | End-of-formula comments, HTML extensions, text accents and strikeout in math, spacing units and modes, and overflowed array columns |
 | KaTeX accents and annotations | Stacked overbracket and underbracket labels, scalable line segments, text-mode underbars, circled text, and macro-expanded accent arguments |
 | KaTeX conditional macros | Mode-aware `\TextOrMath`, starred forms, token lookahead, and branch expansion in formulas, text, and `\edef` |
+| KaTeX legacy macros | Khan Academy color names and shades, literal token assignment with `\let`, multi-digit macro arity, and `\message` or `\errmessage` output during expansion |
 | KaTeX macro and color settings | Deck-scoped `globalGroup`, per-formula `maxExpand` including eager definitions, and two-argument `\color` via `colorIsTextColor` |
 | KaTeX sizing settings | `maxSize` for explicit dimensions and `minRuleThickness` for fraction bars, array rules, box borders, and overlines or underlines |
 | KaTeX text-mode boxes | Phantom space, selective height and depth removal, raised boxes and rules, and escaped verbatim text inside `\text{…}` |
