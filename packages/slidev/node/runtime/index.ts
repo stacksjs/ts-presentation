@@ -8,7 +8,7 @@ import type { LoadedExtensions, PresentationAddon, PresentationLayout } from './
 import { resolveCanvas } from '../../../types/src/canvas.ts'
 import type { LiveDeck } from '../../../types/src/dev-protocol.ts'
 import { renderChart } from './charts.ts'
-import { codeBlock, codeFrame, createCodeHighlighter, codeThemeStyles, magicFrames, parseCodeInfo } from './code-blocks.ts'
+import { codeBlock, createHighlightedCodeRenderer, codeThemeStyles, magicFrames, parseCodeInfo } from './code-blocks.ts'
 import { codeDiffBlock } from './code-diff.ts'
 import { renderMermaid } from './diagram.ts'
 import { optionsForSvg } from './diagram-svg.ts'
@@ -46,6 +46,7 @@ export { defineCodeRunnersSetup } from '../../../types/src/code-runner.ts'
 export type { CodeRunner, CodeRunnerContext, CodeRunnerOutput, CodeRunnerOutputDom, CodeRunnerOutputError, CodeRunnerOutputHtml, CodeRunnerOutputText, CodeRunnerOutputTextArray, CodeRunnerOutputs, CodeRunnerProviders, CodeRunnersSetup } from '../../../types/src/code-runner.ts'
 export { defineCodeHighlightSetup, defineShikiSetup, defineKatexSetup, defineMermaidRendererSetup, defineMermaidSetup } from './authoring-setup.ts'
 export type { CodeHighlightOptions, KatexOptions, KatexTrustContext, MermaidOptions, MermaidRenderer } from './authoring-setup.ts'
+export type { CodeHighlightBlockOptions, CodeHighlightContext, CodeHighlightContextBase, CodeHighlightElement, CodeHighlightProperty, CodeHighlightRoot, CodeHighlightText, CodeHighlightToken, CodeHighlightTransformer } from './highlight-transformers.ts'
 export type { PresentationNavigation, SlideRoute } from '../../../client/runtime/navigation.ts'
 export type { LayoutContext, PresentationAddon, PresentationLayout, PresentationTheme } from './extensions.ts'
 export type { DrawingOptions } from '../../../types/src/drawings.ts'
@@ -153,12 +154,13 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   const renderToken = Bun.randomUUIDv7().replaceAll('-', '')
   const fencePrefix = `tp-fence-${renderToken}-`
   const rawFence = new RegExp(`(?<!language-)\\b${fencePrefix}\\d+\\b`, 'g')
-  const highlight = createCodeHighlighter()
+  const selectedCodeTheme = deck.headmatter?.codeTheme ?? configuration?.codeHighlight?.theme
+  const codeRenderer = createHighlightedCodeRenderer(selectedCodeTheme, configuration?.codeHighlight?.transformers)
   const fontMarkup = deckFontMarkup(options.extensions?.theme.defaults?.fonts, nested?.fonts, deck.headmatter?.fonts)
   const color = deck.headmatter?.colorSchema ?? nested?.colorSchema
   const socialTheme = color === 'light' || (color !== 'dark' && options.extensions?.theme.name === 'paper') ? 'light' : 'dark'
   const colorSchema = color === 'auto' ? color : socialTheme
-  const codeTheme = codeThemeStyles(deck.headmatter?.codeTheme ?? configuration?.codeHighlight?.theme)
+  const codeTheme = codeThemeStyles(selectedCodeTheme)
   const { extensions } = options
   const activeExtensions: PresentationAddon[] = extensions ? [extensions.theme, ...extensions.addons] : []
   const defaults = extensions?.theme.defaults
@@ -205,7 +207,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
   let groups = 0
   const deckNumberMarkup = (number: number) => `<mtext data-equation-auto="${renderToken}">(${number})</mtext>`
   function markdown(content: string, comark?: boolean): string {
-    const transformFences = comark !== undefined && !!transformers?.codeblocks.length
+    const transformFences = comark !== undefined && (!!transformers?.codeblocks.length || codeRenderer.hasTransformers)
     const prepared = prepareMarkdown(content, {
       renderMath: comark === undefined ? renderMath : (body, display) => renderMath(body, display, deckNumberMarkup),
       mathEnabled: (deck.headmatter?.math ?? deck.headmatter?.katex) !== false,
@@ -298,8 +300,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
             const source = override?.code ?? decoded
             const label = override?.info ?? fence.info
             const selected = parseCodeInfo(label)?.language ?? fenceLanguage(label)
-            const tokens = selected && await highlight(source, selected)
-            return tokens ? `<pre><code class="language-${escapeHtml(selected)}">${tokens.join('\n')}</code></pre>` : plainCode(source, selected)
+            return (selected && await codeRenderer.render(source, selected, label)) || plainCode(source, selected)
           },
         }
         for (const transform of transformers.codeblocks) {
@@ -316,7 +317,7 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
       }
       const writable = info?.writeToken && options.liveCompile && options.writableSnippets?.get(info.writeToken)
       if (editorEnabled && info?.runner === 'diff') {
-        const diff = await codeDiffBlock(decoded, info, lineNumbers, highlight)
+        const diff = await codeDiffBlock(decoded, info, lineNumbers, codeRenderer.highlight)
         if (diff) return diff
       }
       if (editorEnabled && (info?.runner || writable)) {
@@ -337,18 +338,17 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
       }
       if (info?.magic) {
         const frames = magicFrames(decoded)
-        if (frames) return codeBlock(info, await Promise.all(frames.map(async frame => codeFrame({
-          ...frame,
-          info: { ...frame.info, title: frame.info.title ?? info.title, lines: frame.info.lines ?? info.lines, maxHeight: frame.info.maxHeight ?? info.maxHeight },
-        }, await highlight(frame.source, frame.info.language), lineNumbers))), true)
+        if (frames) return codeBlock(info, await Promise.all(frames.map(async frame => {
+          const settings = { ...frame.info, title: frame.info.title ?? info.title, lines: frame.info.lines ?? info.lines, maxHeight: frame.info.maxHeight ?? info.maxHeight }
+          return (await codeRenderer.render(frame.source, settings.language, frame.rawInfo, settings, lineNumbers))!
+        })), true)
         return plainCode(decoded, 'md')
       }
-      const lines = language === 'text' && !info && !lineNumbers ? undefined : await highlight(decoded, language)
-      if (info || lineNumbers) {
-        const settings = info ?? parseCodeInfo(language)
-        if (settings) return codeBlock(settings, [codeFrame({ source: decoded, info: settings }, lines, lineNumbers)])
-      }
-      return lines ? `<pre><code class="language-${escapeHtml(language)}">${lines.join('\n')}</code></pre>` : block
+      if (language === 'text' && !info && !lineNumbers && !codeRenderer.hasTransformers) return block
+      const frame = info ?? (lineNumbers ? parseCodeInfo(language) : undefined)
+      const rendered = await codeRenderer.render(decoded, language, fence?.info, frame, lineNumbers)
+      if (rendered === undefined) return block
+      return frame ? codeBlock(frame, [rendered]) : rendered
     }
     const slots = Object.fromEntries(await Promise.all(Object.entries(html[index]).map(async ([name, markup]) => {
       const blocks = [...markup.matchAll(escapedCode)]

@@ -1,8 +1,10 @@
-import { getTheme, resolveGrammar, themeTokenCss, tokenClass, Tokenizer } from 'ts-syntax-highlighter/browser'
+import { getTheme, resolveGrammar, themeTokenColors, themeTokenCss, tokenClass, Tokenizer } from 'ts-syntax-highlighter/browser'
 import { clickSpan } from '../../../client/runtime/clicks.ts'
 import { parseEquationOptions } from '../../../client/runtime/equation-steps.ts'
 import { readFenceOptions } from './fence-options.ts'
 import { escapeHtml } from './html.ts'
+import type { CodeHighlightTransformer, CodeTokenizer } from './highlight-transformers.ts'
+import { orderCodeHighlightTransformers, transformHighlightedCode } from './highlight-transformers.ts'
 
 export interface CodeBlockInfo {
   language: string
@@ -116,19 +118,21 @@ export function decoratedCode(input: string): CodeBlockInfo | undefined {
 export interface CodeFrame {
   source: string
   info: CodeBlockInfo
+  rawInfo?: string
 }
 
 export function magicFrames(source: string): CodeFrame[] | undefined {
   const frames: CodeFrame[] = []
   let fence = ''
   let info: CodeBlockInfo | undefined
+  let rawInfo = ''
   let code: string[] = []
   const opening = /^ {0,3}(`{3,}|~{3,})(.*)$/
   for (const line of source.split('\n')) {
     const match = opening.exec(line)
     if (fence) {
       if (match && match[1][0] === fence[0] && match[1].length >= fence.length && !match[2].trim()) {
-        frames.push({ source: code.join('\n'), info: info! })
+        frames.push({ source: code.join('\n'), info: info!, rawInfo })
         if (frames.length > 100) return
         fence = ''
         code = []
@@ -139,6 +143,7 @@ export function magicFrames(source: string): CodeFrame[] | undefined {
       info = parseCodeInfo(match[2])
       if (!info || info.magic || info.writeToken || info.runner) return
       fence = match[1]
+      rawInfo = match[2].trim()
     }
   }
   if (!fence && frames.length) return frames
@@ -153,7 +158,7 @@ export function codeThemeStyles(name: unknown): string {
 ${selector} { background: var(--tp-code-background); color: var(--tp-code-foreground); }</style>`
 }
 
-export function createCodeHighlighter(): (source: string, language: string) => Promise<string[] | undefined> {
+function createCodeTokenizer(): CodeTokenizer {
   const grammars = new Map<string, ReturnType<typeof resolveGrammar>>()
   return async (source, language) => {
     if (!grammars.has(language)) {
@@ -161,10 +166,43 @@ export function createCodeHighlighter(): (source: string, language: string) => P
       grammars.set(language, resolveGrammar(alias))
     }
     const grammar = await grammars.get(language)
-    if (!grammar) return
-    return new Tokenizer(grammar).tokenize(source).map(line =>
+    return grammar && new Tokenizer(grammar).tokenize(source)
+  }
+}
+
+export function createCodeHighlighter(tokenize: CodeTokenizer = createCodeTokenizer()): (source: string, language: string) => Promise<string[] | undefined> {
+  return async (source, language) => {
+    return (await tokenize(source, language))?.map(line =>
       line.tokens.map(token => `<span class="tok-${tokenClass(token.type)}">${escapeHtml(token.content)}</span>`).join(''),
     )
+  }
+}
+
+export function createHighlightedCodeRenderer(theme: unknown, hooks?: readonly (CodeHighlightTransformer | false | null | undefined)[]): {
+  highlight: ReturnType<typeof createCodeHighlighter>
+  hasTransformers: boolean
+  render: (source: string, language: string, rawInfo?: string, frame?: CodeBlockInfo, lineNumbers?: boolean) => Promise<string | undefined>
+} {
+  const tokenize = createCodeTokenizer()
+  const highlight = createCodeHighlighter(tokenize)
+  const transformers = orderCodeHighlightTransformers(hooks)
+  const themeName = typeof theme === 'string' ? theme : undefined
+  const selected = transformers.length && themeName ? getTheme(themeName) : undefined
+  const palette = selected ? themeTokenColors(selected) : {}
+  return {
+    highlight,
+    hasTransformers: !!transformers.length,
+    async render(source, language, rawInfo, frame, lineNumbers = false) {
+      if (transformers.length) {
+        const meta = { __raw: rawInfo?.trim().replace(/^\S+\s*/, '') ?? '' }
+        const markup = await transformHighlightedCode(source, { lang: language, theme: themeName, meta }, transformers, tokenize, palette,
+          frame && { start: frame.start, lineNumbers: frame.lines ?? lineNumbers, maxHeight: frame.maxHeight })
+        return frame ? wrapCodeFrame(frame, markup) : markup
+      }
+      const lines = await highlight(source, language)
+      if (frame) return codeFrame({ source, info: frame }, lines, lineNumbers)
+      if (lines) return `<pre><code class="language-${escapeHtml(language)}">${lines.join('\n')}</code></pre>`
+    },
   }
 }
 
@@ -178,12 +216,16 @@ function data(info: CodeBlockInfo): string {
   return options.map(([key, value]) => ` ${key}="${escapeHtml(value)}"`).join('')
 }
 
-export function codeFrame(frame: CodeFrame, highlighted: string[] | undefined, lineNumbers: boolean): string {
+function wrapCodeFrame(info: CodeBlockInfo, markup: string): string {
+  const title = info.title ? `<figcaption>${escapeHtml(codeTitle(info.title))}</figcaption>` : ''
+  return `<figure class="code-frame"${data(info)}>${title}${markup}</figure>`
+}
+
+function codeFrame(frame: CodeFrame, highlighted: string[] | undefined, lineNumbers: boolean): string {
   const { source, info } = frame
   const raw = source.replace(/\n$/, '')
   const lines = highlighted?.slice(0, raw.split('\n').length) ?? raw.split('\n').map(escapeHtml)
   const style = info.maxHeight ? ` style="max-height:${info.maxHeight}"` : ''
-  const title = info.title ? `<figcaption>${escapeHtml(codeTitle(info.title))}</figcaption>` : ''
   const numbers = info.lines ?? lineNumbers
   const rows = lines.map((line, index) => {
     const number = info.start + index
@@ -191,7 +233,7 @@ export function codeFrame(frame: CodeFrame, highlighted: string[] | undefined, l
     const gutter = numbers ? `<span class="code-line-number" aria-hidden="true">${number}</span>` : ''
     return `<span class="code-line" data-code-line${count}${line ? '' : ' data-code-empty'}>${gutter}${line || '&#8203;'}</span>`
   }).join('\n')
-  return `<figure class="code-frame"${data(info)}>${title}<pre${style}><code class="language-${info.language}">${rows}</code></pre></figure>`
+  return wrapCodeFrame(info, `<pre${style}><code class="language-${info.language}">${rows}</code></pre>`)
 }
 
 export function codeTitle(title: string): string {

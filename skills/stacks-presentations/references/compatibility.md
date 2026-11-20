@@ -11,6 +11,7 @@ in a new ts-presentation project.
 | Source formatter | `format` writes consistent slide boundaries and speaker-note blocks while preserving Markdown bodies, YAML, and included files |
 | Preparser extensions | Async raw-line, slide, and speaker-note hooks from `setup/preparser.ts` |
 | Markdown transformers | Async `setup/transformers.ts` hooks for slide Markdown and fenced code, including fences nested in lists and block quotes. Hooks support stable edit offsets between commits, native highlighting, and STX rendering for returned components |
+| Syntax highlighting transformers | `setup/shiki.ts` and `setup/code-highlighter.ts` run source, token, HTML tree, and post-processing hooks for static highlighted code, numbered lines, Magic Move, and static editor fallbacks |
 | Integrated editor and live preview | Dev Markdown pane with autosave, included-file support, conflict detection, and in-place body and title refreshes |
 | Scoped styles, layouts, and themes | Slide-local CSS and keyframes, TypeScript theme and addon modules, and STX built-in and custom layouts with named slots |
 | Deck components | First-party STX components from the deck, theme, or addons, with props, scoped Markdown slots, reactive text and native HTML attribute bindings, scoped styles, and client scripts |
@@ -78,6 +79,6 @@ in a new ts-presentation project.
 | VS Code authoring | Slide outline and folding, top-level frontmatter completions and hover help, Markdown syntax highlighting, and Bun preview commands |
 
 Vue-specific component APIs, Vite integrations,
-Monaco IntelliSense, Shiki transformers, advanced VS Code tooling, other
+Monaco IntelliSense, Shiki's packaged transformers and custom grammars, advanced VS Code tooling, other
 PlantUML grammars, and the full KaTeX and Mermaid grammars still need porting. Refer to the [original Slidev skill](slidev-source/skills/slidev/SKILL.md)
 for upstream deck syntax.

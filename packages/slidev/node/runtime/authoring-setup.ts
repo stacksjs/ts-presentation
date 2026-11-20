@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import { importDeckModule } from './deck-modules.ts'
 import type { ObserveDeckFile } from './deck-modules.ts'
 import type { MathMacros } from './math.ts'
+import type { CodeHighlightTransformer } from './highlight-transformers.ts'
 import type { CodeblockTransformer, MarkdownTransformer, TransformersSetupReturn } from '../../../types/src/transform.ts'
 
 // Setup names and helper signatures follow Slidev's packages/types/src/setups (MIT).
@@ -38,6 +39,7 @@ export type MermaidRendererSetup = () => MermaidRenderer | void | Promise<Mermai
 
 export interface CodeHighlightOptions {
   theme?: string
+  transformers?: readonly (CodeHighlightTransformer | false | null | undefined)[]
 }
 
 export type CodeHighlightSetup = () => CodeHighlightOptions | void | Promise<CodeHighlightOptions | void>
@@ -79,7 +81,16 @@ export async function loadAuthoringSetup(root: string, observe: ObserveDeckFile,
     if (katex) setup.katex = { ...setup.katex, ...katex, macros: { ...setup.katex?.macros, ...katex.macros } }
     if (mermaid) setup.mermaid = { ...setup.mermaid, ...mermaid }
     if (diagramRenderer) setup.diagramRenderer = diagramRenderer
-    if (shiki || nativeHighlight) setup.codeHighlight = { ...setup.codeHighlight, ...shiki, ...nativeHighlight }
+    if (shiki || nativeHighlight) {
+      for (const config of [shiki, nativeHighlight]) {
+        const hooks = config?.transformers
+        if (hooks !== undefined && (!Array.isArray(hooks) || hooks.some(hook => hook && (typeof hook !== 'object' || Array.isArray(hook)))))
+          throw new Error('Code highlighter setup must provide an array of transformer objects')
+      }
+      setup.codeHighlight = { ...setup.codeHighlight, ...shiki, ...nativeHighlight,
+        transformers: [...setup.codeHighlight?.transformers ?? [], ...shiki?.transformers ?? [], ...nativeHighlight?.transformers ?? []],
+      }
+    }
     if (transform) {
       for (const key of ['pre', 'preCodeblock', 'postCodeblock', 'post', 'codeblocks'] as const) {
         const entries = transform[key]

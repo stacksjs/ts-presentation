@@ -145,10 +145,28 @@ until an included source or the preparser entry changes. STX compiles the presen
 The TypeScript player updates only the active slide and its reveal state.
 
 Set `codeTheme: nord` in deck headmatter to choose a first-party syntax palette.
-Use `setup/code-highlighter.ts` to set the palette in code. Existing
-`setup/shiki.ts` files can return a palette name through `theme`. In dev
-mode, edits to setup files, their local imports, and STX layouts refresh the
-preview.
+Use `setup/code-highlighter.ts` or `setup/shiki.ts` to configure a palette
+and transformer hooks. Hooks can change source, tokens, line classes, or
+the generated HTML of a static code block.
+
+```ts
+import { defineCodeHighlightSetup } from 'ts-presentation'
+
+export default defineCodeHighlightSetup(() => ({
+  theme: 'nord',
+  transformers: [{
+    line(node, number) {
+      if (number === 2) this.addClassToHast(node, 'review-line')
+    },
+  }],
+}))
+```
+
+Hooks from the theme, addons, and deck run in that order within each
+`enforce` tier. `this.options.meta.__raw` contains the fence text after its
+language. Add CSS for authored classes in the deck stylesheet. In dev
+mode, edits to setup files, their local imports, and STX layouts refresh
+the preview.
 
 Use a deck directory or an entry path without the `.md` suffix on the CLI.
 Theme and addon resolution checks the deck project first, then the package
