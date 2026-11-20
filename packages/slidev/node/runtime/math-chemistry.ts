@@ -278,27 +278,52 @@ export function chemicalFormula(source: string, math: (source: string) => Markup
   return xml`<mrow class="math-chemistry">${sequence()}</mrow>`
 }
 
-const unitToken = /\s+|\/\/|\/|[*.·×]|[()]|[A-ZµμΩΩ°%‰′″]+(?:\^?\{?[+-]?\d+\}?)?|./giu
-const unitTerm = /^([A-ZµμΩΩ°%‰′″]+)(?:\^?\{?([+-]?\d+)\}?)?$/iu
+const unitToken = /^(?:\s+|\/\/|[/*.·×()]|[A-ZµμΩΩ°%‰′″]+|\\[A-Z]+|.)/iu
+const unitSymbol = /^[A-ZµμΩΩ°%‰′″]+$/iu
+const exponent = /^(?:\^?\{([+-]?\d+)\}|\^?([+-]?\d+))/
 const unitSpace = '<mspace width="0.18em"/>'
 
-function unitProduct(source: string): string {
+function unitProduct(source: string, depth = 0): string {
+  if (depth > 50) throw new Error('Physical unit groups are nested too deeply')
   const parts: string[] = []
-  const text = source.trim().replace(/\\%/g, '%')
-  for (const token of text.match(unitToken) ?? []) {
+  const text = source.trim()
+  for (let cursor = 0; cursor < text.length;) {
+    const opening = text[cursor]
+    if (opening === '{' || opening === '(') {
+      const closing = opening === '(' ? ')' : '}'
+      const group = groupAt(text, cursor, opening, closing)
+      const inside = unitProduct(group.content, depth + 1)
+      const value = opening === '(' ? `<mo stretchy="false">(</mo>${inside}<mo stretchy="false">)</mo>` : inside
+      const power = exponent.exec(text.slice(group.end))
+      const base = `<mrow>${value}</mrow>`
+      parts.push(power ? `<msup>${base}${tag('mn', signed(power[1] ?? power[2]))}</msup>` : base)
+      cursor = group.end + (power?.[0].length ?? 0)
+      continue
+    }
+    const token = unitToken.exec(text.slice(cursor))?.[0] ?? text[cursor]
+    cursor += token.length
     if (/^\s/.test(token)) {
       if (parts.length && parts.at(-1) !== unitSpace && !/^<mo>[·×/]/.test(parts.at(-1)!)) parts.push(unitSpace)
       continue
     }
-    if (/^[*.·×/]$/.test(token)) {
+    if (token === '//' || /^[*.·×/]$/.test(token)) {
       if (parts.at(-1) === unitSpace) parts.pop()
+      if (token === '//' && parts.length && text.slice(cursor).trim()) {
+        const denominator = unitProduct(text.slice(cursor), depth + 1)
+        return `<mfrac><mrow>${parts.join('')}</mrow><mrow>${denominator}</mrow></mfrac>`
+      }
+      if (token === '/' && (parts.length > 1 || /[\s()*/]/.test(text.slice(cursor).trim()))) {
+        parts.push(unitSpace, '<mo>/</mo>', unitSpace)
+        continue
+      }
       parts.push(tag('mo', token === '*' || token === '.' ? '·' : token))
       continue
     }
-    const unit = unitTerm.exec(token)
-    if (unit) {
-      const symbol = tag('mi', unit[1], upright)
-      parts.push(unit[2] ? `<msup>${symbol}${tag('mn', signed(unit[2]))}</msup>` : symbol)
+    if (unitSymbol.test(token)) {
+      const symbol = tag('mi', token, upright)
+      const power = exponent.exec(text.slice(cursor))
+      parts.push(power ? `<msup>${symbol}${tag('mn', signed(power[1] ?? power[2]))}</msup>` : symbol)
+      cursor += power?.[0].length ?? 0
     }
     else parts.push(tag(/[()]/.test(token) ? 'mo' : 'mtext', token))
   }
@@ -306,22 +331,78 @@ function unitProduct(source: string): string {
   return parts.join('')
 }
 
-const scientificQuantity = /^\s*([+-]?(?:\d+(?:[.,]\d+)?|[.,]\d+))(\(\d+(?:[.,]\d+)?\))?(?:(e|E|\s*(?:\*|×|x|\\times)\s*10\s*\^)\s*(?:\{([+-]?\d+)\}|([+-]?\d+)))?\s*(.*?)\s*$/s
+const scientificExponent = /^(e|E|\s*(?:\*|×|x|\\times|\\cdot)\s*10\s*\^)\s*(?:\{([+-]?\d+)\}|([+-]?\d+))/
+const unitQuantity = /^(\+\/-|\+-|±|\\pm(?![A-Za-z])|[+-])?\s*(\d+(?:[.,]\d+)?|[.,]\d+)(?:\((\d+(?:[.,]\d+)?)\))?/
+const plusMinus = /^(?:±|\+\/-|\+-|\\pm(?![A-Za-z]))/
+const digitSpace = '<mspace width="0.1111em"/>'
+
+function digitGroups(value: string): string[] {
+  const [, whole, decimal = '', fraction = ''] = /^(\d*)(?:([.,])(\d+))?$/.exec(value) ?? []
+  const split = whole.length % 3 || 3
+  const before = whole.length > 4 ? [whole.slice(0, split), ...whole.slice(split).match(/\d{3}/g)!] : [whole]
+  const after = fraction.length > 4 ? fraction.match(/\d{1,3}/g)! : [fraction]
+  before[before.length - 1] += decimal + after.shift()
+  return [...before, ...after]
+}
+
+function readUnitQuantity(source: string): { markup: string, end: number } | undefined {
+  const number = unitQuantity.exec(source)
+  const scientific = scientificExponent.exec(number ? source.slice(number[0].length) : source)
+  if (!number && !scientific) return
+  if (!number && !/^[Ee]$/.test(scientific![1])) return
+  let markup = ''
+  let end = number?.[0].length ?? 0
+  if (number) {
+    const [, sign = '', value, uncertainty] = number
+    const groups = digitGroups(value)
+    const errors = uncertainty ? digitGroups(uncertainty) : []
+    const isPlusMinus = plusMinus.test(sign)
+    if (!isPlusMinus) groups[0] = signed(sign) + groups[0]
+    if (errors.length === 1 && groups.length === 1) groups[0] += `(${errors.pop()})`
+    const grouped = groups.map(group => tag('mn', group)).join(digitSpace)
+    const error = errors.length ? `<mo stretchy="false">(</mo>${errors.map(group => tag('mn', group)).join(digitSpace)}<mo stretchy="false">)</mo>` : ''
+    markup = (isPlusMinus ? '<mo>±</mo>' : '') + grouped + error
+    const plainPower = source[end] === '^' ? exponent.exec(source.slice(end)) : undefined
+    if (plainPower) return { markup: `<msup><mrow>${markup}</mrow>${tag('mn', signed(plainPower[1] ?? plainPower[2]))}</msup>`, end: end + plainPower[0].length }
+  }
+  if (scientific) {
+    const power = scientific[2] ?? scientific[3]
+    if (number) markup += tag('mo', /^(?:e|\*|\\cdot)/.test(scientific[1].trim()) ? '·' : '×')
+    markup += `<msup><mn>10</mn>${tag('mn', signed(power))}</msup>`
+    end += scientific[0].length
+  }
+  return { markup, end }
+}
+
+function measurement(source: string): { markup: string, end: number } | undefined {
+  const first = readUnitQuantity(source)
+  if (!first) return
+  const rest = source.slice(first.end)
+  const start = rest.length - rest.trimStart().length
+  const connector = plusMinus.exec(rest.slice(start))
+  if (!connector) return first
+  const next = start + connector[0].length
+  const value = rest.slice(next).trimStart()
+  const second = readUnitQuantity(value)
+  if (!second) return first
+  return { markup: `${first.markup}<mo>±</mo>${second.markup}`, end: first.end + rest.length - value.length + second.end }
+}
+
+const unitAliases: Record<string, string> = { mu: 'μ', Omega: 'Ω', degree: '°', cdot: '·', times: '×' }
 
 export function physicalUnits(source: string): string {
-  const [, value, uncertainty, notation, groupedPower, barePower, units = source] = scientificQuantity.exec(source) ?? []
-  const power = groupedPower ?? barePower
-  let formatted = value ? tag('mn', signed(value + (uncertainty ?? ''))) : ''
-  if (power) {
-    const multiply = /^(?:e|\*)/.test(notation.trim()) ? '·' : '×'
-    formatted += `${tag('mo', multiply)}<msup><mn>10</mn>${tag('mn', signed(power))}</msup>`
+  const text = source.trim().replaceAll('−', '-')
+  let quantity = measurement(text)
+  if (text.startsWith('(')) {
+    const group = groupAt(text, 0, '(', ')')
+    const inside = group.content.trim()
+    const measured = measurement(inside)
+    if (measured?.end === inside.length)
+      quantity = { markup: `<mo stretchy="false">(</mo>${measured.markup}<mo stretchy="false">)</mo>`, end: group.end }
   }
-  if (units.trim()) {
-    const division = units.split('//')
-    const body = division.length === 2 && division.every(part => part.trim())
-      ? `<mfrac><mrow>${unitProduct(division[0])}</mrow><mrow>${unitProduct(division[1])}</mrow></mfrac>`
-      : unitProduct(units)
-    formatted += (formatted ? '<mspace width="0.26em"/>' : '') + body
-  }
+  const units = text.slice(quantity?.end ?? 0).trim().replace(/\\%/g, '%')
+    .replace(/\\(mu|Omega|degree|cdot|times)(?![A-Za-z])[ \t]*/g, (_, command) => unitAliases[command])
+    .replace(/\^(?:o|\{o\})(?=[CF]\b)/g, '°')
+  const formatted = (quantity?.markup ?? '') + (units ? (quantity ? '<mspace width="0.26em"/>' : '') + unitProduct(units) : '')
   return `<mrow class="math-units">${formatted}</mrow>`
 }

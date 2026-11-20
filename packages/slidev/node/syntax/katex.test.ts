@@ -59,3 +59,31 @@ it('supports bracketed unit uncertainty, scientific notation and stacked fractio
   expect(html).toContain('<mi mathvariant="normal">kJ</mi><mo>/</mo><mi mathvariant="normal">mol</mi>')
   expect(html).toContain('<mi mathvariant="normal">%</mi>')
 })
+
+it('renders grouped digits, explicit uncertainty, and standalone exponents in quantities', async () => {
+  const formula = String.raw`\pu{12345.123456 m} + \pu{1,23456(0,12345) kJ}
+    + \pu{(2.5 +/- 0.2) V} + \pu{+-0.02 m} + \pu{3.4 ${'±'} 1.3 km}
+    + \pu{e3 Hz} + \pu{10^-3 s}`
+  const html = await renderDeck(parseDeck('$$\n' + formula + '\n$$'))
+  const gap = '<mspace width="0.1111em"/>'
+  expect(html).toContain(`<mn>12</mn>${gap}<mn>345.123</mn>${gap}<mn>456</mn>`)
+  expect(html).toContain(`<mn>1,234</mn>${gap}<mn>56</mn><mo stretchy="false">(</mo><mn>0,123</mn>${gap}<mn>45</mn>`)
+  expect(html).toContain('<mo stretchy="false">(</mo><mn>2.5</mn><mo>±</mo><mn>0.2</mn><mo stretchy="false">)</mo>')
+  expect(html).toContain('<mo>±</mo><mn>0.02</mn>')
+  expect(html).toContain('<mn>3.4</mn><mo>±</mo><mn>1.3</mn>')
+  expect(html).toContain('<msup><mn>10</mn><mn>3</mn></msup><mspace width="0.26em"/><mi mathvariant="normal">Hz</mi>')
+  expect(html).toContain('<msup><mrow><mn>10</mn></mrow><mn>−3</mn></msup>')
+})
+
+it('preserves nested unit fractions, powered groups, and unit symbols', async () => {
+  const formula = String.raw`\pu{12 {J//mol} // K} + \pu{4 V/(A s)} + \pu{1 mol (m s)^-1}
+    + \pu{8 \mu m} + \pu{5 \Omega} + \pu{10 ^{o}F} + \pu{4 kg*m${'−'}3}`
+  const html = await renderDeck(parseDeck('$$\n' + formula + '\n$$'))
+  const unit = (symbol: string) => `<mi mathvariant="normal">${symbol}</mi>`
+  const gap = '<mspace width="0.18em"/>'
+  expect(html).toContain(`<mfrac><mrow><mrow><mfrac><mrow>${unit('J')}</mrow><mrow>${unit('mol')}</mrow></mfrac></mrow></mrow><mrow>${unit('K')}</mrow></mfrac>`)
+  expect(html).toContain(`${unit('V')}${gap}<mo>/</mo>${gap}<mrow><mo stretchy="false">(</mo>${unit('A')}${gap}${unit('s')}`)
+  expect(html).toContain(`<msup><mrow><mo stretchy="false">(</mo>${unit('m')}${gap}${unit('s')}<mo stretchy="false">)</mo></mrow><mn>−1</mn></msup>`)
+  for (const symbol of ['μm', 'Ω', '°F']) expect(html).toContain(unit(symbol))
+  expect(html).toContain(`<msup>${unit('m')}<mn>−3</mn></msup>`)
+})
