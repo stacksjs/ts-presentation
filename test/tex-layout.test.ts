@@ -825,6 +825,29 @@ a+b+c \\[.4em]
   expect([...deck.matchAll(/<mtext>(Check|\(\d+\))<\/mtext>/g)].map(match => match[1])).toEqual(['(1)', 'Check', '(2)'])
 })
 
+test('parses nested Mathtools multlined widths, baselines, and row overrides', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const source = String.raw`\def\width{12em}\left[\begin{multlined}[\width][b]
+    a+b\\[2pt] +c\\ \shoveleft[1em]{+d}\\ \shoveright[-2pt]{+e}\\=f
+  \end{multlined}\right]`
+  const output = math(source, false).split('<annotation')[0]
+  expect(output).toContain('align="baseline -1" data-multlined-position="b" style="min-inline-size:12em"')
+  expect([...output.matchAll(/data-multline-align="(\w+)"/g)].map(match => match[1])).toEqual(['left', 'center', 'left', 'right', 'right'])
+  expect(output).toContain('padding-bottom:max(0px,calc(0.125em + 2pt))')
+  expect(output).toContain('<mspace width="0" style="margin-inline-end:-2pt"/>')
+  expect(output).toContain('<mtr data-multline-align="left"><mtd><mrow><mspace width="1em"/>')
+  expect(output).not.toContain('math-equation-number')
+  const tagged = math(String.raw`\begin{equation}\begin{multlined}[t][12em]a\\b\end{multlined}=c\tag*{Outer}\end{equation}`, true)
+  expect(tagged).toContain('align="baseline 1" data-multlined-position="t" style="min-inline-size:12em"')
+  expect(tagged.match(/class="math-equation-number"/g)).toHaveLength(1)
+  expect(tagged).toContain('<mtext>Outer</mtext>')
+  expect(math(String.raw`\begin{multlined}a\end{multlined}`, true)).toContain('align="axis" data-multlined-position="c"><mtr data-multline-align="center"')
+  expect(() => math(String.raw`\begin{multlined}[baseline]a\end{multlined}`, false)).toThrow('Invalid multlined width or position')
+  expect(() => math(String.raw`\begin{multlined}[-5pt]a\end{multlined}`, false)).toThrow('Invalid multlined width or position')
+  expect(() => math(String.raw`\begin{multlined}a&b\end{multlined}`, false)).toThrow('Too many columns')
+  expect(() => math(String.raw`\begin{multlined}a\tag{Inner}\\b\end{multlined}`, true)).toThrow('Equation tags belong outside multlined')
+})
+
 test('supports AMS intertext without advancing equation row numbers', async () => {
   const source = String.raw`\newcommand{\transition}{\intertext}
 \begin{align}
@@ -1675,6 +1698,53 @@ test('enforces KaTeX strict settings for comments, markup, text commands, spacin
 })
 
 const chrome = await findChrome()
+
+test.skipIf(!chrome)('aligns Mathtools multlined baselines and rows in Chromium', async () => {
+  const mark = String.raw`\rule{1px}{1px}`
+  const formulas = ['t', 'c', 'b'].map(position => renderMath(
+    String.raw`${mark}\begin{multlined}[12em][${position}]${mark}a\\[4pt]${mark}\\b${mark}\end{multlined}=x`,
+  ))
+  const css = await Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url)).text()
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response(`<!doctype html><style>${css}</style><main style="font-size:30px">${formulas.map(formula => `<div>${formula}</div>`).join('')} </main>`, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    }),
+  })
+  const view = new Bun.WebView({ width: 850, height: 660, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await view.navigate(server.url.href)
+    type Layout = { width: number, rows: { baseline: number, fromLeft: number, fromRight: number }[] }
+    const layouts = await view.evaluate<Layout[]>(`[...document.querySelectorAll('.math-multlined')].map(table => {
+      const bounds = table.getBoundingClientRect()
+      const stack = table.parentElement.closest('.math-alignment-axis, .math-multlined-bottom') ?? table
+      const baseline = stack.previousElementSibling.getBoundingClientRect().bottom
+      const rows = [...table.querySelectorAll('mtr mspace[height="1px"]')].map(mark => {
+        const box = mark.getBoundingClientRect()
+        return { baseline: box.bottom - baseline, fromLeft: box.left - bounds.left, fromRight: bounds.right - box.right }
+      })
+      return { width: bounds.width, rows }
+    })`)
+    expect(layouts).toHaveLength(3)
+    for (const { width, rows } of layouts) {
+      expect(width).toBeCloseTo(360, 1)
+      expect(rows[0].fromLeft).toBeCloseTo(0, 1)
+      expect(rows[1].fromLeft).toBeCloseTo((width - 1) / 2, 1)
+      expect(rows[2].fromRight).toBeCloseTo(0, 1)
+      expect(rows[1].baseline).toBeGreaterThan(rows[0].baseline + 20)
+      expect(rows[2].baseline).toBeGreaterThan(rows[1].baseline + 20)
+      expect(rows[1].baseline - rows[0].baseline).toBeGreaterThan(rows[2].baseline - rows[1].baseline + 3)
+    }
+    expect(layouts[0].rows[0].baseline).toBeCloseTo(0, 1)
+    expect(layouts[1].rows[0].baseline).toBeLessThan(0)
+    expect(layouts[1].rows[2].baseline).toBeGreaterThan(0)
+    expect(layouts[2].rows[2].baseline).toBeCloseTo(0, 1)
+  }
+  finally {
+    view.close()
+    await server.stop(true)
+  }
+})
 
 test('parses AMS dotted matrix spans and keeps subsequent columns aligned', () => {
   const math = createMathRenderer({ throwOnError: true })

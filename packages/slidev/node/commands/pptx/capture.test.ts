@@ -864,6 +864,14 @@ $$
 
 $$
 \begin{pmatrix}a&b&c\\\hdotsfor[1.5]{3}\\d&e&f\end{pmatrix}
+$$
+
+---
+
+# Nested multiline equation
+
+$$
+A=\left[\begin{multlined}[b][9em]a+b\\=c-d\end{multlined}\right]
 $$`)
     const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
     const exportDeck = Bun.spawn([process.execPath, cli, 'export', entry, '--format', 'pptx-editable', '--output', output, '--executable-path', chrome!], {
@@ -877,6 +885,7 @@ $$`)
     const cases = parts.get('ppt/slides/slide2.xml')?.toString() ?? ''
     const arrays = parts.get('ppt/slides/slide3.xml')?.toString() ?? ''
     const dotted = parts.get('ppt/slides/slide4.xml')?.toString() ?? ''
+    const multiline = parts.get('ppt/slides/slide5.xml')?.toString() ?? ''
     expect(compact.match(/<a14:m>/g)).toHaveLength(4)
     expect(compact.match(/<mc:Fallback><p:sp>/g)).toHaveLength(4)
     expect(compact).toMatch(/<m:nary>.*?<m:sub><m:m><m:mr>/)
@@ -900,6 +909,8 @@ $$`)
     expect(arrays.match(/<m:mr>/g)).toHaveLength(2)
     expect(dotted.match(/<p:pic>/g)).toHaveLength(1)
     expect(dotted).not.toContain('<a14:m>')
+    expect(multiline.match(/<p:pic>/g)).toHaveLength(1)
+    expect(multiline).not.toContain('<a14:m>')
   }
   finally {
     await rm(root, { recursive: true, force: true })

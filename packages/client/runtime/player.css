@@ -1112,6 +1112,30 @@ math .math-equation-number[data-equation-tag-shifted] > :first-child {
   math .math-multline > mtr > .math-equation-number { padding: 0; flex: none; }
   math .math-multline[data-equation-tags="right"] > mtr > .math-equation-number { margin-inline-start: auto; }
   math .math-multline > mtr > .math-equation-number:empty { display: none; }
+  math .math-multlined {
+    display: inline-flex;
+    flex-direction: column;
+    math-style: normal;
+  }
+  math .math-multlined-bottom {
+    display: inline-flex;
+    align-items: last baseline;
+  }
+  math .math-multlined > mtr {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+  }
+  math .math-multlined > [data-multline-align="left"] {
+    justify-content: flex-start;
+  }
+  math .math-multlined > [data-multline-align="right"] {
+    justify-content: flex-end;
+  }
+  math .math-multlined > mtr > mtd {
+    display: math;
+    padding: 0.125em 0;
+  }
 }
 math .math-overlap-l { transform: translateX(-100%); }
 math .math-overlap-c { transform: translateX(-50%); }

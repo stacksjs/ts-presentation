@@ -519,7 +519,8 @@ interface DottedArrayCell { span: number, spacing: number }
 type ArrayCell = Markup | DottedArrayCell
 interface ArrayRow { cells: ArrayCell[], columns: number, label?: Markup, before: ArrayRule[], gap?: string, raise?: string }
 interface MathLine { content: Markup, gap?: string }
-interface MultlineRow extends MathLine { align?: 'left' | 'right' }
+interface MultlineRow extends MathLine { align?: 'left' | 'right', inset?: string }
+type MultlinedPosition = 't' | 'c' | 'b'
 interface EquationTag { label?: Markup, key?: string, starred?: boolean, suppressed: boolean, raise?: string }
 
 function equationNumberCell(label: Markup | undefined, position?: 'start' | 'end', raise?: string): string {
@@ -557,6 +558,25 @@ function multlineTable(rows: readonly MultlineRow[], label: Markup | undefined, 
   // Office Math uses one alignment for an array. Measure each row's position
   // separately, as with AMS displays that have explicit row gaps.
   return `<mtable class="math-multline" data-equation-lines data-math-array data-equation-environment="${environment}" data-equation-row-spacing${tags}${flush ? ' data-equation-flush' : ''}>${markup}</mtable>`
+}
+
+function multlinedTable(rows: readonly MultlineRow[], position: MultlinedPosition, width?: string): string {
+  const markup = rows.map(({ content, gap, align, inset }, index) => {
+    const first = index === 0 && rows.length > 1
+    const last = index > 0 && index === rows.length - 1
+    const placement = align ?? (first ? 'left' : last ? 'right' : 'center')
+    const spacing = gap ? ` style="padding-bottom:max(0px,calc(0.125em + ${gap}))"` : ''
+    const before = (last ? spaceMarkup('1em') : '') + (inset && align === 'left' ? spaceMarkup(inset) : '')
+    const after = (inset && align === 'right' ? spaceMarkup(inset) : '') + (first ? spaceMarkup('1em') : '')
+    const strut = '<mspace width="0" height="0.7em" depth="0.3em"/>'
+    return `<mtr data-multline-align="${placement}"><mtd${spacing}><mrow>${before}${renderMarkup(content, 0)}${after}${strut}</mrow></mtd></mtr>`
+  }).join('')
+  const size = width ? ` style="min-inline-size:${width}"` : ''
+  const alignment = position === 't' ? 'baseline 1' : position === 'b' ? 'baseline -1' : 'axis'
+  const table = `<mtable class="math-multlined" align="${alignment}" data-multlined-position="${position}"${size}>${markup}</mtable>`
+  if (position === 'b') return `<mrow class="math-multlined-bottom">${table}</mrow>`
+  if (position === 'c') return `<mtable class="math-alignment-axis"><mtr><mtd>${table}</mtd></mtr></mtable>`
+  return table
 }
 
 function inScript(markup: Markup): Markup {
@@ -2482,36 +2502,72 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return gap
   }
 
+  function readMultlineRows(environment: string): MultlineRow[] {
+    const rows: MultlineRow[] = []
+    const stops = ['&', '\\\\', '\\newline', '\\cr', '\\end']
+    while (peek()) {
+      const line = inScope((): MultlineRow => {
+        const first = peek()
+        if (first !== '\\shoveleft' && first !== '\\shoveright')
+          return { content: row(stops, false, false, undefined, true) }
+        take()
+        const insetTokens = environment === 'multlined' ? rawBracket() : undefined
+        const inset = insetTokens === undefined ? undefined : dimension(expandDefinition(insetTokens).join(''))
+        if (insetTokens !== undefined && inset === undefined) throw new MathParseError('Invalid multlined row inset')
+        const body = rawGroup(`Missing argument to ${first}`)
+        const shoved = withTokens(body, () => inScope(() => row([boundary], false, false, undefined, true)))
+        const tail = row(stops)
+        return { content: joinMarkup([shoved, tail]), align: first === '\\shoveleft' ? 'left' : 'right', inset }
+      })
+      const separator = take()
+      if (separator === '&') throw new MathParseError(`Too many columns in ${environment}`)
+      if (separator === '\\end' && literalGroup() === environment) {
+        if (!rows.length || renderMarkup(line.content, 0)) rows.push(line)
+        return rows
+      }
+      if (separator !== '\\\\' && separator !== '\\newline' && separator !== '\\cr') break
+      rows.push({ ...line, gap: arrayRowGap(separator) })
+    }
+    throw new MathParseError(`Unclosed math environment: ${environment}`)
+  }
+
   function multline(environment: string): string {
     if (environmentDepth) throw new MathParseError(`${environment} cannot be nested in another math environment`)
     const previousTag = tagState
     tagState = { suppressed: false }
     environmentDepth++
-    const rows: MultlineRow[] = []
-    const stops = ['&', '\\\\', '\\newline', '\\cr', '\\end']
     try {
-      while (peek()) {
-        const line = inScope((): MultlineRow => {
-          const first = peek()
-          if (first !== '\\shoveleft' && first !== '\\shoveright')
-            return { content: row(stops, false, false, undefined, true) }
-          take()
-          const body = rawGroup(`Missing argument to ${first}`)
-          const shoved = withTokens(body, () => inScope(() => row([boundary], false, false, undefined, true)))
-          // Tags and other zero-width directives can follow the group.
-          const tail = row(stops)
-          return { content: joinMarkup([shoved, tail]), align: first === '\\shoveleft' ? 'left' : 'right' }
-        })
-        const separator = take()
-        if (separator === '&') throw new MathParseError(`Too many columns in ${environment}`)
-        if (separator === '\\end' && literalGroup() === environment) {
-          if (!rows.length || renderMarkup(line.content, 0)) rows.push(line)
-          return multlineTable(rows, nextTag(environment === 'multline'), options?.leqno === true, options?.fleqn === true, environment, tagState.raise)
-        }
-        if (separator !== '\\\\' && separator !== '\\newline' && separator !== '\\cr') break
-        rows.push({ ...line, gap: arrayRowGap(separator) })
+      const rows = readMultlineRows(environment)
+      return multlineTable(rows, nextTag(environment === 'multline'), options?.leqno === true, options?.fleqn === true, environment, tagState.raise)
+    }
+    finally {
+      environmentDepth--
+      tagState = previousTag
+    }
+  }
+
+  function multlined(): string {
+    let position: MultlinedPosition = 'c'
+    let width: string | undefined
+    for (let index = 0; index < 2; index++) {
+      const tokens = rawBracket()
+      if (tokens === undefined) break
+      const value = expandDefinition(tokens).join('').trim()
+      if (!value) continue
+      if (value === 't' || value === 'c' || value === 'b') position = value
+      else {
+        width = dimension(value)
+        if (width === undefined || Number.parseFloat(width) < 0)
+          throw new MathParseError('Invalid multlined width or position')
       }
-      throw new MathParseError(`Unclosed math environment: ${environment}`)
+    }
+    const previousTag = tagState
+    tagState = { suppressed: false }
+    environmentDepth++
+    try {
+      const rows = readMultlineRows('multlined')
+      if (tagState.label !== undefined) throw new MathParseError('Equation tags belong outside multlined')
+      return multlinedTable(rows, position, width)
     }
     finally {
       environmentDepth--
@@ -2528,6 +2584,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       throw new MathParseError(`${environment} requires a top-level display`)
     if (environment === 'CD') return commutativeDiagram()
     if (environment === 'multline' || environment === 'multline*') return multline(environment)
+    if (environment === 'multlined') return multlined()
     if (/^equation[*]?$/.test(environment)) {
       environmentDepth++
       const content = row(['&', '\\end'], false, true)
