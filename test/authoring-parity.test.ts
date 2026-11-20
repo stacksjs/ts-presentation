@@ -188,5 +188,5 @@ test('renders a bare commutative diagram through the deck compiler and preserves
   expect(html.match(/class="math-cd"/g)).toHaveLength(1)
   expect(html.match(/<math [^>]* display="block"/g)).toHaveLength(1)
   expect(html).toContain('language-tex')
-  expect(html).toContain('<mo stretchy="true" movablelimits="false" minsize="2em">→</mo>')
+  expect(html).toContain('<mo stretchy="true" movablelimits="false" minsize="3em">→</mo>')
 })

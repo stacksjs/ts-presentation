@@ -52,6 +52,11 @@ export function mathArrowBody(symbol: string, minWidth = '', bias?: EquilibriumB
   return `<mrow class="math-arrow-body"${data('equilibrium', bias)}${size}>${glyph}${geometry}</mrow>`
 }
 
+export function verticalMathArrow(symbol: '↑' | '↓' | '‖'): string {
+  const direction = symbol === '↑' ? 'up' : symbol === '↓' ? 'down' : 'parallel'
+  return `<mrow class="math-cd-arrow" data-direction="${direction}">${mathArrowBody(symbol, '1.8em')}</mrow>`
+}
+
 export function stackMathArrow(base: string, above: Markup, below: Markup): Markup {
   if (above && below) return xml`<munderover>${base}${below}${above}</munderover>`
   if (above) return xml`<mover>${base}${above}</mover>`

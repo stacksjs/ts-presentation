@@ -168,7 +168,10 @@ speaker notes. Each hook can be asynchronous.
   to label extensible arrows. Their shafts expand to fit the labels.
 - Use an AMS `\begin{CD} … \end{CD}` block for a commutative diagram.
   Use `@>f>>` for a horizontal arrow marked `f` and `@VgVV` for a downward
-  arrow with `g` on the left. Put vertical arrows on their own rows.
+  arrow with `g` on the left. Use `@AAhA` for an upward arrow with
+  `h` on the right and `@|` for a vertical double line. Put vertical
+  arrows on their own rows. Side labels preserve the arrow's alignment
+  with its node column. Local macro definitions apply across one CD row.
 - Use `\Braket{\phi|H|\psi}` and `\Set{x|x>0}` for scalable bra-ket and
   set-builder notation. Labeled arrows accept `[below]{above}`.
 - Use `\bigl( … \bigr)` through `\Biggl( … \Biggr)` for fixed delimiter sizes.

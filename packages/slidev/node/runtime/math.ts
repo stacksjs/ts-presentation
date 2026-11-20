@@ -1,6 +1,6 @@
 import { escapeHtml } from './html.ts'
 import type { KatexOptions, KatexTrustContext } from './authoring-setup.ts'
-import { mathArrowBody, stackMathArrow } from './math-arrow.ts'
+import { mathArrowBody, stackMathArrow, verticalMathArrow } from './math-arrow.ts'
 import { chemicalFormula, physicalUnits } from './math-chemistry.ts'
 import type { Markup, MathStyle } from './math-markup.ts'
 import { joinMarkup, renderMarkup, xml } from './math-markup.ts'
@@ -1240,38 +1240,53 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const stops = ['@', '&', '\\\\', '\\newline', '\\cr', '\\end']
     const rows: string[][] = []
     function arrowLabel(type: string): string {
-      const label = renderMarkup(inScope(() => row([...stops, type])), 2)
+      const label = renderMarkup(row([...stops, type]), 2)
       if (take() !== type) throw new Error('Incomplete CD arrow')
       return label ? `<mrow>${label}</mrow>` : ''
+    }
+    function vertical(symbol: '↑' | '↓' | '‖', left = '', right = ''): string {
+      return `<mrow class="math-cd-vertical">${mathSize(2, left || '<mrow/>')}${verticalMathArrow(symbol)}${mathSize(2, right || '<mrow/>')}</mrow>`
     }
     function commutativeArrow(): string {
       const type = take()
       if (type === '.') return ''
-      if (type === '=') return mathArrowBody('=', '2em')
-      if (type === '|') return mathArrowBody('‖', '1.7em')
+      if (type === '=') return mathArrowBody('=', '3em')
+      if (type === '|') return vertical('‖')
       if (!/^[<>AV]$/.test(type)) throw new Error('Unknown CD arrow')
       const first = arrowLabel(type)
       const second = arrowLabel(type)
-      if (type === '<' || type === '>') return renderMarkup(stackMathArrow(mathArrowBody(type === '<' ? '←' : '→', '2em'), first, second), 0)
-      const vertical = mathArrowBody(type === 'A' ? '↑' : '↓', '1.7em')
-      return `<mrow class="math-cd-vertical">${mathSize(2, first || '<mrow/>')}${vertical}${mathSize(2, second || '<mrow/>')}</mrow>`
+      if (type === '<' || type === '>') {
+        return renderMarkup(stackMathArrow(mathArrowBody(type === '<' ? '←' : '→', '3em'), first, second), 0)
+      }
+      return vertical(type === 'A' ? '↑' : '↓', first, second)
     }
-    let cells: string[] = []
+    function readRow(): { cells: string[], last: boolean } {
+      const cells: string[] = []
+      while (peek()) {
+        cells.push(renderMarkup(row(stops), 0))
+        const separator = take()
+        if (separator === '@') {
+          cells.push(commutativeArrow())
+          continue
+        }
+        if (separator === '&') continue
+        if (separator === '\\\\' || separator === '\\newline' || separator === '\\cr') return { cells, last: false }
+        if (separator === '\\end' && literalGroup() === 'CD') return { cells, last: true }
+        break
+      }
+      throw new Error('Unclosed CD environment')
+    }
+
     let closed = false
     while (peek()) {
-      cells.push(renderMarkup(inScope(() => row(stops)), 0))
-      const separator = take()
-      if (separator === '@') { cells.push(commutativeArrow()); continue }
-      if (separator === '&') continue
-      const lineBreak = separator === '\\\\' || separator === '\\newline' || separator === '\\cr'
-      if (!lineBreak && (separator !== '\\end' || literalGroup() !== 'CD')) break
+      // AMS CD definitions are local to each row, including its labels.
+      const { cells, last } = inScope(readRow)
       if (rows.length % 2) {
         if (cells[0] === '') cells.shift()
         if (cells.at(-1) === '') cells.pop()
       }
-      if (cells.some(Boolean) || lineBreak) rows.push(cells)
-      cells = []
-      if (!lineBreak) { closed = true; break }
+      if (cells.some(Boolean) || !last) rows.push(cells)
+      if (last) { closed = true; break }
     }
     if (!closed || !rows.length) throw new Error('Unclosed CD environment')
     const columns = Math.max(...rows.map(cells => cells.length))

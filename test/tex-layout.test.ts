@@ -364,7 +364,7 @@ test('lays out AMS commutative diagrams with labeled arrows and aligned columns'
   expect(html).toContain('<mtable class="math-cd">')
   expect(html.match(/<mtr>/g)).toHaveLength(3)
   expect(html.match(/<mtd>/g)).toHaveLength(15)
-  expect(html).toContain('<munderover><mrow class="math-arrow-body" style="min-width:2em"><mo stretchy="true" movablelimits="false" minsize="2em">→</mo><mspace class="math-arrow-track" data-right="open" aria-hidden="true"/></mrow><mrow><mi>p</mi></mrow><mrow><mi>f</mi></mrow></munderover>')
+  expect(html).toContain('<munderover><mrow class="math-arrow-body" style="min-width:3em"><mo stretchy="true" movablelimits="false" minsize="3em">→</mo><mspace class="math-arrow-track" data-right="open" aria-hidden="true"/></mrow><mrow><mi>p</mi></mrow><mrow><mi>f</mi></mrow></munderover>')
   expect(html).toContain('class="math-cd-vertical"')
   expect(html).toContain('>↓</mo>')
   expect(html).toContain('>↑</mo>')
@@ -380,7 +380,7 @@ test('keeps CD labels scoped and rejects incomplete arrows and environments', ()
     @. @. \cr
     X @>\identity>> Y
   \end{CD}`, true)
-  expect(html).toContain('<mover><mrow class="math-arrow-body" style="min-width:2em"><mo stretchy="true" movablelimits="false" minsize="2em">→</mo><mspace class="math-arrow-track" data-right="open" aria-hidden="true"/></mrow><mrow><mi>g</mi></mrow></mover>')
+  expect(html).toContain('<mover><mrow class="math-arrow-body" style="min-width:3em"><mo stretchy="true" movablelimits="false" minsize="3em">→</mo><mspace class="math-arrow-track" data-right="open" aria-hidden="true"/></mrow><mrow><mi>g</mi></mrow></mover>')
   expect(html).toContain('<mrow><mi>I</mi></mrow></mover>')
   expect(() => math(String.raw`\begin{CD}U @>f> V\end{CD}`, true)).toThrow('Incomplete CD arrow')
   expect(() => math(String.raw`\begin{CD}U @* V\end{CD}`, true)).toThrow('Unknown CD arrow')
@@ -391,6 +391,19 @@ test('keeps CD labels scoped and rejects incomplete arrows and environments', ()
   \end{CD}`, true)).toThrow('Unsupported math command')
 
   expect(renderMath(String.raw`\begin{CD}U @>>> V`, true)).toContain('math-unrendered')
+})
+
+test('shares local macros across CD cells and labels within one row', () => {
+  const render = createMathRenderer({ throwOnError: true, macros: { '\\mapLabel': 'x' } })
+  const html = render(String.raw`\begin{CD}
+    \def\mapLabel{a} A @>\mapLabel>\def\mapLabel{b}\mapLabel> \mapLabel\\
+    @V\mapLabel VV @. \\
+    C @<\mapLabel<< D
+  \end{CD} + \mapLabel`, true)
+  expect(html).toContain('<mrow><mi>b</mi></mrow><mrow><mi>a</mi></mrow></munderover></mtd><mtd><mi>b</mi></mtd>')
+  expect(html).toContain('<mstyle displaystyle="false" scriptlevel="1"><mrow><mi>x</mi></mrow></mstyle><mrow class="math-cd-arrow" data-direction="down">')
+  expect(html).toContain('<mrow><mi>x</mi></mrow></mover>')
+  expect(html).toContain('</mtable><mo>+</mo><mi>x</mi>')
 })
 
 test('renders fixed and scalable bra-ket and set-builder delimiters', () => {
@@ -1077,6 +1090,65 @@ test.skipIf(!chrome)('stretches horizontal reaction, TeX, and CD arrows to their
     expect(geometry.shapes).toEqual([['bar', 'open'], ['double', 'double'], ['', 'two'], ['open', 'hook']])
     expect(geometry.commutative.width).toBeCloseTo(geometry.commutative.labelWidth)
     expect(geometry.commutative.hasDouble).toBe(true)
+  }
+  finally {
+    view.close()
+    await server.stop(true)
+  }
+}, 45000)
+
+test.skipIf(!chrome)('centers tall AMS CD arrows beneath node columns with unequal side labels', async () => {
+  const source = String.raw`\begin{CD}
+    A @>f>> B @>g>> C \\
+    @V{\text{projection onto the first component}}VV @AA{\frac{p}{q}}A @| \\
+    D @<<< E @= F
+  \end{CD}`
+  const css = Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url))
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: request => new URL(request.url).pathname === '/player.css'
+      ? new Response(css, { headers: { 'Content-Type': 'text/css' } })
+      : new Response(`<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="/player.css"><main style="font-size:40px">${renderMath(source, true)}</main>`, {
+          headers: { 'Content-Type': 'text/html; charset=utf-8' },
+        }),
+  })
+  const view = new Bun.WebView({ width: 1450, height: 700, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await view.navigate(server.url.href)
+    const layout = await view.evaluate<{
+      nodes: [number[], number[]]
+      arrows: { center: number, height: number, direction: string, shape: string }[]
+      labelsOutsideShaft: boolean[]
+      horizontal: number[]
+    }>(`(() => {
+      const mid = node => { const rect = node.getBoundingClientRect(); return rect.x + rect.width / 2 };
+      const [top, middle, bottom] = document.querySelectorAll('mtable.math-cd > mtr')
+      const nodes = row => [...row.querySelectorAll(':scope > mtd > mi')].map(mid)
+      const arrows = [...middle.querySelectorAll('.math-cd-arrow')].map(node => ({
+        center: mid(node), height: node.getBoundingClientRect().height, direction: node.dataset.direction,
+        shape: node.dataset.direction === 'parallel' ? getComputedStyle(node, '::before').borderLeftStyle
+          : getComputedStyle(node, '::after').clipPath,
+      }))
+      const [leftArrow, rightArrow] = middle.querySelectorAll('.math-cd-arrow')
+      const left = leftArrow.previousElementSibling.querySelector('mtext').getBoundingClientRect()
+      const right = rightArrow.nextElementSibling.querySelector('mfrac').getBoundingClientRect()
+      return {
+        nodes: [nodes(top), nodes(bottom)], arrows,
+        labelsOutsideShaft: [left.right < leftArrow.getBoundingClientRect().left, right.left > rightArrow.getBoundingClientRect().right],
+        horizontal: [...top.querySelectorAll('.math-arrow-body')].map(node => node.getBoundingClientRect().width),
+      }
+    })()`)
+    expect(layout.arrows.map(arrow => arrow.direction)).toEqual(['down', 'up', 'parallel'])
+    for (const [index, arrow] of layout.arrows.entries()) {
+      expect(arrow.center).toBeCloseTo(layout.nodes[0][index], 0)
+      expect(arrow.center).toBeCloseTo(layout.nodes[1][index], 0)
+      expect(arrow.height).toBeGreaterThanOrEqual(71)
+    }
+    expect(layout.arrows[0].shape).toStartWith('polygon(')
+    expect(layout.arrows[1].shape).toStartWith('polygon(')
+    expect(layout.arrows[2].shape).toBe('solid')
+    expect(layout.labelsOutsideShaft).toEqual([true, true])
+    expect(layout.horizontal).toEqual([120, 120])
   }
   finally {
     view.close()
