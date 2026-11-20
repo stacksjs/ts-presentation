@@ -1,6 +1,7 @@
 import { escapeHtml } from './html.ts'
 import type { KatexOptions, KatexTrustContext } from './authoring-setup.ts'
 import { chemicalFormula, physicalUnits } from './math-chemistry.ts'
+import { fractionRule, mathDimension } from './math-sizing.ts'
 import { rowSpacing } from './math-spacing.ts'
 import type { MathClass } from './math-spacing.ts'
 import { isCenteredGlyph, mathSymbol, textSymbol } from './math-symbols.ts'
@@ -338,8 +339,10 @@ function arrayColumns(spec: string): { columns: ArrayColumn[], after?: ArrayRule
   return { columns, after }
 }
 
-function tableBorder(side: string, line: ArrayRule): string {
-  return `border-${side}:${line === 'double' ? '3px' : '1px'} ${line} currentColor`
+function tableBorder(side: string, line: ArrayRule, minimum: number): string {
+  const layers = line === 'double' ? 3 : 1
+  const width = minimum ? `max(${layers}px,${layers * minimum}em)` : `${layers}px`
+  return `border-${side}:${width} ${line} currentColor`
 }
 
 function tag(name: string, value: string): string {
@@ -505,13 +508,6 @@ function fractionMarkup(first: Markup, second: Markup, forced?: MathStyle, thick
   }
 }
 
-function dimension(value: string): string | undefined {
-  const [, amount, unit] = /^([+-]?(?:\d+(?:\.\d+)?|\.\d+))\s*(px|em|ex|pt|bp|cm|mm|in|mu)?$/.exec(value.trim()) ?? []
-  if (!amount || (!unit && Number(amount) !== 0) || Math.abs(Number(amount)) > 1000) return
-  if (unit === 'mu') return `${Number(amount) / 18}em`
-  return `${amount}${unit === 'bp' ? 'pt' : unit ?? 'px'}`
-}
-
 /** Translate a bounded TeX math subset to native MathML, with the source retained for accessibility. */
 export function renderMath(source: string, display = false, configured: MathMacros = {}, state?: MathState): string {
   const tokens = tokenize(source)
@@ -519,6 +515,11 @@ export function renderMath(source: string, display = false, configured: MathMacr
   const options = state?.options
   const limit = options?.maxExpand
   const maxExpand = typeof limit === 'number' && !Number.isNaN(limit) ? Math.max(0, limit) : 1000
+  const configuredSize = options?.maxSize ?? Infinity
+  const configuredRule = options?.minRuleThickness ?? 0
+  const maxSize = Number.isFinite(configuredSize) ? Math.max(0, configuredSize) : Infinity
+  const minRule = Number.isFinite(configuredRule) ? Math.max(0, configuredRule) : 0
+  const dimension = (value: string) => mathDimension(value, maxSize)
   let cursor = 0
   let depth = 0
   let expandedCount = 0
@@ -977,7 +978,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   }
 
   function fraction(target?: MathStyle, thickness?: string, align?: string): Markup {
-    return fractionMarkup(argument(), argument(), target, thickness, align)
+    return fractionMarkup(argument(), argument(), target, fractionRule(thickness, minRule), align)
   }
 
   function infixThickness(token: string): string | undefined {
@@ -1135,7 +1136,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     depth--
     const result = joinRow(parts)
     if (!infix) return result
-    const quotient = fractionMarkup(xml`<mrow>${joinRow(before)}</mrow>`, xml`<mrow>${result}</mrow>`, undefined, thickness)
+    const quotient = fractionMarkup(xml`<mrow>${joinRow(before)}</mrow>`, xml`<mrow>${result}</mrow>`, undefined, fractionRule(thickness, minRule))
     const fences = fractionFences[infix]
     return fences ? xml`<mrow>${fence(fences[0])}${quotient}${fence(fences[1])}</mrow>` : quotient
   }
@@ -1300,10 +1301,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
           if (align) styling.push(`text-align:${align}`)
           if (cellStyle === 0) styling.push('math-style:normal')
           const before = layout.columns[index]?.before
-          if (before) styling.push(tableBorder('left', before))
-          if (layout.after && index === columnCount - 1) styling.push(tableBorder('right', layout.after))
-          if (entry.before) styling.push(tableBorder('top', entry.before))
-          if (rule && rowIndex === rows.length - 1) styling.push(tableBorder('bottom', rule))
+          if (before) styling.push(tableBorder('left', before, minRule))
+          if (layout.after && index === columnCount - 1) styling.push(tableBorder('right', layout.after, minRule))
+          if (entry.before) styling.push(tableBorder('top', entry.before, minRule))
+          if (rule && rowIndex === rows.length - 1) styling.push(tableBorder('bottom', rule, minRule))
           if (compact || stretch !== 1) styling.push(`padding-block:${pad}em`)
           if (entry.gap) styling.push(`padding-bottom:max(0px,calc(${pad}em + ${entry.gap}))`)
           const settings = styling.length ? ` style="${styling.join(';')}"` : ''
@@ -1638,8 +1639,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const flush = display && state?.options.fleqn === true
     const label = tagState.label
     const markup = label === undefined ? expression : taggedDisplay(expression, label, state?.options.leqno === true, flush)
-    const layout = flush ? ' style="display:block;padding-inline-start:2em;text-align:start"'
-      : label === undefined ? '' : ' style="display:block;text-align:center"'
+    const layoutStyle = flush ? 'display:block;padding-inline-start:2em;text-align:start'
+      : label === undefined ? '' : 'display:block;text-align:center'
+    const styles = [layoutStyle, minRule ? `--math-min-rule:${minRule}em` : ''].filter(Boolean).join(';')
+    const layout = styles ? ` style="${styles}"` : ''
     return `<math xmlns="http://www.w3.org/1998/Math/MathML"${display ? ' display="block"' : ''}${layout}><semantics>${markup}<annotation encoding="application/x-tex">${escapeHtml(source)}</annotation></semantics></math>`
   }
   catch (error) {

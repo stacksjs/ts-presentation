@@ -19,6 +19,8 @@ export interface KatexOptions {
   fleqn?: boolean
   globalGroup?: boolean
   maxExpand?: number
+  maxSize?: number
+  minRuleThickness?: number
   colorIsTextColor?: boolean
   trust?: boolean | ((context: KatexTrustContext) => boolean)
 }

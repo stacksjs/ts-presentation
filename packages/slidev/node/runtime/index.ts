@@ -90,6 +90,8 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     fleqn: typeof mathConfig.fleqn === 'boolean' ? mathConfig.fleqn : configuration?.katex?.fleqn,
     globalGroup: typeof mathConfig.globalGroup === 'boolean' ? mathConfig.globalGroup : configuration?.katex?.globalGroup,
     maxExpand: typeof mathConfig.maxExpand === 'number' ? mathConfig.maxExpand : configuration?.katex?.maxExpand,
+    maxSize: typeof mathConfig.maxSize === 'number' ? mathConfig.maxSize : configuration?.katex?.maxSize,
+    minRuleThickness: typeof mathConfig.minRuleThickness === 'number' ? mathConfig.minRuleThickness : configuration?.katex?.minRuleThickness,
     colorIsTextColor: typeof mathConfig.colorIsTextColor === 'boolean' ? mathConfig.colorIsTextColor : configuration?.katex?.colorIsTextColor,
     macros: { ...configuration?.katex?.macros, ...resolveMathMacros(deck.headmatter) },
   })

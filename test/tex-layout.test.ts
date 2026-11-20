@@ -143,6 +143,30 @@ test('applies the legacy color option to one argument in text and math', () => {
     .toContain('<mtext>a</mtext><mrow style="color:blue"><mtext>b</mtext></mrow><mtext>c</mtext>')
 })
 
+test('caps positive TeX dimensions in ems, including TeX-only units', () => {
+  const math = createMathRenderer({ maxSize: 2, throwOnError: true })
+  const html = math(String.raw`a\hspace{1500em}\rule[40pt]{10pc}{1pc}\mkern{27mu}\kern{-4em}b`, false)
+  expect(html).toContain('<mspace width="2em"/>')
+  expect(html).toContain('<mpadded voffset="2em"><mspace width="2em" height="1.2em" style="background:currentColor"/>')
+  expect(html).toContain('<mspace width="1.5em"/>')
+  expect(html).toContain('<mspace width="0" style="margin-inline-end:-4em"/>')
+  expect(renderMath(String.raw`\hspace{65536sp}`)).toContain('<mspace width="1pt"/>')
+  const zero = createMathRenderer({ maxSize: 0, throwOnError: true })
+  expect(zero(String.raw`\rule{2pt}{1dd}`, false)).toContain('<mspace width="0em" height="0em"')
+})
+
+test('applies minimum rules to fractions and arrays and keeps line-free binomials', () => {
+  const math = createMathRenderer({ minRuleThickness: 0.3, throwOnError: true })
+  const html = math(String.raw`\frac ab + {a\above{1pt}b} + \genfrac{}{}{4pt}{}ab + \binom ab
+    \begin{array}{|c||}\hline a\\\hdashline b\end{array}`, true)
+  expect(html.match(/<mfrac linethickness="0.3em">/g)).toHaveLength(2)
+  expect(html).toContain('<mfrac linethickness="0.4em">')
+  expect(html).toContain('<mfrac linethickness="0">')
+  expect(html).toContain('border-left:max(1px,0.3em) solid currentColor')
+  expect(html).toContain('dashed currentColor')
+  expect(html).toContain('double currentColor')
+})
+
 test('renders phase angles, actuarial notation, pseudo-bold, and strikeout as MathML', () => {
   const math = createMathRenderer({ throwOnError: true })
   const html = math(String.raw`\phase{-78^\circ} + a_{\angl{n+1}}+b_\angln + \pmb{\mu} + \text{old \sout{term $x^2$}}`, true)
@@ -423,6 +447,40 @@ test('keeps style-dependent math in a lap and uses text mode for plain laps', ()
 })
 
 const chrome = await findChrome()
+test.skipIf(!chrome)('applies configured TeX sizing to the rendered browser geometry', async () => {
+  const source = String.raw`\rule{4em}{.2em}+\frac ab+\overline{c}+\boxed{d}`
+  const css = Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url))
+  const body = `<div id="normal">${renderMath(source, true)}</div><div id="sized">${createMathRenderer({ maxSize: 1.5, minRuleThickness: 0.65 })(source, true)}</div>`
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch(request) {
+      if (new URL(request.url).pathname === '/player.css') return new Response(css, { headers: { 'Content-Type': 'text/css' } })
+      return new Response(`<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="/player.css"><main style="font-size:40px">${body}</main>`, {
+        headers: { 'Content-Type': 'text/html; charset=utf-8' },
+      })
+    },
+  })
+  const view = new Bun.WebView({ width: 720, height: 400, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await view.navigate(server.url.href)
+    const geometry = await view.evaluate<{ width: number, fraction: number, line: number, box: number }[]>(`[...document.querySelectorAll('main > div')].map(formula => ({
+      width: formula.querySelector('mspace').getBoundingClientRect().width,
+      fraction: formula.querySelector('mfrac').getBoundingClientRect().height,
+      line: Number.parseFloat(getComputedStyle(formula.querySelector('.math-overline')).borderTopWidth),
+      box: Number.parseFloat(getComputedStyle(formula.querySelector('.math-boxed')).borderTopWidth),
+    }))`)
+    expect(geometry[0].width).toBeCloseTo(160)
+    expect(geometry[1].width).toBeCloseTo(60)
+    expect(geometry[1].fraction).toBeGreaterThan(geometry[0].fraction)
+    expect(geometry[1].line).toBeCloseTo(26, 0)
+    expect(geometry[1].box).toBeCloseTo(26, 0)
+  }
+  finally {
+    view.close()
+    server.stop(true)
+  }
+}, 45000)
+
 test.skipIf(!chrome)('keeps tagged displays centered and supports flush-left math in Chromium', async () => {
   const options = [{}, { leqno: true }, { fleqn: true }, { fleqn: true }]
   const body = options.map((settings, index) => {

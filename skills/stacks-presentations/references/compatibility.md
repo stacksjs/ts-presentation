@@ -20,6 +20,7 @@ in a new ts-presentation project.
 | KaTeX display options | Formatted `\tag` and `\tag*` labels, `leqno` for left-side equation tags, and `fleqn` for flush-left display formulas |
 | KaTeX conditional macros | Mode-aware `\TextOrMath`, starred forms, token lookahead, and branch expansion in formulas, text, and `\edef` |
 | KaTeX macro and color settings | Deck-scoped `globalGroup`, per-formula `maxExpand` including eager definitions, and two-argument `\color` via `colorIsTextColor` |
+| KaTeX sizing settings | `maxSize` for explicit dimensions and `minRuleThickness` for fraction bars, array rules, box borders, and overlines or underlines |
 | PowerPoint export | Image slides or editable text and boxes with separate artwork |
 | First-party diagram authoring | YAML `charts` fences through `ts-charts` for flowcharts, sequence, state, class, ER, pie, timeline, journey, Gantt, and Git history |
 | Draggable elements | Inline directives, drag and arrow components, frontmatter positions, scaled editing, and local Markdown saves |

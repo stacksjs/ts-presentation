@@ -76,6 +76,23 @@ $\saved\saved$
   expect(html).toContain(String.raw`<code class="math-unrendered">\saved\saved</code>`)
 })
 
+test('configures TeX dimensions and rule widths from deck headmatter', async () => {
+  const deck = parseDeck(String.raw`---
+math:
+  maxSize: 3
+  minRuleThickness: 0.2
+---
+
+$$
+\rule{12em}{1em}\frac{a}{b}\overline{c}
+$$
+`)
+  const html = await renderDeck(deck)
+  expect(html).toContain('display="block" style="--math-min-rule:0.2em"')
+  expect(html).toContain('<mspace width="3em" height="1em"')
+  expect(html).toContain('<mfrac linethickness="0.2em">')
+})
+
 test('renders flowchart clusters, styles, and parallel edges', () => {
   const markup = mermaid(`flowchart LR
   accTitle: Review workflow

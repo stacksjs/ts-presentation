@@ -660,8 +660,8 @@ v-switch { display: block; }
 .slide math .math-italic, .slide math .math-bold-italic { font-style: italic; }
 .slide math .math-sans-serif { font-family: sans-serif; }
 .slide math .math-monospace { font-family: monospace; }
-math .math-overline { border-top: 0.06em solid currentColor; }
-math .math-underline { border-bottom: 0.06em solid currentColor; }
+math .math-overline { border-top: max(0.06em, var(--math-min-rule, 0px)) solid currentColor; }
+math .math-underline { border-bottom: max(0.06em, var(--math-min-rule, 0px)) solid currentColor; }
 math .math-pmb { text-shadow: 0.035em 0 currentColor; }
 math .math-sout {
   background: linear-gradient(to bottom, transparent 47%, currentColor 48% 52%, transparent 53%);
@@ -680,9 +680,9 @@ math .math-angl {
 }
 math .math-cd mtd { padding: 0.12em 0.28em; math-style: normal; }
 math .math-cd-vertical { padding-inline: 0.08em; }
-math .math-boxed { border: 1px solid currentColor; padding-inline: 0.14em; }
+math .math-boxed { border: max(1px, var(--math-min-rule, 0px)) solid currentColor; padding-inline: 0.14em; }
 math .math-color-box { padding: 0.16em; }
-math .math-frame { border: 1px solid currentColor; }
+math .math-frame { border: max(1px, var(--math-min-rule, 0px)) solid currentColor; }
 math .math-vcenter > mtr > mtd { padding: 0; }
 math .math-overlap-l { transform: translateX(-100%); }
 math .math-overlap-c { transform: translateX(-50%); }

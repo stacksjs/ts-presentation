@@ -158,6 +158,9 @@ speaker notes. Each hook can be asynchronous.
   formulas in one deck. Use `maxExpand` to set the expansion budget per formula
   and `colorIsTextColor: true` for decks that use the older two-argument
   `\color` syntax. The same options work in `setup/katex.ts`.
+- Set `maxSize` under `math` to cap explicit positive dimensions in TeX ems.
+  Set `minRuleThickness` to make fraction bars, array rules, box borders,
+  and overlines or underlines thicker. Radical rule widths follow the math font.
 - Position a floating element with `v-drag="[left, top, width, height, angle]"`
   or `<v-drag pos="left, top, width, height, angle">`. Use `NaN` in the
   directive or `_` in the component to retain automatic height. Set
