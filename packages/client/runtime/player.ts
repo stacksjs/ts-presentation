@@ -56,6 +56,7 @@ const overviewLink = overview.querySelector<HTMLAnchorElement>('#overview-page-l
 const imageView = document.querySelector<HTMLDialogElement>('#image-view')!
 const detail = imageView.querySelector('img')!
 const routes: SlideRoute[] = JSON.parse(document.querySelector('#presentation-navigation')!.textContent ?? '[]')
+const currentPageBindings = document.getElementsByClassName('slidev-nav-current-page')
 const aliases = new Map(routes.flatMap(route => route.alias ? [[route.alias, route.no]] : []))
 const routing = { base: document.documentElement.dataset.presentationBase ?? '/', mode: resolveRouterMode(document.documentElement.dataset.routerMode) }
 const params = new URLSearchParams(location.search)
@@ -121,6 +122,7 @@ function showCustomControls(index: number, refreshLinks: boolean): void {
         return {}
       }, null)
     }
+    updateCurrentPageText()
   }
   if (changed || refreshLinks) mountSlideLinks(customControls)
 }
@@ -200,6 +202,13 @@ function syncPeer(data: Record<string, unknown>): void {
   (opener ?? popup)?.postMessage(data, messageOrigin)
 }
 
+function updateCurrentPageText(): void {
+  const page = String(current)
+  for (const binding of currentPageBindings) {
+    if (binding.textContent !== page) binding.textContent = page
+  }
+}
+
 function showCurrentReveals(animate: boolean): void {
   showReveals(reveals[current - 1], click, animate, Number(stage.style.getPropertyValue('--slide-scale')) || 1)
   fittedText(articles[current - 1])
@@ -258,6 +267,7 @@ function show(number: number, step?: number, writeHistory = true, sync = true, r
     if (writeHistory && (slideChanged || nextStep !== click)) writePosition(selected, nextStep, !slideChanged)
     current = selected
     click = nextStep
+    updateCurrentPageText()
     overviewGrid.select(current)
     return
   }
@@ -290,6 +300,7 @@ function show(number: number, step?: number, writeHistory = true, sync = true, r
     }
     const active = articles[current - 1]
     active.hidden = false
+    if (slideChanged || refresh || initial) updateCurrentPageText()
     for (const frame of active.querySelectorAll<HTMLIFrameElement>('iframe[data-presentation-tweet]:not([src])')) {
       if (frame.dataset.src) frame.src = frame.dataset.src
     }
@@ -610,6 +621,7 @@ function refreshConditions(): void {
   }
   if (!changed) return
   if (overviewGrid) {
+    updateCurrentPageText()
     overviewGrid.refreshReveals()
     conditions.observe(stage)
     return

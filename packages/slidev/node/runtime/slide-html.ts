@@ -13,6 +13,7 @@ export { htmlTag } from '../../../client/runtime/html-tags.ts'
 const destinationPattern = /^(?:#\/?|\.\/|\/)?([a-z][a-z0-9-]*|\d+)(?:\/(\d+)|\?clicks=(\d+))?$/i
 const viewTransitionClass = /^view-transition-((?:-?[a-zA-Z_]|--)[\w-]*)$/
 const reservedViewNames = /^(?:none|initial|inherit|unset|revert|revert-layer|default)$/i
+const navigationText = /\{\{\s*(?:\$(page)|\$(?:slidev\.)?nav\.(currentPage|total))\s*\}\}/g
 interface StyleBlock { attributes: string, content: string }
 interface Attribute { value: string, source: string, offset: number }
 
@@ -388,7 +389,10 @@ function tweetMarkup(source: string, theme: 'light' | 'dark'): string {
 
 /** Adapted from Slidev's Markdown link and scoped style transforms (MIT). */
 export function prepareSlideHtml(input: string, destination: (value: string) => SlideDestination | undefined, slide: number, frontmatter: Record<string, unknown> = {}, theme: 'light' | 'dark' = 'dark', outline?: SlideOutline, { scopeStyles = true }: { scopeStyles?: boolean } = {}): { html: string, css: string } {
-  if (!/<(?:style|(?:a|Arrow|Link|Tweet|SlidevVideo|Youtube|Toc|TitleRenderer|SlideCurrentNo|SlidesTotal|RenderWhen|LightOrDark|AutoFitText|Transform)(?=[\s/>])|v-?drag)|\sv-drag\b|view-transition-/i.test(input)) return { html: input, css: '' }
+  const total = outline?.labels.length
+  const interpolate = total !== undefined && navigationText.test(input)
+  navigationText.lastIndex = 0
+  if (!interpolate && !/<(?:style|(?:a|Arrow|Link|Tweet|SlidevVideo|Youtube|Toc|TitleRenderer|SlideCurrentNo|SlidesTotal|RenderWhen|LightOrDark|AutoFitText|Transform)(?=[\s/>])|v-?drag)|\sv-drag\b|view-transition-/i.test(input)) return { html: input, css: '' }
   const blocks: StyleBlock[] = []
   const viewRules = new Set<string>()
   const tags = new RegExp(htmlTags)
@@ -396,10 +400,16 @@ export function prepareSlideHtml(input: string, destination: (value: string) => 
   let html = ''
   let componentOpen = false
   let conditionalDepth = 0
+  let graphicDepth = 0
   let arrowCount = 0
   let paragraph = false
   const layoutComponents: { name: string, tag: 'div' | 'span', content: number, fallback?: string }[] = []
   const layoutSlots: boolean[] = []
+  function textMarkup(text: string): string {
+    if (!interpolate || graphicDepth) return text
+    return text.replace(navigationText, (_, page, property) => page ? String(slide)
+      : property === 'total' ? String(total) : `<span class="slidev-nav-current-page">${slide}</span>`)
+  }
   for (let token = tags.exec(input); token; token = tags.exec(input)) {
     const [original, closing, rawName, source] = token
     const name = rawName?.toLowerCase()
@@ -417,7 +427,11 @@ export function prepareSlideHtml(input: string, destination: (value: string) => 
       const close = new RegExp(`</${name}\\s*>`, 'gi')
       close.lastIndex = tags.lastIndex
       const end = close.exec(input)
-      if (!end) break
+      if (!end) {
+        html += textMarkup(input.slice(offset, token.index)) + input.slice(token.index)
+        offset = input.length
+        break
+      }
       if (scopeStyles && name === 'style') {
         const attrs = attributeValues(source)
         attrs.delete('scoped')
@@ -539,10 +553,11 @@ export function prepareSlideHtml(input: string, destination: (value: string) => 
         replacement = (selfClosedBox ? `${markup}</${rawName}>` : markup) + updated[3]
       }
     }
-    html += input.slice(offset, token.index) + replacement
+    html += textMarkup(input.slice(offset, token.index)) + replacement
+    if ((name === 'svg' || name === 'math') && !original.endsWith('/>')) graphicDepth = Math.max(0, graphicDepth + (closing ? -1 : 1))
     offset = tags.lastIndex
   }
-  html += input.slice(offset)
+  html += textMarkup(input.slice(offset))
   const scoped = scopeSlideStyles(blocks.map(block => block.content), slide)
   const styles = scoped.map((content, index) => `<style data-slide-style="${slide}"${blocks[index].attributes}>${content}</style>`)
   if (viewRules.size) styles.unshift(`<style data-slide-style="${slide}">${[...viewRules].join('\n')}</style>`)

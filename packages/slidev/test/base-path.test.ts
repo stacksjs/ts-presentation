@@ -26,6 +26,8 @@ routerMode: history
 
 [Review](#review)
 
+<p id="page-counter">{{ $page }} / {{ $nav.currentPage }} / {{ $nav.total }}</p>
+
 ---
 
 # Next
@@ -45,6 +47,12 @@ routeAlias: review
 ---
 
 # Review checklist
+
+~~~html
+<div>{{$slidev.nav.currentPage}}</div>
+~~~
+
+Current Page: {{$slidev.nav.currentPage}}
 `
 
 async function writeDeck(root: string): Promise<string> {
@@ -112,6 +120,7 @@ test.skipIf(!chrome).each(['history', 'hash'] as const)('keeps static %s navigat
       location.href, window.presentationNavigation.currentPage, window.presentationNavigation.clicks, window.presentationNavigation.mode,
     ]`)
     expect(await state()).toEqual([locationFor('1'), 1, 0, 'slide'])
+    expect(await view.evaluate('document.querySelector("#page-counter").textContent')).toBe('1 / 1 / 4')
     expect(await view.evaluate(`(async () => {
       const image = document.querySelector('#slide-1 img')
       await image.decode()
@@ -156,6 +165,12 @@ test.skipIf(!chrome).each(['history', 'hash'] as const)('keeps static %s navigat
     expect(await view.evaluate("document.activeElement.getAttribute('aria-activedescendant')")).toBe('goto-result-4')
     await view.press('Enter')
     expect(await state()).toEqual([locationFor('4'), 4, 0, 'slide'])
+    // Port the interpolation and literal code assertions from basic.spec.ts.
+    expect(await view.evaluate(`[
+      document.querySelector('#slide-4 p').textContent,
+      document.querySelector('#slide-4 pre code').textContent.trim(),
+      document.querySelector('#page-counter').textContent,
+    ]`)).toEqual(['Current Page: 4', '<div>{{$slidev.nav.currentPage}}</div>', '1 / 4 / 4'])
     await search('next')
     await view.press('Enter')
     expect(await state()).toEqual([locationFor('2'), 2, 0, 'slide'])

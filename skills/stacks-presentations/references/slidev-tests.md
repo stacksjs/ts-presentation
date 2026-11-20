@@ -25,13 +25,13 @@ native player, presenter, and export paths in Chrome.
 | Slidev browser suite | Bun port |
 | --- | --- |
 | `base-path.spec.ts` | `packages/slidev/test/base-path.test.ts`, `test/presenter-browser.test.ts` |
-| `basic.spec.ts` | `test/presenter-browser.test.ts`, `test/click-reveal-browser.test.ts`, `test/overview.test.ts`, `test/stx-layers.test.ts`, `test/slide-style-links.test.ts`, `test/stx-components.test.ts` |
+| `basic.spec.ts` | `packages/slidev/test/base-path.test.ts`, `test/presenter-browser.test.ts`, `test/click-reveal-browser.test.ts`, `test/overview.test.ts`, `test/stx-layers.test.ts`, `test/slide-style-links.test.ts`, `test/stx-components.test.ts` |
 | `iframe-layout.spec.ts` | `packages/client/layouts/iframe.test.ts` |
 | `presenter-resizer.spec.ts` | `test/presenter-browser.test.ts` |
 | `smoke.spec.ts` | `test/presenter-browser.test.ts` |
 
 The basic suite includes keyboard and overview navigation, named slots,
-nested click groups, list items projected through STX slots, animation
+nested click groups, navigation interpolation, list items projected through STX slots, animation
 presets and overrides, and code blocks inside reveals.
 
 [Slidev v53.1.0 test sources](https://github.com/slidevjs/slidev/tree/b547b48fe86b60bd3a502d4217b33840273667dd)

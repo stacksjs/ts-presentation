@@ -92,6 +92,26 @@ test('protects raw HTML text and does not move unrelated links into slide naviga
   expect(html).toContain('<a href="2" download>Download</a>')
 })
 
+test('renders navigation text while preserving code, raw text, attributes, and diagrams', async () => {
+  const html = await renderDeck(parseDeck([
+    '# Example', '',
+    'Slide {{ $page }} of {{ $slidev.nav.total }}. Active slide {{ $nav.currentPage }}.', '',
+    '`{{ $nav.total }}`', '',
+    '<textarea>{{ $page }}</textarea>', '',
+    '<span title="{{ $page }}">{{ $page }}</span>', '',
+    '<svg><text>{{ $page }}</text></svg>', '',
+    '---', 'disabled: true', '---', '# Draft', '',
+    '---', '', '# Next', '',
+    'Slide {{ $page }} of {{ $nav.total }}. Unknown {{ $nav.future }}.',
+  ].join('\n')))
+  expect(html).toContain('Slide 1 of 2. Active slide <span class="slidev-nav-current-page">1</span>.')
+  expect(html).toContain('<code>{{ $nav.total }}</code>')
+  expect(html).toContain('<textarea>{{ $page }}</textarea>')
+  expect(html).toContain('<span title="{{ $page }}">1</span>')
+  expect(html).toContain('<svg><text>{{ $page }}</text></svg>')
+  expect(html).toContain('Slide 2 of 2. Unknown {{ $nav.future }}.')
+})
+
 test('preserves slot text inside raw blocks and accepts compound, case-sensitive slot names', () => {
   const slots = splitSlots('Left\n<!--\n::ignored::\n-->\n<style>\n::literal::\n</style>\n::  Aside.label:data  ::\nRight')
   expect(Object.keys(slots)).toEqual(['default', 'Aside.label:data'])
