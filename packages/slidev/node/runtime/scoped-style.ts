@@ -123,8 +123,16 @@ function animationNames(value: string, names: Map<string, string>, allowKeywords
   return output
 }
 
-function applySelectorScope(selector: string, root: string, nativeScope: boolean): string {
-  const guard = `:where(${root}, ${root} *)`
+interface StyleScope {
+  root: string
+  namespace: string
+  diagram?: boolean
+  mapSelectors?: (selector: string) => string
+}
+
+function applySelectorScope(selector: string, scope: StyleScope, nativeScope: boolean): string {
+  const { root } = scope
+  const guard = `:${scope.diagram ? 'is' : 'where'}(${root}, ${root} *)`
   let output = ''
   let start = 0
   function scoped(part: string): string {
@@ -154,16 +162,17 @@ function applySelectorScope(selector: string, root: string, nativeScope: boolean
   return output + scoped(selector.slice(start))
 }
 
-export function scopeSlideStyles(styles: readonly string[], slide: number): string[] {
+function scopeStyles(styles: readonly string[], scope: StyleScope): string[] {
   const groups = styles.map(parseRules)
   const names = new Map<string, string>()
+  const scopedGroup = scope.diagram ? /^@(?:media|supports|container|scope|starting-style)\b/i : group
   function collect(rules: Rule[]): void {
     for (const rule of rules) {
       if (!rule.children) continue
       const header = withoutLeadingComments(rule.prelude)
       const frame = keyframe.exec(header)
-      if (frame) names.set(frame[2], `tp-slide-${slide}-${frame[2]}`)
-      else if (group.test(header) || !header.startsWith('@')) collect(rule.children)
+      if (frame) names.set(frame[2], `${scope.namespace}-${frame[2]}`)
+      else if (scopedGroup.test(header) || !header.startsWith('@')) collect(rule.children)
     }
   }
   for (const rules of groups) collect(rules)
@@ -173,7 +182,7 @@ export function scopeSlideStyles(styles: readonly string[], slide: number): stri
       const header = withoutLeadingComments(prelude)
       const prefix = prelude.slice(0, prelude.length - header.length)
       if (!children) {
-        if (/^@import\b/i.test(header)) return prefix
+        if (/^@import\b/i.test(header) || (scope.diagram && header.startsWith('@'))) return prefix
         const declaration = names.size ? animation.exec(header) : undefined
         if (declaration) return prefix + declaration[0] + animationNames(header.slice(declaration[0].length), names, /-name\s*:/i.test(declaration[0]))
         return prelude
@@ -186,12 +195,22 @@ export function scopeSlideStyles(styles: readonly string[], slide: number): stri
       }
       if (/^--[\w-]+\s*:/.test(header)) return `${prelude}{${render(children, false)}}`
       if (header.startsWith('@')) {
-        const nested = selectors && group.test(header)
+        const nested = selectors && scopedGroup.test(header)
+        if (scope.diagram && !nested) return prefix
         return `${prelude}{${render(children, nested, nativeScope || /^@scope\b/i.test(header))}}`
       }
-      return `${selectors ? applySelectorScope(prelude, `#slide-${slide}`, nativeScope) : prelude}{${render(children, selectors, nativeScope)}}`
+      const source = selectors && scope.mapSelectors ? scope.mapSelectors(prelude) : prelude
+      return `${selectors ? applySelectorScope(source, scope, nativeScope) : source}{${render(children, selectors, nativeScope)}}`
     }).join('')
   }
 
   return groups.map(rules => render(rules, true))
+}
+
+export function scopeSlideStyles(styles: readonly string[], slide: number): string[] {
+  return scopeStyles(styles, { root: `#slide-${slide}`, namespace: `tp-slide-${slide}` })
+}
+
+export function scopeDiagramStyles(css: string, id: string, mapSelectors?: StyleScope['mapSelectors']): string {
+  return scopeStyles([css], { root: `#${id}`, namespace: id, diagram: true, mapSelectors })[0]
 }

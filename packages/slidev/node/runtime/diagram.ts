@@ -1,5 +1,5 @@
 import type { MermaidOptions, MermaidRenderer } from './authoring-setup.ts'
-import { optionsForSvg } from './diagram-svg.ts'
+import { applyDiagramTheme, optionsForSvg } from './diagram-svg.ts'
 import { flowchart } from './mermaid/flowchart.ts'
 import { gantt, isGanttHeader } from './mermaid/gantt.ts'
 import { gitGraph } from './mermaid/gitgraph.ts'
@@ -125,7 +125,7 @@ export function mermaid(source: string, marker: string, options?: MermaidOptions
   try {
     const diagram = prepare(source, options)
     const svg = render(diagram.code, marker, diagram.options)
-    return svg && optionsForSvg(svg, diagram.options)
+    return svg && applyDiagramTheme(optionsForSvg(svg, diagram.options), marker, diagram.options.themeCSS)
   }
   catch {
     return
@@ -145,7 +145,9 @@ export async function renderMermaid(
     const diagram = prepare(source, config)
     const options = mergeDiagramOptions(diagram.options, fence)
     const svg = renderer ? await renderer(diagram.code, options) : render(diagram.code, marker, options)
-    return svg && optionsForSvg(svg, options)
+    if (!svg) return
+    const formatted = optionsForSvg(svg, options)
+    return renderer ? formatted : applyDiagramTheme(formatted, marker, options.themeCSS)
   }
   catch {
     return

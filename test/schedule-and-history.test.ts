@@ -1,7 +1,7 @@
 import { expect, spyOn, test } from 'bun:test'
 import { renderChart } from '../packages/slidev/node/runtime/charts.ts'
 import { findChrome } from '../packages/slidev/node/runtime/chrome.ts'
-import { mermaid } from '../packages/slidev/node/runtime/diagram.ts'
+import { mermaid, renderMermaid } from '../packages/slidev/node/runtime/diagram.ts'
 import { scheduleGantt } from '../packages/slidev/node/runtime/mermaid/gantt.ts'
 import { ganttDateParser } from 'ts-charts/diagrams'
 import { buildGitHistory } from '../packages/slidev/node/runtime/mermaid/gitgraph.ts'
@@ -493,8 +493,8 @@ test('imports Gantt compact frontmatter, dimensions, fonts, and themed section b
     displayMode: compact
     config:
 # Gantt and theme settings
-      themeCSS: "
-        .taskText { font-weight: bold; }
+      note: "
+        Folded text before the chart settings.
         "
       gantt:
         useWidth: 460
@@ -544,6 +544,26 @@ Review :2026-03-01, 1d`
   const svg = mermaid(source, 'literal-title')
   expect(svg).toContain('aria-label="Team: &quot;urgent\n  review&quot;"')
   expect(svg).toContain('viewBox="0 0 540 ')
+})
+
+test('scopes diagram CSS, preserves CSS strings, and keeps local animation names distinct', async () => {
+  const source = 'gitGraph\ncommit id:"review"'
+  const themeCSS = [
+    '@import "other.css";',
+    '@font-face { font-family: example; src: local("demo"); }',
+    '@keyframes pulse { to { opacity: .5; } }',
+    '.commit, .diagram-git-dot { animation: pulse 1s; content: "</style>"; }',
+  ].join('\n')
+  const first = await renderMermaid(source, 'first', undefined, { themeCSS })
+  const second = await renderMermaid(source, 'second', undefined, { themeCSS })
+  expect(first).toContain('id="tp-diagram-first"')
+  expect(first?.match(/\.diagram-git-dot:is\(#tp-diagram-first, #tp-diagram-first \*\)/g)).toHaveLength(2)
+  expect(first).toContain('@keyframes tp-diagram-first-pulse')
+  expect(first).toContain('animation: tp-diagram-first-pulse')
+  expect(second).toContain('@keyframes tp-diagram-second-pulse')
+  expect(first?.match(/<\/style>/g)).toHaveLength(1)
+  expect(first).not.toContain('@import')
+  expect(first).not.toContain('@font-face')
 })
 
 test('applies Mermaid Gantt status colors, reference labels, and full date axis directives', () => {
@@ -754,6 +774,51 @@ test('imports Gantt callback commands and applies security settings', () => {
 })
 
 const chrome = await findChrome()
+
+test.skipIf(!chrome)('applies imported Gantt CSS in the deck and scopes it to one diagram', async () => {
+  const schedule = 'gantt\nReview :active, review, 2026-03-01, 7d'
+  const frontmatter = [
+    '---', 'config:', '  theme: forest', '  themeCSS: |',
+    '    // Imported timeline styles',
+    '    @media (min-width: 1px) {',
+    '      .task { stroke: #112233; }',
+    '      .taskText { fill: #ffeedd; }',
+    '      rect[id^=rev] { fill: #623c70; }',
+    '      #review { height: 12px; }',
+    '      h1 { color: red; }',
+    '    }',
+    '---',
+  ].join('\n')
+  const plain = '---\nconfig:\n  theme: forest\n---'
+  const html = await renderDeck(parseDeck([
+    '# Schedule', '', '<style>h1 { color: teal; }</style>', '',
+    '~~~mermaid', frontmatter, schedule, '~~~', '',
+    '~~~mermaid', plain, schedule, '~~~',
+  ].join('\n')))
+  const css = Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url))
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: request => new URL(request.url).pathname === '/presentation.css'
+      ? new Response(css, { headers: { 'Content-Type': 'text/css' } })
+      : new Response(html, { headers: { 'Content-Type': 'text/html' } }),
+  })
+  const view = new Bun.WebView({ width: 960, height: 620, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await view.navigate(server.url.href)
+    expect(await view.evaluate(`(() => {
+      const [first, second] = document.querySelectorAll('.slide-diagram')
+      const bar = chart => getComputedStyle(chart.querySelector('.diagram-gantt-bar'))
+      const label = getComputedStyle(first.querySelector('.diagram-gantt-label'))
+      return [bar(first).fill, bar(first).stroke, bar(first).height, label.fill,
+        bar(second).fill, getComputedStyle(document.querySelector('#slide-1 h1')).color]
+    })()`)).toEqual(['rgb(98, 60, 112)', 'rgb(17, 34, 51)', '12px', 'rgb(255, 238, 221)', 'rgb(205, 228, 152)', 'rgb(0, 128, 128)'])
+  }
+  finally {
+    view.close()
+    await server.stop(true)
+  }
+}, 45000)
+
 test.skipIf(!chrome)('uses readable colors for completed Gantt labels inside and outside bars in Chromium', async () => {
   const frontmatter = '---\nconfig:\n  theme: dark\n---'
   const html = await renderDeck(parseDeck(['# Delivery', '', '~~~mermaid', frontmatter, themedSchedule, '~~~'].join('\n')))
