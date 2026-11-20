@@ -245,6 +245,62 @@ test('rejects STX component discovery outside the active roots', async () => pro
 
 const chrome = await findChrome()
 
+// Adapted from the projected list cases in Slidev's basic Cypress suite (MIT).
+test.skipIf(!chrome)('counts projected STX list items in click groups and reveals them in order', async () => project(async (root) => {
+  const entry = join(root, 'slides.md')
+  await Promise.all([
+    Bun.write(entry, [
+      '# Projected lists', '',
+      '<v-clicks>', '  <ul><li>A</li><li>B</li></ul>', '</v-clicks>', '',
+      '<WrapInClicks>', '  <ul><li>C</li><li>D</li></ul>', '</WrapInClicks>', '',
+      '<WrapInClicks>', '', '- E', '- F', '', '</WrapInClicks>', '',
+      '---', '', '# Decorated slot', '',
+      '<DecorateClicks>', '  <li>E</li>', '  <li>F</li>', '</DecorateClicks>', '',
+    ].join('\n')),
+    Bun.write(join(root, 'components', 'WrapInClicks.stx'), '<template><div><v-clicks><slot /></v-clicks></div></template>'),
+    Bun.write(join(root, 'components', 'DecorateClicks.stx'), '<template><v-clicks><ul><li>A</li><slot /><li>Z</li></ul></v-clicks></template>'),
+  ])
+  const cli = fileURLToPath(new URL('../src/cli.ts', import.meta.url))
+  const build = Bun.spawn([process.execPath, cli, 'build', entry], { stdout: 'ignore', stderr: 'pipe', timeout: 20_000 })
+  const [exit, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
+  if (exit) throw new Error(stderr)
+  const dist = await realpath(join(root, 'dist'))
+  const server = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    fetch(request) {
+      const pathname = new URL(request.url).pathname
+      return asset(dist, pathname === '/' ? '/index.html' : pathname, request)
+    },
+  })
+  const view = new Bun.WebView({ width: 960, height: 540, backend: { type: 'chrome', path: chrome!, url: false } })
+  const read = () => view.evaluate<{ page: number, clicks: number, items: string }>(`(() => {
+    const { currentPage, clicks } = window.presentationNavigation
+    const items = [...document.querySelectorAll('#stage > article:not([hidden]) li:not([data-reveal-hidden])')]
+      .map(item => item.textContent.trim()).join('')
+    return { page: currentPage, clicks, items }
+  })()`)
+  try {
+    await view.navigate(new URL('#/1', server.url).href)
+    expect(await read()).toEqual({ page: 1, clicks: 0, items: '' })
+    for (const [index, prefix] of ['A', 'AB', 'ABC', 'ABCD', 'ABCDE', 'ABCDEF'].entries()) {
+      await view.press('ArrowRight')
+      expect(await read()).toEqual({ page: 1, clicks: index + 1, items: prefix })
+    }
+    await view.press('ArrowRight')
+    expect(await read()).toEqual({ page: 2, clicks: 0, items: '' })
+    expect(await view.evaluate(`Array.from(document.querySelectorAll('#slide-2 li[data-reveal-hidden]'), item => item.textContent).join('')`)).toBe('AEFZ')
+    for (const [index, prefix] of ['A', 'AE', 'AEF', 'AEFZ'].entries()) {
+      await view.press('ArrowRight')
+      expect(await read()).toEqual({ page: 2, clicks: index + 1, items: prefix })
+    }
+  }
+  finally {
+    view.close()
+    await server.stop(true)
+  }
+}), 35_000)
+
 test.skipIf(!chrome)('runs Vue template syntax and setup bindings in an STX slide component', async () => project(async (root) => {
   const entry = join(root, 'slides.md')
   await Promise.all([

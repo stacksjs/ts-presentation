@@ -473,6 +473,7 @@ v-switch { display: block; }
   [data-reveal-hidden].slidev-vclick-anim-left { translate: 20px 0; }
   [data-reveal-hidden].slidev-vclick-anim-right { translate: -20px 0; }
   [data-reveal-hidden].slidev-vclick-anim-scale { scale: 0.9; }
+  .slidev-vclick-anim-none { transition: none; }
 
   :is(v-click, v-click-hide, v-after).slidev-vclick-target > :not(.slidev-vclick-target) {
     transition: inherit;

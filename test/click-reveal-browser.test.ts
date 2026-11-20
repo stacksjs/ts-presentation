@@ -62,6 +62,7 @@ clickAnimation: custom
 <div id="custom" v-click>Custom</div>
 <div id="modifiers" v-click.fade.right>Combined</div>
 <div id="none" v-click.none>None</div>
+<div id="scale-override" v-click.scale>Scale</div>
 <div id="disabled" v-click="false">Disabled</div>
 
 ---
@@ -125,6 +126,14 @@ const answer = 42
 ~~~
 
 </v-click>
+
+---
+
+# Animation presets
+
+<div data-token="fade-up" v-click.fade.up>Fade up</div>
+<div data-token="scale" v-click.scale>Scale</div>
+<div data-token="none" v-click.none>None</div>
 `
 
 // Adapted from Slidev's basic Cypress fixtures for click maps, nested lists, and presets.
@@ -179,22 +188,36 @@ test.skipIf(!chrome)('applies click maps, group depth, ranges, and switches in t
     expect(await group(4)).toEqual(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'])
     expect(await group(6)).toEqual(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'])
 
-    expect((await step(4, 0)).total).toBe(3)
-    const presets = await view.evaluate<{ inherited: boolean, custom: boolean, overrides: boolean, rgba: string, inert: boolean, none: boolean, disabled: boolean }>(`(() => {
+    expect((await step(4, 0)).total).toBe(4)
+    const presets = await view.evaluate(`(() => {
       const first = document.querySelector('#slide-1 [data-token="A"]')
       const custom = document.querySelector('#custom')
       const modifiers = document.querySelector('#modifiers')
+      const none = document.querySelector('#none')
+      const scale = document.querySelector('#scale-override')
       return {
-        inherited: first.classList.contains('slidev-vclick-anim-down'),
+        inherited: ['fade', 'down'].every(name => first.classList.contains('slidev-vclick-anim-' + name)),
         custom: custom.classList.contains('slidev-vclick-anim-custom'),
-        overrides: modifiers.classList.contains('slidev-vclick-anim-right') && !modifiers.classList.contains('slidev-vclick-anim-custom'),
+        overrides: [modifiers, none, scale].every(node => !node.classList.contains('slidev-vclick-anim-custom')),
+        modifiers: ['fade', 'right'].every(name => modifiers.classList.contains('slidev-vclick-anim-' + name)),
         rgba: getComputedStyle(modifiers).opacity,
         inert: modifiers.inert,
-        none: document.querySelector('#none').classList.contains('slidev-vclick-anim-none'),
+        none: none.classList.contains('slidev-vclick-anim-none') && getComputedStyle(none).transitionProperty === 'none',
+        scale: scale.classList.contains('slidev-vclick-anim-scale'),
         disabled: !document.querySelector('#disabled').classList.contains('slidev-vclick-target'),
       }
     })()`)
-    expect(presets).toEqual({ inherited: true, custom: true, overrides: true, rgba: '0.5', inert: true, none: true, disabled: true })
+    expect(presets).toEqual({ inherited: true, custom: true, overrides: true, modifiers: true, rgba: '0.5', inert: true, none: true, scale: true, disabled: true })
+    await step(4, 4)
+    expect(await view.evaluate(`document.querySelectorAll('#slide-4 .slidev-vclick-target:not([data-reveal-hidden])').length`)).toBe(4)
+
+    expect(await step(10, 0)).toEqual({ tokens: [], total: 3 })
+    const presetClasses = await view.evaluate(`Array.from(document.querySelectorAll('#slide-10 [data-token]'), node =>
+      [...node.classList].filter(name => name.startsWith('slidev-vclick-anim-')).map(name => name.slice('slidev-vclick-anim-'.length)))`)
+    expect(presetClasses).toEqual([['fade', 'up'], ['scale'], ['none']])
+    expect((await step(10, 1)).tokens).toEqual(['fade-up'])
+    expect((await step(10, 2)).tokens).toEqual(['fade-up', 'scale'])
+    expect((await step(10, 3)).tokens).toEqual(['fade-up', 'scale', 'none'])
 
     expect(await step(5, 0)).toEqual({ tokens: ['C'], total: 4 })
     expect((await step(5, 2)).tokens).toEqual(['A', 'B'])

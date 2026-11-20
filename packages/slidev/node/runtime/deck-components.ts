@@ -54,7 +54,7 @@ interface Tag {
   self: boolean
 }
 
-const blockRoot = /^\s*<(?:address|article|aside|blockquote|div|dl|figure|footer|h[1-6]|header|hr|main|nav|ol|p|section|table|ul)(?=[\s>])/i
+const blockRoot = /^\s*<(?:address|article|aside|blockquote|div|dl|figure|footer|h[1-6]|header|hr|main|nav|ol|p|section|table|ul|v-clicks|v-switch)(?=[\s>])/i
 const raw = new Set(['code', 'pre', 'script', 'style', 'textarea', 'title', 'xmp', 'iframe', 'noembed', 'noframes', 'noscript'])
 const builtins = new Set([
   'autofittext', 'codegroup', 'drag', 'dragarrow', 'goto', 'lightordark', 'link', 'renderwhen', 'slidecurrentno', 'slidevvideo', 'titles',

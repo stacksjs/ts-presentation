@@ -30,4 +30,8 @@ native player, presenter, and export paths in Chrome.
 | `presenter-resizer.spec.ts` | `test/presenter-browser.test.ts` |
 | `smoke.spec.ts` | `test/presenter-browser.test.ts` |
 
+The basic suite includes keyboard and overview navigation, named slots,
+nested click groups, list items projected through STX slots, animation
+presets and overrides, and code blocks inside reveals.
+
 [Slidev v53.1.0 test sources](https://github.com/slidevjs/slidev/tree/b547b48fe86b60bd3a502d4217b33840273667dd)
