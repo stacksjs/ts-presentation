@@ -283,6 +283,7 @@ test('native Gantt YAML and compatibility syntax render the same schedule', () =
 accessibleTitle: Delivery steps
 description: The preview comes before release.
 todayMarker: false
+taskLabelPlacement: bar
 sections:
   - name: Release
     tasks:
@@ -442,6 +443,7 @@ test('applies Mermaid Gantt status colors, reference labels, and full date axis 
     '    Active : active, crit, activeTask, after\tbase, 1d',
     '    Done : done, crit, doneTask, 2026-01-04, 2d',
     '    Critical : crit, criticalTask, 2026-01-05, 1d',
+    '    Review prep : prep, 2026-01-05, 1h',
     '    Review opens : vert, opens, 2026-01-05, 2d',
   ].join('\n')
   const svg = mermaid(source, 'schedule-theme')!
@@ -456,6 +458,22 @@ test('applies Mermaid Gantt status colors, reference labels, and full date axis 
   expect(svg).toMatch(/class="diagram-gantt-tick"[^>]*style="fill:#ffeedd;"[^>]*><tspan[^>]*>2026-W02  5</)
   expect(svg).toMatch(/class="diagram-gantt-reference-label"[^>]*style="fill:#bb8866;[^"]*"[^>]*><tspan[^>]*>Review opens</)
   expect(svg).toContain('data-task-id="activeTask" data-task-start="2026-01-05T00:00:00.000Z"')
+})
+
+test('applies imported Gantt label placement and GitGraph padding in a rendered deck', async () => {
+  const markdown = [
+    '# Project chronology', '',
+    '~~~mermaid', 'gantt', 'todayMarker off',
+    'Schedule :wide, 2026-01-01, 8d',
+    'Late checkpoint :milestone, check, 2026-01-09, 0d', '~~~', '',
+    '~~~mermaid', '---', 'config:', '  gitGraph:', '    diagramPadding: 36', '---',
+    'gitGraph TB:', 'commit id:"review"', '~~~',
+  ].join('\n')
+  const html = await renderDeck(parseDeck(markdown))
+  expect(html).toMatch(/data-task-id="wide"[^>]*>.*?class="diagram-gantt-label" text-anchor="middle"/)
+  expect(html).toMatch(/data-task-id="check"[^>]*>.*?class="diagram-gantt-label" text-anchor="end"/)
+  expect(html).toContain('data-diagram-kind="gitgraph" transform="translate(36 36)"')
+  expect(html).toContain('data-commit-id="review"')
 })
 
 test('maps imported GitGraph palette and label styles onto structured charts', () => {

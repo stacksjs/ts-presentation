@@ -271,6 +271,9 @@ speaker notes. Each hook can be asynchronous.
   dependencies, milestones, today-marker styling, and chart spacing. Enable
   imported `href` and `call` interactions with `securityLevel: loose` in diagram
   settings. An empty callback argument list passes the task ID.
+  Task labels are centered inside bars when they fit and moved beside shorter
+  bars and milestones. Set `taskLabelPlacement: bar` in a native `charts`
+  Gantt spec to use the same layout.
   Weekends and holidays extend duration-based tasks. A trailing run of excluded
   days leaves a gap between the bar and the next dependent task. Use
   `weekend friday` for Friday and Saturday weekends and `includes` to restore
@@ -282,7 +285,8 @@ speaker notes. Each hook can be asynchronous.
   An imported task with an invalid end date or duration has zero duration.
   Imported GitGraph diagrams support branch ordering, checkout, merges, tags,
   cherry-picking, horizontal or vertical lanes, `rotateCommitLabel`, and the
-  diagram's branch, commit, and tag theme variables.
+  diagram's branch, commit, and tag theme variables. Set `diagramPadding`
+  under `config.gitGraph` to add space around the imported graph and title.
   Use `commit id:"abc" msg:"Describe the change"` to keep a message in the
   commit tooltip. Merge and cherry-pick tooltips describe the operation.
   Set `type:REVERSE`, `type:HIGHLIGHT`, or `type:NORMAL`

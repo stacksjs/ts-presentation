@@ -178,6 +178,7 @@ export function gantt(source: string, idPrefix: string, options?: unknown, fallb
     todayMarker: chart.todayMarker ?? config.todayMarker !== false,
     todayMarkerStyle: { stroke: color('todayLineColor'), ...chart.todayMarkerStyle },
     displayMode: config.displayMode === 'compact' ? 'compact' : undefined,
+    taskLabelPlacement: 'bar',
     barHeight: number('barHeight'), barGap: number('barGap'), topPadding: number('topPadding'),
     leftPadding: number('leftPadding'), rightPadding: number('rightPadding'),
     width: number('useWidth'), titleTopMargin: number('titleTopMargin'), bottomMarginAdj: number('bottomMarginAdj'),
