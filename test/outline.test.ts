@@ -81,6 +81,40 @@ test('compiles accessible outlines with rich title labels and slide-local counte
   expect(contents).not.toMatch(/Private notes|Omitted subsection|Slide 8|Draft/)
 })
 
+test('resolves outline and title props from slide frontmatter', async () => {
+  const source = [
+    '---',
+    'outline:',
+    '  columns: 2',
+    '  start: 4',
+    '  depth: 2',
+    '  classes: [agenda, chapters]',
+    '  styles: [upper-roman, lower-alpha]',
+    '  titleSlide: 2',
+    '---',
+    '# Opening',
+    '',
+    '<Toc id="bound" :columns="frontmatter.outline.columns" v-bind:start="frontmatter.outline.start" :maxDepth="frontmatter.outline.depth" v-bind:list-class="frontmatter.outline.classes" :listStyle="frontmatter.outline.styles" />',
+    '',
+    '<TitleRenderer v-bind:no="frontmatter.outline.titleSlide" id="bound-title" />',
+    '',
+    '---',
+    '',
+    '## **Review**',
+    '',
+    '---',
+    '',
+    '### Appendix',
+  ].join('\n')
+  const { html } = await renderPresentation(parseDeck(source))
+  const contents = /<nav id="bound"[^>]*>[\s\S]*?<\/nav>/.exec(html)?.[0] ?? ''
+  expect(contents).toContain('class="slidev-toc" style="column-count:2"')
+  expect(contents).toContain('class="agenda chapters slidev-toc-list slidev-toc-list-level-1" start="4" style="list-style:upper-roman"')
+  expect(contents).toContain('class="agenda chapters slidev-toc-list slidev-toc-list-level-2" style="list-style:lower-alpha"')
+  expect(contents).not.toMatch(/Appendix|frontmatter|v-bind/)
+  expect(html).toContain('<span id="bound-title"><strong>Review</strong></span>')
+})
+
 const chrome = await findChrome()
 test.skipIf(!chrome)('navigates nested outlines with route aliases and refreshes titles across slides', async () => {
   const project = resolve(import.meta.dir, '..')

@@ -254,7 +254,10 @@ button, select { font: inherit; }
   padding: 6px 12px 11px;
 }
 
-#controls > * {
+#presentation-custom-controls { display: contents; }
+
+#controls > :where(:not(#presentation-custom-controls)),
+#presentation-custom-controls > * {
   min-height: 36px;
   border: 1px solid #49434a;
   border-radius: 6px;

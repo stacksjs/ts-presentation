@@ -1,5 +1,6 @@
 import { resolveTweetId } from '../../../client/logic/tweet.ts'
 import { escapeHtml, readBoundValue, unescapeHtml } from './html.ts'
+import { htmlTags, rawText } from '../../../client/runtime/html-tags.ts'
 import { arrowGeometry, defaultDragPosition, dragKey, dragStyle, parseDragPosition } from '../../../types/src/drag.ts'
 import type { DragKind } from '../../../types/src/drag.ts'
 import type { SlideRoute } from '../../../client/runtime/navigation.ts'
@@ -8,9 +9,7 @@ import type { ActiveTocItem, TocMode } from '../../../client/runtime/toc.ts'
 import type { TocItem } from '../../../types/src/toc.ts'
 import { scopeSlideStyles } from './scoped-style.ts'
 
-export const htmlTag: RegExp = /<(\/?)([a-z][\w:-]*)(?=[\s/>])((?:[^>"']|"[^"]*"|'[^']*')*)>/gi
-const htmlTags = new RegExp(`<!--[\\s\\S]*?(?:-->|$)|${htmlTag.source}`, 'gi')
-const rawText = new Set(['style', 'script', 'textarea', 'title', 'xmp', 'iframe', 'noembed', 'noframes', 'noscript', 'pre', 'code'])
+export { htmlTag } from '../../../client/runtime/html-tags.ts'
 const destinationPattern = /^(?:#\/?|\.\/|\/)?([a-z][a-z0-9-]*|\d+)(?:\/(\d+)|\?clicks=(\d+))?$/i
 const viewTransitionClass = /^view-transition-((?:-?[a-zA-Z_]|--)[\w-]*)$/
 const reservedViewNames = /^(?:none|initial|inherit|unset|revert|revert-layer|default)$/i
@@ -95,15 +94,27 @@ function literalAttribute(attributes: Map<string, Attribute>, name: string): str
   if (/^(?:true|false|-?\d+(?:\.\d+)?)$/.test(value)) return value
 }
 
+function takeBinding(attributes: Map<string, Attribute>, name: string): string | undefined {
+  const key = `:${name}`
+  const longKey = `v-bind:${name}`
+  const binding = (attributes.get(key) ?? attributes.get(longKey))?.value.trim()
+  attributes.delete(key)
+  attributes.delete(longKey)
+  return binding
+}
+
+function takeProp(attributes: Map<string, Attribute>, frontmatter: Record<string, unknown>, name: string): unknown {
+  const literal = attributes.get(name)?.value
+  attributes.delete(name)
+  const binding = takeBinding(attributes, name)
+  return literal ?? (binding === undefined ? undefined : readBoundValue(binding, frontmatter))
+}
+
 function takeLiteral(attributes: Map<string, Attribute>, frontmatter: Record<string, unknown>, ...names: string[]): string | undefined {
   let value: string | undefined
   for (const name of names) {
-    const literal = attributes.get(name)?.value
-    const binding = (attributes.get(`:${name}`) ?? attributes.get(`v-bind:${name}`))?.value
-    const bound = binding === undefined ? undefined : readBoundValue(binding.trim(), frontmatter)
-    if (literal !== undefined) value ??= literal
-    else if (typeof bound === 'string' || typeof bound === 'number' || typeof bound === 'boolean') value ??= String(bound)
-    for (const key of [name, `:${name}`, `v-bind:${name}`]) attributes.delete(key)
+    const prop = takeProp(attributes, frontmatter, name)
+    if (typeof prop === 'string' || typeof prop === 'number' || typeof prop === 'boolean') value ??= String(prop)
   }
   return value
 }
@@ -142,10 +153,7 @@ function transformOpening(source: string, tag: 'div' | 'span', frontmatter: Reco
   return `<${tag}${serialized(attributes)}>`
 }
 
-function listProp(attributes: Map<string, Attribute>, name: string): string[] {
-  const prop = literalAttribute(attributes, name)
-  if (prop !== undefined) return prop ? [prop] : []
-  const value = attributes.get(`:${name}`)?.value.trim()
+function parseList(value: string | undefined): string[] {
   if (!value?.startsWith('[') || !value.endsWith(']')) return []
   const entries = value.slice(1, -1).trim()
   if (!entries) return []
@@ -159,51 +167,49 @@ function listProp(attributes: Map<string, Attribute>, name: string): string[] {
   return values
 }
 
+function takeList(attributes: Map<string, Attribute>, frontmatter: Record<string, unknown>, name: string): string[] {
+  const binding = (attributes.get(`:${name}`) ?? attributes.get(`v-bind:${name}`))?.value.trim()
+  const value = takeProp(attributes, frontmatter, name)
+  if (typeof value === 'string') return value ? [value] : []
+  if (Array.isArray(value)) return value.filter((entry): entry is string => typeof entry === 'string')
+  return parseList(binding)
+}
+
 const outlineComponents = new Set(['Toc', 'TitleRenderer', 'SlideCurrentNo', 'SlidesTotal'])
 
-function conditionalMarkup(name: string, source: string, selfClosing: boolean): string {
+function conditionalMarkup(name: string, source: string, selfClosing: boolean, frontmatter: Record<string, unknown>): string {
   const attributes = attributeValues(selfClosing ? source.replace(/\/\s*$/, '') : source)
   if (name === 'RenderWhen') {
-    const contexts = listProp(attributes, 'context')
-    attributes.delete('context')
-    attributes.delete(':context')
+    const contexts = takeList(attributes, frontmatter, 'context')
     setAttribute(attributes, 'data-render-when', contexts.join(' '))
   }
   else setAttribute(attributes, 'data-light-or-dark', '')
   return `<div${serialized(attributes)}>${selfClosing ? '</div>' : '<template data-condition-content>'}`
 }
 
-function outlineMarkup(name: string, source: string, slide: number, outline: SlideOutline): string {
+function outlineMarkup(name: string, source: string, slide: number, outline: SlideOutline, frontmatter: Record<string, unknown>): string {
   const attributes = attributeValues(source.replace(/\/\s*$/, ''))
-  const integer = (key: string, fallback: number) => {
-    const value = literalAttribute(attributes, key)?.trim()
+  const integer = (fallback: number, ...keys: string[]) => {
+    const value = takeLiteral(attributes, frontmatter, ...keys)?.trim()
     if (!value || !/^-?\d+$/.test(value)) return fallback
     const number = Number(value)
     return Number.isSafeInteger(number) ? number : fallback
   }
-  const removeProps = (keys: string[]) => {
-    for (const key of keys) {
-      attributes.delete(key)
-      attributes.delete(`:${key}`)
-    }
-  }
   if (name !== 'Toc') {
-    const no = integer('no', slide)
+    const no = name === 'TitleRenderer' ? integer(slide, 'no') : slide
     const label = name === 'TitleRenderer' ? outline.labels[no - 1] ?? ''
       : name === 'SlideCurrentNo' ? slide : outline.labels.length
-    if (name === 'TitleRenderer') removeProps(['no'])
     return `<span${serialized(attributes)}>${label}</span>`
   }
 
-  const columns = Math.max(1, integer('columns', 1))
-  const start = integer('start', 1)
-  const minDepth = integer('mindepth', integer('min-depth', 1))
-  const maxDepth = integer('maxdepth', integer('max-depth', Number.POSITIVE_INFINITY))
-  const mode = literalAttribute(attributes, 'mode')
+  const columns = Math.max(1, integer(1, 'columns'))
+  const start = integer(1, 'start')
+  const minDepth = integer(1, 'mindepth', 'min-depth')
+  const maxDepth = integer(Number.POSITIVE_INFINITY, 'maxdepth', 'max-depth')
+  const mode = takeLiteral(attributes, frontmatter, 'mode')
   const tocMode: TocMode = mode === 'onlyCurrentTree' || mode === 'onlySiblings' ? mode : 'all'
-  const listClass = listProp(attributes, 'listclass').concat(listProp(attributes, 'list-class'))
-  const listStyle = listProp(attributes, 'liststyle').concat(listProp(attributes, 'list-style'))
-  removeProps(['columns', 'start', 'mindepth', 'min-depth', 'maxdepth', 'max-depth', 'mode', 'listclass', 'list-class', 'liststyle', 'list-style'])
+  const listClass = takeList(attributes, frontmatter, 'listclass').concat(takeList(attributes, frontmatter, 'list-class'))
+  const listStyle = takeList(attributes, frontmatter, 'liststyle').concat(takeList(attributes, frontmatter, 'list-style'))
   const tree = filterTocTree(activeTocTree(outline.tree, slide), tocMode, minDepth, maxDepth)
 
   function list(items: ActiveTocItem[], level: number): string {
@@ -381,7 +387,7 @@ function tweetMarkup(source: string, theme: 'light' | 'dark'): string {
 }
 
 /** Adapted from Slidev's Markdown link and scoped style transforms (MIT). */
-export function prepareSlideHtml(input: string, destination: (value: string) => SlideDestination | undefined, slide: number, frontmatter: Record<string, unknown> = {}, theme: 'light' | 'dark' = 'dark', outline?: SlideOutline): { html: string, css: string } {
+export function prepareSlideHtml(input: string, destination: (value: string) => SlideDestination | undefined, slide: number, frontmatter: Record<string, unknown> = {}, theme: 'light' | 'dark' = 'dark', outline?: SlideOutline, { scopeStyles = true }: { scopeStyles?: boolean } = {}): { html: string, css: string } {
   if (!/<(?:style|(?:a|Arrow|Link|Tweet|SlidevVideo|Youtube|Toc|TitleRenderer|SlideCurrentNo|SlidesTotal|RenderWhen|LightOrDark|AutoFitText|Transform)(?=[\s/>])|v-?drag)|\sv-drag\b|view-transition-/i.test(input)) return { html: input, css: '' }
   const blocks: StyleBlock[] = []
   const viewRules = new Set<string>()
@@ -399,7 +405,7 @@ export function prepareSlideHtml(input: string, destination: (value: string) => 
     const name = rawName?.toLowerCase()
     let replacement = original
     if (name === 'p') paragraph = !closing
-    if (name && !closing && source.includes('view-transition-')) {
+    if (scopeStyles && name && !closing && source.includes('view-transition-')) {
       const classes = attributeValues(source).get('class')?.value.split(/\s+/) ?? []
       for (const className of classes) {
         const viewName = viewTransitionClass.exec(className)?.[1]
@@ -412,7 +418,7 @@ export function prepareSlideHtml(input: string, destination: (value: string) => 
       close.lastIndex = tags.lastIndex
       const end = close.exec(input)
       if (!end) break
-      if (name === 'style') {
+      if (scopeStyles && name === 'style') {
         const attrs = attributeValues(source)
         attrs.delete('scoped')
         attrs.delete('data-slide-style')
@@ -442,13 +448,13 @@ export function prepareSlideHtml(input: string, destination: (value: string) => 
       replacement = closing ? '' : youtubeMarkup(source)
     }
     else if (outline && outlineComponents.has(rawName)) {
-      replacement = closing ? '' : outlineMarkup(rawName, source, slide, outline)
+      replacement = closing ? '' : outlineMarkup(rawName, source, slide, outline, frontmatter)
     }
     else if (rawName === 'RenderWhen' || rawName === 'LightOrDark') {
       const selfClosing = /\/>$/.test(original)
       if (closing && conditionalDepth) conditionalDepth--
       else if (!closing && !selfClosing) conditionalDepth++
-      replacement = closing ? '</template></div>' : conditionalMarkup(rawName, source, selfClosing)
+      replacement = closing ? '</template></div>' : conditionalMarkup(rawName, source, selfClosing, frontmatter)
     }
     else if (rawName === 'AutoFitText' || rawName === 'Transform') {
       if (closing) {
@@ -489,12 +495,11 @@ export function prepareSlideHtml(input: string, destination: (value: string) => 
       }
       else if (!closing) {
         const attrs = attributeValues(source)
-        const value = attrs.get('to')?.value ?? attrs.get(':to')?.value.replace(/^(["'])(.*)\1$/, '$2') ?? ''
+        const fallback = attrs.get(':to')?.value.replace(/^(["'])(.*)\1$/, '$2')
+        const value = takeLiteral(attrs, frontmatter, 'to') ?? fallback ?? ''
         const target = destination(value)
         if (target) {
           const title = attrs.get('title')?.value
-          attrs.delete('to')
-          attrs.delete(':to')
           attrs.delete('title')
           attrs.delete('href')
           attrs.delete('data-slide-link')

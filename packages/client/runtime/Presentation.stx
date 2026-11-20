@@ -84,9 +84,10 @@
     <span id="drawing-status" role="status" hidden></span>
     <button id="fullscreen" type="button">Fullscreen</button>
     <button id="record-button" type="button" hidden>Record</button>
-    {!! customControls !!}
+    <div id="presentation-custom-controls">{!! customControls !!}</div>
     {!! liveStatus !!}
   </nav>
+  {!! customControlsData !!}
   <dialog id="goto-dialog" aria-labelledby="goto-heading">
     <header>
       <h2 id="goto-heading">Go to slide</h2>

@@ -59,8 +59,19 @@ layer mounted across slides when it has no slide-managed reveals or media.
 The overview and exports render each slide's layer content independently.
 
 Add `custom-nav-controls.stx` beside the deck to append controls to the
-toolbar. Use the browser's `presentationNavigation` API to navigate from
-deck client code.
+toolbar. It receives the active slide's `nav`, `title`, and `frontmatter`.
+Use `<Link to="review">Review</Link>` for slide aliases and `<Toc />` for
+an outline that follows the current slide. Use `#presentation-custom-controls`
+to target custom controls from your stylesheet. Deck client code can navigate
+through the browser's `presentationNavigation` API.
+Toolbars containing client scripts render once with the first slide's context
+and stay mounted during navigation. Use the navigation API to read the active
+slide from a scripted toolbar.
+
+In slide content and layers, `Toc`, `TitleRenderer`, and `Link` accept
+frontmatter property bindings such as `:columns="frontmatter.columns"` or
+`v-bind:to="frontmatter.next"`. Outline `list-class` and `list-style`
+bindings accept strings or arrays of strings.
 
 Export a function with `definePreparserSetup` from `setup/preparser.ts`
 to configure Markdown transforms for the entry and included files. The

@@ -29,6 +29,7 @@ test('discovers STX slide layers across the theme and deck and invalidates live 
   expect(first.live?.slides[0].html).toContain('<p>Theme 1</p>')
   expect(first.live?.slides[1].html).toContain('<p>Theme 2</p>')
   expect(first.html).toContain('<button id="custom-controls">Deck of 2</button>')
+  expect(first.html).not.toContain('id="presentation-custom-controls-data"')
 
   await Bun.write(local, '@if(nav.currentLayout !== "cover")\n<aside><img src="/mark.svg">Page {{ nav.currentPage }} of {{ nav.total }}</aside>\n@endif')
   const second = await compile()
@@ -51,7 +52,47 @@ test('rejects a layer template outside the deck and extension directories', asyn
 }))
 
 const chrome = await findChrome()
-test.skipIf(!chrome)('keeps equivalent STX global controls mounted and exports each slide layer in paint order', async () => project(async (root) => {
+test.skipIf(!chrome)('renders STX toolbar controls for the active presenter slide and follows their bound links', async () => project(async (root) => {
+  const entry = join(root, 'slides.md')
+  await Promise.all([
+    Bun.write(entry, '---\nrouterMode: history\nrouteAlias: intro\nnext: review/1\n---\n# Intro\n\n---\nrouteAlias: review\nnext: intro\n---\n# Review\n\n<p v-click>First reveal</p>'),
+    Bun.write(join(root, 'custom-nav-controls.stx'), [
+      '<style>#nav-title { --toolbar-style: retained; }</style>',
+      '<p id="nav-title">{{ nav.currentPage }}. {{ title }} / {{ nav.total }}</p>',
+      '<Toc id="nav-outline" />',
+      '<Link id="nav-link" v-bind:to="frontmatter.next" title="Open slide" />',
+    ].join('\n')),
+  ])
+  const cli = fileURLToPath(new URL('../src/cli.ts', import.meta.url))
+  const server = Bun.spawn([process.execPath, cli, 'dev', entry, '--port', '0', '--base', '/talk/'], { stdout: 'pipe', stderr: 'pipe', timeout: 25_000 })
+  let view: Bun.WebView | undefined
+  try {
+    const output = await server.stdout.getReader().read()
+    const origin = new TextDecoder().decode(output.value).match(/http:\/\/127\.0\.0\.1:\d+/)?.[0]
+    if (!origin) throw new Error(await new Response(server.stderr).text())
+    view = new Bun.WebView({ width: 1024, height: 660, backend: { type: 'chrome', path: chrome!, url: false } })
+    await view.navigate(origin + '/talk/presenter/review')
+    const state = () => view!.evaluate(`(() => {
+      const title = document.querySelector('#nav-title')
+      const outline = document.querySelector('#nav-outline [aria-current="page"]')
+      const link = document.querySelector('#nav-link')
+      return [title.textContent, outline.textContent, new URL(link.href).pathname, getComputedStyle(title).getPropertyValue('--toolbar-style').trim(), window.presentationNavigation.clicks]
+    })()`)
+    expect(await state()).toEqual(['2. Review / 2', 'Review', '/talk/intro', 'retained', 0])
+    await view.evaluate("document.querySelector('#nav-link').click()")
+    expect(await state()).toEqual(['1. Intro / 2', 'Intro', '/talk/review', 'retained', 0])
+    await view.evaluate("document.querySelector('#nav-link').click()")
+    expect(await state()).toEqual(['2. Review / 2', 'Review', '/talk/intro', 'retained', 1])
+    expect(await view.evaluate('location.pathname + location.search')).toBe('/talk/presenter/review?clicks=1')
+  }
+  finally {
+    view?.close()
+    server.kill()
+    await server.exited
+  }
+}), 30_000)
+
+test.skipIf(!chrome)('keeps equivalent STX layers and scripted controls mounted and exports layers in paint order', async () => project(async (root) => {
   const entry = join(root, 'slides.md')
   await Promise.all([
     Bun.write(entry, '# First slide\n\n---\n\n# Next slide'),
@@ -59,6 +100,8 @@ test.skipIf(!chrome)('keeps equivalent STX global controls mounted and exports e
     Bun.write(join(root, 'layouts', 'slide-bottom.stx'), '<div style="position:absolute;top:250px;left:20px">Slide bottom {{ slideNumber }}</div>'),
     Bun.write(join(root, 'layouts', 'slide-top.stx'), '<div class="lower-badge" style="position:absolute;top:310px;left:20px;width:220px">Slide top {{ nav.currentPage }}</div>'),
     Bun.write(join(root, 'global-top.stx'), '<button class="global-badge" style="position:absolute;top:310px;left:20px;width:220px">Global top</button>'),
+    Bun.write(join(root, 'components', 'Counter.stx'), Bun.file(new URL('../packages/create-app/template/components/Counter.stx', import.meta.url))),
+    Bun.write(join(root, 'custom-nav-controls.stx'), '<Counter :start="nav.currentPage" />'),
   ])
   const cli = fileURLToPath(new URL('../src/cli.ts', import.meta.url))
   const command = Bun.spawn([process.execPath, cli, 'build', entry], { stdout: 'ignore', stderr: 'pipe', timeout: 20_000 })
@@ -79,19 +122,22 @@ test.skipIf(!chrome)('keeps equivalent STX global controls mounted and exports e
     const result = await view.evaluate(`(() => {
       const active = () => document.querySelector('#stage article:not([hidden])')
       const badge = active().querySelector('.global-badge')
-      const counter = document.createElement('output')
-      counter.value = '1'
-      badge.append(counter)
-      badge.addEventListener('click', () => counter.value = '2')
+      const counter = document.querySelector('#presentation-custom-controls .demo-counter')
+      const badgeCount = document.createElement('output')
+      badgeCount.value = '1'
+      badge.append(badgeCount)
+      badge.addEventListener('click', () => badgeCount.value = '2')
       window.presentationNavigation.go(2)
       const next = active().querySelector('.global-badge')
       const box = next.getBoundingClientRect()
       const hit = document.elementFromPoint(box.left + 8, box.top + 8)?.closest('.global-badge') === next
       next.click()
-      return [next === badge, counter.value, hit, active().querySelector('.lower-badge').textContent.trim(),
-        !!document.querySelector('#slide-1 .global-badge')]
+      counter.querySelector('[aria-label="Increase counter"]').click()
+      return [next === badge, badgeCount.value, hit, active().querySelector('.lower-badge').textContent.trim(),
+        !!document.querySelector('#slide-1 .global-badge'), counter === document.querySelector('#presentation-custom-controls .demo-counter'),
+        counter.querySelector('output').textContent.trim()]
     })()`)
-    expect(result).toEqual([true, '2', true, 'Slide top 2', true])
+    expect(result).toEqual([true, '2', true, 'Slide top 2', true, true, '2'])
   }
   finally {
     view.close()

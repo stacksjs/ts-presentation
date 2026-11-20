@@ -1,6 +1,7 @@
 import { renderTemplateString } from '@stacksjs/stx'
 import { fileURLToPath } from 'node:url'
 import { builtinLayouts } from './runtime/builtin-layouts.ts'
+import { htmlTags, rawText } from './runtime/html-tags.ts'
 
 export type { ClickBounds, PresentationNavigation, SlidePosition, SlideRoute } from './runtime/navigation.ts'
 export { clickBounds, createNavigationContext, getSlideRoutePath, readSlideHash, slideHash } from './runtime/navigation.ts'
@@ -48,10 +49,50 @@ interface LayoutBindings {
   nav?: Readonly<Record<string, unknown>>
 }
 
+const navigationTags = new Set(['Link', 'Toc', 'TitleRenderer', 'SlideCurrentNo', 'SlidesTotal'])
+const directiveAttribute = /"[^"]*"|'[^']*'|(\s)(v-bind:|:)([\w-]+)(?=\s*=)/g
+
+function preserveNavigationTags(source: string, marker: string): { template: string, restore: (html: string) => string } {
+  const tags = new RegExp(htmlTags)
+  const originals: string[] = []
+  let start = 0
+  let template = ''
+  for (let match = tags.exec(source); match; match = tags.exec(source)) {
+    const [, closing, name, attrs] = match
+    if (!name) continue
+    if (!closing && !attrs.endsWith('/') && rawText.has(name.toLowerCase())) {
+      const end = new RegExp(`</${name}\\s*>`, 'gi')
+      end.lastIndex = tags.lastIndex
+      tags.lastIndex = end.exec(source) ? end.lastIndex : source.length
+    }
+    if (!navigationTags.has(name)) continue
+
+    // The presentation renderer owns these tags and their bindings. Leave
+    // the attribute values and children available for STX interpolation.
+    const masked = attrs.replace(directiveAttribute, (attribute, space, kind, prop) => space
+      ? `${space}data-${marker}-${kind === ':' ? 'short' : 'long'}-${prop}`
+      : attribute)
+    template += source.slice(start, match.index) + `<wbr data-${marker}="${originals.length}"${masked}>`
+    originals.push(closing + name)
+    start = tags.lastIndex
+  }
+  if (!originals.length) return { template: source, restore: html => html }
+  const markers = new RegExp(`<wbr data-${marker}="(\\d+)"((?:[^>"']|"[^"]*"|'[^']*')*)>`, 'g')
+  const bound = new RegExp(`"[^"]*"|'[^']*'|(\\s)data-${marker}-(short|long)-`, 'g')
+  return {
+    template: template + source.slice(start),
+    restore: html => html.replace(markers, (_token, index: string, attrs: string) =>
+      `<${originals[Number(index)]}${attrs.replace(bound, (attribute, space, kind) => space
+        ? space + (kind === 'short' ? ':' : 'v-bind:')
+        : attribute)}>`),
+  }
+}
+
 export async function compileLayoutTemplate(url: URL): Promise<(bindings: LayoutBindings) => Promise<string>> {
   const path = fileURLToPath(url)
-  const source = await Bun.file(url).text()
-  const marker = `presentationSlot${Bun.randomUUIDv7().replaceAll('-', '')}_`
+  const identity = Bun.randomUUIDv7().replaceAll('-', '')
+  const { template: source, restore } = preserveNavigationTags(await Bun.file(url).text(), `presentation-${identity}`)
+  const marker = `presentationSlot${identity}_`
   const slotExpression = /{!!\s*((?:slots\.)?[\w-]+)\s*!!}|\{\{\s*((?:slots\.)?[\w-]+)\s*\}\}/g
   const restoreSlot = new RegExp(`${marker}(\\d+)x`, 'g')
 
@@ -71,7 +112,7 @@ export async function compileLayoutTemplate(url: URL): Promise<(bindings: Layout
     })
     // Inject rendered Markdown after STX has evaluated the layout's own directives.
     const html = await renderStx(template, path, context)
-    return html.replace(restoreSlot, (_, number: string) => values[Number(number)] ?? '')
+    return restore(html).replace(restoreSlot, (_, number: string) => values[Number(number)] ?? '')
   }
 }
 

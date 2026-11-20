@@ -490,15 +490,35 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     : ''
   const globalTop = baseMarkup(activeExtensions.map(extension => extension.globalTop || '').join(''))
   const globalBottom = baseMarkup(activeExtensions.map(extension => extension.globalBottom || '').join(''))
-  const customControls = layers?.['custom-nav-controls']
-    ? baseMarkup(await renderLayer(layers['custom-nav-controls'], routes[0], routes.length)) : ''
+  const controlsTemplate = layers?.['custom-nav-controls']
+  let customControls = ''
+  let controlsData = ''
+  if (controlsTemplate && routes.length) {
+    const renderControls = async (route: SlideRoute) => {
+      const markup = await renderLayer(controlsTemplate, route, routes.length)
+      return baseMarkup(prepareSlideHtml(markup, destination, route.no, route.frontmatter, socialTheme, outline, { scopeStyles: false }).html)
+    }
+    const scripted = /<script(?=[\s>])/i
+    customControls = await renderControls(routes[0])
+    // Keep scripted controls mounted. Scripts in a swapped template
+    // fragment cannot run client setup.
+    if (routes.length > 1 && !scripted.test(customControls)) {
+      const controlsBySlide = [customControls, ...await Promise.all(routes.slice(1).map(renderControls))]
+      const variants = [...new Set(controlsBySlide)]
+      if (variants.length > 1 && !variants.some(markup => scripted.test(markup))) {
+        const byMarkup = new Map(variants.map((markup, index) => [markup, index]))
+        const indices = controlsBySlide.map(markup => byMarkup.get(markup))
+        controlsData = JSON.stringify({ variants, indices }).replaceAll('<', '\\u003c')
+      }
+    }
+  }
   const mcpNavigation = options.mcpNavigation && deck.headmatter?.mcp !== false
   let live: LiveDeck | undefined
   let liveData = ''
   if (options.liveCompile) {
     const drawingOptions = [drawings.enabled, drawings.presenterOnly, drawings.syncAll, drawings.persist]
     const theme = extensions?.theme.name
-    const frame = snippetRevision(JSON.stringify([routing, width, height, clicksPreset, drawingOptions, contextMenu, theme, colorSchema, codeTheme, fontMarkup, mcpNavigation, timerMode, timerDuration, extensions?.styles, extensions?.client, globalTop, globalBottom, customControls, reactiveSlides, liveGrammars]))
+    const frame = snippetRevision(JSON.stringify([routing, width, height, clicksPreset, drawingOptions, contextMenu, theme, colorSchema, codeTheme, fontMarkup, mcpNavigation, timerMode, timerDuration, extensions?.styles, extensions?.client, globalTop, globalBottom, controlsData || customControls, reactiveSlides, liveGrammars]))
     const parts = slides.map((slide, index) => {
       const source = options.sourceBindings?.get(activeSlides[index])
       const part = { ...slide, notes: notes[index], route: routes[index], sourceToken: source?.token }
@@ -536,6 +556,9 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     slideMarkup: slides.map(slide => slide.html).join('\n'),
     globalBottom,
     customControls,
+    customControlsData: controlsData
+      ? `<script id="presentation-custom-controls-data" type="application/json">${controlsData}</script>`
+      : '',
     downloadButton: options.pdfDownloadHref
       ? baseMarkup(`<a id="download-pdf" href="${escapeHtml(options.pdfDownloadHref)}" download target="_blank" rel="noopener">Download PDF</a>`)
       : '',

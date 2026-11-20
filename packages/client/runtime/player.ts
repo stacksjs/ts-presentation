@@ -41,6 +41,9 @@ const articles = [...stage.querySelectorAll<HTMLElement>(':scope > article')]
 const notesPanel = document.querySelector<HTMLElement>('#presenter-notes')!
 const notes = [...notesPanel.querySelectorAll<HTMLElement>(':scope > section')]
 const control = document.querySelector<HTMLElement>('#controls')!
+const customControls = control.querySelector<HTMLElement>('#presentation-custom-controls')!
+const controlsData = document.querySelector('#presentation-custom-controls-data')?.textContent
+const controlsBySlide: { variants: string[], indices: number[] } | undefined = controlsData ? JSON.parse(controlsData) : undefined
 const goto = control.querySelector<HTMLSelectElement>('#goto')!
 const previous = control.querySelector<HTMLButtonElement>('#previous')!
 const next = control.querySelector<HTMLButtonElement>('#next')!
@@ -88,13 +91,28 @@ function writePosition(slide: number, click: number, replace: boolean): void {
   else history.pushState(null, '', url)
 }
 
-function mountSlide(article: HTMLElement, index: number): void {
+function mountSlideLinks(container: HTMLElement): void {
   if (!isCapture && (routing.mode === 'hash' || routing.mode === 'history')) {
-    for (const link of article.querySelectorAll<HTMLElement>('a[data-slide-link]')) {
+    for (const link of container.querySelectorAll<HTMLElement>('a[data-slide-link]')) {
       const target = routes[Number(link.dataset.slideLink) - 1]
       if (target) link.setAttribute('href', audienceUrl(target, Number(link.dataset.slideClick) || undefined).href)
     }
   }
+}
+
+let controlsVariant = 0
+function showCustomControls(index: number, refreshLinks: boolean): void {
+  const variant = controlsBySlide?.indices[index] ?? 0
+  const changed = variant !== controlsVariant
+  if (changed && controlsBySlide) {
+    customControls.replaceChildren(template(controlsBySlide.variants[variant]))
+    controlsVariant = variant
+  }
+  if (changed || refreshLinks) mountSlideLinks(customControls)
+}
+
+function mountSlide(article: HTMLElement, index: number): void {
+  mountSlideLinks(article)
   updateSlideContent(article)
   mountInlineMath(notes[index])
   reveals[index] = collectReveals(article, routes[index].frontmatter.clickAnimation || defaultClickAnimation, updateSlideContent)
@@ -250,6 +268,7 @@ function show(number: number, step?: number, writeHistory = true, sync = true, r
     }
     current = selected
     click = nextStep
+    if (!isCapture && !isPreview) showCustomControls(current - 1, refresh)
     const active = articles[current - 1]
     active.hidden = false
     for (const frame of active.querySelectorAll<HTMLIFrameElement>('iframe[data-presentation-tweet]:not([src])')) {
@@ -483,12 +502,13 @@ stage.addEventListener('toggle', (event) => {
 imageView.addEventListener('close', () => syncPeer({ slide: current, screenshot: -1 }))
 stage.addEventListener('click', event => zoom(event.target))
 if (!isCapture && !isPreview) setupDiagramActions(stage)
-stage.addEventListener('click', (event) => {
+function followSlideLink(event: MouseEvent): void {
   if (isCapture || isPreview || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
   const link = event.target instanceof Element ? event.target.closest<HTMLAnchorElement | SVGAElement>('a') : null
   const target = link?.getAttribute('target')
   if (!link || (target && target !== '_self') || link.hasAttribute('download')) return
   if (!link.hasAttribute('data-slide-link')) {
+    if (event.currentTarget !== stage) return
     const href = link.getAttribute('href')
     if (routing.mode !== 'history' || !href?.startsWith('#') || href.length === 1) return
     let id: string
@@ -508,7 +528,9 @@ stage.addEventListener('click', (event) => {
   if (!Number.isInteger(slide) || slide < 1 || slide > articles.length || (click !== undefined && !Number.isSafeInteger(click))) return
   event.preventDefault()
   show(slide, click)
-})
+}
+stage.addEventListener('click', followSlideLink)
+customControls.addEventListener('click', followSlideLink)
 stage.addEventListener('keydown', (event) => {
   if (event.defaultPrevented || (event.key !== 'Enter' && event.key !== ' ')) return
   if (event.target instanceof HTMLImageElement && event.target.hasAttribute('data-zoom')) {
@@ -585,6 +607,7 @@ if (overviewGrid) {
   conditions.observe(stage)
 }
 else for (const article of articles) article.hidden = true
+mountSlideLinks(customControls)
 const savedNotes = isNotes ? notesFeed?.saved() : undefined
 if (savedNotes) {
   show(savedNotes.slide, savedNotes.click, false, false)
