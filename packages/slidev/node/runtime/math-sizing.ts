@@ -8,6 +8,8 @@ const pointsPerUnit: Readonly<Record<string, number>> = {
 const nativeUnits = new Set(['px', 'em', 'ex', 'pt', 'cm', 'mm', 'in', 'pc'])
 const dimensionPattern = /^([+-]?)\s*(\d+(?:\.\d*)?|\.\d+)\s*(px|em|ex|pt|bp|cm|mm|in|mu|pc|dd|cc|nd|nc|sp)?$/
 
+export const nullDelimiterWidth = '0.12em'
+
 function toEm(value: number, unit: string): number {
   if (unit === 'em') return value
   if (unit === 'mu') return value / 18

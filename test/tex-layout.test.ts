@@ -2374,7 +2374,7 @@ test('expands closing fences and tracks the last declared color through nested p
   expect(() => formula(String.raw`{\left(\def\value{x}\value\right)}\value`))
     .toThrow(String.raw`Unsupported math command: \value`)
   const nested = formula(String.raw`\left(\color{red}\left[\color{blue}x\right] y\right)z`)
-  expect(nested).toContain('<mo stretchy="true">(</mo><mrow style="color:red"><mrow><mo stretchy="true">[</mo>')
+  expect(nested).toContain('<mo stretchy="true">(</mo><mrow style="color:red"><mrow data-math-delimiters=""><mo stretchy="true">[</mo>')
   expect(nested).toContain('<mo stretchy="true" style="color:blue">]</mo></mrow><mi>y</mi></mrow><mo stretchy="true" style="color:blue">)</mo></mrow><mi>z</mi>')
   for (const body of [String.raw`{\color{red}x}`, String.raw`\textcolor{red}{x}`]) {
     expect(formula(String.raw`\left(${body}\right)`)).toContain('<mo stretchy="true">)</mo>')

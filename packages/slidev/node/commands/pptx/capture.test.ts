@@ -343,6 +343,66 @@ $$`)
   }
 }, 45_000)
 
+it.skipIf(!chrome)('exports TeX invisible and middle delimiters as native Office Math', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-math-delimiters-'))
+  try {
+    const entry = join(root, 'slides.md')
+    const output = join(root, 'delimiters.pptx')
+    await Bun.write(entry, String.raw`# Delimiters
+
+$$
+\left.\frac{x}{2}\right|_0^1
+$$
+
+$$
+\left\lbrace \frac{x}{2} \middle| x>0 \middle| x<2 \right\rbrace
+$$
+
+$$
+\color{purple}\left\llbracket \frac{x}{y} \middle\Vert z \right\rrbracket
+$$
+
+---
+
+# More delimiters
+
+$$
+\left[\left.\frac{x}{y}\right. \middle] z \right.
+$$
+
+$$
+\left(a \middle| b \middle\Vert c \right)
+$$
+
+$$
+\left(\color{red}a \middle| b \right)
+$$`)
+    const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
+    const exportDeck = Bun.spawn([process.execPath, cli, 'export', entry, '--format', 'pptx-editable', '--output', output, '--executable-path', chrome!], {
+      stderr: 'pipe', stdout: 'ignore', timeout: 30_000,
+    })
+    const [status, stderr] = await Promise.all([exportDeck.exited, new Response(exportDeck.stderr).text()])
+    if (status) throw new Error(stderr)
+
+    const parts = await storedParts(Bun.file(output))
+    const first = parts.get('ppt/slides/slide1.xml')?.toString() ?? ''
+    const second = parts.get('ppt/slides/slide2.xml')?.toString() ?? ''
+    expect(first.match(/<a14:m>/g)).toHaveLength(3)
+    expect(first.match(/<mc:Fallback><p:sp>/g)).toHaveLength(3)
+    expect(first).toContain('<m:sSubSup><m:e><m:d><m:dPr><m:begChr/><m:endChr m:val="|"/></m:dPr><m:e>')
+    expect(first).toContain('<m:t xml:space="preserve">\u200a</m:t>')
+    expect(first).toMatch(/<m:begChr m:val="\{"\/><m:endChr m:val="\}"\/><m:sepChr m:val="\|"\/><\/m:dPr><m:e>.*?<m:f>.*?<\/m:e><m:e>.*?>x<\/m:t>.*?&gt;<\/m:t>.*?<\/m:e><m:e>.*?&lt;<\/m:t>/)
+    expect(first).toMatch(/<m:begChr m:val="⟦"\/><m:endChr m:val="⟧"\/><m:sepChr m:val="‖"\/><m:ctrlPr>.*?<a:srgbClr val="800080"\/>/)
+    expect(second.match(/<a14:m>/g)).toHaveLength(1)
+    expect(second.match(/<p:pic>/g)).toHaveLength(2)
+    expect(second).toContain('<m:begChr m:val="["/><m:endChr/><m:sepChr m:val="]"/></m:dPr><m:e><m:d>')
+    expect(second).toContain('<m:dPr><m:begChr/><m:endChr/></m:dPr><m:e>')
+  }
+  finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}, 45_000)
+
 it.skipIf(!chrome)('keeps AMS rows, tags, and click highlights editable in PowerPoint', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-ams-'))
   const canvas = { width: 960, height: 540 }

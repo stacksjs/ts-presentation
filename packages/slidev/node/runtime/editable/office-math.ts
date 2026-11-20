@@ -1,5 +1,6 @@
 import { escapeHtml } from '../html.ts'
 import { baseMathLetters } from '../math-alphabets.ts'
+import { nullDelimiterWidth } from '../math-sizing.ts'
 import { parseColor } from './color.ts'
 import type { RawMathElement, Rgba } from './ir.ts'
 import { PT_PER_PX } from './ir.ts'
@@ -21,7 +22,8 @@ const accents: Readonly<Record<string, string>> = {
 }
 const zeroLength = /^-?0(?:\.0+)?[a-z]+$/
 const stretchMarks = new Set(['⏞', '⏟', '←', '→', '↔', '⇐', '⇒', '⇔', '↼', '⇀'])
-const spaces = [[0.17, '\u2009'], [2 / 9, '\u205f'], [5 / 18, '\u2005'], [0.5, '\u2002'], [1, '\u2003'], [2, '\u2003\u2003']] as const
+const nullFenceSpace = '\u200a'
+const spaces = [[Number.parseFloat(nullDelimiterWidth), nullFenceSpace], [0.17, '\u2009'], [2 / 9, '\u205f'], [5 / 18, '\u2005'], [0.5, '\u2002'], [1, '\u2003'], [2, '\u2003\u2003']] as const
 const strikeProperties: Readonly<Record<string, readonly string[]>> = {
   'math-cancel': ['strikeBLTR'],
   'math-bcancel': ['strikeTLBR'],
@@ -290,6 +292,59 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba, 
     }
     if (rows) return wrap('eqArr', rows)
   }
+  function delimiter(left: string, right: string, expressions: readonly string[], separator?: string): string {
+    const begin = left ? setting('begChr', left) : '<m:begChr/>'
+    const end = right ? setting('endChr', right) : '<m:endChr/>'
+    const options = begin + end + (separator ? setting('sepChr', separator) : '') + control()
+    return wrap('d', wrap('dPr', options) + expressions.map(content => wrap('e', content)).join(''))
+  }
+  function fenceGlyph(node: RawMathElement, middle: boolean): string | undefined {
+    const { attributes, text } = node
+    if (!middle && node.name === 'mspace' && attributes.width === nullDelimiterWidth && only(node, 'width')
+      && !text.trim() && !node.children.length) return ''
+    if (node.name !== 'mo' || node.children.length || attributes.stretchy !== 'true' || text.length !== 1 || /[\p{C}\s]/u.test(text)) return
+    if (middle) {
+      if (!only(node, 'stretchy', 'fence', 'symmetric', 'form', 'lspace', 'rspace', 'style') || attributes.fence !== 'true'
+        || attributes.symmetric !== 'true' || attributes.form !== 'infix' || attributes.lspace !== '0.05em' || attributes.rspace !== '0.05em') return
+    }
+    else if (!only(node, 'stretchy', 'style')) return
+    // An OMML delimiter uses a single style for all of its characters.
+    if (attributes.style) {
+      const paint = parseColor(node.color)
+      if (!paint || !/^color:[^;]+;?$/.test(attributes.style)) return
+      const resolved = mathInk(paint)
+      if (resolved.hex !== ink.hex || resolved.alpha !== ink.alpha) return
+    }
+    return text
+  }
+  function pairedDelimiters(nodes: readonly RawMathElement[]): string | undefined {
+    if (nodes.length < 2) return
+    const left = fenceGlyph(nodes[0], false)
+    const right = fenceGlyph(nodes[nodes.length - 1], false)
+    if (left === undefined || right === undefined) return
+    const parts: string[] = []
+    let separator: string | undefined
+    let start = 1
+    const end = nodes.length - 1
+    for (let index = start; index < end; index++) {
+      const node = nodes[index]
+      if (node.name !== 'mo' || node.attributes.form !== 'infix' || node.attributes.stretchy !== 'true') continue
+      const glyph = fenceGlyph(node, true)
+      if (glyph === undefined || (separator !== undefined && separator !== glyph)) return
+      const content = sequence(nodes.slice(start, index))
+      if (content === undefined) return
+      parts.push(content)
+      separator = glyph
+      start = index + 1
+    }
+    const content = sequence(nodes.slice(start, end))
+    if (content === undefined) return
+    parts.push(content)
+    // A null TeX delimiter also contributes a small horizontal space.
+    if (!left) parts[0] = run(nullFenceSpace) + parts[0]
+    if (!right) parts[parts.length - 1] += run(nullFenceSpace)
+    return delimiter(left, right, parts, separator)
+  }
   function convert(node: RawMathElement): string | undefined {
     if (node.color === undefined) return convertElement(node)
     const next = parseColor(node.color)
@@ -340,6 +395,7 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba, 
       return
     }
     if (name === 'mrow') {
+      if (attributes['data-math-delimiters'] === '' && only(node, 'data-math-delimiters')) return pairedDelimiters(children)
       const variant = attributes.mathvariant
       if (variant && attributes.class === `math-${variant}` && only(node, 'class', 'mathvariant') && Object.hasOwn(mathFonts, variant))
         return inFont({ ...defaultMathFont, ...mathFonts[variant] }, () => sequence(children))
@@ -372,8 +428,7 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba, 
       if (children.length > 2 && stretchyFence(left, leftFences) && stretchyFence(right, rightFences)) {
         const expression = sequence(children.slice(1, -1))
         if (expression === undefined) return
-        const options = setting('begChr', left.text) + setting('endChr', right.text) + control()
-        return wrap('d', wrap('dPr', options) + wrap('e', expression))
+        return delimiter(left.text, right.text, [expression])
       }
       return sequence(children)
     }

@@ -6,7 +6,7 @@ import { MathParseError } from './math-error.ts'
 import { chemicalFormula, physicalUnits } from './math-chemistry.ts'
 import type { Markup, MathStyle } from './math-markup.ts'
 import { joinMarkup, renderMarkup, xml } from './math-markup.ts'
-import { fractionRule, mathDimension } from './math-sizing.ts'
+import { fractionRule, mathDimension, nullDelimiterWidth } from './math-sizing.ts'
 import { resolveRowClasses, rowSpacing } from './math-spacing.ts'
 import type { MathClass } from './math-spacing.ts'
 import { isCenteredGlyph, isColonRelationCommand, mathSymbol, textSymbol, unicodeColonRelation } from './math-symbols.ts'
@@ -1610,7 +1610,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
 
   function pairedDelimiters(): Markup {
     const leftGlyph = readDelimiter('left')
-    const left = leftGlyph === '.' ? spaceMarkup('0.12em') : fence(leftGlyph)
+    const left = leftGlyph === '.' ? spaceMarkup(nullDelimiterWidth) : fence(leftGlyph)
     delimiterDepth++
     let content: Markup
     try {
@@ -1620,8 +1620,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
     finally { delimiterDepth-- }
     if (take() !== '\\right') throw new MathParseError('Missing \\right for \\left')
     const rightGlyph = readDelimiter('right')
-    const right = rightGlyph === '.' ? spaceMarkup('0.12em') : fence(rightGlyph, true, currentColor)
-    return xml`<mrow>${left}${content}${right}</mrow>`
+    const right = rightGlyph === '.' ? spaceMarkup(nullDelimiterWidth) : fence(rightGlyph, true, currentColor)
+    return xml`<mrow data-math-delimiters="">${left}${content}${right}</mrow>`
   }
 
   function readDimension(blank?: string, spacingCommand?: string): string {
@@ -2673,7 +2673,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (name === 'middle') {
       if (!delimiterDepth) throw new MathParseError('\\middle requires \\left and \\right')
       const glyph = readDelimiter(name)
-      const markup = glyph === '.' ? spaceMarkup('0.12em')
+      const markup = glyph === '.' ? spaceMarkup(nullDelimiterWidth)
         : `<mo stretchy="true" symmetric="true" form="infix" fence="true" lspace="0.05em" rspace="0.05em">${escapeHtml(glyph)}</mo>`
       return { markup, mathClass: 'middle' }
     }
