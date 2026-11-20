@@ -177,10 +177,12 @@ export function gitGraph(source: string, idPrefix: string, options: MermaidOptio
       fontSize: diagramPixels(variables.commitLabelFontSize) ?? preset?.commit.fontSize,
     },
     tagLabel: {
+      shape: 'tag',
       color: color('tagLabelColor') ?? preset?.tag.color,
       background: color('tagLabelBackground') ?? preset?.tag.background ?? labelBackground,
       border: color('tagLabelBorder') ?? preset?.tag.border,
       fontSize: diagramPixels(variables.tagLabelFontSize) ?? preset?.tag.fontSize,
+      holeColor: color('textColor') ?? preset?.tag.holeColor,
     },
   })
   return sizeChronologySvg(svg, config.useMaxWidth)

@@ -434,6 +434,7 @@ test('native Git history YAML and compatibility syntax render the same branch gr
   const yaml = `type: gitgraph
 direction: BT
 rotateCommitLabel: true
+tagLabel: { shape: tag }
 operations:
   - { op: commit, id: start }
   - { op: branch, name: test, order: 3 }
@@ -743,6 +744,7 @@ config:
     tagLabelBackground: '#f7c4ca'
     tagLabelBorder: '#db8492'
     tagLabelFontSize: '14px'
+    textColor: '#234567'
 ---
 gitGraph
   commit id:"first" type:HIGHLIGHT tag:"v1"
@@ -753,7 +755,8 @@ colors: ['#28536b']
 branchLabelColors: ['#ead99b']
 highlightColors: ['#77aa66']
 commitLabel: { color: '#173652', background: '#d9eef6', fontSize: 18 }
-tagLabel: { color: '#370b16', background: '#f7c4ca', border: '#db8492', fontSize: 14 }
+tagLabel: { shape: tag, color: '#370b16', background: '#f7c4ca', border: '#db8492', fontSize: 14, holeColor: '#234567' }
+titleColor: '#234567'
 operations:
   - { op: commit, id: first, style: HIGHLIGHT, tags: [v1] }
   - { op: commit, id: second }`
@@ -761,6 +764,7 @@ operations:
   expect(svg).toContain('fill="#77aa66"')
   expect(svg).toContain('style="fill:#173652;font-size:18px;"')
   expect(svg).toContain('fill="#f7c4ca" stroke="#db8492"')
+  expect(svg).toMatch(/class="diagram-git-tag-hole"[^>]*fill="#234567"/)
   expect(svg).toBe(renderChart(native, 'styled-git'))
 })
 
@@ -906,6 +910,7 @@ test.skipIf(!chrome)('fits complete GitGraph labels and separate tag stacks in e
     ].join('\n')
     return mermaid(source, `long-${direction}-${rotateCommitLabel}`, {
       theme: 'forest', gitGraph: { rotateCommitLabel, useMaxWidth: false },
+      themeCSS: rotateCommitLabel ? '.tag-hole { fill: #123456; }' : undefined,
     })
   }))
   expect(graphs.every(Boolean)).toBe(true)
@@ -919,10 +924,12 @@ test.skipIf(!chrome)('fits complete GitGraph labels and separate tag stacks in e
   const browser = new Bun.WebView({ width: 1100, height: 780, backend: { type: 'chrome', path: chrome!, url: false } })
   try {
     await browser.navigate(server.url.href)
-    const boxes = await browser.evaluate<{ labels: string[], fits: boolean, separate: boolean }[]>(`[...document.querySelectorAll('svg')].map(svg => {
+    const boxes = await browser.evaluate<{ labels: string[], fits: boolean, separate: boolean, shaped: boolean, holeColors: string[] }[]>(`[...document.querySelectorAll('svg')].map(svg => {
       const bounds = svg.getBoundingClientRect()
       const labels = [...svg.querySelectorAll('.diagram-git-branch-label, .diagram-git-label, .diagram-git-tag')]
-      const tags = [...svg.querySelectorAll('.diagram-git-tag-box')].map(node => node.getBoundingClientRect())
+      const polygons = [...svg.querySelectorAll('polygon.diagram-git-tag-box')]
+      const holes = [...svg.querySelectorAll('circle.diagram-git-tag-hole')]
+      const tags = polygons.map(node => node.getBoundingClientRect())
       return {
         labels: labels.map(node => node.textContent),
         fits: [...labels, ...svg.querySelectorAll('.diagram-git-tag-box')].every(node => {
@@ -932,13 +939,19 @@ test.skipIf(!chrome)('fits complete GitGraph labels and separate tag stacks in e
         }),
         separate: tags.length === 6 && tags.every((box, index) => tags.slice(index + 1).every(other =>
           box.bottom <= other.top || other.bottom <= box.top || box.right <= other.left || other.right <= box.left)),
+        shaped: holes.length === polygons.length && holes.every((hole, index) =>
+          polygons[index].isPointInFill(new DOMPoint(hole.cx.baseVal.value, hole.cy.baseVal.value))) &&
+          new Set(polygons.slice(0, 3).map(node => Math.round(node.getBBox().width))).size === 1,
+        holeColors: [...new Set(holes.map(hole => getComputedStyle(hole).fill))],
       }
     })`)
     expect(boxes).toHaveLength(6)
-    for (const graph of boxes) {
+    for (const [index, graph] of boxes.entries()) {
       expect(graph.labels).toEqual(['main', branch, 'root', 'verified', 'signedand tested', 'preview', 'second', 'nightly', commit, 'stable', tag])
       expect(graph.fits).toBe(true)
       expect(graph.separate).toBe(true)
+      expect(graph.shaped).toBe(true)
+      expect(graph.holeColors).toEqual([index % 2 === 0 ? 'rgb(18, 52, 86)' : 'rgb(0, 0, 0)'])
     }
   }
   finally {

@@ -44,6 +44,7 @@ const gitSelectors: Readonly<Record<string, string>> = {
   branchLabelBkg: '.diagram-git-branch-label-box',
   'tag-label': '.diagram-git-tag',
   'tag-label-bkg': '.diagram-git-tag-box',
+  'tag-hole': '.diagram-git-tag-hole',
   branch: ':is(.diagram-git-branch > path)',
   arrow: '.diagram-git-edge',
 }
