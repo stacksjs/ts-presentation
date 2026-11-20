@@ -369,6 +369,7 @@ test('builds GitGraph branch history with merge parents, tags, and cherry-picks'
     ['base', 0], ['work; review', 1], ['other', 1], ['c4', 2], ['release', 3],
   ])
   expect(graph?.commits.at(-1)?.parents.map(parent => parent.id)).toEqual(['c4', 'work; review'])
+  expect(graph?.commits[3].parents.map(parent => parent.id)).toEqual(['other', 'work; review'])
   expect(graph?.commits[3].picked).toBe('work; review')
   expect(graph?.commits[3].message).toBe('cherry-picked work; review into main')
   expect(graph?.commits[4].tags).toEqual(['v1.0', 'stable'])
@@ -386,7 +387,7 @@ test('supports directed GitGraph layout and checks cherry-pick merge parents', a
   expect(buildGitHistory(branched + '  cherry-pick id: "release" parent: "c4"\n')?.commits.at(-1)?.picked).toBe('release')
   const picked = mermaid(branched + '  cherry-pick id: "release" parent: "c4"\n', 'provenance')!
   expect(picked).toMatch(/stroke-dasharray="5 3" data-from-commit="release" data-to-commit="c7"/)
-  expect(picked).toContain('data-parent-ids="maintenance" data-picked-id="release" data-picked-parent="c4"')
+  expect(picked).toContain('data-parent-ids="maintenance, release" data-picked-id="release" data-picked-parent="c4"')
   expect(picked).toContain('cherry-pick:release|parent:c4')
   const noTag = branched + '  cherry-pick id: "release" parent: "c4" tag: ""\n'
   expect(buildGitHistory(noTag)?.commits.at(-1)?.tags).toEqual([])
@@ -398,6 +399,39 @@ test('supports directed GitGraph layout and checks cherry-pick merge parents', a
   expect(html).toContain('viewBox="0 0 ')
   expect(html).toContain('diagram-git-node diagram-git-merge')
   expect(html).not.toContain('language-mermaid')
+})
+
+const routedHistory = `commit id:"root"
+branch review
+commit id:"patch"
+commit id:"next-draft"
+checkout main
+commit id:"test"
+commit id:"publish"
+cherry-pick id:"patch"
+branch maintenance
+commit id:"maintenance"
+cherry-pick id:"c6" parent:"patch"`
+
+test('uses cherry-pick source parents when validating later picks', () => {
+  const graph = buildGitHistory(`gitGraph\n${routedHistory}`)
+  expect(graph?.commits[5].parents.map(parent => parent.id)).toEqual(['publish', 'patch'])
+  expect(graph?.commits.at(-1)?.parents.map(parent => parent.id)).toEqual(['maintenance', 'c6'])
+  expect(graph?.commits.at(-1)?.pickedParent).toBe('patch')
+  expect(buildGitHistory(`gitGraph\n${routedHistory.replace('parent:"patch"', 'parent:"next-draft"')}`)).toBeUndefined()
+})
+
+test('rejects GitGraph merges from the original branch of an inherited head', () => {
+  const graph = `gitGraph
+commit id:"root"
+branch review
+checkout main
+commit id:"advance"
+checkout review
+merge main id:"merged"`
+  expect(buildGitHistory(graph)).toBeUndefined()
+  const withReviewCommit = graph.replace('branch review', 'branch review\ncommit id:"draft"')
+  expect(buildGitHistory(withReviewCommit)?.commits.at(-1)?.parents.map(parent => parent.id)).toEqual(['draft', 'advance'])
 })
 
 test('imports GitGraph commit messages and keeps explicit merge symbols in the built deck', async () => {
@@ -477,6 +511,7 @@ test('native Git history YAML and compatibility syntax render the same branch gr
   const yaml = `type: gitgraph
 direction: BT
 rotateCommitLabel: true
+edgeLayout: orthogonal
 tagLabel: { shape: tag }
 operations:
   - { op: commit, id: start }
@@ -794,6 +829,7 @@ gitGraph
   commit id:"second"`
   const native = `type: gitgraph
 rotateCommitLabel: false
+edgeLayout: orthogonal
 colors: ['#28536b']
 branchLabelColors: ['#ead99b']
 highlightColors: ['#77aa66']
@@ -995,6 +1031,58 @@ test.skipIf(!chrome)('fits complete GitGraph labels and separate tag stacks in e
       expect(graph.separate).toBe(true)
       expect(graph.shaped).toBe(true)
       expect(graph.holeColors).toEqual([index % 2 === 0 ? 'rgb(18, 52, 86)' : 'rgb(0, 0, 0)'])
+    }
+  }
+  finally {
+    browser.close()
+    await server.stop(true)
+  }
+})
+
+test.skipIf(!chrome)('routes GitGraph connectors around intervening commit dots in Chromium', async () => {
+  const graphs = ['LR', 'TB', 'BT'].flatMap(direction => [true, false].map(parallelCommits =>
+    mermaid(`gitGraph ${direction}:\n${routedHistory}`, `routed-${direction}-${parallelCommits}`, {
+      gitGraph: { parallelCommits, rotateCommitLabel: false },
+    })))
+  expect(graphs.every(Boolean)).toBe(true)
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response(`<!doctype html><meta charset="utf-8">${graphs.join('')}`, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    }),
+  })
+  const browser = new Bun.WebView({ width: 1100, height: 780, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await browser.navigate(server.url.href)
+    const routes = await browser.evaluate<{ turns: number, clearance: number, endpoints: boolean, copies: number }[]>(`[...document.querySelectorAll('svg')].map(svg => {
+      const edges = svg.querySelectorAll('.diagram-git-pick-edge[data-from-commit="patch"][data-to-commit="c6"]')
+      const route = edges[0]
+      const length = route.getTotalLength()
+      const center = id => {
+        const dot = svg.querySelector('[data-commit-id="' + id + '"] .diagram-git-dot')
+        return { x: dot.cx.baseVal.value, y: dot.cy.baseVal.value }
+      }
+      const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y)
+      const blockers = ['next-draft', 'test', 'publish'].map(center)
+      let clearance = Infinity
+      for (let offset = 0; offset < length; offset += 1) {
+        const point = route.getPointAtLength(offset)
+        for (const blocker of blockers) clearance = Math.min(clearance, distance(point, blocker))
+      }
+      return {
+        turns: route.getAttribute('d').split('Q').length - 1,
+        clearance,
+        endpoints: distance(route.getPointAtLength(0), center('patch')) < 1 &&
+          distance(route.getPointAtLength(length), center('c6')) < 1,
+        copies: edges.length,
+      }
+    })`)
+    expect(routes).toHaveLength(6)
+    for (const route of routes) {
+      expect(route.turns).toBe(4)
+      expect(route.clearance).toBeGreaterThan(12)
+      expect(route.endpoints).toBe(true)
+      expect(route.copies).toBe(1)
     }
   }
   finally {

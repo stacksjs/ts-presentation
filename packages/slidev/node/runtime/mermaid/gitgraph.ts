@@ -136,6 +136,8 @@ function parseGitHistory(source: string, config: Record<string, unknown>): GitGr
     operations, title: chart.title, accessibleTitle: chart.accessibleTitle, description: chart.description,
     direction: header[1] as GitGraphDirection | undefined,
     duplicateCommitIds: 'latest',
+    cherryPickSourceParent: true,
+    allowMergeFromInheritedHead: false,
     mainBranchName: typeof config.mainBranchName === 'string' ? config.mainBranchName : undefined,
     mainBranchOrder: ordered.findIndex(({ branch }) => !branch),
     titleTopMargin: diagramPixels(config.titleTopMargin),
@@ -164,6 +166,7 @@ export function gitGraph(source: string, idPrefix: string, options: MermaidOptio
   const svg = gitGraphChart({
     ...chart, idPrefix, title: chart.title || (typeof options.title === 'string' ? options.title : ''),
     truncateLabels: false,
+    edgeLayout: 'orthogonal',
     tagLayout: 'stacked',
     colors,
     branchLabelColors: palette('gitBranchLabel', preset?.branchText, color('branchLabelColor')),
