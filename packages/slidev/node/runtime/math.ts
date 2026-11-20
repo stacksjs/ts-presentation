@@ -75,7 +75,7 @@ const contextualDots = new Set(['dots', 'dotsc', 'dotsb', 'dotsm', 'dotsi', 'dot
 const centersDots = /^[+\-−*=<>:±∓·×÷≤≥≠≈∼≃≡∝∈∉∋∌∣∤∥∦⊥⊂⊄⊆⊈⊃⊅⊇⊉∘∗∖∩∪∧∨⊕⊗⊙∑∏∐⋃⋂⋁⋀←→↔⇒⇐⇔↦⟵⟶⟷⟹⟸⟺⟼]$/u
 const variants: Record<string, string> = {
   mathbf: 'bold', mathbb: 'double-struck', mathrm: 'normal', mathit: 'italic',
-  mathsf: 'sans-serif', mathtt: 'monospace', mathcal: 'script', mathscr: 'script',
+  mathsf: 'sans-serif', mathsfit: 'sans-serif-italic', mathtt: 'monospace', mathcal: 'script', mathscr: 'script',
   mathfrak: 'fraktur', mathnormal: 'italic', boldsymbol: 'bold-italic', bm: 'bold-italic',
   Bbb: 'double-struck', frak: 'fraktur', bold: 'bold',
 }
@@ -392,9 +392,9 @@ function rowClass({ markup, token = '', mathClass, operator }: RowPart): MathCla
 function neutralizeOperator(markup: string): string {
   // MathML propagates a glyph's native spacing through scripts and singleton
   // rows. Preserve spacing within a group that has several children.
-  const operator = /^((?:<(?:msub|msup|msubsup|mover|munder|munderover)(?: [^>]*)?>)*)((?:<mrow>)*)<mo([^>]*)>([^<]*<\/mo>)((?:<\/mrow>)*)/
+  const operator = /^((?:<(?:msub|msup|msubsup|mover|munder|munderover)(?: [^>]*)?>)*)((?:<mrow(?: [^>]*)?>)*)<mo([^>]*)>([^<]*<\/mo>)((?:<\/mrow>)*)/
   return markup.replace(operator, (match, scripts: string, groups: string, attrs: string, glyph: string, ends: string) => {
-    if (groups.length / '<mrow>'.length !== ends.length / '</mrow>'.length) return match
+    if ((groups.match(/<mrow\b/g)?.length ?? 0) !== ends.length / '</mrow>'.length) return match
     const attributes = attrs.replace(/ (?:lspace|rspace)="[^"]*"/g, '')
     return `${scripts}${groups}<mo${attributes} lspace="0em" rspace="0em">${glyph}${ends}`
   })
@@ -634,9 +634,19 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
     const values = macro.parameters.map((delimiter, index) => {
       if (index === 0 && macro.optional !== undefined) return rawBracket() ?? macro.optional
-      return delimiter.length ? delimitedArgument(delimiter) : rawGroup()
+      return delimiter.length ? delimitedArgument(delimiter, true) : rawGroup()
     })
-    const body = macro.body.flatMap(token => /^#[1-9]$/.test(token) ? values[Number(token[1]) - 1] ?? [] : [token])
+    const body: string[] = []
+    for (let index = 0; index < macro.body.length; index++) {
+      const token = macro.body[index]
+      const next = macro.body[index + 1] ?? ''
+      if (token === '#' && /^#[1-9]?$/.test(next)) {
+        body.push(next)
+        index++
+      }
+      else if (/^#[1-9]$/.test(token)) body.push(...values[Number(token[1]) - 1] ?? [])
+      else body.push(token)
+    }
     replaceExpansion(start, body)
     return true
   }
@@ -677,18 +687,20 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return rawGroup().join('')
   }
 
-  function delimitedArgument(delimiter: string[]): string[] {
+  function delimitedArgument(delimiter: string[], unwrapGroup = false): string[] {
     const start = cursor
     let level = 0
+    let groupEnd: number | undefined
     while (cursor < tokens.length && tokens[cursor] !== boundary) {
       if (level === 0 && delimiter.every((token, index) => tokens[cursor + index] === token)) {
-        const argument = tokens.slice(start, cursor)
+        const unwrap = unwrapGroup && tokens[start] === '{' && groupEnd === cursor
+        const argument = unwrap ? tokens.slice(start + 1, cursor - 1) : tokens.slice(start, cursor)
         cursor += delimiter.length
         return argument
       }
       const token = tokens[cursor++]
       if (token === '{') level++
-      else if (token === '}') level--
+      else if (token === '}' && --level === 0) groupEnd ??= cursor
       if (level < 0) break
     }
     throw new Error('Missing macro delimiter')
@@ -739,14 +751,21 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
   }
 
-  function argumentAtom(): Atom {
+  function argumentAtom(classify = false): Atom {
     if (depth++ > 100) throw new Error('Math arguments are nested too deeply')
     const token = take()
     if (!token || token === '}' || token === boundary || token === '^' || token === '_') throw new Error('Missing math argument')
     if (infixFractions.has(token)) throw new Error('An infix fraction argument requires a group')
-    const result = atom(token)
+    const result = atom(token, classify)
     depth--
+    if (classify) result.mathClass = rowClass({ ...result, token })
     return result
+  }
+
+  function binRelArgument(): Atom & { mathClass: MathClass } {
+    const result = argumentAtom(true)
+    const mathClass = result.mathClass === 'bin' || result.mathClass === 'rel' ? result.mathClass : 'ord'
+    return { ...result, mathClass }
   }
 
   function argument(): Markup {
@@ -1118,7 +1137,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
   }
 
-  function row(stop: string[] = [], breakOnInfix = false, exposeLines = false): Markup {
+  function row(stop: string[] = [], breakOnInfix = false, exposeLines = false, firstClass?: (value: MathClass | undefined) => void): Markup {
     if (depth++ > 100) throw new Error('Math groups are nested too deeply')
     let parts: RowPart[] = []
     let lines: MathLine[] | undefined
@@ -1229,6 +1248,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
       parts.push({ markup: content, token, mathClass: part.mathClass, operator: part.limits !== undefined })
     }
     depth--
+    if (firstClass && !infix && !lines) {
+      const first = parts.find(part => part.markup !== '')
+      firstClass(first && rowClass(first))
+    }
     const result = finish()
     if (!infix) return result
     const quotient = fractionMarkup(xml`<mrow>${numerator}</mrow>`, xml`<mrow>${result}</mrow>`, undefined, fractionRule(thickness, minRule))
@@ -1464,9 +1487,16 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const prefix: string[] = []
       const parameters: string[][] = []
       let sequence = prefix
+      let openDelimiter = false
       while (tokens[cursor] !== '{') {
         const token = tokens[cursor++]
         if (!token || token === boundary || token === '}' || sequence.length > 80) throw new Error('Invalid macro parameter')
+        if (token === '#') {
+          if (tokens[cursor] !== '{') throw new Error('Invalid macro parameter')
+          sequence.push('{')
+          openDelimiter = true
+          break
+        }
         if (/^#[1-9]$/.test(token)) {
           if (Number(token[1]) !== parameters.length + 1) throw new Error('Macro parameters must be sequential')
           sequence = []
@@ -1476,6 +1506,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       }
       const body = rawGroup()
       const replacement = name === 'edef' || name === 'xdef' ? expandDefinition(body, true) : body
+      if (openDelimiter) replacement.push('{')
       assign(command, { body: replacement, parameters, prefix }, global || name === 'gdef' || name === 'xdef')
       return true
     }
@@ -1514,11 +1545,13 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return false
   }
 
-  function atom(token: string): Atom {
+  function atom(token: string, classifyGroup = false): Atom {
     if (token === '{') {
-      const content = inScope(() => row(['}']))
+      let mathClass: MathClass | undefined
+      const captureClass = classifyGroup ? (value: MathClass | undefined) => { mathClass = value } : undefined
+      const content = inScope(() => row(['}'], false, false, captureClass))
       if (take() !== '}') throw new Error('Unclosed math group')
-      return { markup: xml`<mrow>${content}</mrow>` }
+      return { markup: xml`<mrow>${content}</mrow>`, mathClass }
     }
     if (!token.startsWith('\\')) {
       if (/^\d/.test(token)) return { markup: tag('mn', token) }
@@ -1545,6 +1578,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (name === 'pu') return { markup: physicalUnits(literalGroup()) }
     if (isMathAttributeCommand(token) || isMathUrlCommand(token)) return { markup: htmlCommand(token) }
     if (Object.hasOwn(mathClasses, name)) return classifiedAtom(mathClasses[name], argument())
+    if (name === '@binrel') {
+      const { mathClass } = binRelArgument()
+      return classifiedAtom(mathClass, argument())
+    }
     if (name === 'mathchoice') {
       const choices = Array.from({ length: 4 }, () => {
         const next = peek()
@@ -1572,7 +1609,11 @@ export function renderMath(source: string, display = false, configured: MathMacr
       strictViolation('mathVsSout', 'LaTeX strikeout works only in text mode')
       return { markup: xml`<mrow class="math-sout">${content}</mrow>` }
     }
-    if (name === 'pmb' || name === 'phase' || name === 'angl') {
+    if (name === 'pmb') {
+      const { mathClass, markup } = binRelArgument()
+      return { mathClass, markup: xml`<mrow class="math-pmb">${markup}</mrow>` }
+    }
+    if (name === 'phase' || name === 'angl') {
       return { markup: xml`<mrow class="math-${name}">${argument()}</mrow>` }
     }
     if (name === 'angln') return { markup: '<mrow class="math-angl"><mi>n</mi></mrow>' }
@@ -1700,7 +1741,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (name === 'overset' || name === 'underset' || name === 'stackrel') {
       const annotation = inScript(argument())
       const element = name === 'underset' ? 'munder' : 'mover'
-      return { markup: xml`<${element}>${argument()}${annotation}</${element}>` }
+      const base = binRelArgument()
+      return { mathClass: name === 'stackrel' ? 'rel' : base.mathClass, markup: xml`<${element}>${base.markup}${annotation}</${element}>` }
     }
     if (ruledAccents.has(name)) {
       const brace = name.endsWith('bracket') ? (name.startsWith('over') ? 'upper' : 'lower') : undefined
@@ -1731,10 +1773,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (name === 'relax' || name === 'allowbreak' || name === 'nobreak') return { markup: '' }
     if (Object.hasOwn(variants, name)) {
       const variant = variants[name]
-      const content = argument()
+      const { mathClass, markup: content } = name === 'boldsymbol' || name === 'bm'
+        ? binRelArgument()
+        : { markup: argument(), mathClass: undefined }
       // MathML Core honors normal on identifiers and uses font styles for other variants.
       const styled: Markup = typeof content === 'string' ? applyVariant(content, variant) : style => applyVariant(content(style), variant)
-      return { markup: xml`<mrow class="math-${variant}" mathvariant="${variant}">${styled}</mrow>` }
+      return { mathClass, markup: xml`<mrow class="math-${variant}" mathvariant="${variant}">${styled}</mrow>` }
     }
     if (Object.hasOwn(accents, name)) return { markup: xml`<mover accent="true">${argument()}${tag('mo', accents[name])}</mover>` }
     if (Object.hasOwn(greek, name)) return { markup: tag('mi', greek[name]) }

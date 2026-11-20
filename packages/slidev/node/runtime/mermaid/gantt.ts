@@ -42,7 +42,7 @@ function splitCallbackArgs(raw: string): string[] | undefined {
 interface TaskInteraction { href?: string, callback?: GanttTaskCallback }
 
 function parseClick(line: string): { ids: string[], interaction: TaskInteraction } | undefined {
-  const [, ids, clauses] = /^click\s+([\w.-]+(?:,[\w.-]+)*)\s+(.+)$/.exec(line) ?? []
+  const [, ids, clauses] = /^click\s+([\w.-]+(?:,[\w.-]+)*)\s+(.+)$/i.exec(line) ?? []
   if (!ids) return
   const interaction: TaskInteraction = {}
   let remaining = clauses
@@ -85,27 +85,31 @@ function parseGantt(source: string, now: number, interactionsEnabled = false, co
   let generatedIds = 0
   for (const line of chart.rows) {
     const [, directive, text = ''] = /^(\S+)(?:\s+(.+))?$/.exec(line) ?? []
-    switch (directive) {
-      case 'dateFormat': if (!text || text.length > 72) return; dateFormat = text; continue
-      case 'axisFormat': axisFormat = text; continue
-      case 'tickInterval': ticks = text; continue
+    switch (directive?.toLowerCase()) {
+      case 'dateformat': if (!text || text.length > 72) return; dateFormat = text; continue
+      case 'axisformat': axisFormat = text; continue
+      case 'tickinterval': ticks = text; continue
       case 'excludes': exclusions.push(...text.split(/[\s,]+/).filter(Boolean)); continue
       case 'includes': inclusions.push(...text.split(/[\s,]+/).filter(Boolean)); continue
       case 'section': if (!text) return; sections.push({ name: text, tasks: [] }); continue
-      case 'weekday':
-        if (!isWeekday(text)) return
-        weekday = text
+      case 'weekday': {
+        const day = text.toLowerCase()
+        if (!isWeekday(day)) return
+        weekday = day
         continue
-      case 'weekend':
-        if (text !== 'friday' && text !== 'saturday') return
-        weekend = text
+      }
+      case 'weekend': {
+        const day = text.toLowerCase()
+        if (day !== 'friday' && day !== 'saturday') return
+        weekend = day
         continue
-      case 'todayMarker':
-        todayMarker = text !== 'off'
+      }
+      case 'todaymarker':
+        todayMarker = text.toLowerCase() !== 'off'
         todayMarkerStyle = todayMarker ? markerStyle(text) : undefined
         continue
-      case 'topAxis': topAxis = true; continue
-      case 'inclusiveEndDates': inclusiveEndDates = true; continue
+      case 'topaxis': topAxis = true; continue
+      case 'inclusiveenddates': inclusiveEndDates = true; continue
       case 'click': {
         const action = parseClick(line)
         if (!action) return

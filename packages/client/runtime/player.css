@@ -668,8 +668,8 @@ v-switch { display: block; }
 .slide math .math-bold, .slide math .math-bold-italic { font-weight: 700; }
 .slide math mstyle[displaystyle="true"] { math-style: normal; }
 .slide math mstyle[displaystyle="false"] { math-style: compact; }
-.slide math .math-italic, .slide math .math-bold-italic { font-style: italic; }
-.slide math .math-sans-serif { font-family: sans-serif; }
+.slide math :is(.math-italic, .math-bold-italic, .math-sans-serif-italic) { font-style: italic; }
+.slide math :is(.math-sans-serif, .math-sans-serif-italic) { font-family: sans-serif; }
 .slide math .math-monospace { font-family: monospace; }
 math .math-overline { border-top: max(0.06em, var(--math-min-rule, 0px)) solid currentColor; }
 math .math-underline { border-bottom: max(0.06em, var(--math-min-rule, 0px)) solid currentColor; }

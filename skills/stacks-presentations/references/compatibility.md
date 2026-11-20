@@ -24,6 +24,7 @@ in a new ts-presentation project.
 | mhchem notation | Native MathML hydrate dots, isotopes, charges, oxidation states, labelled reaction arrows, embedded TeX, scientific quantities, and unit fractions |
 | Extensible arrows | Label-sized shafts for TeX, chemistry, and horizontal commutative diagram arrows, including distinct forward- and reverse-biased equilibria |
 | AMS commutative diagrams | Centered vertical arrows with side labels, vertical parallel lines, extensible horizontal arrows, and row-local macros |
+| Macro parameters and operator wrappers | Delimited and nested TeX parameters, inherited binary and relation spacing in bold symbols and stacked labels, and sans-serif italic math |
 | KaTeX trust option | Opt-in links, URL labels, formula images, and HTML attributes through the KaTeX-shaped boolean or callback |
 | KaTeX display options | Formatted `\tag` and `\tag*` labels, `leqno` for left-side equation tags, and `fleqn` for flush-left display formulas |
 | KaTeX line breaks | Standalone `\\` and `\newline` in math and text, optional row spacing, and `strict` handling for standalone display breaks |
@@ -38,7 +39,7 @@ in a new ts-presentation project.
 | Imported Slidev diagrams | Compatibility fences translate the supported syntax to `ts-charts` input |
 | XY charts | Native YAML and imported `xychart` fences render bar and line series with category or numeric axes, orientation, legends, labels, and palette overrides |
 | Sankey diagrams | Weighted links from native YAML and imported CSV fences, with four alignments, gradient or solid links, and configurable node colors and labels |
-| Gantt styles and dates | Task status palettes, partial dates and fractional seconds, calendar-aligned UTC ticks, zero-duration fallback for invalid ends, and whole-day exclusions that preserve gaps between dependent tasks through `ts-charts` |
+| Gantt styles and dates | Case-insensitive directives, task status palettes, partial dates and fractional seconds, calendar-aligned UTC ticks, zero-duration fallback for invalid ends, and whole-day exclusions that preserve gaps between dependent tasks through `ts-charts` |
 | GitGraph | Named Mermaid palettes and color overrides, commit message and operation tooltips, and custom symbols on commits and merges |
 | PlantUML sequence diagrams | Local `ts-charts` rendering for messages, participants, notes, and groups |
 | Presenter mode | Two synced browser windows, notes, timer, resizable layouts, next-frame preview, and reveal seeking |

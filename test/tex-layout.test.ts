@@ -301,6 +301,40 @@ test('captures eager macro expansion and tracks global definitions per deck', ()
   expect(createMathRenderer()(String.raw`\deckOnly`, false)).toContain('<mtext>\\deckOnly</mtext>')
 })
 
+test('expands brace-delimited definitions and nested macro parameters', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const formula = math(String.raw`
+    \def\before#1#{\left[#1\right]}
+    \before q{z}
+    \def\factory#1{\def\formed##1{#1+##1}}
+    \factory{x}\formed{y}
+    \def\identity#1,{#1}
+    \identity{\def\saved{Q}},\saved
+  `, true)
+  expect(formula).toContain('<mo stretchy="true">[</mo><mi>q</mi><mo stretchy="true">]</mo>')
+  expect(formula).toContain('<mrow><mi>z</mi></mrow>')
+  expect(formula).toContain('<mi>x</mi><mo>+</mo><mi>y</mi><mi>Q</mi>')
+  expect(() => math(String.raw`\def\before#1#{#1}\before a`, false)).toThrow('Missing macro delimiter')
+  expect(() => math(String.raw`\def\identity#1,{#1}\identity{{\def\local{L}}},\local`, false)).toThrow('Unsupported math command')
+})
+
+test('uses the base operator class for labelled and bold symbols', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const labels = math(String.raw`a\overset{!}{=}b\underset{i}{+}c`, true)
+  expect(labels).toContain(thick + '<mover><mrow>' + operator('='))
+  expect(labels).toContain('</mover>' + thick + '<mi>b</mi>' + medium + '<munder><mrow>' + operator('+'))
+  expect(labels).toContain('</munder>' + medium + '<mi>c</mi>')
+  const bold = math(String.raw` a\boldsymbol{\leq}b\bm{+}c\pmb{=}d \@binrel{+}{\square}e`, true)
+  expect(bold).toContain(thick + '<mrow class="math-bold-italic"')
+  expect(bold).toContain(operator('≤') + '</mrow></mrow>' + thick)
+  expect(bold).toContain(operator('+') + '</mrow></mrow>' + medium)
+  expect(bold).toContain(thick + '<mrow class="math-pmb"><mrow>' + operator('=') + '</mrow></mrow>' + thick)
+  expect(bold).toContain('<mi>d</mi>' + medium)
+  expect(bold).toContain(medium + '<mi>e</mi>')
+  const ordinary = math(String.raw`a\overset{!}{x}b`, true)
+  expect(ordinary).not.toContain('<mspace')
+})
+
 test('lays out AMS arrays with solid and dashed rules, row gaps, and scoped cell styles', () => {
   const source = String.raw`\def\arraystretch{1.5}\begin{darray}{|r:c||}
     \hline \def\value{a}\value & \mathchoice{D}{T}{S}{s} \\[1ex]
@@ -709,6 +743,10 @@ test.skipIf(!chrome)('lays out TeX atom gaps at the expected widths in Chromium'
     String.raw`x^{a\mathbin{+}b}`,
     String.raw`a\mathinner{+}b`,
     String.raw`a\mathinner{+}_i b`,
+    String.raw`a\overset{!}{=}b`,
+    String.raw`a\underset{i}{+}b`,
+    String.raw`a\boldsymbol{\leq}b`,
+    String.raw`a\pmb{+}b`,
   ]
   const body = formulas.map(tex => `<div>${renderMath(tex)}</div>`).join('')
   const server = Bun.serve({
@@ -720,8 +758,9 @@ test.skipIf(!chrome)('lays out TeX atom gaps at the expected widths in Chromium'
   const view = new Bun.WebView({ width: 720, height: 400, backend: { type: 'chrome', path: chrome!, url: false } })
   try {
     await view.navigate(server.url.href)
-    const gaps = await view.evaluate<number[][]>(`[...document.querySelectorAll('main div mo')].map(glyph => {
-      const operator = glyph.closest('semantics > mrow > :is(msub, mrow)') ?? glyph
+    const gaps = await view.evaluate<number[][]>(`[...document.querySelectorAll('main div')].map(formula => {
+      const glyph = formula.querySelector('mo')
+      const operator = glyph.closest('semantics > mrow > :is(msub, mrow, mover, munder)') ?? glyph
       const box = operator.getBoundingClientRect()
       const gap = (sibling, before) => {
         if (!sibling) return 0
@@ -731,7 +770,9 @@ test.skipIf(!chrome)('lays out TeX atom gaps at the expected widths in Chromium'
       }
       return [gap(operator.previousElementSibling, true), gap(operator.nextElementSibling, false)]
     })`)
-    expect(gaps.map(pair => pair.map(Math.round))).toEqual([[8, 8], [0, 0], [10, 10], [0, 0], [6, 6], [6, 6]])
+    expect(gaps.map(pair => pair.map(Math.round))).toEqual([
+      [8, 8], [0, 0], [10, 10], [0, 0], [6, 6], [6, 6], [10, 10], [8, 8], [10, 10], [8, 8],
+    ])
   }
   finally {
     view.close()
@@ -1000,11 +1041,13 @@ test('applies the last operator limit control even after scripts', () => {
 })
 
 test('renders TeX character codes, zero-width struts, and common font aliases', () => {
-  const html = renderMath(String.raw`\char"263A+\char'101+\char66+\sqrt{\mathstrut x}+\mathscr{F}+\bm{v}`)
-  expect(html).toContain('<mtext>☺</mtext><mo>+</mo><mi>A</mi><mo>+</mo><mi>B</mi>')
+  const html = renderMath(String.raw`\char"263A+\char'101+\char66+\sqrt{\mathstrut x}+\mathscr{F}+\bm{v}+\mathsfit{K}`)
+  const plus = medium + operator('+') + medium
+  expect(html).toContain('<mtext>☺</mtext>' + plus + '<mi>A</mi>' + plus + '<mi>B</mi>')
   expect(html).toContain('<mpadded width="0"><mphantom><mo stretchy="false">(</mo></mphantom></mpadded>')
   expect(html).toContain('mathvariant="script"')
   expect(html).toContain('mathvariant="bold-italic"')
+  expect(html).toContain('<mrow class="math-sans-serif-italic" mathvariant="sans-serif-italic"><mrow><mi>K</mi></mrow></mrow>')
   expect(renderMath('\\char`\\&')).toContain('<mtext>&amp;</mtext>')
   expect(renderMath(String.raw`\char"110000`)).toContain('math-unrendered')
 })

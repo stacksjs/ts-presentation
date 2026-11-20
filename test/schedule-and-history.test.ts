@@ -60,6 +60,27 @@ Follow-up :milestone, followup, 10-03-2026, 0d`
   ])
 })
 
+test('accepts mixed-case Gantt directives and preserves date formats and task IDs', () => {
+  const source = `gantt
+DATEFORMAT DD-MM-YYYY
+AxisFormat %b %d
+TICKINTERVAL 1day
+EXCLUDES weekends
+WEEKEND FRIDAY
+Weekday MONDAY
+TODAYMARKER Off
+topAXIS
+SECTION Review
+Draft :draftA, 05-03-2026, 1d
+Publish :ship, after draftA, 1d
+CLICK draftA HREF "#Review"`
+  const svg = mermaid(source, 'case-gantt', { securityLevel: 'loose' })
+  expect(svg).toContain('data-task-id="draftA"')
+  expect(svg).toContain('href="#Review"')
+  expect(svg).toContain('data-task-start="2026-03-08T00:00:00.000Z"')
+  expect(svg).not.toContain('diagram-gantt-today')
+})
+
 test('uses strict input dates, validates dependencies and supports timezone offsets', () => {
   const iso = ganttDateParser('YYYY-MM-DD HH:mm Z')
   expect(iso('2026-02-30 03:15 -0800')).toBeUndefined()
