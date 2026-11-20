@@ -135,7 +135,8 @@ speaker notes. Each hook can be asynchronous.
   Row numbers and explicit tags work in `align` and `gather`.
 - Use `\ce{^{227}_{90}Th+}` for isotopes, `\ce{CrO4^2-}` for charged
   species, and `\ce{A ->[H2O][$p_i$] B}` for reaction labels above and
-  below an arrow. Write a hydrate with `\ce{CuSO4*5H2O}`.
+  below an arrow. Use `<=>>` for a longer forward harpoon or `<<=>` for
+  a longer reverse harpoon. Write a hydrate with `\ce{CuSO4*5H2O}`.
 - Use `\pu{1,2(3)e-4 J // mol K}` for a quantity with uncertainty,
   scientific notation, and a stacked unit fraction. A single slash is
   inline. See the [mhchem syntax manual](https://mhchem.github.io/MathJax-mhchem/).
@@ -163,6 +164,8 @@ speaker notes. Each hook can be asynchronous.
   from the baseline, `\vcenter` to center a box on the math axis, and
   `\mathllap`, `\mathclap`, or `\mathrlap` to align an overlap without
   increasing the width of the formula.
+- Use `\xrightarrow[below]{above}` or `\xrightleftharpoons[below]{above}`
+  to label extensible arrows. Their shafts expand to fit the labels.
 - Use an AMS `\begin{CD} … \end{CD}` block for a commutative diagram.
   Use `@>f>>` for a horizontal arrow marked `f` and `@VgVV` for a downward
   arrow with `g` on the left. Put vertical arrows on their own rows.

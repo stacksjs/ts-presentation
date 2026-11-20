@@ -1,5 +1,6 @@
 import { escapeHtml } from './html.ts'
 import type { KatexOptions, KatexTrustContext } from './authoring-setup.ts'
+import { mathArrowBody, stackMathArrow } from './math-arrow.ts'
 import { chemicalFormula, physicalUnits } from './math-chemistry.ts'
 import type { Markup, MathStyle } from './math-markup.ts'
 import { joinMarkup, renderMarkup, xml } from './math-markup.ts'
@@ -94,7 +95,8 @@ const extensibleArrows: Record<string, string> = {
   xrightarrow: '→', xleftarrow: '←', xleftrightarrow: '↔', xRightarrow: '⇒', xLeftarrow: '⇐', xLeftrightarrow: '⇔',
   xmapsto: '↦', xhookrightarrow: '↪', xhookleftarrow: '↩', xtwoheadleftarrow: '↞', xtwoheadrightarrow: '↠',
   xleftharpoonup: '↼', xleftharpoondown: '↽', xrightharpoonup: '⇀', xrightharpoondown: '⇁',
-  xleftrightharpoons: '⇋', xrightleftharpoons: '⇌', xtofrom: '⇄', xlongequal: '=',
+  xleftrightharpoons: '⇋', xrightleftharpoons: '⇌', xtofrom: '⇄', xrightleftarrows: '⇄', xlongequal: '=',
+  xleftequilibrium: '⇌', xrightequilibrium: '⇌',
 }
 const notationDelimiters: Record<string, [string, string]> = {
   bra: ['⟨', '|'], Bra: ['⟨', '|'], ket: ['|', '⟩'], Ket: ['|', '⟩'],
@@ -469,13 +471,6 @@ const fractionFences: Record<string, [string, string]> = {
 const boundary = '\u0000math-expansion-boundary'
 const literalToken = '\u0000math-literal:'
 const inhibitedToken = '\u0000math-inhibited:'
-
-function labelledOperator(symbol: string, above: string, below: string, size = ''): string {
-  const base = `<mo stretchy="true" movablelimits="false"${size ? ` minsize="${size}"` : ''}>${symbol}</mo>`
-  if (above && below) return `<munderover>${base}${below}${above}</munderover>`
-  if (above) return `<mover>${base}${above}</mover>`
-  return below ? `<munder>${base}${below}</munder>` : base
-}
 
 function mathSize(style: MathStyle, markup: string): string {
   return `<mstyle displaystyle="${style === 0}" scriptlevel="${Math.max(0, style - 1)}">${markup}</mstyle>`
@@ -1252,13 +1247,13 @@ export function renderMath(source: string, display = false, configured: MathMacr
     function commutativeArrow(): string {
       const type = take()
       if (type === '.') return ''
-      if (type === '=') return labelledOperator('=', '', '', '2em')
-      if (type === '|') return labelledOperator('‖', '', '', '1.7em')
+      if (type === '=') return mathArrowBody('=', '2em')
+      if (type === '|') return mathArrowBody('‖', '1.7em')
       if (!/^[<>AV]$/.test(type)) throw new Error('Unknown CD arrow')
       const first = arrowLabel(type)
       const second = arrowLabel(type)
-      if (type === '<' || type === '>') return labelledOperator(type === '<' ? '←' : '→', first, second, '2em')
-      const vertical = labelledOperator(type === 'A' ? '↑' : '↓', '', '', '1.7em')
+      if (type === '<' || type === '>') return renderMarkup(stackMathArrow(mathArrowBody(type === '<' ? '←' : '→', '2em'), first, second), 0)
+      const vertical = mathArrowBody(type === 'A' ? '↑' : '↓', '1.7em')
       return `<mrow class="math-cd-vertical">${mathSize(2, first || '<mrow/>')}${vertical}${mathSize(2, second || '<mrow/>')}</mrow>`
     }
     let cells: string[] = []
@@ -1710,10 +1705,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
         if (take() !== ']') throw new Error('Unclosed arrow subscript')
       }
       const above = inScript(argument())
-      const symbol = extensibleArrows[name]
-      return { markup: typeof above === 'string' && typeof below === 'string'
-        ? labelledOperator(symbol, above, below)
-        : style => labelledOperator(symbol, renderMarkup(above, style), renderMarkup(below, style)) }
+      const bias = name === 'xleftequilibrium' ? 'left' : name === 'xrightequilibrium' ? 'right' : undefined
+      return { markup: stackMathArrow(mathArrowBody(extensibleArrows[name], '1.75em', bias), above, below) }
     }
     if (name === 'phantom' || name === 'hphantom' || name === 'vphantom') {
       const invisible = xml`<mphantom>${argument()}</mphantom>`

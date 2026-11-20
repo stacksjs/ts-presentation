@@ -57,7 +57,7 @@ $\pu{1.5e-3 mol/L}$
   expect(html).toContain('<mtext>(C)</mtext>')
   expect(html).toContain('<mtext>(2)</mtext>')
   expect(html).toContain('<mtext>heat</mtext>')
-  expect(html).toContain('<mo stretchy="true">⇌</mo>')
+  expect(html).toContain('<mo stretchy="true" movablelimits="false" minsize="1.75em">⇌</mo>')
   expect(html).toContain('<mo>3+</mo>')
   expect(html).toContain('<msup><mn>10</mn><mn>−3</mn></msup>')
   const nextDeck = await renderDeck(parseDeck('# Third\n\n$\\sq{z}$'))

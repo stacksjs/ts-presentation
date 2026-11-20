@@ -1,4 +1,5 @@
 import { escapeHtml } from './html.ts'
+import { mathArrowBody, stackMathArrow } from './math-arrow.ts'
 import type { Markup } from './math-markup.ts'
 import { joinMarkup, xml } from './math-markup.ts'
 
@@ -152,11 +153,10 @@ export function chemicalFormula(source: string, math: (source: string) => Markup
     let under: Markup = ''
     if (source[cursor] === '[') over = renderLabel(balanced('[', ']'))
     if (source[cursor] === '[') under = renderLabel(balanced('[', ']'))
-    const arrow = tag('mo', arrows.get(direction)!, ' stretchy="true"')
-    if (over && under) return xml`${arrowSpace}<munderover>${arrow}${under}${over}</munderover>${arrowSpace}`
-    if (over) return xml`${arrowSpace}<mover>${arrow}${over}</mover>${arrowSpace}`
-    if (under) return xml`${arrowSpace}<munder>${arrow}${under}</munder>${arrowSpace}`
-    return arrow
+    const bias = direction === '<<=>' ? 'left' : direction === '<=>>' ? 'right' : undefined
+    const symbol = arrows.get(direction)!
+    const arrow = stackMathArrow(mathArrowBody(symbol, '1.75em', bias), over, under)
+    return xml`${arrowSpace}${arrow}${arrowSpace}`
   }
 
   function renderLabel(label: string): Markup {

@@ -364,7 +364,7 @@ test('lays out AMS commutative diagrams with labeled arrows and aligned columns'
   expect(html).toContain('<mtable class="math-cd">')
   expect(html.match(/<mtr>/g)).toHaveLength(3)
   expect(html.match(/<mtd>/g)).toHaveLength(15)
-  expect(html).toContain('<munderover><mo stretchy="true" movablelimits="false" minsize="2em">→</mo><mrow><mi>p</mi></mrow><mrow><mi>f</mi></mrow></munderover>')
+  expect(html).toContain('<munderover><mrow class="math-arrow-body" style="min-width:2em"><mo stretchy="true" movablelimits="false" minsize="2em">→</mo><mspace class="math-arrow-track" data-right="open" aria-hidden="true"/></mrow><mrow><mi>p</mi></mrow><mrow><mi>f</mi></mrow></munderover>')
   expect(html).toContain('class="math-cd-vertical"')
   expect(html).toContain('>↓</mo>')
   expect(html).toContain('>↑</mo>')
@@ -380,7 +380,7 @@ test('keeps CD labels scoped and rejects incomplete arrows and environments', ()
     @. @. \cr
     X @>\identity>> Y
   \end{CD}`, true)
-  expect(html).toContain('<mover><mo stretchy="true" movablelimits="false" minsize="2em">→</mo><mrow><mi>g</mi></mrow></mover>')
+  expect(html).toContain('<mover><mrow class="math-arrow-body" style="min-width:2em"><mo stretchy="true" movablelimits="false" minsize="2em">→</mo><mspace class="math-arrow-track" data-right="open" aria-hidden="true"/></mrow><mrow><mi>g</mi></mrow></mover>')
   expect(html).toContain('<mrow><mi>I</mi></mrow></mover>')
   expect(() => math(String.raw`\begin{CD}U @>f> V\end{CD}`, true)).toThrow('Incomplete CD arrow')
   expect(() => math(String.raw`\begin{CD}U @* V\end{CD}`, true)).toThrow('Unknown CD arrow')
@@ -412,7 +412,7 @@ test('places arrow, accent, and stretchy brace labels with the expected math sty
   \overbrace{a+b}^{n} \quad \underbrace{c+d}_{m}
   \quad \widecheck{fg}+\underleftharpoon{h}`
   const html = renderMath(input, true)
-  expect(html).toContain('<munderover><mo stretchy="true" movablelimits="false">⇌</mo><mrow><mi>s</mi><mi>l</mi><mi>o</mi><mi>w</mi></mrow><mrow><mrow><mi>S</mi></mrow></mrow></munderover>')
+  expect(html).toContain('<munderover><mrow class="math-arrow-body" style="min-width:1.75em"><mo stretchy="true" movablelimits="false" minsize="1.75em">⇌</mo><mspace class="math-arrow-track" data-lane="upper" data-right="upper" aria-hidden="true"/><mspace class="math-arrow-track" data-lane="lower" data-left="lower" aria-hidden="true"/></mrow><mrow><mi>s</mi><mi>l</mi><mi>o</mi><mi>w</mi></mrow><mrow><mrow><mi>S</mi></mrow></mrow></munderover>')
   expect(html).toContain('<mover><mover accent="true">')
   expect(html).toContain('<munder><munder accentunder="true">')
   expect(html).toContain('<mo stretchy="true">ˇ</mo>')
@@ -1005,3 +1005,81 @@ test('renders verbatim math without opening Markdown or TeX delimiters inside it
   expect(renderMath(String.raw`\verb@  a b  @`)).toContain('>  a b  </mtext>')
   expect(renderMath(String.raw`\verb*xa bx`)).toContain('>a␣b</mtext>')
 })
+
+test.skipIf(!chrome)('stretches horizontal reaction, TeX, and CD arrows to their labels in Chromium', async () => {
+  const formulas = [
+    String.raw`a\xrightarrow{\text{f}}b`,
+    String.raw`a\xrightarrow[\frac{x}{y}]{\text{a substantially longer label}}b`,
+    String.raw`\ce{A <=>>[{forward reaction}] B <<=>[][{reverse reaction}] C <=> D}`,
+    String.raw`a\xmapsto{f}b\xLeftrightarrow{g}c\xtwoheadrightarrow{h}d\xhookleftarrow{i}e`,
+    String.raw`\begin{CD} A @>{\text{long commuting map}}>> B @= C \end{CD}`,
+  ]
+  const rendered = formulas.map((formula, index) => `<div id="formula-${index}">${renderMath(formula, index === 4)}</div>`).join('')
+  const css = Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url))
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: request => new URL(request.url).pathname === '/player.css'
+      ? new Response(css, { headers: { 'Content-Type': 'text/css' } })
+      : new Response(`<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="/player.css"><main style="font-size:40px">${rendered}</main>`, {
+          headers: { 'Content-Type': 'text/html; charset=utf-8' },
+        }),
+  })
+  const view = new Bun.WebView({ width: 1160, height: 700, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await view.navigate(server.url.href)
+    const geometry = await view.evaluate<{
+      shortWidth: number
+      long: { width: number, labelWidth: number, trackWidth: number, wellPlaced: boolean, hasTip: boolean }
+      bias: { widths: number[], node: string, sides: string[] }[]
+      shapes: string[][]
+      commutative: { width: number, labelWidth: number, hasDouble: boolean }
+    }>(`(() => {
+      const width = node => node.getBoundingClientRect().width
+      const long = document.querySelector('#formula-1 .math-arrow-body')
+      const [baseline, lower, upper] = long.parentElement.children
+      const shaft = long.querySelector('.math-arrow-track')
+      const cd = document.querySelector('#formula-4 .math-arrow-body')
+      return {
+        shortWidth: width(document.querySelector('#formula-0 .math-arrow-body')),
+        long: {
+          width: width(long),
+          labelWidth: width(upper),
+          trackWidth: width(shaft),
+          wellPlaced: upper.getBoundingClientRect().bottom <= baseline.getBoundingClientRect().top &&
+            lower.getBoundingClientRect().top >= baseline.getBoundingClientRect().bottom,
+          hasTip: getComputedStyle(shaft, '::after').clipPath.startsWith('polygon('),
+        },
+        bias: [...document.querySelectorAll('#formula-2 .math-arrow-body')].map(body => ({
+          widths: [...body.querySelectorAll('.math-arrow-track')].map(width),
+          node: body.dataset.equilibrium || '',
+          sides: [...body.querySelectorAll('.math-arrow-track')].map(track => track.dataset.left || track.dataset.right),
+        })),
+        shapes: [...document.querySelectorAll('#formula-3 .math-arrow-track')]
+          .map(track => [track.dataset.left || '', track.dataset.right || '']),
+        commutative: {
+          width: width(cd),
+          labelWidth: width(cd.nextElementSibling),
+          hasDouble: !!document.querySelector('#formula-4 .math-arrow-track[data-double]'),
+        },
+      }
+    })()`)
+    expect(geometry.shortWidth).toBeGreaterThanOrEqual(70)
+    expect(geometry.long.width).toBeGreaterThan(geometry.shortWidth * 2)
+    expect(geometry.long.width).toBeCloseTo(geometry.long.labelWidth)
+    expect(geometry.long.trackWidth).toBeCloseTo(geometry.long.width)
+    expect(geometry.long.wellPlaced).toBe(true)
+    expect(geometry.long.hasTip).toBe(true)
+    expect(geometry.bias.map(item => item.node)).toEqual(['right', 'left', ''])
+    expect(geometry.bias.every(item => item.sides.join(',') === 'upper,lower')).toBe(true)
+    expect(geometry.bias[0].widths[0] - geometry.bias[0].widths[1]).toBeCloseTo(40, 0)
+    expect(geometry.bias[1].widths[1] - geometry.bias[1].widths[0]).toBeCloseTo(40, 0)
+    expect(geometry.bias[2].widths[0]).toBeCloseTo(geometry.bias[2].widths[1])
+    expect(geometry.shapes).toEqual([['bar', 'open'], ['double', 'double'], ['', 'two'], ['open', 'hook']])
+    expect(geometry.commutative.width).toBeCloseTo(geometry.commutative.labelWidth)
+    expect(geometry.commutative.hasDouble).toBe(true)
+  }
+  finally {
+    view.close()
+    await server.stop(true)
+  }
+}, 45000)

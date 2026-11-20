@@ -704,6 +704,71 @@ math .math-overbracket { --math-accent-bar: top; }
 math .math-underbracket { --math-accent-bar: bottom; }
 math .math-overlinesegment { --math-accent-bar: 0.11em; }
 math .math-underlinesegment { --math-accent-bar: calc(100% - 0.11em); }
+/* MathML sizes and positions the labels. These shapes fill the base box. */
+math .math-arrow-body {
+  position: relative;
+  min-height: 0.64em;
+  print-color-adjust: exact;
+}
+math :is(mover, munder, munderover) > .math-arrow-body:first-child { width: 100%; }
+math .math-arrow-body > mo { opacity: 0; }
+math .math-arrow-track {
+  position: absolute;
+  inset-inline: 0;
+  top: calc(var(--math-arrow-lane, 50%) - 0.19em);
+  height: 0.38em;
+  background: linear-gradient(currentColor, currentColor) center / 100% 0.045em no-repeat;
+}
+math .math-arrow-track[data-lane="upper"] { --math-arrow-lane: 30%; }
+math .math-arrow-track[data-lane="lower"] { --math-arrow-lane: 70%; }
+math .math-arrow-track[data-short] { inset-inline: 0.5em; }
+math .math-arrow-track[data-double] {
+  background:
+    linear-gradient(currentColor, currentColor) center 32% / 100% 0.038em no-repeat,
+    linear-gradient(currentColor, currentColor) center 68% / 100% 0.038em no-repeat;
+}
+math .math-arrow-track[data-left]::before,
+math .math-arrow-track[data-right]::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  width: 0.32em;
+  height: 100%;
+  background: currentColor;
+  clip-path: polygon(12% 4%, 100% 50%, 12% 96%, 2% 80%, 66% 50%, 2% 20%);
+}
+math .math-arrow-track[data-left]::before { left: 0; transform: scaleX(-1); }
+math .math-arrow-track[data-right]::after { right: 0; }
+math .math-arrow-track[data-left="upper"]::before,
+math .math-arrow-track[data-right="upper"]::after {
+  clip-path: polygon(12% 1%, 100% 56%, 0 56%, 0 44%, 63% 44%, 4% 16%);
+}
+math .math-arrow-track[data-left="lower"]::before,
+math .math-arrow-track[data-right="lower"]::after {
+  clip-path: polygon(0 44%, 100% 44%, 12% 99%, 4% 84%, 63% 56%, 0 56%);
+}
+math .math-arrow-track[data-left="double"]::before,
+math .math-arrow-track[data-right="double"]::after {
+  clip-path: polygon(10% 0, 100% 50%, 10% 100%, 0 82%, 63% 50%, 0 18%);
+}
+math .math-arrow-track[data-left="bar"]::before,
+math .math-arrow-track[data-right="bar"]::after { width: 0.047em; clip-path: none; }
+math .math-arrow-track[data-left="hook"]::before,
+math .math-arrow-track[data-right="hook"]::after {
+  clip-path: none;
+  top: 4%;
+  height: 52%;
+  width: 0.23em;
+  background: transparent;
+  border: 0.044em solid currentColor;
+  border-left: 0;
+  border-radius: 0 0.2em 0.2em 0;
+}
+math .math-arrow-track[data-left="two"]::before,
+math .math-arrow-track[data-right="two"]::after {
+  width: 0.48em;
+  clip-path: polygon(11% 4%, 52% 44%, 65% 44%, 38% 18%, 51% 4%, 100% 50%, 51% 96%, 38% 82%, 65% 56%, 52% 56%, 11% 96%, 0 82%, 33% 50%, 0 18%);
+}
 math .math-pmb { text-shadow: 0.035em 0 currentColor; }
 math .math-sout {
   background: linear-gradient(to bottom, transparent 47%, currentColor 48% 52%, transparent 53%);

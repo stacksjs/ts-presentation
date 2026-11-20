@@ -43,9 +43,9 @@ it('renders hydrate dots, fractional coefficients, grouped species and phase mar
 it('renders two reaction labels with chemical formulas, literal text, and scoped TeX math', async () => {
   const formula = String.raw`\def\pressure{p_i}\ce{A->[H2O][$\pressure$] B <-->[][{<mixed>}] C <=>[\Delta] D}+\pressure`
   const html = await renderDeck(parseDeck('$' + formula + '$'))
-  expect(html).toContain('<munderover><mo stretchy="true">→</mo><mrow><msub><mi>p</mi><mi>i</mi></msub></mrow><mrow class="math-chemistry"><msub><mi mathvariant="normal">H</mi><mn>2</mn></msub>')
-  expect(html).toContain('<munder><mo stretchy="true">⇄</mo><mtext>&lt;mixed&gt;</mtext></munder>')
-  expect(html).toContain('<mover><mo stretchy="true">⇌</mo><mrow class="math-chemistry"><mi>Δ</mi></mrow></mover>')
+  expect(html).toMatch(/<munderover><mrow class="math-arrow-body"[^>]*><mo[^>]*>→<\/mo><mspace[^>]*data-right="open"[^>]*\/><\/mrow><mrow><msub><mi>p<\/mi><mi>i<\/mi><\/msub><\/mrow><mrow class="math-chemistry"><msub><mi mathvariant="normal">H<\/mi><mn>2<\/mn><\/msub>/)
+  expect(html).toMatch(/<munder><mrow class="math-arrow-body"[^>]*><mo[^>]*>⇄<\/mo>[^<]*(?:<mspace[^>]*\/>){2}<\/mrow><mtext>&lt;mixed&gt;<\/mtext><\/munder>/)
+  expect(html).toMatch(/<mover><mrow class="math-arrow-body"[^>]*><mo[^>]*>⇌<\/mo>[^<]*(?:<mspace[^>]*\/>){2}<\/mrow><mrow class="math-chemistry"><mi>Δ<\/mi><\/mrow><\/mover>/)
   expect(html).toContain('<mo>+</mo><msub><mi>p</mi><mi>i</mi></msub>')
 })
 
