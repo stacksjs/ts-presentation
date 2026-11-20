@@ -1,4 +1,4 @@
-export type MathClass = 'ord' | 'op' | 'bin' | 'rel' | 'open' | 'close' | 'punct' | 'inner'
+export type MathClass = 'ord' | 'op' | 'bin' | 'rel' | 'open' | 'close' | 'punct' | 'inner' | 'middle'
 
 type Spacing = Partial<Record<MathClass, Partial<Record<MathClass, number>>>>
 
@@ -24,6 +24,7 @@ const cancelsFollowingBinary = new Set<MathClass>(['bin', 'op', 'rel', 'open', '
 const cancelsPrecedingBinary = new Set<MathClass>(['rel', 'close', 'punct'])
 
 // Undefined slots are explicit spaces and do not interrupt atom adjacency.
+// Middle delimiters interrupt adjacency but carry their own delimiter space.
 // Demote a binary atom in unary position before looking up pair spacing.
 export function resolveRowClasses(classes: readonly (MathClass | undefined)[]): (MathClass | undefined)[] {
   const resolved = [...classes]

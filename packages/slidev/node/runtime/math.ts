@@ -518,7 +518,7 @@ function rowClass({ markup, token = '', mathClass, operator }: RowPart): MathCla
   if (token === '~' || Object.hasOwn(spacing, name) || spacingCommands.has(name)) return
   if (token === '{') return 'ord'
   if (name === 'left') return 'inner'
-  if (name === 'middle' || name === 'not' || name === 'stackrel' || Object.hasOwn(extensibleArrows, name)) return 'rel'
+  if (name === 'not' || name === 'stackrel' || Object.hasOwn(extensibleArrows, name)) return 'rel'
   const sized = /^(?:bigg|Bigg|big|Big)([lrm]?)$/.exec(name)
   if (sized) return sized[1] === 'l' ? 'open' : sized[1] === 'r' ? 'close' : sized[1] === 'm' ? 'rel' : 'ord'
   if (name === 'colon') return 'punct'
@@ -566,6 +566,16 @@ function expandRow(parts: RowPart[], style: MathStyle): RowPart[] {
   return parts.flatMap(part => part.fragment ? expandRow(part.fragment(style), style) : part)
 }
 
+function colorRowPart(part: RowPart, color: string): RowPart {
+  const fragment = part.fragment
+  if (!fragment && !rowClass(part)) return part
+  return {
+    ...part,
+    markup: part.markup ? xml`<mrow style="color:${color}">${part.markup}</mrow>` : '',
+    fragment: fragment && (style => fragment(style).map(child => colorRowPart(child, color))),
+  }
+}
+
 function joinRow(parts: RowPart[], wrap = false, followsOrdinary = false, explicitSpacing = false): Markup {
   if (parts.some(part => part.fragment))
     return style => renderMarkup(joinRow(expandRow(parts, style), wrap, followsOrdinary, true), style)
@@ -584,7 +594,8 @@ function joinRow(parts: RowPart[], wrap = false, followsOrdinary = false, explic
     const value = renderMarkup(part.markup, style)
     // The renderer inserts a single gap between neighbors, including composites.
     const boundary = breaks?.has(index) ? '<mspace width="0" data-math-break=""/>' : ''
-    return (gap ? muSpace(gap) : '') + boundary + (classes[atomIndex] ? neutralizeOperator(value) : value)
+    const category = classes[atomIndex]
+    return (gap ? muSpace(gap) : '') + boundary + (category && category !== 'middle' ? neutralizeOperator(value) : value)
   }).join('')
 }
 
@@ -1151,7 +1162,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
   }
 
   function pairedDelimiters(): Markup {
-    const left = fence(readDelimiter('left'))
+    const leftGlyph = readDelimiter('left')
+    const left = leftGlyph === '.' ? spaceMarkup('0.12em') : fence(leftGlyph)
     delimiterDepth++
     let content: Markup
     try {
@@ -1160,7 +1172,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
     finally { delimiterDepth-- }
     if (take() !== '\\right') throw new Error('Missing \\right for \\left')
-    const right = fence(readDelimiter('right'), true, currentColor)
+    const rightGlyph = readDelimiter('right')
+    const right = rightGlyph === '.' ? spaceMarkup('0.12em') : fence(rightGlyph, true, currentColor)
     return xml`<mrow>${left}${content}${right}</mrow>`
   }
 
@@ -1709,8 +1722,14 @@ export function renderMath(source: string, display = false, configured: MathMacr
       if (token === '\\color' && !options?.colorIsTextColor) {
         const color = readColor()
         currentColor = color
-        const content = row(stop, true, exposeDeclarationLines, undefined, followsOrdinary && !parts.some(rowClass))
-        parts.push({ markup: xml`<mrow style="color:${color}">${content}</mrow>` })
+        let coloredParts: RowPart[] | undefined
+        const capture = delimiterDepth > 0 ? (value: RowPart[]) => { coloredParts = value } : undefined
+        const content = row(stop, true, exposeDeclarationLines, capture, followsOrdinary && !parts.some(rowClass))
+        // An embellished middle operator must be a child of the fence row
+        // to stretch to its height. Keep the color on each atom in that row.
+        if (coloredParts?.some(part => part.mathClass === 'middle' || part.fragment))
+          parts.push(...coloredParts.map(part => colorRowPart(part, color)))
+        else parts.push({ markup: xml`<mrow style="color:${color}">${content}</mrow>` })
         continue
       }
       let part: Atom
@@ -2213,7 +2232,9 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (name === 'middle') {
       if (!delimiterDepth) throw new Error('\\middle requires \\left and \\right')
       const glyph = readDelimiter(name)
-      return { markup: glyph === '.' ? '' : `<mo stretchy="true" symmetric="true" form="infix">${escapeHtml(glyph)}</mo>` }
+      const markup = glyph === '.' ? spaceMarkup('0.12em')
+        : `<mo stretchy="true" symmetric="true" form="infix" fence="true" lspace="0.05em" rspace="0.05em">${escapeHtml(glyph)}</mo>`
+      return { markup, mathClass: 'middle' }
     }
     const sized = /^(bigg|Bigg|big|Big)([lrm]?)$/.exec(name)
     if (sized) return { markup: sizedFence(readDelimiter(name), sizedDelimiters[sized[1]], sized[2]) }

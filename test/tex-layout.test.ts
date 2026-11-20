@@ -1750,7 +1750,7 @@ test('pairs nested stretchy delimiters, expands aliases, and supports invisible 
   const html = formula(String.raw`\def\open{\lt}\left\open
     \left. \frac{x}{2} \right\rvert \middle\Vert y \right\gt`)
   expect(html).toContain('<mo stretchy="true">⟨</mo>')
-  expect(html).toContain('<mo stretchy="true" symmetric="true" form="infix">‖</mo>')
+  expect(html).toContain('<mo stretchy="true" symmetric="true" form="infix" fence="true" lspace="0.05em" rspace="0.05em">‖</mo>')
   expect(html).toContain('<mo stretchy="true">⟩</mo>')
   expect(html).toContain('<mo stretchy="true">|</mo>')
   expect(html).not.toContain('>.</mo>')
@@ -1762,6 +1762,69 @@ test('pairs nested stretchy delimiters, expands aliases, and supports invisible 
   expect(() => formula(String.raw`\left(x{\right) y}`)).toThrow('Unexpected \\right')
   expect(renderMath(String.raw`\left(x & y\right)`)).toContain('math-unrendered')
 })
+
+test('keeps middle delimiters from applying relation glue or cancelling binary operators', () => {
+  const middle = '<mo stretchy="true" symmetric="true" form="infix" fence="true" lspace="0.05em" rspace="0.05em">|</mo>'
+  expect(formula(String.raw`\left(x\mathord{a}\middle|y\right)`))
+    .toContain(`<mi>x</mi><mi>a</mi>${middle}<mi>y</mi>`)
+  expect(formula(String.raw`\left(x+\middle|y\right)`))
+    .toContain(`<mi>x</mi>${medium}${operator('+')}${middle}<mi>y</mi>`)
+  expect(formula(String.raw`\left(x\middle|-y\right)`))
+    .toContain(`<mi>x</mi>${middle}${operator('−')}${medium}<mi>y</mi>`)
+  const blank = '<mspace width="0.12em"/>'
+  expect(formula(String.raw`\left.x\middle.y\right.`))
+    .toContain(`${blank}<mi>x</mi>${blank}<mi>y</mi>${blank}`)
+})
+
+test.skipIf(!chrome)('uses tight middle spacing and stretches a colored delimiter with its row in Chromium', async () => {
+  const inputs = [
+    String.raw`\left(x\middle|y\right)`,
+    String.raw`\left(x\mid y\right)`,
+    String.raw`\left.x\middle.y\right.`,
+    String.raw`\left(\frac{\frac12}{3}\middle|y\right)`,
+    String.raw`\left(\frac{\frac12}{3}\color{red}\middle|y\right)`,
+    String.raw`\left(\frac{\frac12}{3}\color{red}\mathchoice{\middle|}{a}{b}{c}y\right)`,
+  ]
+  const body = inputs.map(source => `<div>${renderMath(source, true)}</div>`).join('')
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response(`<!doctype html><meta charset="utf-8"><main style="font-size:40px">${body}</main>`, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    }),
+  })
+  const view = new Bun.WebView({ backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await view.navigate(server.url.href)
+    const result = await view.evaluate<{ gaps: number[], blanks: number[], heights: number[], color: string }>(`(() => {
+      const [middle, relation, invisible, tall, colored, choice] = document.querySelectorAll('main > div')
+      const operators = (row) => [...row.querySelectorAll('mo')]
+      const gaps = [middle, relation].flatMap(row => {
+        const [, bar] = operators(row)
+        const [x, y] = [...row.querySelectorAll('mi')].map(node => node.getBoundingClientRect())
+        const bounds = bar.getBoundingClientRect()
+        return [bounds.left - x.right, y.left - bounds.right]
+      })
+      return {
+        gaps,
+        blanks: [...invisible.querySelectorAll('mspace')].map(space => space.getBoundingClientRect().width),
+        heights: [tall, colored, choice].map(row => operators(row)[1].getBoundingClientRect().height),
+        color: getComputedStyle(operators(colored)[1]).color,
+      }
+    })()`)
+    for (const gap of result.gaps.slice(0, 2)) expect(gap).toBeCloseTo(2, 1)
+    for (const gap of result.gaps.slice(2)) expect(gap).toBeGreaterThan(10)
+    expect(result.blanks).toHaveLength(3)
+    for (const blank of result.blanks) expect(blank).toBeCloseTo(4.8, 1)
+    expect(result.heights[0]).toBeGreaterThan(100)
+    expect(result.heights[1]).toBeCloseTo(result.heights[0])
+    expect(result.heights[2]).toBeCloseTo(result.heights[0])
+    expect(result.color).toBe('rgb(255, 0, 0)')
+  }
+  finally {
+    view.close()
+    await server.stop(true)
+  }
+}, 45_000)
 
 // Paired delimiters use the surrounding TeX macro and color scope in KaTeX.
 test('expands closing fences and tracks the last declared color through nested pairs', () => {
