@@ -228,6 +228,10 @@ speaker notes. Each hook can be asynchronous.
   `yAxis.domain` an explicit range when charts need a shared scale.
   A line point may use `{ value: 8, label: Target }`.
   Set `orientation: horizontal` to flip the chart.
+- Use `type: sankey` with `links` containing `source`, `target`, and
+  a nonnegative `value`. Optional `nodes` give IDs custom labels or colors.
+  Set `nodeAlignment` to `left`, `right`, `center`, or `justify`.
+  Choose `linkColor: gradient`, `source`, `target`, or a CSS color.
 - Use `type: timeline` with `sections` and `type: journey` with `phases`.
 - Use `type: gantt` with `sections` containing tasks. Give each task a
   `name`, an optional `id`, a `start` date or `after` list, and one
@@ -251,7 +255,7 @@ speaker notes. Each hook can be asynchronous.
   `fontSize`.
 - Imported Slidev diagram fences pass through a compatibility parser.
   Styled flowchart groups, sequence and state diagrams, relationships,
-  pie charts, XY charts, Gantt schedules, Git histories, timelines, and journeys use
+  pie charts, XY charts, Sankey diagrams, Gantt schedules, Git histories, timelines, and journeys use
   the same `ts-charts` renderers as `charts` fences.
 - Imported Gantt schedules support date and axis formats, exclusions, task
   dependencies, milestones, today-marker styling, and chart spacing. Enable
@@ -279,6 +283,10 @@ speaker notes. Each hook can be asynchronous.
   series, quoted categories, negative and positive numbers, and point labels.
   Set dimensions and axis options in `config.xyChart`. Palette and text
   colors go in `config.themeVariables.xyChart`.
+- For imported `sankey` or `sankey-beta`, write CSV rows in
+  `source,target,value` order. Quote names containing commas and double
+  any quotes inside that field. Use `config.sankey` for colors, dimensions,
+  node labels, and alignment.
 - Use `timeline` or `timeline TD` for chronological periods. A period can
   have several events on one line or continuation lines starting with `:`.
   Add `section` headings and use `<br>` to break a label manually.

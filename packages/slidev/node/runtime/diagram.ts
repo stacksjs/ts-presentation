@@ -6,6 +6,7 @@ import { gitGraph } from './mermaid/gitgraph.ts'
 import { journey } from './mermaid/journey.ts'
 import { pieDiagram } from './mermaid/pie.ts'
 import { relationshipsDiagram } from './mermaid/relationships.ts'
+import { sankey } from './mermaid/sankey.ts'
 import { sequence } from './mermaid/sequence.ts'
 import { timeline } from './mermaid/timeline.ts'
 import { xyDiagram } from './mermaid/xy.ts'
@@ -16,12 +17,13 @@ function mapping(value: unknown): MermaidOptions {
 
 function mergeDiagramOptions(base: MermaidOptions = {}, override: MermaidOptions = {}): MermaidOptions {
   const result = { ...base, ...override }
-  for (const key of ['flowchart', 'gantt', 'gitGraph', 'journey', 'pie', 'timeline', 'xyChart', 'themeVariables']) {
+  for (const key of ['flowchart', 'gantt', 'gitGraph', 'journey', 'pie', 'sankey', 'timeline', 'xyChart', 'themeVariables']) {
     if (base[key] && override[key] && typeof base[key] === 'object' && typeof override[key] === 'object')
       result[key] = { ...mapping(base[key]), ...mapping(override[key]) }
   }
   for (const [scope, children] of [
     ['xyChart', ['xAxis', 'yAxis']],
+    ['sankey', ['nodeColors']],
     ['themeVariables', ['xyChart']],
   ] as const) {
     const before = mapping(base[scope])
@@ -64,6 +66,7 @@ function render(code: string, marker: string, options: MermaidOptions): string |
   if (/^timeline(?:\s|$)/i.test(header ?? '')) return timeline(code, marker, options)
   if (/^journey$/i.test(header ?? '')) return journey(code, marker, options)
   if (header === 'gantt') return gantt(code, marker, options.gantt, title, options.securityLevel === 'loose', options.themeVariables)
+  if (/^sankey(?:-beta)?$/.test(header ?? '')) return sankey(code, marker, options)
   if (/^xychart(?:-beta)?(?:\s|$)/.test(header ?? '')) return xyDiagram(code, marker, options)
   if (/^gitGraph(?:\s|:|;|$)/.test(header ?? '')) return gitGraph(code, marker, options)
   if (header === 'sequenceDiagram') return sequence(code, marker)

@@ -30,10 +30,11 @@ in a new ts-presentation project.
 | KaTeX macro and color settings | Deck-scoped `globalGroup`, per-formula `maxExpand` including eager definitions, and two-argument `\color` via `colorIsTextColor` |
 | KaTeX sizing settings | `maxSize` for explicit dimensions and `minRuleThickness` for fraction bars, array rules, box borders, and overlines or underlines |
 | PowerPoint export | Image slides or editable text and boxes with separate artwork |
-| First-party diagram authoring | YAML `charts` fences through `ts-charts` for flowcharts, sequence, state, class, ER, pie, timeline, journey, Gantt, Git history, and XY charts |
+| First-party diagram authoring | YAML `charts` fences through `ts-charts` for flowcharts, sequence, state, class, ER, pie, timeline, journey, Gantt, Git history, XY charts, and Sankey diagrams |
 | Draggable elements | Inline directives, drag and arrow components, frontmatter positions, scaled editing, and local Markdown saves |
 | Imported Slidev diagrams | Compatibility fences translate the supported syntax to `ts-charts` input |
 | XY charts | Native YAML and imported `xychart` fences render bar and line series with category or numeric axes, orientation, legends, labels, and palette overrides |
+| Sankey diagrams | Weighted links from native YAML and imported CSV fences, with four alignments, gradient or solid links, and configurable node colors and labels |
 | Gantt styles and dates | Task status palettes, partial dates and fractional seconds, calendar-aligned UTC ticks, zero-duration fallback for invalid ends, and whole-day exclusions that preserve gaps between dependent tasks through `ts-charts` |
 | GitGraph | Named Mermaid palettes and color overrides, commit message and operation tooltips, and custom symbols on commits and merges |
 | PlantUML sequence diagrams | Local `ts-charts` rendering for messages, participants, notes, and groups |
