@@ -452,6 +452,67 @@ $$`)
   }
 }, 45_000)
 
+it.skipIf(!chrome)('captures Mathtools frames around aligned cells as editable PowerPoint outlines', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-aligned-boxes-'))
+  const canvas = { width: 960, height: 540 }
+  try {
+    const entry = join(root, 'slides.md')
+    await Bun.write(entry, String.raw`# Boxed rows
+
+$$ {1|2|all}
+\begin{alignat}{2}
+\Aboxed{a&=b}+q & \setlength{\fboxsep}{.45em}\setlength\fboxrule{2px}\Aboxed{c&=\frac{d}{e}}\\
+z&=k & v&=w
+\end{alignat}
+$$
+
+---
+
+# Box around one expression
+
+\begin{align*}
+\setlength\fboxsep{.5em}\Aboxed{x}+y &= z
+\end{align*}`)
+    const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
+    const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
+    const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
+    if (status) throw new Error(stderr)
+    const frames: PowerPointFrame[] = []
+    await captureFrames({ root: join(root, 'dist'), executable: chrome!, scale: 1, canvas, editable: true, withClicks: true }, frame => { frames.push(frame) })
+    expect(frames.map(frame => [frame.position?.slide, frame.position?.click])).toEqual([[1, 0], [1, 1], [1, 2], [2, 0]])
+    for (const [step, frame] of frames.slice(0, 3).entries()) {
+      const math = frame.editable?.nodes.find((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math')?.equation
+      expect(math?.frames).toHaveLength(2)
+      expect(math?.tags).toHaveLength(2)
+      const [first, second] = math!.frames!
+      const cells = [math!, ...(math?.cells ?? [])]
+      const left = cells.find(cell => cell.expression.includes('>a</m:t>'))!
+      const right = cells.find(cell => cell.expression.includes('>b</m:t>'))!
+      const outside = cells.find(cell => cell.expression.includes('>q</m:t>'))!
+      const below = cells.find(cell => cell.expression.includes('>k</m:t>'))!
+      expect(first.rect.x).toBeLessThan(left.rect.x)
+      expect(first.rect.x + first.rect.w).toBeGreaterThan(right.rect.x + right.rect.w)
+      expect(first.rect.x + first.rect.w).toBeLessThanOrEqual(outside.rect.x + 0.5)
+      expect(first.rect.x + first.rect.w).toBeLessThanOrEqual(second.rect.x + 1)
+      expect(second.rect.h).toBeGreaterThan(first.rect.h + 4)
+      expect(right.rect.x).toBeCloseTo(below.rect.x)
+      expect(first.border.color.a).toBeCloseTo(step === 1 ? 0.24 : 1)
+      expect(second.border.width).toBeCloseTo(2)
+    }
+    const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Boxed rows' }))
+    const slide = parts.get('ppt/slides/slide3.xml')?.toString() ?? ''
+    expect(slide.match(/name="Equation frame"/g)).toHaveLength(2)
+    expect(slide).toContain('<a:noFill/><a:ln w="')
+    expect(slide).toContain('<m:f>')
+    const one = parts.get('ppt/slides/slide4.xml')?.toString() ?? ''
+    expect(one.match(/name="Equation frame"/g)).toHaveLength(1)
+    expect(one).toContain('>x</m:t>')
+  }
+  finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}, 45_000)
+
 it.skipIf(!chrome)('exports AMS full-width alignments with editable columns and tags', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-flalign-'))
   const canvas = { width: 960, height: 540 }

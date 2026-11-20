@@ -145,6 +145,12 @@ function mathShape({ display, expression, rect }: IrEquation, id: number, name: 
 
 function drawEquation(equation: NonNullable<IrRaster['equation']>, id: number, relationship: string, pictureRect: Rect, nextId: () => number): string {
   const editable = mathShape(equation, id, 'Equation')
+    + (equation.frames?.map(({ rect, border }) => {
+      // DrawingML centers the stroke and CSS draws it within the measured box.
+      const inset = border.width / 2
+      const path = { x: rect.x + inset, y: rect.y + inset, w: rect.w - border.width, h: rect.h - border.width }
+      return shape(nextId(), 'Equation frame', transform(path) + rectShape(0, path) + fill() + line(border))
+    }).join('') ?? '')
     + (equation.cells?.map(cell => mathShape(cell, nextId(), 'Equation cell')).join('') ?? '')
     + (equation.tags?.map(tag => mathShape(tag, nextId(), 'Equation tag')).join('') ?? '')
   const picture = `<a:blipFill><a:blip r:embed="${relationship}"/><a:stretch><a:fillRect/></a:stretch></a:blipFill>`

@@ -524,7 +524,8 @@ const alignments: Record<string, Alignment> = { l: 'left', c: 'center', r: 'righ
 interface ArrayColumn { align: Alignment, before: ArrayRule[] }
 interface DottedArrayCell { span: number, spacing: number }
 type ArrayCell = Markup | DottedArrayCell
-interface ArrayRow { cells: ArrayCell[], columns: number, label?: Markup, before: ArrayRule[], gap?: string, raise?: string, arrow?: 'left' | 'right', flushAbove?: boolean, flushBelow?: boolean }
+interface AlignmentFrame { span: 1 | 2, dimensions: string[] }
+interface ArrayRow { cells: ArrayCell[], columns: number, label?: Markup, before: ArrayRule[], gap?: string, raise?: string, arrow?: 'left' | 'right', flushAbove?: boolean, flushBelow?: boolean, frames?: Map<number, AlignmentFrame> }
 interface MathLine { content: Markup, gap?: string }
 interface MultlineRow extends MathLine { align?: 'left' | 'right', inset?: string }
 type MultlinedPosition = 't' | 'c' | 'b'
@@ -935,6 +936,8 @@ const intertextCommands: ReadonlyMap<string, string> = new Map([
 const arrowBetweenLines = '\\ArrowBetweenLines'
 const flushSpaceAbove = '\\MTFlushSpaceAbove'
 const flushSpaceBelow = '\\MTFlushSpaceBelow'
+const alignedBox = '\\Aboxed'
+const alignedBoxAssignments = new Set(['\\setlength', '\\fboxsep', '\\fboxrule'])
 const mathModeFunctions = new Set([
   ...groupedArgumentFunctions, ...primitiveArgumentFunctions, ...Object.keys(mathClasses), ...Object.keys(accents),
   ...Object.keys(stretchedAccents), ...Object.keys(extensibleArrows),
@@ -942,7 +945,7 @@ const mathModeFunctions = new Set([
   'begin', 'end', 'right', 'middle', '@binrel', '@splitfrac', 'mathchoice', 'vcenter',
   'cancel', 'bcancel', 'xcancel', 'pmb', 'phase', 'mathreflectbox',
   'prescript', 'mathstrut', 'xmathstrut', 'sideset', 'overset', 'underset', 'overunderset', 'stackrel',
-  'shoveleft', 'shoveright', 'ArrowBetweenLines', 'MTFlushSpaceAbove', 'MTFlushSpaceBelow',
+  'shoveleft', 'shoveright', 'ArrowBetweenLines', 'MTFlushSpaceAbove', 'MTFlushSpaceBelow', 'Aboxed',
   ...Array.from(intertextCommands.keys(), command => command.slice(1)),
   'overline', 'operatorname', 'operatorname@', 'operatornamewithlimits', 'limits', 'nolimits', 'displaylimits',
   'not', 'mod', 'bmod', 'pmod', 'pod', 'ce', 'pu', 'allowbreak', 'nonscript', 'root', 'of', 'leftroot', 'uproot', 'hdotsfor',
@@ -2752,6 +2755,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     let rules: ArrayRule[] = []
     let closed = false
     let flushAbove = false
+    let frames: Map<number, AlignmentFrame> | undefined
     const stops = ['&', '\\\\', '\\newline', '\\cr', '\\end']
     if (allowIntertext) stops.push(...intertextCommands.keys())
     if (allowArrow) stops.push(arrowBetweenLines)
@@ -2804,7 +2808,46 @@ export function renderMath(source: string, display = false, configured: MathMacr
         }
       }
       const followsOrdinary = aligned && columnsInRow % 2 === 1
-      if (allowDottedCells && peek() === '\\hdotsfor') {
+      const command = aligned || allowDottedCells ? peek() : ''
+      if (aligned && (command === alignedBox || alignedBoxAssignments.has(command))) {
+        const dimensions: string[] = []
+        while (peek() !== alignedBox) {
+          const assignment = take()
+          if (!alignedBoxAssignments.has(assignment))
+            throw new MathParseError('Frame dimensions must precede \\Aboxed')
+          const name = assignment === '\\setlength' ? literalGroup() : assignment
+          if (name !== '\\fboxsep' && name !== '\\fboxrule') throw new MathParseError('Unsupported \\Aboxed dimension')
+          if (assignment !== '\\setlength' && peek() === '=') take()
+          const length = readDimension()
+          if (Number.parseFloat(length) < 0) throw new MathParseError('Invalid \\Aboxed dimension')
+          dimensions.push(`--math-frame-${name === '\\fboxsep' ? 'padding' : 'rule'}:${length}`)
+        }
+        take()
+        const [lhs, rhs] = withTokens(rawGroup(), () => inScope(() => {
+          const lhs = row(['&', boundary], false, false, undefined, followsOrdinary)
+          if (peek() !== '&') return [lhs]
+          take()
+          const rhs = row(['&', boundary], false, false, undefined, true)
+          if (peek() === '&') throw new MathParseError('Too many alignment points in \\Aboxed')
+          return [lhs, rhs]
+        }))
+        const suffix = inScope(() => row(stops, false, false, undefined, true))
+        if (rhs === undefined && !dimensions.length) {
+          cells.push(xml`<mrow class="math-color-box math-frame">${lhs}</mrow>${suffix}`)
+          columnsInRow++
+        }
+        else {
+          const span = rhs === undefined ? 1 : 2
+          if (span === 2 && followsOrdinary) throw new MathParseError('\\Aboxed must start in the left column of an alignment pair')
+          frames ??= new Map()
+          frames.set(columnsInRow, { span, dimensions })
+          const tail = suffix && xml`<mrow>${suffix}</mrow>`
+          if (rhs === undefined) cells.push(xml`<mrow data-equation-frame-start>${lhs}</mrow>${tail}`)
+          else cells.push(lhs, xml`<mrow data-equation-frame-end>${rhs}</mrow>${tail}`)
+          columnsInRow += span
+        }
+      }
+      else if (allowDottedCells && command === '\\hdotsfor') {
         take()
         const multiplier = rawBracket()
         const scale = multiplier === undefined ? '1' : expandDefinition(multiplier).join('').trim()
@@ -2835,11 +2878,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const separator = take()
       if (separator === '&') {
         if (subarray || gathered) throw new MathParseError('Too many columns in math stack')
-        if (environment === 'split' && columnsInRow === 2) throw new MathParseError('Too many columns in split')
+        if (environment === 'split' && columnsInRow >= 2) throw new MathParseError('Too many columns in split')
         if (proseCases && columnsInRow === 2) throw new MathParseError(`Too many columns in ${environment}`)
         if (columnArray && columnsInRow === layout.columns.length) strictViolation('textEnv', 'Too few columns in the array specification')
         continue
       }
+      if (environment === 'split' && columnsInRow > 2) throw new MathParseError('Too many columns in split')
       if (pairs && columnsInRow > pairs * 2) throw new MathParseError('Too many alignment columns')
       const spacing = allowIntertext && intertextCommands.get(separator)
       const arrow = allowArrow && separator === arrowBetweenLines
@@ -2853,10 +2897,11 @@ export function renderMath(source: string, display = false, configured: MathMacr
         throw new MathParseError('Equation tags belong on an equation line')
       const label = rowTags ? nextTag(automatic && !arrow && !continuation) : undefined
       if (cells.length > 1 || cells[0] || label !== undefined || rows.length === 0 || lineBreak) {
-        rows.push({ cells, columns: columnsInRow, label, before: rules, gap, raise: tagState.raise, flushAbove, flushBelow })
+        rows.push({ cells, columns: columnsInRow, label, before: rules, gap, raise: tagState.raise, flushAbove, flushBelow, frames })
         rules = []
       }
       cells = []
+      frames = undefined
       columnsInRow = 0
       flushAbove = separator === flushSpaceAbove
       if (rowTags) tagState = { suppressed: false }
@@ -2878,13 +2923,14 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const hasIntertext = intertexts.size > 0
     const hasArrows = rows.some(entry => entry.arrow)
     const hasContinuations = rows.some(entry => entry.flushAbove || entry.flushBelow)
+    const hasFrames = rows.some(entry => entry.frames)
     const leqno = state?.options.leqno === true
     const authoredColumns = Math.max(layout.columns.length, Number(hasIntertext), ...rows.map(entry => entry.columns))
     const columnCount = spreadEnvironment ? Math.max(pairs * 2, 2 * Math.ceil(authoredColumns / 2)) : authoredColumns
     // A single alignment pair has no intercolumn space to distribute.
     const spread = spreadEnvironment && columnCount > 2 ? environment.startsWith('xalignat') ? 'balanced' : 'full' : ''
     if (spread === 'full') fullWidthAlignment = true
-    const displayRows = (tags || hasIntertext || hasArrows || hasContinuations || spread) && rowTags && display && depth === 1
+    const displayRows = (tags || hasIntertext || hasArrows || hasContinuations || hasFrames || spread) && rowTags && display && depth === 1
     const grid = aligned || cases || alignment.length > 0 || displayRows || gatherAlignment !== '' || position !== 'c'
     const rowRules = rows.reduce((count, entry) => count + entry.before.length, rules.length)
     const columnRules = layout.columns.reduce((count, column) => count + column.before.length, layout.after.length)
@@ -2905,7 +2951,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const classes = [compact && 'math-compact-array', grid && 'math-alignment-grid', displayRows && 'math-display-grid'].filter(Boolean).join(' ')
     const layoutClass = classes ? ` class="${classes}"` : ''
     const amsAlignment = (aligned || gathered) ? ` data-equation-environment="${environment}"` : ''
-    const rowSpacing = amsAlignment && (hasIntertext || (hasArrows && displayRows) || hasContinuations || stretch !== 1 || rows.some(row => row.gap !== undefined)) ? ' data-equation-row-spacing' : ''
+    const rowSpacing = amsAlignment && (hasIntertext || (hasArrows && displayRows) || hasContinuations || hasFrames || stretch !== 1 || rows.some(row => row.gap !== undefined)) ? ' data-equation-row-spacing' : ''
     const tagPlacement = tags ? ` data-equation-tags="${leqno ? 'left' : 'right'}"` : ''
     const spreadLayout = spread ? ` data-equation-spread="${spread}"` : ''
     const gridTracks = spread ? `--math-pair-gaps:${columnCount / 2 - 1}` : `--math-columns:${columnCount}`
@@ -2935,6 +2981,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
           const align = alignmentAt(index)
           const cellStyle = proseCases && index === 1 ? 1 : tableCellStyle
           const styling: string[] = []
+          const frameStart = entry.frames?.get(index)
+          const previousFrame = entry.frames?.get(index - 1)
+          const frameEnd = previousFrame?.span === 2 ? previousFrame : undefined
+          const framing = frameStart ?? frameEnd
           if (align) styling.push(`text-align:${align}`)
           if (grid && align !== 'left')
             styling.push(`--math-cell-align:${align === 'right' ? 'end' : 'center'}`)
@@ -2964,17 +3014,24 @@ export function renderMath(source: string, display = false, configured: MathMacr
           }
           if (entry.arrow) styling.push('padding-block:0em')
           else if (compact || stretch !== 1 || moreRowSpace) styling.push(`padding-block:${pad}em`)
+          const inset = 'var(--math-frame-inset)'
+          const pairedGap = !spread && !paired && index > 0 && index % 2 === 0
+          if (framing) styling.push(...framing.dimensions)
+          if (frameStart) styling.push(`padding-inline-start:${pairedGap ? `calc(1em + ${inset})` : inset}`)
+          if (framing) styling.push(`padding-block:calc(${pad}em + ${inset})`)
           styling.push(...trim)
-          if (entry.gap) styling.push(`padding-bottom:max(0px,calc(${flushBottom ? '0' : pad}em + ${entry.gap}))`)
+          if (entry.gap) styling.push(`padding-bottom:max(0px,calc(${flushBottom ? '0' : pad}em${framing && !flushBottom ? ` + ${inset}` : ''} + ${entry.gap}))`)
           const settings = styling.length ? ` style="${styling.join(';')}"` : ''
           const cellAttrs = dots ? ` class="math-array-dots" columnspan="${span}"` : ''
           const markup = dots ? '<mo>…</mo>' : renderMarkup(typeof value === 'object' ? '' : value ?? '', cellStyle)
           const sized = compact || style === cellStyle ? markup : mathSize(cellStyle, markup)
-          return `<mtd${cellAttrs}${settings}>${grid ? `<mrow>${sized}</mrow>` : sized}</mtd>`
+          const frame = frameStart ? `<mspace data-equation-frame="${frameStart.span}" aria-hidden="true" width="0"/>` : ''
+          return `<mtd${cellAttrs}${settings}>${grid ? `<mrow>${sized}</mrow>` : sized}${frame}</mtd>`
         }).join('')
         const arrow = entry.arrow ? ` data-equation-arrow="${entry.arrow}"` : ''
         const continuation = entry.flushAbove || entry.flushBelow ? ' data-equation-continuation' : ''
-        return `${prose(rowIndex)}<mtr${arrow}${continuation}>${leqno ? cell : ''}${content}${leqno ? '' : cell}</mtr>`
+        const frameRow = entry.frames ? ' data-equation-frame-row' : ''
+        return `${prose(rowIndex)}<mtr${arrow}${continuation}${frameRow}>${leqno ? cell : ''}${content}${leqno ? '' : cell}</mtr>`
       }).join('') + prose(rows.length)
       const baseline = position === 't' ? ' align="baseline 1"' : position === 'b' ? ' align="baseline -1"' : ''
       const matrix = `<mtable${lines} data-math-array${align}${layoutClass}${gridLayout}${amsAlignment}${rowSpacing}${baseline}>${markup}</mtable>`
@@ -3222,6 +3279,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const name = token.slice(1)
     if (token === arrowBetweenLines) throw new MathParseError(`${token} requires an align, alignat, aligned, or alignedat environment`)
     if (token === flushSpaceAbove || token === flushSpaceBelow) throw new MathParseError(`${token} requires an alignment environment`)
+    if (token === alignedBox) throw new MathParseError('\\Aboxed must start an alignment cell')
     if (intertextCommands.has(token)) throw new MathParseError(`${token} requires a top-level align, alignat, or gather display (including full-width alignments)`)
     if (name === 'begingroup') {
       let parts: RowPart[] | undefined

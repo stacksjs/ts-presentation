@@ -537,6 +537,8 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba, 
       return
     }
     if (name === 'mrow') {
+      if (attributes['data-equation-frame-start'] === '' && only(node, 'data-equation-frame-start')) return sequence(children)
+      if (attributes['data-equation-frame-end'] === '' && only(node, 'data-equation-frame-end')) return sequence(children)
       if (attributes['data-math-delimiters'] === '' && only(node, 'data-math-delimiters')) return pairedDelimiters(children)
       if (attributes['data-math-cases'] && only(node, 'data-math-cases')) return caseArray(node, attributes['data-math-cases'])
       const variant = attributes.mathvariant

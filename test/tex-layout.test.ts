@@ -979,6 +979,34 @@ a&=x & c&=y
   expect(() => math(String.raw`a\shortvdotswithin{=}b`, true)).toThrow('requires an alignment environment')
 })
 
+test('parses Mathtools boxes across alignment points, including multiple boxes per row', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const markup = math(String.raw`\begin{alignat}{2}
+\Aboxed{a&=b}+q & \Aboxed{c&=\frac{d}{e}}\\
+\Aboxed{f} &= g & h&=i
+\end{alignat}`, true).split('<annotation')[0]
+  expect(markup.match(/<mspace data-equation-frame\b/g)).toHaveLength(2)
+  expect(markup.match(/<mtr data-equation-frame-row>/g)).toHaveLength(1)
+  expect(markup).toContain('<mrow class="math-color-box math-frame"><mi>f</mi></mrow>')
+  expect(markup).toContain('<mrow data-equation-frame-end>' + thick + operator('=') + thick + '<mi>b</mi></mrow><mrow>' + medium + operator('+') + medium + '<mi>q</mi>')
+  expect(markup).toContain('<mtext>(1)</mtext>')
+  expect(markup).toContain('<mtext>(2)</mtext>')
+  const nested = math(String.raw`\begin{aligned}\Aboxed{{\begin{pmatrix}a&b\end{pmatrix}}&=c}\end{aligned}`, false).split('<annotation')[0]
+  expect(nested.match(/<mspace data-equation-frame\b/g)).toHaveLength(1)
+  const custom = math(String.raw`\begin{align*}
+\setlength\fboxsep{.6em}\fboxrule=2px\Aboxed{a}&=b\\
+\Aboxed{c&=d}
+\end{align*}`, true).split('<annotation')[0]
+  expect(custom).toContain('--math-frame-padding:.6em;--math-frame-rule:2px')
+  expect(custom.match(/--math-frame-padding:/g)).toHaveLength(1)
+  expect(custom).toContain('data-equation-frame="1"')
+  expect(custom).toContain('data-equation-frame="2"')
+  expect(() => math(String.raw`\begin{aligned}\setlength\fboxsep{-1em}\Aboxed{a&=b}\end{aligned}`, false)).toThrow('Invalid \\Aboxed dimension')
+  expect(() => math(String.raw`\begin{aligned}\Aboxed{a&b&c}\end{aligned}`, false)).toThrow('Too many alignment points')
+  expect(() => math(String.raw`\begin{aligned}a&\Aboxed{b&c}\end{aligned}`, false)).toThrow('left column of an alignment pair')
+  expect(() => math(String.raw`\Aboxed{a&b}`, false)).toThrow('must start an alignment cell')
+})
+
 test('parses AMS full-width alignments and applies their tag and column rules', async () => {
   const flalign = String.raw`\begin{flalign}
 a&=b\label{first} & c&=d\\

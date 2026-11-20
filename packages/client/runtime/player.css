@@ -1016,6 +1016,23 @@ math .math-array-dots mo { opacity: 0; }
   }
   math .math-alignment-grid > mtr > mtd > mrow,
   math .math-alignment-grid > mtr > .math-equation-number { display: math; }
+  math [data-equation-frame-row] {
+    position: relative;
+    --math-frame-padding: 0.3em;
+    --math-frame-rule: max(0.04em, var(--math-min-rule, 0px));
+  }
+  math [data-equation-frame-row] > mtd { --math-frame-inset: calc(var(--math-frame-padding) + var(--math-frame-rule)); }
+  math :is([data-equation-frame-start], [data-equation-frame-end]) { margin-inline-end: var(--math-frame-inset); }
+  math mspace[data-equation-frame] {
+    position: absolute;
+    display: block;
+    box-sizing: border-box;
+    padding: var(--math-frame-padding);
+    border: var(--math-frame-rule) solid currentColor;
+    visibility: hidden;
+    pointer-events: none;
+  }
+  math mspace[data-equation-frame][style] { visibility: inherit; }
   /* A standalone equation table borrows the display width for its tag gutters. */
   math:has(> semantics > mrow > .math-display-grid:only-child),
   math:has(> semantics > mrow > .math-display-grid:only-child) > semantics,

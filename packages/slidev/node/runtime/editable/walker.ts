@@ -1,5 +1,5 @@
 // Adapted from Slidev v53.1.0. See licenses/Slidev-MIT.txt.
-import type { RawMathElement, RawMathFragment, RawMathSnapshot, RawNode, RawSlide, RawSnapshot, RawStyle } from './ir.ts'
+import type { RawMathElement, RawMathFragment, RawMathFrame, RawMathSnapshot, RawNode, RawSlide, RawSnapshot, RawStyle } from './ir.ts'
 
 /**
  * The one function that runs inside the browser. Invariant: zero free variables.
@@ -422,6 +422,7 @@ export function collectSnapshot(options: {
       // Capture tags independently of the full-width gutters.
       const tags: RawMathFragment[] = []
       const measuredCells: RawMathFragment[] = []
+      const frames: RawMathFrame[] = []
       const body: DOMRect[] = []
       let singleFormula: RawMathSnapshot | undefined
       for (const [index, row] of Array.from(table.children).entries()) {
@@ -458,6 +459,29 @@ export function collectSnapshot(options: {
           else {
             body.push(cell.getBoundingClientRect())
             if (!positionedCells) continue
+            const frame = cell.querySelector(':scope > mspace[data-equation-frame]')
+            if (frame) {
+              const style = getComputedStyle(frame)
+              const box = frame.getBoundingClientRect()
+              const rect = mathBounds([box])
+              if (!rect || style.visibility !== 'visible') return
+              const width = Number.parseFloat(style.borderTopWidth) * scale
+              if (width > 0) frames.push({ rect, color: style.borderTopColor, width, opacity: rowOpacity })
+              body.push(box)
+            }
+            const content = cell.firstElementChild
+            const pieces = content?.firstElementChild?.matches('[data-equation-frame-start], [data-equation-frame-end]')
+            if ((frame || pieces) && content) {
+              if (/(?:^|;)(?:border-|background:)/.test(cellData.attributes.style ?? '')) return
+              // Position the boxed expression and the trailing text separately.
+              const sections = pieces ? Array.from(content.children) : [content]
+              const expressions = pieces ? cellData.children[0].children : [cellData.children[0]]
+              for (const [index, item] of sections.entries()) {
+                const rect = mathBounds([item.getBoundingClientRect()])
+                if (rect) measuredCells.push(fragment(item, expressions[index], rowOpacity, rect))
+              }
+              continue
+            }
             // Cells already have independent coordinates. For a measured box
             // that fills a continuation cell, place only its visible content.
             if (row.hasAttribute('data-equation-continuation')) {
@@ -492,7 +516,7 @@ export function collectSnapshot(options: {
       const rect = mathBounds(body)
       if (!rect) return
       if (!positionedCells) return { expression, rect, display, tags }
-      if (measuredCells.length) return { rect, display, tags, cells: measuredCells }
+      if (measuredCells.length) return { rect, display, tags, cells: measuredCells, ...(frames.length ? { frames } : {}) }
     }
 
     function walk(node: Node, parent: number, fromShadowRoot: boolean, inheritedOpacity: number, inheritedScale: number): void {

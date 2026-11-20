@@ -1,5 +1,6 @@
 const strut = 'data-math-strut'
-const selector = `mrow[${strut}], mtable[data-equation-tags]:is(.math-display-grid, .math-tagged-display, .math-multline)`
+const frameRow = 'data-equation-frame-row'
+const selector = `mrow[${strut}], mtr[${frameRow}], mtable[data-equation-tags]:is(.math-display-grid, .math-tagged-display, .math-multline)`
 const shifted = 'data-equation-tag-shifted'
 
 function fitStrut(element: Element): void {
@@ -62,6 +63,28 @@ function fitTable(table: Element): void {
   }
 }
 
+function fitFrames(row: Element): void {
+  const bounds = row.getBoundingClientRect()
+  const dimensions = getComputedStyle(row)
+  const xScale = bounds.width / Number.parseFloat(dimensions.width)
+  const yScale = bounds.height / Number.parseFloat(dimensions.height)
+  if (!(xScale > 0 && yScale > 0 && Number.isFinite(xScale) && Number.isFinite(yScale))) return
+  for (const frame of row.querySelectorAll(':scope > mtd > mspace[data-equation-frame]')) {
+    const single = frame.getAttribute('data-equation-frame') === '1'
+    const lhs = frame.previousElementSibling
+    const left = (single ? lhs?.querySelector(':scope > [data-equation-frame-start]') : lhs)?.getBoundingClientRect()
+    const right = single ? left : frame.parentElement?.nextElementSibling?.querySelector(':scope > mrow > [data-equation-frame-end]')?.getBoundingClientRect()
+    if (!left || !right) continue
+    const style = getComputedStyle(frame)
+    const inset = Number.parseFloat(style.paddingTop) + Number.parseFloat(style.borderTopWidth)
+    if (!Number.isFinite(inset)) continue
+    const top = Math.min(left.top, right.top)
+    const bottom = Math.max(left.bottom, right.bottom)
+    const properties = `left:${(left.left - bounds.left) / xScale - inset}px;top:${(top - bounds.top) / yScale - inset}px;width:${(right.right - left.left) / xScale + 2 * inset}px;height:${(bottom - top) / yScale + 2 * inset}px`
+    if (frame.getAttribute('style') !== properties) frame.setAttribute('style', properties)
+  }
+}
+
 export function createEquationFit(): (root: ParentNode, watch?: boolean) => void {
   const observed = new Map<Element, Element>()
   const pending = new Set<Element>()
@@ -69,6 +92,7 @@ export function createEquationFit(): (root: ParentNode, watch?: boolean) => void
   let frame: number | undefined
   function fit(element: Element): void {
     if (element.hasAttribute(strut)) fitStrut(element)
+    else if (element.hasAttribute(frameRow)) fitFrames(element)
     else fitTable(element)
   }
 
@@ -108,6 +132,10 @@ export function createEquationFit(): (root: ParentNode, watch?: boolean) => void
       // The unpadded glyphs change size even when the outer strut has fixed dimensions.
       if (element.hasAttribute(strut)) {
         for (const child of element.firstElementChild?.children ?? []) observe(child, element)
+      }
+      else if (element.hasAttribute(frameRow)) {
+        observe(element, element)
+        for (const cell of element.children) observe(cell, element)
       }
       else observe(element, element)
     }
