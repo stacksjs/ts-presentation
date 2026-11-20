@@ -421,8 +421,11 @@ completions, hover help, and Markdown syntax highlighting. It launches audience
 and presenter previews with the project’s local Bun CLI. See the
 [extension guide](packages/vscode/README.md) for setup and deck file patterns.
 
-Run `bun test` from the project root to discover the adapted Slidev suites
-under `packages/` and the presentation regression suite under `test/`. The Bun runtime
+Run `bun test --timeout 45000` from the project root to run the adapted
+Slidev tests and native regression suite. GitHub Actions runs the same suite
+with Chrome for browser and export coverage. See the
+[Slidev test ports](skills/stacks-presentations/references/slidev-tests.md)
+for the source-to-port mapping. The Bun runtime
 uses the published [`@stacksjs/stx` package](https://github.com/stacksjs/stx) for the
 shell, built-in layouts, and custom templates. Bun installs it from the registry.
 Some copied components, Vite integrations, and advanced VS Code tooling still
