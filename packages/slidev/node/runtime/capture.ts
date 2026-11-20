@@ -1,6 +1,7 @@
 import { realpath } from 'node:fs/promises'
 import type { FrameLink, PowerPointFrame } from './powerpoint.ts'
 import type { SlideCanvas } from '../../../types/src/canvas.ts'
+import { deckPath } from '../../../client/runtime/routing.ts'
 import { asset } from './assets.ts'
 import { dataPicture, maxOriginalPictureBytes, originalPicture } from './editable/pictures.ts'
 import type { OriginalPicture } from './editable/pictures.ts'
@@ -12,6 +13,7 @@ interface BrowserOptions {
   scale: number
   canvas: SlideCanvas
   timeout?: number
+  base?: string
 }
 
 export interface CaptureOptions extends BrowserOptions {
@@ -40,14 +42,16 @@ async function prepareImages(root: Element, visibleOnly = false): Promise<void> 
 
 type PictureReader = (source: string) => Promise<OriginalPicture | undefined>
 
-function pictureReader(root: string, origin: string): PictureReader {
+function pictureReader(root: string, origin: string, base: string): PictureReader {
   const previous = new Map<string, Promise<OriginalPicture | undefined>>()
   async function read(source: string): Promise<OriginalPicture | undefined> {
     if (source.startsWith('data:')) return dataPicture(source)
     const url = URL.parse(source)
     if (url?.origin !== origin) return
     try {
-      const response = await asset(root, decodeURIComponent(url.pathname))
+      const path = deckPath(url.pathname, base)
+      if (!path) return
+      const response = await asset(root, decodeURIComponent(path))
       if (!response.ok || Number(response.headers.get('Content-Length')) > maxOriginalPictureBytes) return
       return originalPicture(await response.bytes())
     }
@@ -64,14 +68,16 @@ function pictureReader(root: string, origin: string): PictureReader {
 
 async function withExportBrowser<T>(options: BrowserOptions, run: (browser: Bun.WebView, readOriginal: PictureReader) => Promise<T>): Promise<T> {
   const { width, height } = options.canvas
+  const base = options.base ?? '/'
   const root = await realpath(options.root)
   const preview = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
     fetch(request) {
       try {
-        const path = decodeURIComponent(new URL(request.url).pathname)
-        return asset(root, path === '/' ? '/index.html' : path, request)
+        const path = deckPath(new URL(request.url).pathname, base)
+        if (!path) return new Response('Not found', { status: 404 })
+        return asset(root, path === '/' ? '/index.html' : decodeURIComponent(path), request)
       }
       catch {
         return new Response('Invalid URL', { status: 400 })
@@ -93,8 +99,8 @@ async function withExportBrowser<T>(options: BrowserOptions, run: (browser: Bun.
       await chrome.cdp('Emulation.setDeviceMetricsOverride', {
         width, height, deviceScaleFactor: options.scale, mobile: false,
       })
-      await chrome.navigate(new URL('?capture=1&steps=1', preview.url).href)
-      return run(chrome, pictureReader(root, preview.url.origin))
+      await chrome.navigate(new URL(`${base}?capture=1&steps=1`, preview.url).href)
+      return run(chrome, pictureReader(root, preview.url.origin, base))
     }
     const duration = options.timeout ?? 120_000
     if (!duration) return await capture()
@@ -216,13 +222,18 @@ export async function capturePdf(options: CaptureOptions): Promise<Uint8Array<Ar
         anchor.className = 'print-destination'
         anchor.setAttribute('aria-hidden', 'true')
         page.prepend(anchor)
-        for (const link of page.querySelectorAll('a[data-slide-link]')) {
-          const target = link.dataset.slideLink
-          const id = destinations.get(target + '/' + link.dataset.slideClick) ?? destinations.get(target)
-          if (id) link.hash = id
-          else link.removeAttribute('href')
-        }
         pages.append(page)
+      }
+      const printUrl = new URL(location.href)
+      printUrl.hash = ''
+      // Chromium compares PDF link destinations against the document's base URL.
+      // Give subpath builds the same base as the document being printed.
+      document.querySelector('base[href]')?.setAttribute('href', printUrl.href)
+      for (const link of pages.querySelectorAll('a[data-slide-link]')) {
+        const target = link.dataset.slideLink
+        const id = destinations.get(target + '/' + link.dataset.slideClick) ?? destinations.get(target)
+        if (id) link.setAttribute('href', '#' + id)
+        else link.removeAttribute('href')
       }
       stage.replaceChildren(pages)
       document.body.classList.add('printing-frames')

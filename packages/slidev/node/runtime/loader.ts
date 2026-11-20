@@ -37,6 +37,8 @@ import { prefixCssUrls } from './base-assets.ts'
 import type { Routing } from '../../../client/runtime/routing.ts'
 import { expandSnippets } from './snippets.ts'
 import { loadRoutePages } from './route-pages.ts'
+import type { BuildDownload } from './export-options.ts'
+import { resolveBuildDownload } from './export-options.ts'
 
 export interface CompiledDeck extends ExtensionAssets {
   html: string
@@ -44,6 +46,7 @@ export interface CompiledDeck extends ExtensionAssets {
   author?: string
   notesMarkdown: readonly string[]
   headmatter?: Record<string, unknown>
+  download?: BuildDownload
   canvas: SlideCanvas
   routing: Routing
   routeAliases: ReadonlySet<string>
@@ -58,6 +61,7 @@ export interface CompiledDeck extends ExtensionAssets {
 
 export interface CompileOptions extends Pick<RenderOptions, 'base' | 'routerMode' | 'liveCompile' | 'mode' | 'mcpNavigation'> {
   theme?: string
+  download?: boolean
 }
 
 async function fileRevision(path: string): Promise<string> {
@@ -235,10 +239,11 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
       loadDeckComponents(layoutRoots, observeOptional),
     ])
     const liveCode = createLiveCodeCompiler(directory, deck.headmatter?.monacoRunAdditionalDeps, observeOptional)
+    const download = mode === 'build' ? resolveBuildDownload(deck.headmatter, options.download) : undefined
     const { html, routes, routing, live, notesMarkdown } = await renderPresentation(deck, {
       base: options.base, routerMode: options.routerMode, liveCompile: options.liveCompile, mcpNavigation: options.mcpNavigation, mode, extensions, setup, writableSnippets, savedDrawings, saveDrawings,
       deckCssRevision: deckCss && snippetRevision(deckCss), sourceBindings, layers, compileExample: liveCode.authored,
-      entry: filepath, transformerSources,
+      entry: filepath, transformerSources, pdfDownloadHref: download?.href,
       components: components.size ? (frontmatter, number) => createDeckComponentRenderer(components, filepath, number, frontmatter, observeOptional) : undefined,
       async resolveFileLayout(name, registered) {
         if (!/^[\w-]+$/.test(name)) return
@@ -258,7 +263,7 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
       extensionStyles: Boolean(extensions.styles), observe, optional: observeOptional,
     })
     const drawingStore = saveDrawings ? { ...store, slideCount: routes.length } : undefined
-    const compiled = { title: deck.title, author, notesMarkdown, headmatter: deck.headmatter, canvas, routing, html, styles: prefixCssUrls(extensions.styles, routing.base), client: extensions.client, mounts: extensions.mounts, writableSnippets, writableDrags, writableSlides, routeAliases, pages, drawingStore, live, compileExample: liveCode.edited }
+    const compiled = { title: deck.title, author, notesMarkdown, headmatter: deck.headmatter, download, canvas, routing, html, styles: prefixCssUrls(extensions.styles, routing.base), client: extensions.client, mounts: extensions.mounts, writableSnippets, writableDrags, writableSlides, routeAliases, pages, drawingStore, live, compileExample: liveCode.edited }
     cached = { files, deck: compiled }
     return compiled
   }

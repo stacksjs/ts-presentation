@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'bun:test'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { deckPath } from '../../../client/runtime/routing.ts'
+import { asset } from '../runtime/assets.ts'
 import { findChrome } from '../runtime/chrome.ts'
-import { resolveExportSettings, resolveNotesExportSettings } from '../runtime/export-options.ts'
+import { resolveBuildDownload, resolveDownloadCapture, resolveExportSettings, resolveNotesExportSettings } from '../runtime/export-options.ts'
 import { parseDeck } from '../../../parser/src/deck.ts'
 
 const cli = fileURLToPath(new URL('../cli.ts', import.meta.url))
@@ -40,6 +42,21 @@ describe('export defaults', () => {
       output: resolve('paper.pdf'), timeout: 0, wait: 250,
     })
   })
+
+  it('resolves the generated PDF filename, custom links, and PDF-specific capture options', () => {
+    expect(resolveBuildDownload({ download: true })).toEqual({ filename: 'slidev-exported.pdf', href: './slidev-exported.pdf' })
+    expect(resolveBuildDownload({ config: { download: 'auto', exportFilename: 'reports/Talk (Draft).pdf' } })).toEqual({
+      filename: 'reports/Talk (Draft).pdf', href: './reports/Talk%20(Draft).pdf',
+    })
+    expect(resolveBuildDownload({ download: false, config: { download: true } })).toBeUndefined()
+    expect(resolveBuildDownload({ download: 'https://example.com/talk.pdf' })).toEqual({ href: 'https://example.com/talk.pdf' })
+    expect(resolveBuildDownload({ download: 'handouts/talk.pdf', exportFilename: 'prepared' }, true)?.filename).toBe('prepared.pdf')
+    expect(() => resolveBuildDownload({ download: true, exportFilename: '../outside' })).toThrow('relative to the build directory')
+    expect(() => resolveBuildDownload({ download: 'javascript:void(0)' })).toThrow('HTTP, or HTTPS')
+    expect(resolveDownloadCapture({ export: { format: 'pptx', scale: 3, range: 2, withClicks: true } })).toMatchObject({
+      scale: 1, range: '2', withClicks: true,
+    })
+  })
 })
 
 const deck = [
@@ -62,6 +79,62 @@ async function deckCommand(root: string, name: string, ...args: string[]): Promi
 function exportDeck(root: string, ...args: string[]): Promise<void> {
   return deckCommand(root, 'export', '--executable-path', chrome!, ...args)
 }
+
+it('exposes an existing PDF in the static player without generating a second file', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-linked-pdf-'))
+  try {
+    await Bun.write(join(root, 'slides.md'), '---\ndownload: /handouts/existing.pdf\n---\n\n# Example')
+    await Bun.write(join(root, 'public', 'handouts', 'existing.pdf'), '%PDF-existing')
+    await deckCommand(root, 'build', '--base', '/demo/', '--executable-path', join(root, 'missing-chrome'))
+    expect(await Bun.file(join(root, 'dist', 'index.html')).text()).toContain('id="download-pdf" href="/demo/handouts/existing.pdf" download')
+    expect(await Bun.file(join(root, 'dist', 'handouts', 'existing.pdf')).text()).toBe('%PDF-existing')
+    expect(await Bun.file(join(root, 'dist', 'slidev-exported.pdf')).exists()).toBe(false)
+  }
+  finally { await rm(root, { recursive: true, force: true }) }
+}, exportTestTimeout)
+
+it.skipIf(!chrome)('bundles and links a downloadable vector PDF in a subpath build', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-built-pdf-'))
+  const base = '/talks/d%C3%A9mo/'
+  const site = join(root, 'output', 'site')
+  let server: ReturnType<typeof Bun.serve> | undefined
+  let view: Bun.WebView | undefined
+  try {
+    const filename = 'handouts/Release notes.pdf'
+    await Bun.write(join(root, 'slides.md'), deck
+      .replace('nested/final/report', filename)
+      .replace('src="./missing-screenshot.png"', 'src="/cover.png"'))
+    await Bun.write(join(root, 'public', 'cover.png'), Bun.file(new URL('../../test/fixtures/pptx/picture.png', import.meta.url)))
+    await deckCommand(root, 'build', '--download', '--out', site, '--base', base, '--router-mode', 'history',
+      '--range', '2', '--with-clicks', '--executable-path', chrome!)
+    const pdf = await Bun.file(join(site, filename)).text()
+    expect(pdf.startsWith('%PDF')).toBe(true)
+    expect(pdf.match(/\/Type\s*\/Page\b/g)).toHaveLength(3)
+    expect(pdf).toContain('/Type /Font')
+    expect(pdf).toContain('/Subtype /Image')
+    expect(pdf.match(/\/Dest \/presentation-print-2-2\b/g)).toHaveLength(3)
+    const files = await realpath(site)
+    server = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      fetch(request) {
+        const path = deckPath(new URL(request.url).pathname, base)
+        if (path === undefined) return new Response(null, { status: 404 })
+        return asset(files, path === '/selected' ? '/index.html' : decodeURIComponent(path), request)
+      },
+    })
+    view = new Bun.WebView({ width: 960, height: 600, backend: { type: 'chrome', path: chrome!, url: false } })
+    await view.navigate(new URL(base + 'selected', server.url).href)
+    const href = await view.evaluate<string>("document.querySelector('#download-pdf[download]').href")
+    expect(new URL(href).pathname).toBe(base + 'handouts/Release%20notes.pdf')
+    expect((await fetch(href)).headers.get('Content-Type')).toBe('application/pdf')
+  }
+  finally {
+    view?.close()
+    await server?.stop(true)
+    await rm(root, { recursive: true, force: true })
+  }
+}, exportTestTimeout)
 
 describe('export creates output directories', () => {
   it.skipIf(!chrome).each([

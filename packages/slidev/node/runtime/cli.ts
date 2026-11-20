@@ -1,11 +1,11 @@
 #!/usr/bin/env bun
-import { cp, mkdir, mkdtemp, readFile, realpath, rm } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, realpath, rename, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { asset, within } from './assets.ts'
 import { findChrome } from './chrome.ts'
-import { resolveExportSettings, resolveNotesExportSettings } from './export-options.ts'
+import { resolveDownloadCapture, resolveExportSettings, resolveNotesExportSettings } from './export-options.ts'
 import { resolveDeckEntry } from './extension-resolver.ts'
 import { maxCodeLength } from './compile-code.ts'
 import { saveDrag } from './drag-source.ts'
@@ -25,6 +25,7 @@ import { version } from '../../../../package.json'
 const options = {
   out: { type: 'string' },
   output: { type: 'string' },
+  download: { type: 'boolean' },
   range: { type: 'string' },
   scale: { type: 'string' },
   'with-clicks': { type: 'boolean' },
@@ -45,6 +46,7 @@ const help = `ts-presentation <dev|build|format|export|export-notes|mcp> [slides
 
   dev     Serve a local presentation. Optional --port (default: 3030) and --mcp.
   build   Build a static site. Optional --out (default: dist beside the deck).
+          Use --download to include a downloadable PDF.
   format Normalize slide boundaries and speaker note blocks in the source.
   export  Write PDF, PNG, PPTX, editable PPTX or Markdown with slide images using Chrome.
           Optional --out and --executable-path.
@@ -106,7 +108,7 @@ async function main(): Promise<void> {
   if (!player.success || !player.outputs[0]) throw new Error('Could not build the browser player')
   const javascript = await player.outputs[0].text()
   const emptyStyle = '/* This deck has no custom styles. */\n'
-  const compile = createDeckCompiler(source, { base, routerMode, liveCompile: command === 'dev', mcpNavigation: command === 'dev' && values.mcp, mode, theme: values.theme })
+  const compile = createDeckCompiler(source, { base, routerMode, liveCompile: command === 'dev', mcpNavigation: command === 'dev' && values.mcp, mode, theme: values.theme, download: values.download })
 
   async function deckStyles(): Promise<string | Bun.BunFile> {
     const css = Bun.file(customStyle)
@@ -310,7 +312,38 @@ async function main(): Promise<void> {
   }
   if (command === 'build') {
     const output = resolve(destination ?? join(directory, 'dist'))
-    await writeSite(output)
+    if (within(publicDir, output)) throw new Error('Build output must be outside the deck’s public directory')
+    const deck = await compile()
+    const filename = deck.download?.filename
+    if (filename) {
+      const { executablePath, ...selection } = resolveDownloadCapture(deck.headmatter, values)
+      const executable = await findChrome(executablePath)
+      if (!executable) throw new Error('Chrome or Chromium is required for a PDF download. Pass --executable-path or set CHROME_BIN.')
+      const temporary = await mkdtemp(join(tmpdir(), 'ts-presentation-build-'))
+      try {
+        await writeSite(temporary, deck)
+        const root = await realpath(temporary)
+        const parts = filename.split('/')
+        const name = parts.pop()!
+        let parent = root
+        for (const part of parts) {
+          const next = join(parent, part)
+          await mkdir(next, { recursive: true })
+          parent = await realpath(next)
+          if (!within(root, parent)) throw new Error('The PDF download filename must stay inside the build directory')
+        }
+        const { capturePdf } = await import('./capture.ts')
+        const pdf = await capturePdf({ ...selection, root, executable, canvas: deck.canvas, base })
+        const staged = join(root, `.${crypto.randomUUID()}.pdf`)
+        await Bun.write(staged, pdf)
+        await rename(staged, join(parent, name))
+        await cp(temporary, output, { recursive: true })
+      }
+      finally {
+        await rm(temporary, { recursive: true, force: true })
+      }
+    }
+    else await writeSite(output, deck)
     console.log(join(output, 'index.html'))
     return
   }

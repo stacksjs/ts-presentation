@@ -81,6 +81,7 @@ export interface RenderOptions {
   compileExample?: CompileLiveCode
   mcpNavigation?: boolean
   mode?: PreparserContext['mode']
+  pdfDownloadHref?: string
   extensions?: LoadedExtensions
   layers?: DeckLayers
   components?: (frontmatter: Record<string, unknown>, slideNumber: number) => DeckComponentRenderer
@@ -465,6 +466,9 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     slideMarkup: slides.map(slide => slide.html).join('\n'),
     globalBottom,
     customControls,
+    downloadButton: options.pdfDownloadHref
+      ? baseMarkup(`<a id="download-pdf" href="${escapeHtml(options.pdfDownloadHref)}" download target="_blank" rel="noopener">Download PDF</a>`)
+      : '',
     contextMenu: contextMenu ? '<div id="presentation-context-menu" role="menu" aria-label="Presentation actions" hidden></div>' : '',
     editorPanel: options.liveCompile ? sideEditor : '',
     notesMarkup: notes.join('\n'),

@@ -73,6 +73,7 @@
       <output for="presenter-seek"></output>
     </div>
     <button id="overview-button" type="button">Overview</button>
+    {!! downloadButton !!}
     {!! editorButton !!}
     <button id="draw-button" type="button" aria-pressed="false"{!! drawHidden !!}>Draw</button>
     <button id="clear-drawing" type="button" hidden>Clear drawing</button>
