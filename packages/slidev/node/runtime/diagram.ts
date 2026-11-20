@@ -73,7 +73,23 @@ function parseDirectiveYaml(literal: string): MermaidOptions | undefined {
   catch { return }
 }
 
-function prepare(source: string, options?: MermaidOptions): { code: string, options: MermaidOptions } {
+function diagramScope(header: string | undefined): string | undefined {
+  const type = header?.split(/[\s:;]/, 1)[0]
+  if (!type) return
+  if (/^gantt$/i.test(type)) return 'gantt'
+  if (/^quadrantchart$/i.test(type)) return 'quadrantChart'
+  return Object.hasOwn(diagramScopes, type) ? diagramScopes[type] : type
+}
+
+function mergeDiagramLayer(base: MermaidOptions | undefined, layer: MermaidOptions | undefined, scope: string | undefined): MermaidOptions {
+  const options = mergeDiagramOptions(base, layer)
+  const scoped = scope && diagramOptionsRecord(layer?.[scope])
+  if (!scoped) return options
+  const appearance = Object.fromEntries(['theme', 'look', 'layout'].flatMap(name => typeof scoped[name] === 'string' ? [[name, scoped[name]]] : []))
+  return mergeDiagramOptions(options, appearance)
+}
+
+function prepare(source: string, options?: MermaidOptions): { code: string, options: MermaidOptions, header?: string, scope?: string } {
   let code = source.trim()
   let inline: MermaidOptions = {}
   const fields = /^---[ \t]*\r?\n([\s\S]+?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(code)
@@ -85,28 +101,31 @@ function prepare(source: string, options?: MermaidOptions): { code: string, opti
     inline = config
     code = code.slice(fields[0].length).trimStart()
   }
-  let directives: MermaidOptions | undefined
+  const directives: MermaidOptions[] = []
   if (code.includes('%%{')) {
     code = code.replace(diagramDirectives, (token, literal: string | undefined) => {
       if (literal === undefined) return token
       const config = parseDiagramOptions(literal) ?? parseDirectiveYaml(literal)
-      directives = mergeDiagramOptions(directives, config)
+      if (config) directives.push(config)
       return ''
     }).trim()
   }
-  const legacyOptions = diagramOptionsRecord(directives?.config)
-  const type = legacyOptions && diagramHeader(code)?.split(/[\s:;]/, 1)[0]
-  const scope = type && (Object.hasOwn(diagramScopes, type) ? diagramScopes[type] : /^gantt$/i.test(type) ? 'gantt' : type)
-  const config = scope ? { ...directives, [scope]: legacyOptions } : directives
-  return { code, options: mergeDiagramOptions(mergeDiagramOptions(options, inline), config) }
+  const header = diagramHeader(code)
+  const scope = diagramScope(header)
+  let resolved = mergeDiagramLayer(mergeDiagramLayer(undefined, options, scope), inline, scope)
+  for (const directive of directives) {
+    const legacy = diagramOptionsRecord(directive.config)
+    const layer = scope && legacy ? mergeDiagramOptions(directive, { [scope]: legacy }) : directive
+    resolved = mergeDiagramLayer(resolved, layer, scope)
+  }
+  return { code, options: resolved, header, scope }
 }
 
 function diagramHeader(code: string): string | undefined {
   return code.split('\n').find(line => line.trim() && !/^\s*(?:%%|#)/.test(line))?.trim()
 }
 
-function render(code: string, marker: string, options: MermaidOptions): string | undefined {
-  const header = diagramHeader(code)
+function render(code: string, marker: string, options: MermaidOptions, header: string | undefined): string | undefined {
   const title = typeof options.title === 'string' ? options.title : ''
   if (/^timeline(?:\s|$)/i.test(header ?? '')) return timeline(code, marker, options)
   if (/^journey$/i.test(header ?? '')) return journey(code, marker, options)
@@ -126,7 +145,7 @@ export function mermaid(source: string, marker: string, options?: MermaidOptions
   if (source.length > 30_000) return
   try {
     const diagram = prepare(source, options)
-    const svg = render(diagram.code, marker, diagram.options)
+    const svg = render(diagram.code, marker, diagram.options, diagram.header)
     return svg && applyDiagramTheme(optionsForSvg(svg, diagram.options), marker, diagram.options)
   }
   catch {
@@ -145,8 +164,8 @@ export async function renderMermaid(
   if (source.length > 30_000) return
   try {
     const diagram = prepare(source, config)
-    const options = mergeDiagramOptions(diagram.options, fence)
-    const svg = renderer ? await renderer(diagram.code, options) : render(diagram.code, marker, options)
+    const options = mergeDiagramLayer(diagram.options, fence, diagram.scope)
+    const svg = renderer ? await renderer(diagram.code, options) : render(diagram.code, marker, options, diagram.header)
     if (!svg) return
     const formatted = optionsForSvg(svg, options)
     return renderer ? formatted : applyDiagramTheme(formatted, marker, options)

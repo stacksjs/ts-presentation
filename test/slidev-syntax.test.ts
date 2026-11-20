@@ -6,7 +6,7 @@ import { lineMatches, parseEquationOptions } from '../packages/client/runtime/eq
 import { readFenceOptions } from '../packages/slidev/node/runtime/fence-options.ts'
 import { parseDeck, renderDeck } from '../packages/slidev/node/runtime/index.ts'
 import { createDeckCompiler } from '../packages/slidev/node/runtime/loader.ts'
-import { mermaid } from '../packages/slidev/node/runtime/diagram.ts'
+import { mermaid, renderMermaid } from '../packages/slidev/node/runtime/diagram.ts'
 
 // Adapted from Slidev's packages/slidev/node/syntax/katex.test.ts and
 // integration.test.ts. See licenses/Slidev-MIT.txt.
@@ -163,6 +163,31 @@ test('combines legacy diagram directives in source order and preserves quoted te
   const chart = mermaid(schedule, 'legacy-schedule')!
   expect(chart).toContain('<title>2026</title>')
   expect(chart).toMatch(/viewBox="0 0 ([\d.]+) ([\d.]+)" width="\1" height="\2"/)
+})
+
+test('resolves diagram-scoped appearance within each configuration layer', async () => {
+  const defaults = { theme: 'dark', gantt: { theme: 'neutral' }, gitGraph: { theme: 'neo', look: 'neo' } }
+  const schedule = 'GANTT\nReview :review, 2026-01-01, 3d'
+  const history = 'gitGraph\ncommit id:"root"'
+  expect(mermaid(schedule, 'scoped-schedule', defaults)).toContain('data-diagram-theme="neutral"')
+  const graph = mermaid(history, 'scoped-history', defaults)
+  expect(graph).toContain('data-diagram-theme="neo"')
+  expect(graph).toContain('<feDropShadow')
+  const frontmatter = '---\nconfig:\n  theme: base\n  gitGraph: { showCommitLabel: false, look: classic }\n---\n'
+  const inline = mermaid(frontmatter + history, 'frontmatter-history', defaults)
+  expect(inline).toContain('data-diagram-theme="base"')
+  expect(inline).not.toContain('class="diagram-git-label"')
+  expect(inline).not.toContain('<feDropShadow')
+  const directives = [
+    "%%{init: {gitGraph: {theme: 'redux-color', diagramPadding: 21}} }%%",
+    "%%{init: {theme: 'redux-dark', config: {look: 'neo'}} }%%",
+  ].join('\n')
+  const directed = mermaid(frontmatter + directives + '\n' + history, 'directed-history', defaults)
+  expect(directed).toContain('data-diagram-theme="redux-dark"')
+  expect(directed).toContain('transform="translate(21 21)"')
+  expect(directed).toContain('<feDropShadow')
+  const fenced = await renderMermaid(frontmatter + history, 'fenced-history', defaults, { theme: 'dark', gitGraph: { theme: 'neo-dark' } })
+  expect(fenced).toContain('data-diagram-theme="neo-dark"')
 })
 
 test('renders class and ER diagrams with markers and a pie chart with its legend', () => {

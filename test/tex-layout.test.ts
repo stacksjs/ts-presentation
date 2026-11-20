@@ -661,6 +661,21 @@ test('preserves spacing, markup, and limits in named TeX operators', () => {
   expect(() => math(String.raw`\operatorname{\unsupported}`, false)).toThrow('Unsupported math command')
 })
 
+test('declares reusable AMS operators with normal or display limits', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const ordinary = String.raw`\DeclareMathOperator \rank {rank} a\rank_i M`
+  expect(math(ordinary, true)).toContain(`${thin}<msub>${operator('rank')}<mi>i</mi></msub>${thin}`)
+  const limits = String.raw`\DeclareMathOperator*{\maximize}{arg\,max}\maximize_x f(x)`
+  expect(math(limits, true)).toContain(`<munder>${operator('arg\u2009max')}<mi>x</mi></munder>`)
+  expect(math(limits, false)).toContain(`<msub>${operator('arg\u2009max')}<mi>x</mi></msub>`)
+  expect(() => math(String.raw`\rank M`, false)).toThrow('Unsupported math command')
+  expect(() => math(String.raw`\DeclareMathOperator{\sin}{sine}`, false)).toThrow('already defined')
+
+  const deck = createMathRenderer({ globalGroup: true, throwOnError: true })
+  deck(String.raw`\DeclareMathOperator{\rank}{rank}`, true)
+  expect(deck(String.raw`\rank M`, false)).toContain(operator('rank') + thin + '<mi>M</mi>')
+})
+
 test('toggles nested TeX emphasis in the active text shape', () => {
   const math = createMathRenderer({ throwOnError: true })
   const nested = String.raw`\emph{foo \emph{bar} baz}`

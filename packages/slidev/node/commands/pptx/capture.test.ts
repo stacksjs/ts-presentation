@@ -468,7 +468,7 @@ a\overunderset{A}{B}{=}b
 $$
 
 $$
-x+\vcenter{\hbox{$\frac{a}{b}$}}+y
+\DeclareMathOperator{\rank}{rank}\rank\vcenter{\hbox{$\frac{a}{b}$}}+y
 $$`)
     const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
     const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
@@ -576,6 +576,7 @@ $$`)
     expect(annotations).toMatch(/<m:sPre><m:sub>.*?>i<\/m:t>.*?<m:sup>.*?>j<\/m:t>.*?<m:sSubSup><m:e>.*?>∑<\/m:t>.*?<m:sub>.*?>k<\/m:t>.*?<m:sup>.*?>l<\/m:t>/)
     expect(annotations).toMatch(/<m:limUpp><m:e><m:limLow><m:e><m:r>.*?>=<\/m:t>.*?<m:lim>.*?>B<\/m:t>.*?<m:lim>.*?>A<\/m:t>/)
     expect(annotations).toContain('<m:m><m:mPr><m:baseJc m:val="center"/></m:mPr><m:mr><m:e><m:f>')
+    expect(annotations).toContain('<m:t xml:space="preserve">rank</m:t>')
     for (const cell of ['a', 'b', 'c', 'd']) expect(fonts.get(cell)).toBe('<m:sty m:val="i"/>')
     expect(fonts.get('i')).toBe('<m:sty m:val="p"/>')
     expect(fonts.get('plain')).toBe('<m:sty m:val="p"/>')
