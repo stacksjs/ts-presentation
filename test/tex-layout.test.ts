@@ -825,6 +825,40 @@ a+b+c \\[.4em]
   expect([...deck.matchAll(/<mtext>(Check|\(\d+\))<\/mtext>/g)].map(match => match[1])).toEqual(['(1)', 'Check', '(2)'])
 })
 
+test('parses the starred Mathtools cases conditions as scoped prose and inline math', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const body = String.raw`\sum_{i=1}^n i & \TextOrMath{when}{wrong} $n>0$ \\ 0 & otherwise`
+  for (const [environment, side, limit] of [
+    ['cases*', 'left', 'msubsup'],
+    ['rcases*', 'right', 'msubsup'],
+    ['dcases*', 'left', 'munderover'],
+    ['drcases*', 'right', 'munderover'],
+  ]) {
+    const markup = math(`\\begin{${environment}}${body}\\end{${environment}}`, true).split('<annotation')[0]
+    expect(markup).toContain(`data-math-cases="${side}"`)
+    expect(markup).toContain(`<${limit}>`)
+    expect(markup).toContain('<mtext>when\u00a0</mtext><mrow class="math-font-reset"><mi>n</mi><mo>&gt;</mo><mn>0</mn></mrow>')
+    expect(markup).toContain('<mtext>otherwise</mtext>')
+    expect(markup).not.toContain('wrong')
+  }
+  const scoped = math(String.raw`\begin{cases*}a&\def\condition{otherwise}\condition\\b&literal \& text\end{cases*}`, false)
+  expect(scoped).toContain('<mtext>otherwise</mtext>')
+  expect(scoped).toContain('<mtext>literal &amp; text</mtext>')
+  const macroSeparator = math(String.raw`\def\breakrow{\\}\begin{cases*}x&first\breakrow y&second\end{cases*}`, false)
+  expect(macroSeparator).toContain('<mtext>second</mtext>')
+  expect(() => math(String.raw`\begin{cases*}a&condition&additional\end{cases*}`, false)).toThrow('Too many columns in cases*')
+})
+
+test('expands MoveEqLeft into opposing kerns across an alignment point', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const output = (source: string) => math(source, true).split('<annotation')[0]
+  expect(output(String.raw`\begin{align*}\MoveEqLeft a+b\\ &=c\end{align*}`))
+    .toBe(output(String.raw`\begin{align*}\kern{2em}&\kern{-2em}a+b\\ &=c\end{align*}`))
+  expect(output(String.raw`\def\amount{-.5}\edef\indent{\MoveEqLeft[\amount]}\begin{aligned}\indent a+b\\ &=c\end{aligned}`))
+    .toBe(output(String.raw`\begin{aligned}\kern{-.5em}&\kern{.5em}a+b\\ &=c\end{aligned}`))
+  expect(() => output(String.raw`\begin{align*}\MoveEqLeft[wide] x\\ &=3\end{align*}`)).toThrow('Expected a signed number')
+})
+
 test('parses nested Mathtools multlined widths, baselines, and row overrides', () => {
   const math = createMathRenderer({ throwOnError: true })
   const source = String.raw`\def\width{12em}\left[\begin{multlined}[\width][b]
@@ -1714,6 +1748,46 @@ test('enforces KaTeX strict settings for comments, markup, text commands, spacin
 })
 
 const chrome = await findChrome()
+
+test.skipIf(!chrome)('aligns cases columns and indents continuation lines in Chromium', async () => {
+  const sources = [
+    String.raw`f(x)=\begin{cases*}x & when $x<0$ \\ a+b+c+d & otherwise\end{cases*}`,
+    String.raw`\begin{align*}\MoveEqLeft a+b+c+d\\&x\\&y\end{align*}`,
+    String.raw`\begin{align*}\MoveEqLeft[1.5] a+b+c+d\\&x\\&y\end{align*}`,
+  ]
+  const css = await Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url)).text()
+  const body = sources.map(source => `<section>${renderMath(source, true)}</section>`).join('')
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response(`<!doctype html><style>${css}</style><main style="font-size:32px">${body}</main>`, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    }),
+  })
+  const view = new Bun.WebView({ width: 920, height: 660, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await view.navigate(server.url.href)
+    const { cases, align } = await view.evaluate<{ cases: number[][], align: number[][] }>(`(() => {
+      const left = element => element.getBoundingClientRect().left
+      const rows = document.querySelectorAll('[data-math-cases] .math-alignment-grid > mtr')
+      return {
+        cases: [...rows].map(row => [left(row.querySelector('mi')), left(row.querySelector('mtext'))]),
+        align: [...document.querySelectorAll('[data-equation-environment="align*"]')].map(table => [...table.children].map(row => left(row.querySelector('mi')))),
+      }
+    })()`)
+    expect(cases).toHaveLength(2)
+    expect(cases[0][0]).toBeCloseTo(cases[1][0], 1)
+    expect(cases[0][1]).toBeCloseTo(cases[1][1], 1)
+    expect(cases[0][1] - cases[0][0]).toBeGreaterThan(80)
+    for (const [index, [first, second, third]] of align.entries()) {
+      expect(second - first).toBeCloseTo(index === 0 ? 64 : 48, 1)
+      expect(second).toBeCloseTo(third, 1)
+    }
+  }
+  finally {
+    view.close()
+    await server.stop(true)
+  }
+})
 
 test.skipIf(!chrome)('aligns Mathtools multlined baselines and rows in Chromium', async () => {
   const mark = String.raw`\rule{1px}{1px}`

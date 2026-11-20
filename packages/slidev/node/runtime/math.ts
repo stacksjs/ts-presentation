@@ -308,12 +308,12 @@ function tokenize(source: string, onTrailingComment?: () => void): string[] {
 }
 
 type MathMode = 'math' | 'text'
-const expansionPrimitives = ['\\expandafter', '\\noexpand', '\\@firstoftwo', '\\@secondoftwo', '\\@ifnextchar', '\\@ifstar', '\\TextOrMath', '\\html@mathml', '\\message', '\\errmessage', '\\char'] as const
+const expansionPrimitives = ['\\expandafter', '\\noexpand', '\\@firstoftwo', '\\@secondoftwo', '\\@ifnextchar', '\\@ifstar', '\\TextOrMath', '\\html@mathml', '\\message', '\\errmessage', '\\char', '\\MoveEqLeft'] as const
 const expansionPrimitiveNames = new Set<string>(expansionPrimitives)
 const macroDeclaration = /^\\(?:[gex]?def|(?:future)?let|(?:new|renew|provide)command|DeclarePairedDelimiter(?:X(?:PP)?)?|global|long)$/
 const assignmentCommand = /^\\(?:[gex]?def|(?:future)?let)$/
 type ExpansionPrimitive = typeof expansionPrimitives[number]
-type ConditionalPrimitive = Exclude<ExpansionPrimitive, '\\expandafter' | '\\noexpand' | '\\message' | '\\errmessage' | '\\char'>
+type ConditionalPrimitive = Exclude<ExpansionPrimitive, '\\expandafter' | '\\noexpand' | '\\message' | '\\errmessage' | '\\char' | '\\MoveEqLeft'>
 interface TokenMacro { body: string[], parameters: string[][], prefix: string[], optional?: string[], unexpandable?: boolean, source?: string }
 type DelimitedNotation = 'Braket' | 'Set' | 'set'
 type DotsMacro = 'dots' | 'dotsc' | 'dotso' | 'cdots'
@@ -1223,6 +1223,15 @@ export function renderMath(source: string, display = false, configured: MathMacr
       return []
     }
     if (primitive === '\\char') return expandCharacter()
+    if (primitive === '\\MoveEqLeft') {
+      if (mode !== 'math') throw new MathParseError('Math command \\MoveEqLeft requires math mode')
+      const input = rawBracket()
+      const amount = input === undefined ? '2' : expandDefinition(input).join('').trim()
+      if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(amount) || !Number.isFinite(Number(amount)))
+        throw new MathParseError('Expected a signed number after \\MoveEqLeft')
+      const inverse = amount.startsWith('-') ? amount.slice(1) : `-${amount.replace(/^\+/, '')}`
+      return tokenize(`\\kern{${amount}em}&\\kern{${inverse}em}`)
+    }
     return chooseBranch(primitive)
   }
 
@@ -1990,7 +1999,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return xml`<mrow style="color:${color}">${content}</mrow>`
   }
 
-  function parseTextArgument(properties: string, parentheses: boolean, capture?: (parts: Markup[]) => void, end = boundary): Markup {
+  function parseTextArgument(properties: string, parentheses: boolean, capture?: (parts: Markup[]) => void, end = boundary, stops?: readonly string[]): Markup {
     if (depth++ > 100) throw new MathParseError('Math text is nested too deeply')
     const wrap = (markup: Markup) => properties ? xml`<mrow style="${properties}">${markup}</mrow>` : markup
     const opening = parentheses ? '(' : ''
@@ -2026,6 +2035,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
           if (end !== boundary) cursor++
           if (end === '\\endgroup') space()
           literal += closing
+          break
+        }
+        if (stops?.includes(token)) {
+          literal = literal.replace(/[ \t\r\n]+$/, '')
           break
         }
         if (!token || token === boundary || token === '}' || token === '\\endgroup') throw new MathParseError('Unclosed math text')
@@ -2601,7 +2614,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       tagState.label = nextTag(display && environment === 'equation')
       return xml`<mrow>${content}</mrow>`
     }
-    if (!spreadEnvironment && !/^(?:[pbBvV]?matrix[*]?|smallmatrix|d?rcases|d?cases|align(?:ed|edat|at[*]?|[*])?|gather(?:ed|[*])?|split|d?array|subarray)$/.test(environment))
+    if (!spreadEnvironment && !/^(?:[pbBvV]?matrix[*]?|smallmatrix|d?r?cases\*?|align(?:ed|edat|at[*]?|[*])?|gather(?:ed|[*])?|split|d?array|subarray)$/.test(environment))
       throw new MathParseError(`Unsupported math environment: ${environment}`)
     const subarray = environment === 'subarray'
     const smallMatrix = environment === 'smallmatrix'
@@ -2619,7 +2632,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const compact = subarray || smallMatrix
     const aligned = spreadEnvironment || environment.startsWith('align') || environment === 'split'
     const gathered = environment.startsWith('gather')
-    const cases = environment.endsWith('cases')
+    const cases = environment.endsWith('cases') || environment.endsWith('cases*')
+    const proseCases = cases && environment.endsWith('*')
     const ordinaryCellStyle = environment.startsWith('d') || aligned || gathered ? 0 : 1
     const stretch = !compact && !cases && macros.has('\\arraystretch')
       ? Number.parseFloat(expandDefinition(['\\arraystretch']).join('')) : 1
@@ -2655,7 +2669,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
     let closed = false
     const stops = ['&', '\\\\', '\\newline', '\\cr', '\\end']
     if (allowIntertext) stops.push(...intertextCommands.keys())
-    while (peek()) {
+    // The condition column must expand in text mode, including its first token.
+    while ((proseCases && columnsInRow === 1) || peek()) {
       if (!cells.length) {
         while (peek() === '\\hline' || peek() === '\\hdashline')
           rules.push(take() === '\\hline' ? 'solid' : 'dashed')
@@ -2688,6 +2703,14 @@ export function renderMath(source: string, display = false, configured: MathMacr
         cells.push({ span, spacing: Number(scale) })
         columnsInRow += span
       }
+      else if (proseCases && columnsInRow === 1) {
+        const properties = mathFontActive || textFont ? textFontCSS({ ...normalFont, ...textFont }) : ''
+        cells.push(inMode('text', () => {
+          expand()
+          return parseTextArgument(properties, false, undefined, boundary, stops)
+        }))
+        columnsInRow++
+      }
       else {
         cells.push(inScope(() => row(stops, false, false, undefined, followsOrdinary)))
         columnsInRow++
@@ -2696,6 +2719,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       if (separator === '&') {
         if (subarray || gathered) throw new MathParseError('Too many columns in math stack')
         if (environment === 'split' && columnsInRow === 2) throw new MathParseError('Too many columns in split')
+        if (proseCases && columnsInRow === 2) throw new MathParseError(`Too many columns in ${environment}`)
         if (columnArray && columnsInRow === layout.columns.length) strictViolation('textEnv', 'Too few columns in the array specification')
         continue
       }
@@ -2734,7 +2758,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const spread = spreadEnvironment && columnCount > 2 ? environment.startsWith('xalignat') ? 'balanced' : 'full' : ''
     if (spread === 'full') fullWidthAlignment = true
     const displayRows = (tags || hasIntertext || spread) && rowTags && display && depth === 1
-    const grid = aligned || alignment.length > 0 || displayRows
+    const grid = aligned || cases || alignment.length > 0 || displayRows
     const rowRules = rows.reduce((count, entry) => count + entry.before.length, rules.length)
     const columnRules = layout.columns.reduce((count, column) => count + column.before.length, layout.after.length)
     const rectangular = grid || columnArray || tags || rowRules > 0 || rows.some(row => row.columns > row.cells.length)
@@ -2762,7 +2786,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       ? ` style="${gridTracks}"${tagPlacement}${spreadLayout}${options?.fleqn && spread !== 'full' ? ' data-equation-flush' : ''}`
       : grid ? ` style="--math-columns:${columnAlignment.length}"` : ''
     return (style) => {
-      const cellStyle = compact ? 2 : ordinaryCellStyle
+      const tableCellStyle = compact ? 2 : ordinaryCellStyle
       const prose = (index: number) => intertexts.get(index)?.map(({ content, spacing }) =>
         `<mtr data-equation-intertext="${spacing}"><mtd columnspan="${columnCount + Number(tags)}"><mrow><mrow>${renderMarkup(content, 1)}</mrow></mrow></mtd></mtr>`).join('') ?? ''
       const markup = rows.map((entry, rowIndex) => {
@@ -2777,6 +2801,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
           const span = dots?.span ?? 1
           nextColumn += span
           const align = alignmentAt(index)
+          const cellStyle = proseCases && index === 1 ? 1 : tableCellStyle
           const styling: string[] = []
           if (align) styling.push(`text-align:${align}`)
           if (grid && align !== 'left')
@@ -2816,10 +2841,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
         return `${prose(rowIndex)}<mtr>${leqno ? cell : ''}${content}${leqno ? '' : cell}</mtr>`
       }).join('') + prose(rows.length)
       const matrix = `<mtable${lines} data-math-array${align}${layoutClass}${gridLayout}${amsAlignment}${rowSpacing}>${markup}</mtable>`
-      const table = compact ? mathSize(cellStyle, matrix) : matrix
+      const table = compact ? mathSize(tableCellStyle, matrix) : matrix
       if (displayRows) return table
       // Center the whole grid on the math axis beside surrounding inline atoms.
-      const centered = grid && style !== 0
+      const centered = grid && (cases || style !== 0)
         ? `<mtable class="math-alignment-axis"><mtr><mtd>${table}</mtd></mtr></mtable>`
         : table
       const caseBrace = cases ? ` data-math-cases="${left ? 'left' : 'right'}"` : ''

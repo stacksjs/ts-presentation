@@ -391,14 +391,26 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba, 
     const mark = run('&')
     return wrap('eqArr', rows.map(([content]) => wrap('e', mark + content)).join(''))
   }
+  function alignmentAxisContents(node: RawMathElement): RawMathElement[] | undefined {
+    if (node.name !== 'mtable' || node.attributes.class !== 'math-alignment-axis' || !only(node, 'class') || node.children.length !== 1) return
+    const [row] = node.children
+    if (row.name !== 'mtr' || !only(row) || row.text.trim() || row.children.length !== 1) return
+    const [cell] = row.children
+    if (cell.name === 'mtd' && only(cell) && !cell.text.trim()) return cell.children
+  }
   function caseArray(node: RawMathElement, side: string): string | undefined {
     if (node.children.length !== 2 || (side !== 'left' && side !== 'right')) return
     const [first, second] = node.children
     const left = side === 'left'
     const brace = left ? first : second
-    const table = left ? second : first
-    if (!stretchyFence(brace, left ? leftFences : rightFences) || brace.text !== (left ? '{' : '}')
-      || !only(table, 'columnalign', 'data-equation-lines', 'data-math-array')) return
+    const container = left ? second : first
+    const wrapped = alignmentAxisContents(container)
+    const table = wrapped?.[0] ?? container
+    if (!stretchyFence(brace, left ? leftFences : rightFences) || brace.text !== (left ? '{' : '}')) return
+    if (wrapped && wrapped.length !== 1) return
+    if (!only(table, 'columnalign', 'data-equation-lines', 'data-math-array', 'class', 'style')) return
+    if ((table.attributes.class || table.attributes.style)
+      && (table.attributes.class !== 'math-alignment-grid' || !/^--math-columns:[12]$/.test(table.attributes.style ?? ''))) return
     const array = inFont(defaultMathFont, () => {
       const rows = tableRows(table, caseCellStyles)
       if (!rows || rows.some(row => row.length > 2 || row.some(cell => cell.includes('&amp;')))) return
@@ -578,11 +590,9 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba, 
       if (rows?.length === 1 && rows[0].length === 1) return matrix(rows, wrap('mPr', setting('baseJc', 'center')))
       return
     }
-    if (name === 'mtable' && attributes.class === 'math-alignment-axis' && only(node, 'class') && children.length === 1) {
-      const [row] = children
-      const [cell] = row.children
-      if (row.name === 'mtr' && only(row) && !row.text.trim() && row.children.length === 1
-        && cell.name === 'mtd' && only(cell) && !cell.text.trim()) return sequence(cell.children)
+    if (name === 'mtable' && attributes.class === 'math-alignment-axis') {
+      const content = alignmentAxisContents(node)
+      if (content) return sequence(content)
       return
     }
     if (name === 'mtable' && only(node, 'data-equation-lines', 'data-math-array')) {

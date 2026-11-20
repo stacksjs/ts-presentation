@@ -876,6 +876,18 @@ $$
 
 $$
 B=\frac{\splitfrac{x+y+z}{+w}}{n}
+$$
+
+---
+
+# Conditions in prose
+
+$$
+\begin{dcases*}\sum_{i=1}^n i&when $n>0$\\0&otherwise\end{dcases*}
+$$
+
+$$
+\begin{rcases*}x&for \(x\geq0\)\\0&otherwise\end{rcases*}
 $$`)
     const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
     const exportDeck = Bun.spawn([process.execPath, cli, 'export', entry, '--format', 'pptx-editable', '--output', output, '--executable-path', chrome!], {
@@ -890,6 +902,7 @@ $$`)
     const arrays = parts.get('ppt/slides/slide3.xml')?.toString() ?? ''
     const dotted = parts.get('ppt/slides/slide4.xml')?.toString() ?? ''
     const multiline = parts.get('ppt/slides/slide5.xml')?.toString() ?? ''
+    const prose = parts.get('ppt/slides/slide6.xml')?.toString() ?? ''
     expect(compact.match(/<a14:m>/g)).toHaveLength(4)
     expect(compact.match(/<mc:Fallback><p:sp>/g)).toHaveLength(4)
     expect(compact).toMatch(/<m:nary>.*?<m:sub><m:m><m:mr>/)
@@ -915,6 +928,12 @@ $$`)
     expect(dotted).not.toContain('<a14:m>')
     expect(multiline.match(/<p:pic>/g)).toHaveLength(2)
     expect(multiline).not.toContain('<a14:m>')
+    expect(prose.match(/<a14:m>/g)).toHaveLength(2)
+    expect(prose.match(/<mc:Fallback><p:sp>/g)).toHaveLength(2)
+    expect(prose).toContain('<m:begChr m:val="{"/>')
+    expect(prose).toContain('<m:endChr m:val="}"/>')
+    expect(prose).toMatch(/<m:eqArr>.*?<m:nary>.*?when\s*<\/m:t>.*?>n<\/m:t>.*?&gt;<\/m:t>/)
+    expect(prose).toContain('>otherwise</m:t>')
   }
   finally {
     await rm(root, { recursive: true, force: true })
