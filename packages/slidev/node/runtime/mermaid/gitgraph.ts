@@ -100,7 +100,7 @@ function parseGitHistory(source: string, options?: unknown): GitGraphOptions | u
         ? fields(fieldsForLine.slice(1), ['id', 'tag', 'type', 'msg'])
         : fields(rest, ['id', 'tag', 'type'])
       if (!attrs) return
-      const commit = { id: attrs.get('id')?.[0], tags: attrs.get('tag'), style: attrs.get('type')?.[0] as GitCommitStyle | undefined }
+      const commit = { id: attrs.get('id')?.[0] || undefined, tags: attrs.get('tag'), style: attrs.get('type')?.[0] as GitCommitStyle | undefined }
       if (op === 'merge') {
         if (!first) return
         operations.push({ op, branch: first, ...commit })
@@ -113,6 +113,7 @@ function parseGitHistory(source: string, options?: unknown): GitGraphOptions | u
   return {
     operations, title: chart.title, accessibleTitle: chart.accessibleTitle, description: chart.description,
     direction: header[1] as GitGraphDirection | undefined,
+    duplicateCommitIds: 'latest',
     mainBranchName: typeof config.mainBranchName === 'string' ? config.mainBranchName : undefined,
     mainBranchOrder: typeof config.mainBranchOrder === 'number' ? config.mainBranchOrder : undefined,
     titleTopMargin: diagramPixels(config.titleTopMargin),

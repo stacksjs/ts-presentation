@@ -8,6 +8,10 @@ function isTag(value: string): value is GanttTaskTag {
 
 const weekdays: ReadonlySet<string> = new Set(['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'])
 
+export function isGanttHeader(line = ''): boolean {
+  return /^gantt(?:\s+%%.*)?$/i.test(line)
+}
+
 function isWeekday(value: unknown): value is GanttWeekday {
   return typeof value === 'string' && weekdays.has(value)
 }
@@ -67,7 +71,7 @@ function parseClick(line: string): { ids: string[], interaction: TaskInteraction
 
 function parseGantt(source: string, now: number, interactionsEnabled = false, configuredAxisFormat = ''): GanttChartOptions | undefined {
   const chart = readChronology(source, '')
-  if (!chart || chart.header !== 'gantt') return
+  if (!chart || !isGanttHeader(chart.header)) return
 
   let dateFormat = 'YYYY-MM-DD'
   let axisFormat = ''
@@ -84,14 +88,14 @@ function parseGantt(source: string, now: number, interactionsEnabled = false, co
   const interactions = new Map<string, TaskInteraction>()
   let generatedIds = 0
   for (const line of chart.rows) {
-    const [, directive, text = ''] = /^(\S+)(?:\s+(.+))?$/.exec(line) ?? []
+    const [, directive, text = ''] = /^([^\s:]+)(?:\s*:\s*|\s+)?(.*)$/.exec(line) ?? []
     switch (directive?.toLowerCase()) {
       case 'dateformat': if (!text || text.length > 72) return; dateFormat = text; continue
       case 'axisformat': axisFormat = text; continue
       case 'tickinterval': ticks = text; continue
       case 'excludes': exclusions.push(...text.split(/[\s,]+/).filter(Boolean)); continue
       case 'includes': inclusions.push(...text.split(/[\s,]+/).filter(Boolean)); continue
-      case 'section': if (!text) return; sections.push({ name: text, tasks: [] }); continue
+      case 'section': if (!text) return; sections.push({ name: text.replace(/<\/?br(?:\s|\\t)*\/?>/gi, '<br>'), tasks: [] }); continue
       case 'weekday': {
         const day = text.toLowerCase()
         if (!isWeekday(day)) return
@@ -124,7 +128,7 @@ function parseGantt(source: string, now: number, interactionsEnabled = false, co
     const segments = spec.split(',').map(part => part.trim())
     const tags: GanttTaskTag[] = []
     while (isTag(segments[0])) tags.push(segments.shift() as GanttTaskTag)
-    if (segments.length < 1 || segments.length > 3 || segments.some(segment => !segment)) return
+    if (segments.length < 1 || segments.length > 3 || segments.slice(0, -1).some(segment => !segment)) return
     const id = segments.length === 3 ? segments.shift()! : `task${++generatedIds}`
     const [start, end] = segments.length === 2 ? segments : [undefined, segments[0]]
     const task: GanttTask = { id, name, tags }
@@ -137,6 +141,8 @@ function parseGantt(source: string, now: number, interactionsEnabled = false, co
     sections.at(-1)!.tasks.push(task)
   }
   const parseDate = ganttDateParser(dateFormat, now)
+  const isoDate = ganttDateParser('YYYY-MM-DD', now)
+  const calendarDate = (value: string) => isoDate(value) !== undefined || parseDate(value) !== undefined
   const taskIds = new Set(sections.flatMap(section => section.tasks.map(task => task.id)))
   for (const section of sections) {
     for (const task of section.tasks) {
@@ -144,10 +150,16 @@ function parseGantt(source: string, now: number, interactionsEnabled = false, co
         const unknown = task[kind]?.filter(id => !taskIds.has(id))
         if (unknown?.length) console.warn(`Gantt task "${task.name}" references unknown IDs in "${kind}": ${unknown.join(', ')}`)
       }
+      if (task.start && dateFormat === 'YYYY-MM-DD') {
+        const [, year, month, day] = /^(\d{3,4})-(\d{1,2})-(\d{1,2})$/.exec(task.start) ?? []
+        if (year) task.start = `${year.padStart(4, '0')}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
+      }
       // A literal suffix in dateFormat can make a date look like a duration.
       if (task.end !== undefined && parseDate(task.end) === undefined) {
-        // Mermaid keeps the task at its start when its end is neither a date nor a duration.
-        task.duration = ganttDurationEnd(0, task.end) === undefined ? '0ms' : task.end
+        const duration = ganttDurationEnd(0, task.end)
+        if (duration === undefined && task.end && task.end !== '0')
+          console.warn(`Gantt task "${task.name}" has an invalid end "${task.end}". Use a date or duration such as 0d for a milestone.`)
+        task.duration = duration === undefined ? '0ms' : task.end
         delete task.end
       }
       const interaction = task.id ? interactions.get(task.id) : undefined
@@ -156,7 +168,10 @@ function parseGantt(source: string, now: number, interactionsEnabled = false, co
   }
   return { sections, title: chart.title, accessibleTitle: chart.accessibleTitle, description: chart.description, dateFormat,
     axisFormat: axisFormat || configuredAxisFormat || (dateFormat === 'D' ? '%d' : ''), tickInterval: ticks,
-    weekday, weekend, topAxis, todayMarker, todayMarkerStyle, inclusiveEndDates, excludes: exclusions, includes: inclusions,
+    weekday, weekend, topAxis, todayMarker, todayMarkerStyle, inclusiveEndDates,
+    // Mermaid compares these tokens to formatted dates and weekday names. Unmatched tokens are inert.
+    excludes: exclusions.filter(value => value.toLowerCase() === 'weekends' || weekdays.has(value.toLowerCase()) || calendarDate(value)),
+    includes: inclusions.filter(calendarDate),
     exclusionMode: 'whole-days', durationMode: 'calendar', missingDependencyFallback: 'today', now }
 }
 
@@ -175,7 +190,7 @@ export function gantt(source: string, idPrefix: string, options?: unknown, fallb
   const color = (key: string) => typeof variables[key] === 'string' ? variables[key] as string : undefined
   const alternateSection = color('altSectionBkgColor')
   const sectionColors = [color('sectionBkgColor'), alternateSection, color('sectionBkgColor2'), alternateSection]
-  return ganttChart({
+  const svg = ganttChart({
     ...chart, idPrefix, title: chart.title || fallbackTitle,
     tickInterval: chart.tickInterval || (typeof config.tickInterval === 'string' ? config.tickInterval : undefined),
     weekday: chart.weekday ?? (isWeekday(config.weekday) ? config.weekday : undefined),
@@ -201,4 +216,7 @@ export function gantt(source: string, idPrefix: string, options?: unknown, fallb
       excluded: color('excludeBkgColor'), reference: color('vertLineColor'),
     },
   })
+  if (config.useMaxWidth === false)
+    return svg?.replace(/^(<svg\b[^>]*\bviewBox="0 0 ([\d.]+) ([\d.]+)")/, '$1 width="$2" height="$3"')
+  return svg
 }

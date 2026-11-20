@@ -61,8 +61,8 @@ Follow-up :milestone, followup, 10-03-2026, 0d`
 })
 
 test('accepts mixed-case Gantt directives and preserves date formats and task IDs', () => {
-  const source = `gantt
-DATEFORMAT DD-MM-YYYY
+  const source = `GANTT %% imported schedule
+DATEFORMAT :DD-MM-YYYY
 AxisFormat %b %d
 TICKINTERVAL 1day
 EXCLUDES weekends
@@ -86,6 +86,38 @@ test('uses strict input dates, validates dependencies and supports timezone offs
   expect(iso('2026-02-30 03:15 -0800')).toBeUndefined()
   expect(new Date(iso('2026-03-04 03:15 -0800')!).toISOString()).toBe('2026-03-04T11:15:00.000Z')
   expect(mermaid('gantt\nA :a, after b, 1d\nB :b, after a, 1d', 'cycle')).toBeUndefined()
+})
+
+// Based on Mermaid 12.3.0 Gantt parser and rendering fixtures (MIT).
+test('imports multiline Gantt sections, repeated reference markers, and legacy exclusion lists', () => {
+  const source = String.raw`gantt
+excludes weekdays, 2026-03-09
+section Review<br\t/>and publish
+Review :review, 2026-03-08, 1d
+Marker :vert, milestone, marker, 2026-03-10,
+Marker :vert, milestone, marker, 2026-03-10,
+Ship :ship, after review marker, 1d`
+  const schedule = scheduleGantt(source)
+  expect(schedule?.tasks.at(-1)?.start).toBe(Date.UTC(2026, 2, 10))
+  expect(schedule?.tasks[1].end).toBe(schedule?.tasks[1].start)
+  const svg = mermaid(source, 'schedule', { gantt: { useMaxWidth: false, useWidth: 640 } })
+  expect(svg).toMatch(/<svg\b[^>]*viewBox="0 0 640 ([\d.]+)" width="640" height="\1"/)
+  expect(svg).toMatch(/class="diagram-gantt-section-label"[^>]*><tspan[^>]*>Review<\/tspan><tspan[^>]*>and publish<\/tspan>/)
+  expect(svg?.match(/class="diagram-gantt-reference-label"/g)).toHaveLength(1)
+})
+
+test('pads legacy ISO start dates and warns about invalid Gantt milestones', () => {
+  const source = `gantt
+Past work :past, 202-12-1, 7d
+Milestone :milestone, 2026-01-01, missingDuration`
+  const warn = spyOn(console, 'warn').mockImplementation(() => {})
+  try {
+    const schedule = scheduleGantt(source)
+    expect(new Date(schedule!.tasks[0].start).toISOString()).toBe('0202-12-01T00:00:00.000Z')
+    expect(schedule?.tasks[1].end).toBe(schedule?.tasks[1].start)
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('missingDuration'))
+  }
+  finally { warn.mockRestore() }
 })
 
 test('diagnoses unknown imported Gantt dependencies and renders the remaining schedule', async () => {
@@ -225,6 +257,23 @@ test('dispatches gitGraph when its header and first commit share a line', () => 
   const svg = mermaid('gitGraph; commit id: "first; draft"; commit id: "publish"', 'history')!
   expect(svg).toContain('data-commit-id="first; draft"')
   expect(svg).toContain('data-parent-ids="first; draft"')
+})
+
+test('imports GitGraph branch-only diagrams and warns while retaining repeated commit IDs', () => {
+  const svg = mermaid('gitGraph\nbranch review\nswitch review', 'empty-history')
+  expect(svg).toContain('>review</tspan>')
+  expect(buildGitHistory('gitGraph\nbranch review\ncheckout review')?.currentBranch).toBe('review')
+
+  const warn = spyOn(console, 'warn').mockImplementation(() => {})
+  try {
+    const source = 'gitGraph\ncommit id:""\ncommit id:"review"\ncommit id:"review" msg:"new draft"'
+    const history = buildGitHistory(source)
+    expect(history?.commits.map(commit => commit.id)).toEqual(['c1', 'review', 'review'])
+    expect(history?.commits[2].parents[0]).toBe(history?.commits[1])
+    expect(warn).toHaveBeenCalledWith('Commit ID review already exists')
+    expect(mermaid(source, 'repeated')?.match(/data-commit-id="review"/g)).toHaveLength(2)
+  }
+  finally { warn.mockRestore() }
 })
 
 test('builds GitGraph branch history with merge parents, tags, and cherry-picks', () => {
