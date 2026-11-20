@@ -125,7 +125,7 @@ export function mermaid(source: string, marker: string, options?: MermaidOptions
   try {
     const diagram = prepare(source, options)
     const svg = render(diagram.code, marker, diagram.options)
-    return svg && applyDiagramTheme(optionsForSvg(svg, diagram.options), marker, diagram.options.themeCSS)
+    return svg && applyDiagramTheme(optionsForSvg(svg, diagram.options), marker, diagram.options)
   }
   catch {
     return
@@ -147,7 +147,7 @@ export async function renderMermaid(
     const svg = renderer ? await renderer(diagram.code, options) : render(diagram.code, marker, options)
     if (!svg) return
     const formatted = optionsForSvg(svg, options)
-    return renderer ? formatted : applyDiagramTheme(formatted, marker, options.themeCSS)
+    return renderer ? formatted : applyDiagramTheme(formatted, marker, options)
   }
   catch {
     return

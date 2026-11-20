@@ -189,6 +189,7 @@ export function gantt(source: string, idPrefix: string, options: MermaidOptions 
   if (!chart) return
   const variables = options.themeVariables && typeof options.themeVariables === 'object' ? options.themeVariables as Record<string, unknown> : {}
   const preset = ganttTheme(options.theme)
+  const styled = typeof options.themeCSS === 'string' && !!options.themeCSS.trim()
   const number = (key: string) => diagramPixels(config[key])
   const color = (key: string) => typeof variables[key] === 'string' ? variables[key] as string : preset?.[key]
   const alternateSection = color('altSectionBkgColor')
@@ -206,7 +207,7 @@ export function gantt(source: string, idPrefix: string, options: MermaidOptions 
     leftPadding: number('leftPadding'), rightPadding: number('rightPadding'),
     width: number('useWidth'), titleTopMargin: number('titleTopMargin'), bottomMarginAdj: number('bottomMarginAdj'),
     gridLineStartPadding: number('gridLineStartPadding'), fontSize: number('fontSize'), sectionFontSize: number('sectionFontSize'),
-    numberSectionStyles: number('numberSectionStyles') ?? (preset ? 4 : 1), sectionColors,
+    numberSectionStyles: number('numberSectionStyles') ?? (preset || styled ? 4 : 1), sectionColors,
     palette: {
       background: color('background'),
       task: { fill: color('taskBkgColor'), border: color('taskBorderColor') },

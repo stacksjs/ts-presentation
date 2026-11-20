@@ -92,7 +92,7 @@ function parseGitHistory(source: string, options?: unknown): GitGraphOptions | u
     if (op === 'branch') {
       const attrs = fields(rest, ['order'])
       const order = attrs?.get('order')?.[0]
-      if (!attrs || !first || (order !== undefined && !/^-?\d+$/.test(order))) return
+      if (!attrs || !first || (order !== undefined && (!/^-?\d+$/.test(order) || !Number.isSafeInteger(Number(order))))) return
       operations.push({ op, name: first, order: order === undefined ? undefined : Number(order) })
       continue
     }
@@ -123,12 +123,22 @@ function parseGitHistory(source: string, options?: unknown): GitGraphOptions | u
     }
     return
   }
+  // Imported diagrams give undeclared orders fractional positions based on
+  // declaration order. Pass integer ranks to the native renderer.
+  const mainOrder = typeof config.mainBranchOrder === 'number' && Number.isFinite(config.mainBranchOrder) ? config.mainBranchOrder : 0
+  const branches = operations.filter(operation => operation.op === 'branch')
+  const ordered = [{ branch: undefined, order: mainOrder }, ...branches.map((branch, index) => ({
+    branch, order: branch.order ?? Number(`0.${index + 1}`),
+  }))].sort((a, b) => a.order - b.order)
+  for (const [index, { branch }] of ordered.entries()) {
+    if (branch) branch.order = index
+  }
   return {
     operations, title: chart.title, accessibleTitle: chart.accessibleTitle, description: chart.description,
     direction: header[1] as GitGraphDirection | undefined,
     duplicateCommitIds: 'latest',
     mainBranchName: typeof config.mainBranchName === 'string' ? config.mainBranchName : undefined,
-    mainBranchOrder: typeof config.mainBranchOrder === 'number' ? config.mainBranchOrder : undefined,
+    mainBranchOrder: ordered.findIndex(({ branch }) => !branch),
     titleTopMargin: diagramPixels(config.titleTopMargin),
     diagramPadding: diagramPixels(config.diagramPadding),
     parallelCommits: Boolean(config.parallelCommits), showBranches: config.showBranches !== false, showCommitLabel: config.showCommitLabel !== false,
@@ -150,22 +160,23 @@ export function gitGraph(source: string, idPrefix: string, options: MermaidOptio
   const palette = (prefix: string, defaults?: readonly string[], fallback?: string) =>
     Array.from({ length: 8 }, (_, index) => color(`${prefix}${index}`) ?? fallback ?? defaults?.[index])
   const colors = palette('git', preset?.branches)
+  const labelBackground = typeof options.themeCSS === 'string' && options.themeCSS.trim() ? 'transparent' : undefined
   return gitGraphChart({
     ...chart, idPrefix, title: chart.title || (typeof options.title === 'string' ? options.title : ''),
     colors,
     branchLabelColors: palette('gitBranchLabel', preset?.branchText, color('branchLabelColor')),
-    branchLabelBackgrounds: preset ? colors : undefined,
+    branchLabelBackgrounds: preset ? colors : labelBackground ? colors.map(color => color ?? labelBackground) : undefined,
     highlightColors: palette('gitInv', preset?.highlights),
     background: color('background') ?? preset?.background,
     titleColor: color('titleColor') ?? color('textColor') ?? preset?.title,
     commitLabel: {
       color: color('commitLabelColor') ?? preset?.commit.color,
-      background: color('commitLabelBackground') ?? preset?.commit.background,
+      background: color('commitLabelBackground') ?? preset?.commit.background ?? labelBackground,
       fontSize: diagramPixels(variables.commitLabelFontSize) ?? preset?.commit.fontSize,
     },
     tagLabel: {
       color: color('tagLabelColor') ?? preset?.tag.color,
-      background: color('tagLabelBackground') ?? preset?.tag.background,
+      background: color('tagLabelBackground') ?? preset?.tag.background ?? labelBackground,
       border: color('tagLabelBorder') ?? preset?.tag.border,
       fontSize: diagramPixels(variables.tagLabelFontSize) ?? preset?.tag.fontSize,
     },

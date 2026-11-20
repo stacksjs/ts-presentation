@@ -1,51 +1,20 @@
 import { escapeHtml } from './html.ts'
 import { gitGraphPreset } from './mermaid/gitgraph-themes.ts'
+import { diagramThemeSelector } from './mermaid/theme-selectors.ts'
 import { scopeDiagramStyles } from './scoped-style.ts'
 
-const ganttSelectors: Readonly<Record<string, string>> = {
-  task: ':is(.diagram-gantt-bar,.diagram-gantt-milestone-shape,.diagram-gantt-reference)',
-  taskText: '.diagram-gantt-label[text-anchor="middle"]',
-  taskTextOutsideLeft: '.diagram-gantt-label[text-anchor="end"]',
-  taskTextOutsideRight: '.diagram-gantt-label[text-anchor="start"]',
-  titleText: '.diagram-title',
-  section: '.diagram-gantt-band',
-  sectionTitle: '.diagram-gantt-section-label',
-  milestone: '.diagram-gantt-milestone-shape',
-  vert: '.diagram-gantt-reference',
-  today: '.diagram-gantt-today',
-  exclude: '.diagram-gantt-excluded',
-}
-
-const gitGraphSelectors: Readonly<Record<string, string>> = {
-  commit: '.diagram-git-dot',
-  'commit-label': '.diagram-git-label',
-  'commit-label-bkg': '.diagram-git-label-box',
-  'branch-label': '.diagram-git-branch-label',
-  branchLabelBkg: '.diagram-git-branch-label-box',
-  'tag-label': '.diagram-git-tag',
-  'tag-label-bkg': '.diagram-git-tag-box',
-  arrow: '.diagram-git-edge',
-}
-
-function diagramSelector(selector: string, aliases: Readonly<Record<string, string>>, gantt: boolean): string {
-  const tokens = /\/\*[\s\S]*?\*\/|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|(\[\s*)id((?=\s*(?:[~|^$*]?=|\]))(?:[^\]"']|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')*\])|([#.])([\w-]+)(?![\w\\-]|[^\x00-\x7f])/g
-  return selector.replace(tokens, (token, attribute: string | undefined, suffix: string, type: string | undefined, name: string) => {
-    if (gantt && attribute) return `:is(${token},${attribute}data-gantt-css-id${suffix})`
-    if (gantt && type === '#') return `:is(${token},[data-gantt-css-id="${name}"])`
-    return type === '.' && Object.hasOwn(aliases, name) ? aliases[name] : token
-  })
-}
-
-export function applyDiagramTheme(svg: string, marker: string, value: unknown): string {
+export function applyDiagramTheme(svg: string, marker: string, options: Readonly<Record<string, unknown>>): string {
+  const value = options.themeCSS
   if (typeof value !== 'string' || !value.trim()) return svg
   const id = `tp-diagram-${marker.replace(/[^\w-]/g, '-')}`
   const gantt = svg.includes('data-diagram-kind="gantt"')
-  const aliases = gantt ? ganttSelectors : svg.includes('data-diagram-kind="gitgraph"') ? gitGraphSelectors : undefined
+  const git = svg.includes('data-diagram-kind="gitgraph"')
+  const kind = gantt ? 'gantt' : git ? 'gitgraph' : undefined
   let scoped: string
   try {
     const literalsOrComments = /\/\*[\s\S]*?\*\/|"(?:[^"\\]|\\[\s\S])*"|'(?:[^'\\]|\\[\s\S])*'|^[ \t]*\/\/[^\r\n]*/gm
     const css = value.replace(literalsOrComments, token => token.trimStart().startsWith('//') ? '' : token)
-    scoped = scopeDiagramStyles(css, id, aliases ? selector => diagramSelector(selector, aliases, gantt) : undefined).trim()
+    scoped = scopeDiagramStyles(css, id, kind ? selector => diagramThemeSelector(selector, kind) : undefined).trim()
   }
   catch { return svg }
   if (!scoped) return svg
@@ -53,6 +22,12 @@ export function applyDiagramTheme(svg: string, marker: string, value: unknown): 
   // Keep the renderer's palette above deck defaults while letting an author
   // override it using ordinary selectors and the normal CSS cascade.
   const paint = new Map<string, number>()
+  const theme = typeof options.theme === 'string' ? options.theme : ''
+  const variables = options.themeVariables as { THEME_COLOR_LIMIT?: unknown } | undefined
+  const customLimit = variables?.THEME_COLOR_LIMIT
+  const redux = /^redux(?:-dark)?(?:-color)?$/.test(theme)
+  const railLimit = redux ? (typeof customLimit === 'number' && Number.isSafeInteger(customLimit) && customLimit > 1 ? customLimit : 12) : 8
+  const reserveFirst = redux && theme.endsWith('-color')
   let root = true
   let task: string | null = null
   const markup = new HTMLRewriter().on('*', {
@@ -66,6 +41,13 @@ export function applyDiagramTheme(svg: string, marker: string, value: unknown): 
         if (!paint.has(style)) paint.set(style, paint.size)
         element.setAttribute('data-diagram-paint', String(paint.get(style)))
         element.removeAttribute('style')
+      }
+      const branch = git ? element.getAttribute('data-git-branch-index') : null
+      if (branch !== null) {
+        const index = Number(branch)
+        const limit = element.getAttribute('class') === 'diagram-git-branch' ? railLimit : 8
+        const slot = reserveFirst && index > 0 ? (index - 1) % (limit - 1) + 1 : index % limit
+        element.setAttribute('data-git-style-index', String(slot))
       }
       if (!gantt) return
       const taskId = element.getAttribute('data-task-id')

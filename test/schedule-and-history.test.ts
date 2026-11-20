@@ -566,6 +566,19 @@ test('scopes diagram CSS, preserves CSS strings, and keeps local animation names
   expect(first).not.toContain('@font-face')
 })
 
+test('uses theme-specific indices for GitGraph rails and commit symbols', () => {
+  const graph = ['gitGraph', 'commit id:"root"', ...Array.from({ length: 8 }, (_, index) => [
+    'checkout main', `branch lane${index + 1}`, `commit id:"work${index + 1}"`,
+  ]).flat()].join('\n')
+  const css = { themeCSS: '.branch-label8, .commit1 { fill: red }' }
+  const stock = mermaid(graph, 'stock', css)!
+  const redux = mermaid(graph, 'redux', { ...css, theme: 'redux-color' })!
+  expect(stock).toMatch(/data-git-branch-index="8" data-git-style-index="0"><title>lane8/)
+  expect(stock).toMatch(/data-commit-id="work8"[^>]*data-git-style-index="0"/)
+  expect(redux).toMatch(/data-git-branch-index="8" data-git-style-index="8"><title>lane8/)
+  expect(redux).toMatch(/data-commit-id="work8"[^>]*data-git-style-index="1"/)
+})
+
 test('applies Mermaid Gantt status colors, reference labels, and full date axis directives', () => {
   const source = [
     '---',
@@ -775,25 +788,42 @@ test('imports Gantt callback commands and applies security settings', () => {
 
 const chrome = await findChrome()
 
-test.skipIf(!chrome)('applies imported Gantt CSS in the deck and scopes it to one diagram', async () => {
-  const schedule = 'gantt\nReview :active, review, 2026-03-01, 7d'
+test.skipIf(!chrome)('applies scoped indexed CSS to imported Gantt and GitGraph diagrams', async () => {
+  const schedule = [
+    'gantt', 'section Draft', 'Draft :draft, 2026-03-01, 7d', 'section Review',
+    'Review :active, crit, review, 2026-03-01, 7d', 'Done :done, finished, 2026-03-01, 7d',
+    'section Draft', 'Revision :revision, 2026-03-01, 7d',
+  ].join('\n')
   const frontmatter = [
     '---', 'config:', '  theme: forest', '  themeCSS: |',
     '    // Imported timeline styles',
     '    @media (min-width: 1px) {',
     '      .task { stroke: #112233; }',
-    '      .taskText { fill: #ffeedd; }',
-    '      rect[id^=rev] { fill: #623c70; }',
+    '      .task0 { fill: #3b295e; }',
+    '      .activeCritText1, .doneText1 { fill: #ffeedd; }',
+    '      .activeCrit1 { stroke-width: 5px; }',
+    '      .sectionTitle1 { fill: #006677; }',
+    '      rect[id^=review] { fill: #623c70; }',
     '      #review { height: 12px; }',
     '      h1 { color: red; }',
     '    }',
     '---',
   ].join('\n')
   const plain = '---\nconfig:\n  theme: forest\n---'
+  const git = [
+    '---', 'config:', '  themeCSS: |',
+    '    .commit0 { fill: #123456; }', '    .commit2 { fill: #07967c; }',
+    '    .commit-highlight2 { fill: #ab33aa; }', '    .branch2 { stroke: #449966; }',
+    '    .branch-label1 { fill: #567812; }', '    .label2 { fill: #aaaaaa; }',
+    '    .arrow2 { stroke: #135724; }',
+    '---', 'gitGraph', 'commit id:"root"', 'branch review', 'commit id:"audit" type:HIGHLIGHT',
+    'checkout main', 'branch priority order:0', 'commit id:"urgent"', 'checkout main', 'merge review id:"approved"',
+  ].join('\n')
   const html = await renderDeck(parseDeck([
     '# Schedule', '', '<style>h1 { color: teal; }</style>', '',
     '~~~mermaid', frontmatter, schedule, '~~~', '',
-    '~~~mermaid', plain, schedule, '~~~',
+    '~~~mermaid', plain, schedule, '~~~', '',
+    '~~~mermaid', git, '~~~',
   ].join('\n')))
   const css = Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url))
   const server = Bun.serve({
@@ -806,12 +836,35 @@ test.skipIf(!chrome)('applies imported Gantt CSS in the deck and scopes it to on
   try {
     await view.navigate(server.url.href)
     expect(await view.evaluate(`(() => {
-      const [first, second] = document.querySelectorAll('.slide-diagram')
-      const bar = chart => getComputedStyle(chart.querySelector('.diagram-gantt-bar'))
-      const label = getComputedStyle(first.querySelector('.diagram-gantt-label'))
-      return [bar(first).fill, bar(first).stroke, bar(first).height, label.fill,
-        bar(second).fill, getComputedStyle(document.querySelector('#slide-1 h1')).color]
-    })()`)).toEqual(['rgb(98, 60, 112)', 'rgb(17, 34, 51)', '12px', 'rgb(255, 238, 221)', 'rgb(205, 228, 152)', 'rgb(0, 128, 128)'])
+      const [first, second, git] = document.querySelectorAll('.slide-diagram')
+      const bar = (chart, id) => getComputedStyle(chart.querySelector('[data-task-id="' + id + '"] .diagram-gantt-bar'))
+      const label = id => getComputedStyle(first.querySelector('[data-task-id="' + id + '"] .diagram-gantt-label')).fill
+      const fill = (root, selector) => getComputedStyle(root.querySelector(selector)).fill
+      const stroke = (root, selector) => getComputedStyle(root.querySelector(selector)).stroke
+      const review = bar(first, 'review')
+      return {
+        review: [review.fill, review.stroke, review.height, review.strokeWidth, label('review'), label('finished')],
+        draft: [bar(first, 'draft').fill, bar(first, 'revision').fill],
+        sections: [...first.querySelectorAll('.diagram-gantt-section-label')]
+          .filter(node => getComputedStyle(node).fill === 'rgb(0, 102, 119)').map(node => node.textContent),
+        outside: [bar(second, 'review').fill, getComputedStyle(document.querySelector('#slide-1 h1')).color],
+        commits: [fill(git, '[data-commit-id="root"] .diagram-git-dot'),
+          fill(git, '[data-commit-id="audit"] .diagram-git-dot'), fill(git, '.diagram-git-highlight-inner')],
+        lanes: [stroke(git, '.diagram-git-branch[data-git-branch-index="2"] path'),
+          fill(git, '.diagram-git-branch[data-git-branch-index="1"] .diagram-git-branch-label'),
+          fill(git, '.diagram-git-branch[data-git-branch-index="2"] .diagram-git-branch-label-box')],
+        edges: [...git.querySelectorAll('.diagram-git-edge')]
+          .filter(node => getComputedStyle(node).stroke === 'rgb(19, 87, 36)').map(node => node.getAttribute('data-git-branch-index')),
+      }
+    })()`)).toEqual({
+      review: ['rgb(98, 60, 112)', 'rgb(17, 34, 51)', '12px', '5px', 'rgb(255, 238, 221)', 'rgb(255, 238, 221)'],
+      draft: ['rgb(59, 41, 94)', 'rgb(59, 41, 94)'],
+      sections: ['Review'],
+      outside: ['rgb(205, 228, 152)', 'rgb(0, 128, 128)'],
+      commits: ['rgb(18, 52, 86)', 'rgb(171, 51, 170)', 'rgb(7, 150, 124)'],
+      lanes: ['rgb(68, 153, 102)', 'rgb(86, 120, 18)', 'rgb(170, 170, 170)'],
+      edges: ['2', '2'],
+    })
   }
   finally {
     view.close()
