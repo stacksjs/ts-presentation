@@ -134,21 +134,26 @@ multiword kebab-case tag such as `<status-badge>`.
 </Callout>
 ```
 
-A named slot can expose values to Markdown text. For example, a component
-with `<slot name="row" :label="props.heading" />` can accept this slot:
+A named slot can expose values to Markdown text and native HTML attributes.
+A component with `<slot name="row" :label="props.heading" />` can accept the
+following slot.
 
 ```md
 <template #row="{ label }">
 
 **{{ label }}**
 
+<span :aria-label="label" title="Selected row {{ label }}">Details</span>
+
 </template>
 ```
 
 Use a destructured binding as above or an object binding such as
-`<template v-slot:row="row">` with `{{ row.label }}`. Slot values are
-escaped as text. Values bound to a client signal update as the signal changes.
-Inline and fenced code keep their literal braces.
+`<template v-slot:row="row">` with `{{ row.label }}`. Use `:attribute` or
+`v-bind:attribute` for native bindings such as `:disabled="count === 0"`.
+Use interpolation in quoted attributes to combine slot values with text.
+Text and attribute values are escaped. Bindings update when their STX signals
+change. Inline and fenced code keep their literal braces.
 
 Use plain attributes for text, bare attributes for booleans, and
 `:prop` bindings for JSON values, quoted strings, or paths such as

@@ -90,6 +90,42 @@ test('projects scoped STX values into named Markdown slots while preserving lite
   expect(html).not.toContain('tp-component-')
 }))
 
+test('binds native HTML attributes in scoped Markdown slots', async () => project(async (root) => {
+  const entry = join(root, 'slides.md')
+  await Promise.all([
+    Bun.write(entry, [
+      '# Attribute bindings', '',
+      '<ExampleRow label="&quot; &lt;One&gt;" :index="2" url="/guide?x=1&amp;y=2">',
+      '<template #row="{ label, index, url }">', '',
+      `<span class="row-label" title="Slot {{ label }} / {{ index + 1 }}" v-bind:data-label='label + "!"' :aria-label="label"><span>One</span></span>`,
+      '<a :href="url">Details</a>',
+      '<pre><span title="{{ label }}" :data-tag="index">literal</span></pre>',
+      '',
+      '`<span :title="label">`', '',
+      '</template>',
+      '<template #control="{ index }"><input :disabled="index > 1" /></template>',
+      '</ExampleRow>',
+    ].join('\n')),
+    Bun.write(join(root, 'components', 'ExampleRow.stx'), [
+      '<template><section>',
+      '<slot name="row" :label="props.label" :index="props.index" :url="props.url" />',
+      '<slot name="control" :index="props.index" />',
+      '</section></template>',
+    ].join('')),
+  ])
+  const html = (await createDeckCompiler(entry)()).html
+  expect(html).toContain('class="row-label"')
+  expect(html).toContain('title="Slot &quot; &lt;One&gt; / 3"')
+  expect(html).toContain('data-label="&quot; &lt;One&gt;!"')
+  expect(html).toContain('aria-label="&quot; &lt;One&gt;"')
+  expect(html).toContain('><span>One</span></span>')
+  expect(html).toContain('href="/guide?x=1&amp;y=2"')
+  expect(html).toMatch(/<input\s+disabled[\s=/>]/)
+  expect(html).toContain('<pre><span title="{{ label }}" :data-tag="index">literal</span></pre>')
+  expect(html).toContain('<code>&lt;span :title=&quot;label&quot;&gt;</code>')
+  expect(html).not.toContain('tp-component-')
+}))
+
 test('observes theme, addon, and project STX components across creation, edits, and removal', async () => project(async (root) => {
   const entry = join(root, 'slides.md')
   const component = (where: string) => join(root, where, 'components', 'Badge.stx')
@@ -137,7 +173,14 @@ test.skipIf(!chrome)('hydrates independent STX counters and their scoped Markdow
   expect(await Bun.file(entry).text()).toContain('<Counter :start="1" />')
   const counter = join(deck, 'components', 'Counter.stx')
   await Promise.all([
-    Bun.write(entry, '# Counter\n\n<Counter :start="2" v-click><template #value="{ current }">**{{ current }}**</template></Counter>\n\n<Counter :start="9" />\n\n---\n\n# Next\n\n<Counter :start="4" />'),
+    Bun.write(entry, [
+      '# Counter', '',
+      '<Counter :start="2" v-click><template #value="{ current }">',
+      '<strong :aria-label="current + 1" data-count="Count {{ current }}">{{ current }}</strong>',
+      '</template></Counter>', '',
+      '<Counter :start="9" />', '', '---', '', '# Next', '',
+      '<Counter :start="4" />',
+    ].join('\n')),
     Bun.file(counter).text().then(source => Bun.write(counter, source.replace('{{ count }}', '<slot name="value" :current="count()">{{ count }}</slot>'))),
   ])
   const cli = fileURLToPath(new URL('../src/cli.ts', import.meta.url))
@@ -154,10 +197,15 @@ test.skipIf(!chrome)('hydrates independent STX counters and their scoped Markdow
     },
   })
   const view = new Bun.WebView({ width: 960, height: 540, backend: { type: 'chrome', path: chrome!, url: false } })
+  const slotAttributes = `(() => {
+    const slot = document.querySelector('.demo-counter output strong')
+    return [slot.getAttribute('data-count'), slot.getAttribute('aria-label')]
+  })()`
   try {
     await view.navigate(new URL('?capture=1&steps=1', server.url).href)
     const initial = await view.evaluate(`Array.from(document.querySelectorAll('.demo-counter output'), b => b.textContent.trim())`)
     expect(initial).toEqual(['2', '9', '4'])
+    expect(await view.evaluate(slotAttributes)).toEqual(['Count 2', '3'])
     const revealed = await view.evaluate(`(() => {
       const component = document.querySelector('.demo-counter')
       window.presentationNavigation.go(1, 0)
@@ -171,6 +219,7 @@ test.skipIf(!chrome)('hydrates independent STX counters and their scoped Markdow
     const updated = await view.evaluate(`Array.from(document.querySelectorAll('.demo-counter output'), b => b.textContent.trim())`)
     expect(updated).toEqual(['3', '9', '4'])
     expect(await view.evaluate(`document.querySelector('.demo-counter output strong')?.textContent`)).toBe('3')
+    expect(await view.evaluate(slotAttributes)).toEqual(['Count 3', '4'])
   }
   finally {
     view.close()

@@ -12,7 +12,7 @@ in a new ts-presentation project.
 | Markdown transformers | Async `setup/transformers.ts` hooks for slide Markdown and fenced code, including fences nested in lists and block quotes. Hooks support stable edit offsets between commits, native highlighting, and STX rendering for returned components |
 | Integrated editor and live preview | Dev Markdown pane with autosave, included-file support, conflict detection, and in-place body and title refreshes |
 | Scoped styles, layouts, and themes | Slide-local CSS and keyframes, TypeScript theme and addon modules, and STX built-in and custom layouts with named slots |
-| Deck components | First-party STX components from the deck, theme, or addons, with props, named Markdown slots, scoped text interpolation, scoped styles, and reactive client scripts |
+| Deck components | First-party STX components from the deck, theme, or addons, with props, scoped Markdown slots, reactive text and native HTML attribute bindings, scoped styles, and client scripts |
 | Iframe layouts | Full and split STX layouts with per-slide zoom, viewport sizing for enlarged slides, and design-size layout in thumbnails and print |
 | Global and per-slide layers | STX layers from the deck, theme, or addons, slide context bindings, persistent matching global content, and a custom toolbar slot |
 | Subpath hosting | `--base` for build and dev, history and hash navigation, direct presenter links, and deck-relative assets |
@@ -69,7 +69,7 @@ in a new ts-presentation project.
 | Quick overview and overview page | Rendered thumbnails, keyboard navigation, standalone reveal sliders, and read-only speaker notes |
 | Drawing and recording | Native SVG ink, mouse and stylus input, same-browser sync, SVG persistence, drawing options, and screen capture |
 
-Vue-specific component APIs, scoped slot bindings in HTML attributes, Vite integrations,
+Vue-specific component APIs, Vite integrations,
 Monaco IntelliSense, Shiki transformers, VS Code language tooling, other
 PlantUML grammars, and the full KaTeX and Mermaid grammars still need porting. Refer to the [original Slidev skill](slidev-source/skills/slidev/SKILL.md)
 for upstream deck syntax.

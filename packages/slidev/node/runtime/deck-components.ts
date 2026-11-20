@@ -168,21 +168,86 @@ function readSlots(source: string, component: (tag: Tag) => boolean): MarkdownSl
 
 type ProjectSlot = (html: string, restoreComponents: (html: string) => string) => string
 
+const slotInterpolation = /(?<!@)\{\{\s*([^{}]+?)\s*\}\}/g
+const quotedBindingStrings = /'(?:[^'\\]|\\[\s\S])*'|"(?:[^"\\]|\\[\s\S])*"/g
+
+function normalizeBinding(expression: string): string {
+  // STX reads server binding expressions from double-quoted HTML attributes.
+  // Use single-quoted JavaScript string literals and keep their escape sequences.
+  return expression.replace(quotedBindingStrings, (quoted) => {
+    const value = quoted.slice(1, -1).replace(/\\[\s\S]|['"&<>{}]/g, (part) => {
+      if (part === '\\"') return '\\x22'
+      if (part.length > 1) return part
+      return `\\x${part.charCodeAt(0).toString(16)}`
+    })
+    return `'${value}'`
+  }).replaceAll('"', '&quot;')
+}
+
+function slotAttribute(attribute: string, value: string | undefined): string | undefined {
+  if (value === undefined) return
+  const name = attribute.replace(/^(?::|v-bind:)/, '')
+  if (!/^[a-z][\w-]*$/i.test(name) || /^(?:on\w+|srcdoc)$/i.test(name)) return
+  if (name !== attribute) return ` :${name}="${normalizeBinding(unescapeHtml(value))}"`
+  const parts: string[] = []
+  let cursor = 0
+  for (const match of value.matchAll(slotInterpolation)) {
+    parts.push(JSON.stringify(unescapeHtml(value.slice(cursor, match.index))), `((${unescapeHtml(match[1])}) ?? '')`)
+    cursor = match.index + match[0].length
+  }
+  if (!parts.length) return
+  if (cursor < value.length) parts.push(JSON.stringify(unescapeHtml(value.slice(cursor))))
+  return ` :${name}="${normalizeBinding(parts.join(' + '))}"`
+}
+
+function projectSlotTag(name: string, attrs: string, literal: (html: string) => string): string | undefined {
+  const matches = [...attrs.matchAll(attributes)]
+  const bindings = matches.map(([, attribute, double, single, bare]) => {
+    const bound = attribute.startsWith(':') || attribute.startsWith('v-bind:')
+    return slotAttribute(attribute, double ?? single ?? (bound ? bare : undefined))
+  })
+  if (!bindings.some(Boolean)) return
+  let opening = `<${name}`
+  let cursor = 0
+  for (const [index, match] of matches.entries()) {
+    const [markup, attribute] = match
+    const opaque = /^(?::|@|v-|x-)/.test(attribute) || markup.includes('{{')
+    opening += attrs.slice(cursor, match.index) + (bindings[index] ?? (opaque ? ` ${literal(markup.trimStart())}` : markup))
+    cursor = match.index + markup.length
+  }
+  return opening + attrs.slice(cursor) + '>'
+}
+
 function projectScopedSlot(html: string, literal: (html: string) => string): string {
-  if (!html.includes('{{')) return literal(html)
+  if (!/\{\{|\s(?::|v-bind:)/.test(html)) return literal(html)
   const tokens = new RegExp(`<!--[\\s\\S]*?(?:-->|$)|${htmlTag.source}|\\{\\{([^{}<]+)\\}\\}`, 'gi')
+  const openTags = new Map<string, boolean[]>()
   let projected = ''
   let cursor = 0
   for (let token = tokens.exec(html); token; token = tokens.exec(html)) {
-    const [, closing, name, attrs, expression] = token
+    const [markup, closing, name, attrs, expression] = token
     if (expression !== undefined) {
       projected += literal(html.slice(cursor, token.index)) + `{{ ${unescapeHtml(expression).trim()} }}`
       cursor = tokens.lastIndex
     }
-    else if (name && !closing && !attrs.endsWith('/') && raw.has(name.toLowerCase())) {
+    if (!name) continue
+    const tag = name.toLowerCase()
+    if (raw.has(tag)) {
+      if (closing || attrs.endsWith('/')) continue
       const end = new RegExp(`</${name}\\s*>`, 'gi')
       end.lastIndex = tokens.lastIndex
       tokens.lastIndex = end.exec(html) ? end.lastIndex : html.length
+      continue
+    }
+    const stack = openTags.get(tag) ?? []
+    const visible = closing ? (stack.pop() ? markup : undefined) : projectSlotTag(name, attrs, literal)
+    if (!closing && !attrs.endsWith('/')) {
+      if (!stack.length) openTags.set(tag, stack)
+      stack.push(visible !== undefined)
+    }
+    if (visible !== undefined) {
+      projected += literal(html.slice(cursor, token.index)) + visible
+      cursor = tokens.lastIndex
     }
   }
   return projected + literal(html.slice(cursor))
@@ -272,8 +337,8 @@ export function createDeckComponentRenderer(
           values.set(id, html)
           return id
         }
-        // Only expose Markdown text expressions to STX. Restore pre-rendered
-        // code, other HTML and nested components after STX projects the slot.
+        // Restore code, nested components, and static Markdown after STX
+        // projects the slot's text expressions and native attribute bindings.
         const projectSlot: ProjectSlot | undefined = slot.binding
           ? (html, restore) => projectScopedSlot(unwrap(html), literal => stash(restore(literal)))
           : undefined
