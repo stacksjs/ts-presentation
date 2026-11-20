@@ -36,5 +36,5 @@ jobs:
       - run: bun run typecheck
       - name: Run all Bun tests
         run: bun test --timeout 45000 --reporter junit --reporter-outfile "$RUNNER_TEMP/bun-test.xml"
-      - name: Verify every Slidev test port ran
+      - name: Verify every mapped Slidev case ran
         run: bun test/verify-slidev-report.ts "$RUNNER_TEMP/bun-test.xml"

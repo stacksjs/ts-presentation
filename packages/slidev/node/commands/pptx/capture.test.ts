@@ -1861,6 +1861,8 @@ it.skipIf(!chrome)('restores the slide after a failed clip and reports a missing
       + '</article></main>'
     await view.navigate('data:text/html,' + encodeURIComponent(html))
     const calls: string[] = []
+    const viewport = () => view.evaluate('[innerWidth, innerHeight, scrollX, scrollY]')
+    const initialViewport = await viewport()
     let missing = false
     const browser: Parameters<typeof captureEditable>[0] = {
       async evaluate<T>(script: string): Promise<T> {
@@ -1870,7 +1872,14 @@ it.skipIf(!chrome)('restores the slide after a failed clip and reports a missing
       },
       async cdp(method, parameters) {
         calls.push(method)
-        if (method === 'Page.captureScreenshot') throw new Error('Artwork clip failed')
+        if (method === 'Page.captureScreenshot') {
+          expect(parameters).toMatchObject({
+            clip: { x: 100, y: 100, width: 160, height: 100, scale: 1 },
+            captureBeyondViewport: false,
+          })
+          expect(await viewport()).toEqual(initialViewport)
+          throw new Error('Artwork clip failed')
+        }
         return view.cdp(method, parameters)
       },
     }
@@ -1893,6 +1902,7 @@ it.skipIf(!chrome)('restores the slide after a failed clip and reports a missing
     expect(textOnly.warnings).toEqual([])
     expect(textOnly.content?.nodes.some(node => node.kind === 'text')).toBe(true)
     expect(calls).toEqual([])
+    expect(await viewport()).toEqual(initialViewport)
   }
   finally {
     view.close()

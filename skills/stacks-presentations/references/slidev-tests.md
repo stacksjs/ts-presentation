@@ -5,10 +5,14 @@ The test baseline is Slidev v53.1.0 at
 `bun test --timeout 45000` from the project root. Use `CHROME_BIN` to point at
 Chrome if it lives outside the usual installation paths.
 
-The inventory lists all 41 suites from the baseline. GitHub Actions checks the
-Bun JUnit report for every port below and fails if a port has no results or the
-full run contains skipped tests. The five Cypress suites run in Bun WebView
-with Chrome.
+The inventory lists all 41 suites from the baseline. The
+[case manifest](../../../test/fixtures/slidev-cases.json) maps 398 original cases
+to Bun assertions. A string keeps the original test title. An array gives the
+original title followed by the equivalent Bun test titles. The manifest expands
+parameterized cases and maps Vite, Vue, and Playwright inputs to the corresponding
+Bun and STX behavior. GitHub Actions checks those titles against the Bun JUnit
+report and fails on missing assertions, failed tests, or skips. The five Cypress
+suites run in Bun WebView with Chrome.
 
 | Slidev suite | Bun port |
 | --- | --- |
@@ -55,7 +59,7 @@ with Chrome.
 | `cypress/e2e/examples/smoke.spec.ts` | `test/presenter-browser.test.ts` |
 
 The basic suite includes keyboard and overview navigation, named slots,
-nested click groups, navigation interpolation, list items projected through STX slots, animation
+nested click groups, navigation interpolation, local styles, list items projected through STX slots, animation
 presets and overrides, and code blocks inside reveals.
 
 [Slidev v53.1.0 test sources](https://github.com/slidevjs/slidev/tree/b547b48fe86b60bd3a502d4217b33840273667dd)

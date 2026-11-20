@@ -59,9 +59,9 @@ describe('utilities', () => {
   })
 
   it.each([
-    [generateGoogleFontsUrl, 'https://fonts.googleapis.com/css2'],
-    [generateCoollabsFontsUrl, 'https://api.fonts.coollabs.io/css2'],
-  ] as const)('builds CSS2 requests for normal and italic weights using %s', (url, origin) => {
+    ['Google', generateGoogleFontsUrl, 'https://fonts.googleapis.com/css2'],
+    ['Coollabs', generateCoollabsFontsUrl, 'https://api.fonts.coollabs.io/css2'],
+  ] as const)('builds %s CSS2 requests for normal and italic weights', (_, url, origin) => {
     expect(url(fontOptions)).toBe(`${origin}?family=Fira+Code:wght@200;400;600&family=PT+Serif:wght@200;400;600&display=swap`)
     expect(url({ ...fontOptions, italic: true })).toBe(`${origin}?family=Fira+Code:ital,wght@0,200;0,400;0,600;1,200;1,400;1,600&family=PT+Serif:ital,wght@0,200;0,400;0,600;1,200;1,400;1,600&display=swap`)
     expect(url({ ...fontOptions, webfonts: ['"Helvetica Neue"', "'PT Serif'"], weights: ['400'] }))

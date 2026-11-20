@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'bun:test'
+import { findChrome } from '../../slidev/node/runtime/chrome.ts'
 import { resolveTweetId } from './tweet.ts'
+
+const chrome = await findChrome()
 
 describe('resolveTweetId', () => {
   it('keeps the existing id input', () => {
@@ -51,10 +54,7 @@ it('renders a sandboxed widget with a post link and preserves fenced examples', 
   expect(html).not.toContain('/status/456')
 })
 
-it('resizes an isolated Tweet frame through the browser player', async () => {
-  const { findChrome } = await import('../../slidev/node/runtime/chrome.ts')
-  const chrome = await findChrome()
-  if (!chrome) return
+it.skipIf(!chrome)('resizes an isolated Tweet frame through the browser player', async () => {
   const { parseDeck, renderDeck } = await import('../../slidev/node/runtime/index.ts')
   const html = (await renderDeck(parseDeck('# Widget\n\n<Tweet id="123" />')))
     .replace(/src="https:\/\/platform\.twitter\.com\/embed\/Tweet\.html[^"]*"/, 'src="about:blank"')
@@ -70,7 +70,7 @@ it('resizes an isolated Tweet frame through the browser player', async () => {
         : new Response(html, { headers: { 'Content-Type': 'text/html' } })
     },
   })
-  const browser = new Bun.WebView({ width: 1060, height: 675, backend: { type: 'chrome', path: chrome, url: false } })
+  const browser = new Bun.WebView({ width: 1060, height: 675, backend: { type: 'chrome', path: chrome!, url: false } })
   try {
     await browser.navigate(server.url.href)
     const height = await browser.evaluate(`(() => {

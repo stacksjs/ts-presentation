@@ -96,6 +96,33 @@ test.skipIf(!chrome)('renders actual thumbnails, selects slides from the dialog,
       return [modal.open, window.presentationNavigation.currentPage, location.hash]
     })()`)).toEqual([false, 1, '#slide-1'])
 
+    await view.evaluate(`document.querySelector('#overview-button').click()`)
+    await view.evaluate(`(async () => {
+      const frame = document.querySelector('#overview iframe')
+      const deadline = performance.now() + 5000
+      while (!frame.contentDocument?.querySelector('[data-overview-slide="1"]') && performance.now() < deadline)
+        await new Promise(resolve => setTimeout(resolve, 25))
+      const overview = frame.contentDocument
+      overview.querySelector('#stage').style.gridTemplateColumns = 'repeat(2, minmax(0, 1fr))'
+      overview.querySelector('[data-overview-slide="1"]').focus()
+    })()`)
+    const focusedSlide = () => view!.evaluate("document.querySelector('#overview iframe').contentDocument.activeElement.dataset.overviewSlide")
+    await view.press('ArrowRight')
+    expect(await focusedSlide()).toBe('2')
+    await view.press('ArrowLeft')
+    await view.press('ArrowDown')
+    expect(await focusedSlide()).toBe('3')
+    await view.press('ArrowUp')
+    expect(await focusedSlide()).toBe('1')
+    await view.press('ArrowDown')
+    await view.press('Enter')
+    expect(await view.evaluate(`(async () => {
+      const modal = document.querySelector('#overview')
+      for (let attempt = 0; attempt < 40 && modal.open; attempt++)
+        await new Promise(resolve => setTimeout(resolve, 25))
+      return [modal.open, window.presentationNavigation.currentPage]
+    })()`)).toEqual([false, 3])
+
     await view.navigate(`${origin}/overview#details`)
     expect(await view.evaluate(`(() => {
       const nav = window.presentationNavigation

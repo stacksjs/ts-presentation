@@ -22,9 +22,12 @@ routerMode: history
 
 <style>
 .probe { background: url('/image.svg'); }
+.scope-probe { color: maroon; }
 </style>
 
 [Review](#review)
+
+<p class="scope-probe">First slide style</p>
 
 <p id="page-counter">{{ $page }} / {{ $nav.currentPage }} / {{ $nav.total }}</p>
 
@@ -33,6 +36,12 @@ routerMode: history
 # Next
 
 <p v-click>Reveal</p>
+
+<p class="scope-probe">Local style</p>
+
+<style>
+.scope-probe { border-color: green; }
+</style>
 
 [Jump](#note)
 
@@ -59,6 +68,9 @@ async function writeDeck(root: string): Promise<string> {
   const entry = join(root, 'slides.md')
   await Promise.all([
     Bun.write(entry, source),
+    Bun.write(join(root, 'global-bottom.stx'), [
+      '@if (nav.currentPage % 2 === 1)', '<footer id="fixture-footer">Global Footer</footer>', '@endif',
+    ].join('\n')),
     Bun.write(join(root, 'style.css'), '.slide { --asset: url("/image.svg"); }'),
     Bun.write(join(root, 'public/image.svg'), '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12"/>'),
   ])
@@ -121,6 +133,8 @@ test.skipIf(!chrome).each(['history', 'hash'] as const)('keeps static %s navigat
     ]`)
     expect(await state()).toEqual([locationFor('1'), 1, 0, 'slide'])
     expect(await view.evaluate('document.querySelector("#page-counter").textContent')).toBe('1 / 1 / 4')
+    expect(await view.evaluate("document.querySelector('#stage article:not([hidden]) #fixture-footer').textContent")).toBe('Global Footer')
+    expect(await view.evaluate("getComputedStyle(document.querySelector('#slide-1 .scope-probe')).color")).toBe('rgb(128, 0, 0)')
     expect(await view.evaluate(`(async () => {
       const image = document.querySelector('#slide-1 img')
       await image.decode()
@@ -131,6 +145,11 @@ test.skipIf(!chrome).each(['history', 'hash'] as const)('keeps static %s navigat
     const advance = () => view!.cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'ArrowRight', code: 'ArrowRight' })
     await advance()
     expect(await state()).toEqual([locationFor('2'), 2, 0, 'slide'])
+    expect(await view.evaluate(`(() => {
+      const active = document.querySelector('#stage article:not([hidden])')
+      const probe = getComputedStyle(active.querySelector('.scope-probe'))
+      return [active.querySelector('#fixture-footer') === null, probe.borderColor, probe.color !== 'rgb(128, 0, 0)']
+    })()`)).toEqual([true, 'rgb(0, 128, 0)', true])
     await advance()
     expect(await state()).toEqual([locationFor('2?clicks=1'), 2, 1, 'slide'])
     await visit('2?clicks=1')
