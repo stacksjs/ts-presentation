@@ -460,8 +460,10 @@ it.skipIf(!chrome)('captures Mathtools frames around aligned cells as editable P
     await Bun.write(entry, String.raw`# Boxed rows
 
 $$ {1|2|all}
+\newcommand\highlightbox[1]{\fcolorbox{112233}{ffe680}{#1}}
+\MakeAboxedCommand\Highlight\highlightbox
 \begin{alignat}{2}
-\Aboxed{a&=b}+q & \setlength{\fboxsep}{.45em}\setlength\fboxrule{2px}\Aboxed{c&=\frac{d}{e}}\\
+\Highlight{a&=b}+q & \setlength{\fboxsep}{.45em}\setlength\fboxrule{2px}\Aboxed{c&=\frac{d}{e}}\\
 z&=k & v&=w
 \end{alignat}
 $$
@@ -470,9 +472,13 @@ $$
 
 # Box around one expression
 
+$$
+\newcommand\shadebox[1]{\colorbox{e8edff}{#1}}
+\MakeAboxedCommand\Shade\shadebox
 \begin{align*}
-\setlength\fboxsep{.5em}\Aboxed{x}+y &= z
-\end{align*}`)
+\setlength\fboxsep{.5em}\Shade{x}+y &= z
+\end{align*}
+$$`)
     const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
     const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
     const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
@@ -496,16 +502,22 @@ $$
       expect(first.rect.x + first.rect.w).toBeLessThanOrEqual(second.rect.x + 1)
       expect(second.rect.h).toBeGreaterThan(first.rect.h + 4)
       expect(right.rect.x).toBeCloseTo(below.rect.x)
-      expect(first.border.color.a).toBeCloseTo(step === 1 ? 0.24 : 1)
-      expect(second.border.width).toBeCloseTo(2)
+      expect(first.border?.color.a).toBeCloseTo(step === 1 ? 0.24 : 1)
+      expect(first.border?.color).toMatchObject({ r: 17, g: 34, b: 51 })
+      expect(first.fill).toMatchObject({ r: 255, g: 230, b: 128 })
+      expect(first.fill?.a).toBeCloseTo(step === 1 ? 0.24 : 1)
+      expect(second.border?.width).toBeCloseTo(2)
     }
     const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Boxed rows' }))
     const slide = parts.get('ppt/slides/slide3.xml')?.toString() ?? ''
     expect(slide.match(/name="Equation frame"/g)).toHaveLength(2)
     expect(slide).toContain('<a:noFill/><a:ln w="')
+    expect(slide).toContain('<a:solidFill><a:srgbClr val="FFE680">')
+    expect(slide.indexOf('name="Equation frame"')).toBeLessThan(slide.indexOf('<a14:m>'))
     expect(slide).toContain('<m:f>')
     const one = parts.get('ppt/slides/slide4.xml')?.toString() ?? ''
     expect(one.match(/name="Equation frame"/g)).toHaveLength(1)
+    expect(one).toContain('<a:solidFill><a:srgbClr val="E8EDFF"></a:srgbClr></a:solidFill><a:ln><a:noFill/></a:ln>')
     expect(one).toContain('>x</m:t>')
   }
   finally {

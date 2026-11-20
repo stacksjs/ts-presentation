@@ -466,7 +466,7 @@ export function collectSnapshot(options: {
               const rect = mathBounds([box])
               if (!rect || style.visibility !== 'visible') return
               const width = Number.parseFloat(style.borderTopWidth) * scale
-              if (width > 0) frames.push({ rect, color: style.borderTopColor, width, opacity: rowOpacity })
+              frames.push({ rect, color: style.borderTopColor, background: style.backgroundColor, width, opacity: rowOpacity })
               body.push(box)
             }
             const content = cell.firstElementChild

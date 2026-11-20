@@ -106,6 +106,7 @@ export interface RawMathFragment {
 export interface RawMathFrame {
   rect: Rect
   color: string
+  background: string
   width: number
   opacity: number
 }
@@ -316,7 +317,7 @@ export interface IrRaster extends IrBase {
   /** Also hide the element's own children while capturing. Correct only when they are walked and redrawn as shapes; hiding a leaf's children (e.g. an `<svg>`) removes its artwork from the picture. */
   hideDescendants: boolean
   /** Native Office Math choice with this raster as the compatibility fallback. */
-  equation?: IrEquation & { tags?: IrEquation[], cells?: IrEquation[], frames?: { rect: Rect, border: Border }[] }
+  equation?: IrEquation & { tags?: IrEquation[], cells?: IrEquation[], frames?: { rect: Rect, border?: Border, fill?: Rgba }[] }
 }
 
 export type IrNode = IrBox | IrText | IrImage | IrRaster

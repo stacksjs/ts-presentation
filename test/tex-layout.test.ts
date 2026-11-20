@@ -1007,6 +1007,35 @@ test('parses Mathtools boxes across alignment points, including multiple boxes p
   expect(() => math(String.raw`\Aboxed{a&b}`, false)).toThrow('must start an alignment cell')
 })
 
+test('declares custom aligned box commands with scoped colors and dimensions', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const markup = math(String.raw`
+\newcommand\highlightbox[1]{\fcolorbox{112233}{ffe680}{{#1}}}
+\newcommand\paddedbox[1]{{\fboxsep=5pt\fboxrule=2pt\fbox{#1}}}
+\newcommand\highlightonly[1]{\colorbox{e8edff}{#1}}
+\MakeAboxedCommand\Highlight\highlightbox
+\MakeAboxedCommand\Padded\paddedbox
+\MakeAboxedCommand\Tint\highlightonly
+\MakeAboxedCommand\Standard\boxed
+\let\Alias\Highlight
+\begin{alignat*}{2}
+\Alias{a&=b}+q & \setlength\fboxsep{1em}\Padded{c&=d}\\
+\Tint{e&=f} & \Standard{g&=h}
+\end{alignat*}`, true).split('<annotation')[0]
+  expect(markup.match(/data-equation-frame="2"/g)).toHaveLength(4)
+  expect(markup.match(/--math-frame-fill:#ffe680;--math-frame-color:#112233/g)).toHaveLength(2)
+  expect(markup.match(/--math-frame-padding:1em;--math-frame-padding:5pt;--math-frame-rule:2pt/g)).toHaveLength(2)
+  expect(markup.match(/--math-frame-fill:#e8edff;--math-frame-rule:0px/g)).toHaveLength(2)
+  expect(markup).toContain('<mi>q</mi>')
+  expect(markup).not.toContain('alignment-box-argument')
+  const local = String.raw`{\MakeAboxedCommand\Local\fbox\begin{aligned}\Local{x&=y}\end{aligned}}`
+  expect(math(local, false)).toContain('data-equation-frame="2"')
+  expect(() => math(local + String.raw`\begin{aligned}\Local{x&=y}\end{aligned}`, false)).toThrow('Unsupported math command: \\Local')
+  expect(() => math(String.raw`\MakeAboxedCommand\Aboxed\fbox`, true)).toThrow('already defined')
+  expect(() => math(String.raw`\newcommand\duplicate[1]{\fbox{#1#1}}\MakeAboxedCommand\Duplicate\duplicate
+\begin{align*}\Duplicate{a&=b}\end{align*}`, true)).toThrow('pass its argument through once')
+})
+
 test('parses AMS full-width alignments and applies their tag and column rules', async () => {
   const flalign = String.raw`\begin{flalign}
 a&=b\label{first} & c&=d\\

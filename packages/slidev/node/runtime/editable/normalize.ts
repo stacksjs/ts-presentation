@@ -606,12 +606,17 @@ function buildSlideIr(
         const tags = math.tags?.map(tag => convertFragment(tag, false)) ?? []
         const fragments = math.cells ?? [{ expression: math.expression, rect: math.rect, fontSize, opacity: 1 }]
         const bodies = fragments.map(fragment => convertFragment(fragment, math.display))
-        const frames = math.frames?.map(({ rect, color, width, opacity: alpha }) => {
+        const frames = math.frames?.map(({ rect, color, background, width, opacity: alpha }) => {
           const clipped = clipToSlide(rect, size)
-          const line = parseColor(color, unparsed)
-          if (!line || clipped?.w !== rect.w || clipped.h !== rect.h
-            || !(width > 0 && width < Math.min(rect.w, rect.h)) || !(alpha >= 0 && alpha <= 1)) return
-          return { rect, border: { width, style: 'solid' as const, color: { ...line, a: line.a * alpha * opacity } } }
+          const stroke = parseColor(color, unparsed)
+          const fill = parseColor(background, unparsed)
+          if (!stroke || !fill || clipped?.w !== rect.w || clipped.h !== rect.h
+            || !(width >= 0 && width < Math.min(rect.w, rect.h)) || !(alpha >= 0 && alpha <= 1)) return
+          return {
+            rect,
+            border: width && stroke.a ? { width, style: 'solid' as const, color: { ...stroke, a: stroke.a * alpha * opacity } } : undefined,
+            fill: fill.a ? { ...fill, a: fill.a * alpha * opacity } : undefined,
+          }
         }) ?? []
         if (tags.every(tag => tag !== undefined) && bodies.every(body => body !== undefined) && frames.every(frame => frame !== undefined)) {
           const [body, ...cells] = bodies

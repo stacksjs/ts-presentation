@@ -310,7 +310,7 @@ function tokenize(source: string, onTrailingComment?: () => void): string[] {
 type MathMode = 'math' | 'text'
 const expansionPrimitives = ['\\expandafter', '\\noexpand', '\\@firstoftwo', '\\@secondoftwo', '\\@ifnextchar', '\\@ifstar', '\\TextOrMath', '\\html@mathml', '\\message', '\\errmessage', '\\char', '\\MoveEqLeft'] as const
 const expansionPrimitiveNames = new Set<string>(expansionPrimitives)
-const macroDeclaration = /^\\(?:[gex]?def|(?:future)?let|(?:new|renew|provide)command|DeclarePairedDelimiter(?:X(?:PP)?)?|global|long)$/
+const macroDeclaration = /^\\(?:[gex]?def|(?:future)?let|(?:new|renew|provide)command|DeclarePairedDelimiter(?:X(?:PP)?)?|MakeAboxedCommand|global|long)$/
 const assignmentCommand = /^\\(?:[gex]?def|(?:future)?let)$/
 type ExpansionPrimitive = typeof expansionPrimitives[number]
 type ConditionalPrimitive = Exclude<ExpansionPrimitive, '\\expandafter' | '\\noexpand' | '\\message' | '\\errmessage' | '\\char' | '\\MoveEqLeft'>
@@ -524,7 +524,7 @@ const alignments: Record<string, Alignment> = { l: 'left', c: 'center', r: 'righ
 interface ArrayColumn { align: Alignment, before: ArrayRule[] }
 interface DottedArrayCell { span: number, spacing: number }
 type ArrayCell = Markup | DottedArrayCell
-interface AlignmentFrame { span: 1 | 2, dimensions: string[] }
+interface AlignmentFrame { span: 1 | 2, style: string[] }
 interface ArrayRow { cells: ArrayCell[], columns: number, label?: Markup, before: ArrayRule[], gap?: string, raise?: string, arrow?: 'left' | 'right', flushAbove?: boolean, flushBelow?: boolean, frames?: Map<number, AlignmentFrame> }
 interface MathLine { content: Markup, gap?: string }
 interface MultlineRow extends MathLine { align?: 'left' | 'right', inset?: string }
@@ -937,6 +937,7 @@ const arrowBetweenLines = '\\ArrowBetweenLines'
 const flushSpaceAbove = '\\MTFlushSpaceAbove'
 const flushSpaceBelow = '\\MTFlushSpaceBelow'
 const alignedBox = '\\Aboxed'
+const customAlignedBox = '\\@AboxedWith'
 const alignedBoxAssignments = new Set(['\\setlength', '\\fboxsep', '\\fboxrule'])
 const mathModeFunctions = new Set([
   ...groupedArgumentFunctions, ...primitiveArgumentFunctions, ...Object.keys(mathClasses), ...Object.keys(accents),
@@ -945,7 +946,7 @@ const mathModeFunctions = new Set([
   'begin', 'end', 'right', 'middle', '@binrel', '@splitfrac', 'mathchoice', 'vcenter',
   'cancel', 'bcancel', 'xcancel', 'pmb', 'phase', 'mathreflectbox',
   'prescript', 'mathstrut', 'xmathstrut', 'sideset', 'overset', 'underset', 'overunderset', 'stackrel',
-  'shoveleft', 'shoveright', 'ArrowBetweenLines', 'MTFlushSpaceAbove', 'MTFlushSpaceBelow', 'Aboxed',
+  'shoveleft', 'shoveright', 'ArrowBetweenLines', 'MTFlushSpaceAbove', 'MTFlushSpaceBelow', 'Aboxed', '@AboxedWith', 'MakeAboxedCommand',
   ...Array.from(intertextCommands.keys(), command => command.slice(1)),
   'overline', 'operatorname', 'operatorname@', 'operatornamewithlimits', 'limits', 'nolimits', 'displaylimits',
   'not', 'mod', 'bmod', 'pmod', 'pod', 'ce', 'pu', 'allowbreak', 'nonscript', 'root', 'of', 'leftroot', 'uproot', 'hdotsfor',
@@ -1827,10 +1828,63 @@ export function renderMath(source: string, display = false, configured: MathMacr
   function textBox(name: string): Markup {
     if (name === 'reflectbox') return xml`<mrow class="math-reflect">${textArgument('hbox')}</mrow>`
     if (name === 'fbox') return xml`<mrow class="math-color-box math-frame">${textArgument('hbox')}</mrow>`
-    const frame = name === 'fcolorbox' ? readColor('Invalid math box color') : ''
-    const background = readColor('Invalid math box color')
+    const { frame, background } = readBoxColors(name)
     const content = textArgument('hbox')
     return xml`<mrow class="math-color-box${frame ? ' math-frame' : ''}" style="background-color:${background}${frame ? `;border-color:${frame}` : ''}">${content}</mrow>`
+  }
+
+  function readBoxColors(name: string): { frame?: string, background: string } {
+    const frame = name === 'fcolorbox' ? readColor('Invalid math box color') : undefined
+    const background = readColor('Invalid math box color')
+    return { frame, background }
+  }
+
+  function alignedBoxDimensions(): string[] {
+    const dimensions: string[] = []
+    while (alignedBoxAssignments.has(peek())) {
+      const assignment = take()
+      const name = assignment === '\\setlength' ? literalGroup() : assignment
+      if (name !== '\\fboxsep' && name !== '\\fboxrule') throw new MathParseError('Unsupported \\Aboxed dimension')
+      if (assignment !== '\\setlength' && peek() === '=') take()
+      const length = readDimension()
+      if (Number.parseFloat(length) < 0) throw new MathParseError('Invalid \\Aboxed dimension')
+      dimensions.push(`--math-frame-${name === '\\fboxsep' ? 'padding' : 'rule'}:${length}`)
+    }
+    return dimensions
+  }
+
+  function alignedBoxStyle(box: string[]): string[] {
+    // Expand the wrapper in isolation and verify that it forwards one
+    // argument to a box. The actual math is laid out in its alignment cells.
+    const probe = '\u0000alignment-box-argument'
+    return withTokens([...box, '{', probe, '}'], () => inScope(() => {
+      let groups = 0
+      while (peek() === '{') {
+        take()
+        groups++
+      }
+      const style = alignedBoxDimensions()
+      const command = take()
+      const name = command.slice(1)
+      if (name !== 'fbox' && name !== 'colorbox' && name !== 'fcolorbox')
+        throw new MathParseError('Expected \\fbox, \\colorbox, or \\fcolorbox in an alignment box wrapper')
+      const { frame, background } = name === 'fbox' ? {} : readBoxColors(name)
+      let contents = expandDefinition(rawGroup()).filter(value => !texWhitespace.test(value))
+      // \boxed expands to an \fbox containing a grouped display formula.
+      if (contents[0] === '$' && contents.at(-1) === '$') contents = contents.slice(1, -1)
+      if (contents[0] === '\\displaystyle') contents.shift()
+      while (contents[0] === '{' && contents.at(-1) === '}') contents = contents.slice(1, -1)
+      if (contents.length !== 1 || contents[0] !== probe)
+        throw new MathParseError('An alignment box wrapper must pass its argument through once')
+      for (let index = 0; index < groups; index++) {
+        if (take() !== '}') throw new MathParseError('Unexpected tokens after an alignment box wrapper')
+      }
+      if (peek() !== boundary) throw new MathParseError('Unexpected tokens after an alignment box wrapper')
+      if (background) style.push(`--math-frame-fill:${background}`)
+      if (frame) style.push(`--math-frame-color:${frame}`)
+      if (name === 'colorbox') style.push('--math-frame-rule:0px')
+      return style
+    }))
   }
 
   function optionalBoxDimension(): string | undefined {
@@ -2809,20 +2863,11 @@ export function renderMath(source: string, display = false, configured: MathMacr
       }
       const followsOrdinary = aligned && columnsInRow % 2 === 1
       const command = aligned || allowDottedCells ? peek() : ''
-      if (aligned && (command === alignedBox || alignedBoxAssignments.has(command))) {
-        const dimensions: string[] = []
-        while (peek() !== alignedBox) {
-          const assignment = take()
-          if (!alignedBoxAssignments.has(assignment))
-            throw new MathParseError('Frame dimensions must precede \\Aboxed')
-          const name = assignment === '\\setlength' ? literalGroup() : assignment
-          if (name !== '\\fboxsep' && name !== '\\fboxrule') throw new MathParseError('Unsupported \\Aboxed dimension')
-          if (assignment !== '\\setlength' && peek() === '=') take()
-          const length = readDimension()
-          if (Number.parseFloat(length) < 0) throw new MathParseError('Invalid \\Aboxed dimension')
-          dimensions.push(`--math-frame-${name === '\\fboxsep' ? 'padding' : 'rule'}:${length}`)
-        }
-        take()
+      if (aligned && (command === alignedBox || command === customAlignedBox || alignedBoxAssignments.has(command))) {
+        const frameStyle = alignedBoxDimensions()
+        const box = take()
+        if (box !== alignedBox && box !== customAlignedBox) throw new MathParseError('Frame dimensions must precede an alignment box')
+        if (box === customAlignedBox) frameStyle.push(...alignedBoxStyle(rawGroup()))
         const [lhs, rhs] = withTokens(rawGroup(), () => inScope(() => {
           const lhs = row(['&', boundary], false, false, undefined, followsOrdinary)
           if (peek() !== '&') return [lhs]
@@ -2832,7 +2877,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
           return [lhs, rhs]
         }))
         const suffix = inScope(() => row(stops, false, false, undefined, true))
-        if (rhs === undefined && !dimensions.length) {
+        if (rhs === undefined && !frameStyle.length) {
           cells.push(xml`<mrow class="math-color-box math-frame">${lhs}</mrow>${suffix}`)
           columnsInRow++
         }
@@ -2840,7 +2885,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
           const span = rhs === undefined ? 1 : 2
           if (span === 2 && followsOrdinary) throw new MathParseError('\\Aboxed must start in the left column of an alignment pair')
           frames ??= new Map()
-          frames.set(columnsInRow, { span, dimensions })
+          frames.set(columnsInRow, { span, style: frameStyle })
           const tail = suffix && xml`<mrow>${suffix}</mrow>`
           if (rhs === undefined) cells.push(xml`<mrow data-equation-frame-start>${lhs}</mrow>${tail}`)
           else cells.push(lhs, xml`<mrow data-equation-frame-end>${rhs}</mrow>${tail}`)
@@ -3016,7 +3061,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
           else if (compact || stretch !== 1 || moreRowSpace) styling.push(`padding-block:${pad}em`)
           const inset = 'var(--math-frame-inset)'
           const pairedGap = !spread && !paired && index > 0 && index % 2 === 0
-          if (framing) styling.push(...framing.dimensions)
+          if (framing) styling.push(...framing.style)
           if (frameStart) styling.push(`padding-inline-start:${pairedGap ? `calc(1em + ${inset})` : inset}`)
           if (framing) styling.push(`padding-block:calc(${pad}em + ${inset})`)
           styling.push(...trim)
@@ -3161,6 +3206,14 @@ export function renderMath(source: string, display = false, configured: MathMacr
       assign(target, { pairedDelimiter: { opening, closing, template } })
       return true
     }
+    if (name === 'MakeAboxedCommand') {
+      const target = definitionTarget(true)
+      if (!controlSequence.test(target)) throw new MathParseError(`Expected a command name in ${token}`)
+      if (defined(target)) throw new MathParseError(`Macro ${target} is already defined`)
+      const wrapper = rawGroup('Missing alignment box wrapper')
+      assign(target, plainMacro([customAlignedBox, '{', ...wrapper, '}', '{', '#1', '}'], 1))
+      return true
+    }
     if (['def', 'gdef', 'edef', 'xdef'].includes(name)) {
       const command = definitionTarget()
       space()
@@ -3279,7 +3332,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const name = token.slice(1)
     if (token === arrowBetweenLines) throw new MathParseError(`${token} requires an align, alignat, aligned, or alignedat environment`)
     if (token === flushSpaceAbove || token === flushSpaceBelow) throw new MathParseError(`${token} requires an alignment environment`)
-    if (token === alignedBox) throw new MathParseError('\\Aboxed must start an alignment cell')
+    if (token === alignedBox || token === customAlignedBox) throw new MathParseError('\\Aboxed must start an alignment cell')
     if (intertextCommands.has(token)) throw new MathParseError(`${token} requires a top-level align, alignat, or gather display (including full-width alignments)`)
     if (name === 'begingroup') {
       let parts: RowPart[] | undefined
