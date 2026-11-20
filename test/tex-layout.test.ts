@@ -580,7 +580,8 @@ test('keeps phantom atoms invisible with the spacing of their visible equivalent
 test('positions boxes and prescripts with bounded MathML dimensions', () => {
   const formula = String.raw`\raisebox{2pt}[1ex][0pt]{x}\kern7mu \rule[-1pt]{1em}{.5pt}\smash[b]{y} \prescript{14}{6}{C}`
   const html = renderMath(formula)
-  expect(html).toContain('<mpadded voffset="2pt" height="1ex" depth="0pt">')
+  expect(html).toContain('<mpadded height="1ex" depth="0pt"><mtext class="math-raised-box"')
+  expect(html).toContain('vertical-align:2pt"><math')
   expect(html).toContain('<mspace width="0.3888888888888889em"/>')
   expect(html).toMatch(/<mpadded voffset="-1pt" [^>]+><mspace width="1em" height="\.5pt"/)
   expect(html).toContain('<mpadded depth="0">')
@@ -599,7 +600,7 @@ test('renders phantom space, smashed dimensions, raised boxes, rules, and verbat
   expect(html).toContain('<mpadded height="0" depth="0"><mphantom><mtext>wide</mtext></mphantom></mpadded>')
   expect(html).toContain('<mpadded width="0"><mphantom><mtext>tall</mtext></mphantom></mpadded>')
   expect(html).toContain('<mpadded height="0" depth="0"><mtext>flat</mtext></mpadded>')
-  expect(html).toContain('<mpadded voffset="2pt"><mtext>up</mtext></mpadded>')
+  expect(html).toMatch(/vertical-align:2pt"><math[^>]*><mrow><mtext>up<\/mtext>/)
   expect(html).toMatch(/<mpadded voffset="2pt" [^>]+><mspace width="1em" height="\.5pt"/)
   expect(html).toContain('>&lt;a␣$␣b&gt;%{}</mtext><mtext>Z</mtext>')
   expect(html).toContain(' stays inline.')
@@ -610,7 +611,7 @@ test('applies only valid TeX smash flags and expands optional box dimensions', (
   const html = math(String.raw`\smash[]x\smash[tx]{y}\smash[t]{z} + \text{\smash[b]{g}}`, false)
   expect(html).toContain('<mi>x</mi><mrow><mi>y</mi></mrow><mpadded height="0"><mrow><mi>z</mi></mrow></mpadded>')
   expect(html).toContain('<mpadded depth="0"><mtext>g</mtext></mpadded>')
-  expect(math(String.raw`\def\size{1ex}\raisebox{2pt}[\size]{x}`, false)).toContain('<mpadded voffset="2pt" height="1ex">')
+  expect(math(String.raw`\def\size{1ex}\raisebox{2pt}[\size]{x}`, false)).toContain('<mpadded height="1ex"><mtext class="math-raised-box"')
   expect(() => math(String.raw`\text{\rule[wrong]{1em}{2pt}}`, false)).toThrow('Invalid math box dimension')
 })
 
@@ -842,7 +843,7 @@ test('sets text and mixed math in framed, raised, and centered boxes', () => {
   expect(html).toContain('style="background-color:#fc9;border-color:#d66c21"')
   expect(html).toContain('<mfrac><mrow><mi>a</mi></mrow><mrow><mi>b</mi></mrow></mfrac>')
   expect(html).toContain('<mtext> result</mtext>')
-  expect(html).toContain('<mpadded voffset=".3em"><mrow style="font-style:normal;font-weight:normal"><mstyle displaystyle="false" scriptlevel="0"><msup><mi>y</mi><mn>2</mn></msup>')
+  expect(html).toMatch(/vertical-align:\.3em"><math[^>]* scriptlevel="0" displaystyle="false"><mrow><mrow style="font-style:normal;font-weight:normal"><msup><mi>y<\/mi><mn>2<\/mn><\/msup>/)
   expect(html).toContain('class="math-color-box math-frame"><mtext>check</mtext>')
   expect(html).toContain('style="background-color:yellow"><mtext>draft</mtext>')
   expect(html).toContain('style="color:#228B22"')
@@ -1030,6 +1031,66 @@ test('enforces KaTeX strict settings for comments, markup, text commands, spacin
 })
 
 const chrome = await findChrome()
+
+test.skipIf(!chrome)('sizes raised text boxes from their shifted baseline in Chromium', async () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const formulas = [
+    String.raw`\raisebox{}{Ag}`,
+    String.raw`\raisebox{1em}{Ag}`,
+    String.raw`\raisebox{-1em}{Ag}`,
+    String.raw`\raisebox{-.1em}{Ag}`,
+    String.raw`\raisebox{1em}[.2em][.25em]{Ag}`,
+    String.raw`x_{\raisebox{.2em}{$\mathchoice{D}{T}{S}{SS}$}}`,
+    String.raw`\textbf{\raisebox{.2em}{Ag}}`,
+  ]
+  const marker = '<mspace class="baseline" width="0" height="0" depth="0"/>'
+  const rows = formulas.map(source => `<div>${math(source, false).replace('</mrow><annotation', `${marker}</mrow><annotation`)}</div>`).join('')
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response(`<!doctype html><meta charset="utf-8"><main style="font-size:40px">${rows}</main>`, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    }),
+  })
+  const view = new Bun.WebView({ backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await view.navigate(server.url.href)
+    const boxes = await view.evaluate<{
+      ascent: number, descent: number, ink: number, offset: number, font: number, text: string, weight: string,
+    }[]>(`[...document.querySelectorAll('main > div > math')].map(math => {
+      const baseline = math.querySelector('.baseline').getBoundingClientRect().top
+      const box = math.getBoundingClientRect()
+      const shifted = math.querySelector('.math-raised-box > span > span')
+      const text = shifted.querySelector('math > mrow')
+      return {
+        ascent: baseline - box.top,
+        descent: box.bottom - baseline,
+        ink: baseline - text.getBoundingClientRect().top,
+        offset: parseFloat(getComputedStyle(shifted).verticalAlign),
+        font: parseFloat(getComputedStyle(text).fontSize),
+        text: text.textContent,
+        weight: getComputedStyle(text).fontWeight,
+      }
+    })`)
+    const [normal, raised, lowered, shifted, fixed, script, bold] = boxes
+    expect(raised.ascent).toBeCloseTo(normal.ascent + 40)
+    expect(raised.descent).toBeCloseTo(0)
+    expect(lowered.ascent).toBeCloseTo(0)
+    expect(lowered.descent).toBeCloseTo(normal.descent + 40)
+    expect(shifted.ascent).toBeCloseTo(normal.ascent - 4)
+    expect(shifted.descent).toBeCloseTo(normal.descent + 4)
+    expect(fixed.ascent).toBeCloseTo(8)
+    expect(fixed.descent).toBeCloseTo(10)
+    expect(fixed.ink).toBeCloseTo(raised.ink)
+    expect(script.text).toBe('T')
+    expect(script.font).toBe(normal.font)
+    expect(script.offset).toBeCloseTo(5.6, 1)
+    expect(bold.weight).toBe('700')
+  }
+  finally {
+    view.close()
+    await server.stop(true)
+  }
+}, 45_000)
 
 test.skipIf(!chrome)('matches visible atom positions for math choices and phantoms in Chromium', async () => {
   const cases = [

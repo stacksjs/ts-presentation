@@ -1209,10 +1209,16 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
     if (name === 'raisebox') {
       if (peek() !== '{') throw new Error('Raised math box requires a grouped dimension')
-      const offset = readDimension()
+      const offset = readDimension('0px')
       const height = optionalBoxDimension()
       const depth = optionalBoxDimension()
-      return xml`<mpadded voffset="${offset}"${height ? ` height="${height}"` : ''}${depth ? ` depth="${depth}"` : ''}>${textArgument('text')}</mpadded>`
+      const body = renderMarkup(textArgument('text'), 1)
+      // Use an inline box baseline so the shift affects both layout and paint.
+      // Zero font adjustment removes the empty line strut without shrinking the content.
+      const text = `<math style="font-size:math;font-family:inherit;font-style:inherit;font-weight:inherit" scriptlevel="0" displaystyle="false"><mrow>${body}</mrow></math>`
+      const shifted = `<span style="display:inline-block;font-size-adjust:none;vertical-align:${offset}">${text}</span>`
+      const box = `<mtext class="math-raised-box" style="line-height:0"><span style="display:inline-block;line-height:0;font-size-adjust:0">${shifted}</span></mtext>`
+      return height || depth ? `<mpadded${height ? ` height="${height}"` : ''}${depth ? ` depth="${depth}"` : ''}>${box}</mpadded>` : box
     }
     if (name === 'smash') {
       const flags = rawBracket()

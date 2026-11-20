@@ -55,7 +55,7 @@ in a new ts-presentation project.
 | KaTeX parser diagnostics | Macro declaration and scope checks, undefined commands in eager expansion, unexpected delimiters, text-mode command checks, and validation of expanded colors |
 | KaTeX macro and color settings | Deck-scoped `globalGroup`, per-formula `maxExpand` including eager definitions, and two-argument `\color` via `colorIsTextColor` |
 | KaTeX sizing settings | `maxSize` for explicit dimensions and `minRuleThickness` for fraction bars, array rules, box borders, and overlines or underlines |
-| KaTeX text-mode boxes | Phantom space, selective height and depth removal, raised boxes and rules, and escaped verbatim text inside `\text{…}` |
+| KaTeX text-mode boxes | Phantom space, selective height and depth removal, shifted line dimensions for `\raisebox`, text-style box contents in scripts, and escaped verbatim text inside `\text{…}` |
 | KaTeX math-mode boxes | `\phantom` retains atom spacing and signed kerns. Shifted `\rule` reserves space above and below the baseline, including zero-width struts |
 | PowerPoint export | Image slides or editable text and boxes, including supported linear-gradient fills, with separate artwork |
 | Notes and Markdown export | `export-notes` prints notes with slide titles and numbers. `export --format md` links selected slide images and keeps raw speaker-note Markdown |
