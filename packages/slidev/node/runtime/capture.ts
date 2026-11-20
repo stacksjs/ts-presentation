@@ -6,13 +6,17 @@ import { dataPicture, maxOriginalPictureBytes, originalPicture } from './editabl
 import type { OriginalPicture } from './editable/pictures.ts'
 import { slideRange } from './selection.ts'
 
-interface CaptureOptions {
+interface BrowserOptions {
   root: string
   executable: string
   scale: number
+  canvas: SlideCanvas
+  timeout?: number
+}
+
+export interface CaptureOptions extends BrowserOptions {
   withClicks: boolean
   range?: string
-  canvas: SlideCanvas
   editable?: boolean
 }
 
@@ -58,7 +62,7 @@ function pictureReader(root: string, origin: string): PictureReader {
   }
 }
 
-async function withExportBrowser<T>(options: CaptureOptions, run: (browser: Bun.WebView, readOriginal: PictureReader) => Promise<T>): Promise<T> {
+async function withExportBrowser<T>(options: BrowserOptions, run: (browser: Bun.WebView, readOriginal: PictureReader) => Promise<T>): Promise<T> {
   const { width, height } = options.canvas
   const root = await realpath(options.root)
   const preview = Bun.serve({
@@ -92,10 +96,12 @@ async function withExportBrowser<T>(options: CaptureOptions, run: (browser: Bun.
       await chrome.navigate(new URL('?capture=1&steps=1', preview.url).href)
       return run(chrome, pictureReader(root, preview.url.origin))
     }
+    const duration = options.timeout ?? 120_000
+    if (!duration) return await capture()
     return await Promise.race([
       capture(),
       new Promise<never>((_, reject) => {
-        timeout = setTimeout(() => reject(new Error('Slide capture did not finish within 120 seconds')), 120_000)
+        timeout = setTimeout(() => reject(new Error(`Presentation export did not finish within ${duration}ms`)), duration)
       }),
     ])
   }
@@ -224,8 +230,63 @@ export async function capturePdf(options: CaptureOptions): Promise<Uint8Array<Ar
       await (${prepareImages.toString()})(stage)
       window.presentationFitText?.(stage)
     })(${JSON.stringify(positions)})`)
-    const result = await chrome.cdp('Page.printToPDF', { printBackground: true, preferCSSPageSize: true }) as { data?: string }
-    if (!result.data) throw new Error('Chrome PDF export returned no pages')
-    return Buffer.from(result.data, 'base64')
+    return printPdf(chrome)
+  })
+}
+
+async function printPdf(chrome: Bun.WebView): Promise<Uint8Array<ArrayBuffer>> {
+  const result = await chrome.cdp('Page.printToPDF', { printBackground: true, preferCSSPageSize: true }) as { data?: string }
+  if (!result.data) throw new Error('Chrome PDF export returned no pages')
+  return Buffer.from(result.data, 'base64')
+}
+
+const notePrintCss = `
+  @page { size: A4; margin: 15mm 16mm 10mm; }
+  html, body.printing-notes { width: auto; height: auto; min-height: 0; overflow: visible; }
+  body.printing-notes { display: block; margin: 0; background: #fff; color: #161616; font: 11pt/1.55 system-ui, sans-serif; }
+  .printing-notes main > h1 { margin: 0 0 18pt; font-size: 27pt; }
+  .printing-notes section { margin: 0 0 14pt; padding: 0 0 12pt; break-inside: avoid-page; }
+  .printing-notes section + section { border-top: 1px solid #ddd; padding-top: 12pt; }
+  .printing-notes section > h2 { margin: 0 0 6pt; font-size: 14pt; break-after: avoid-page; }
+  .printing-notes [data-note-step] p { margin: 0 0 6pt; }
+  .printing-notes :is(img, table, pre) { max-width: 100%; }
+  .printing-notes pre { white-space: pre-wrap; }
+`
+
+/** Print the full presenter notes for each selected slide that has notes. */
+export async function captureNotesPdf(options: BrowserOptions & { range?: string, wait: number }): Promise<Uint8Array<ArrayBuffer>> {
+  return withExportBrowser(options, async (chrome) => {
+    const total = await chrome.evaluate<number>("document.querySelectorAll('#stage > article').length")
+    const selected = slideRange(total, options.range)
+    await chrome.evaluate(`(async (selected, css) => {
+      const slides = [...document.querySelectorAll('#stage > article')]
+      const notes = [...document.querySelectorAll('#presenter-notes > section')]
+      const title = document.title
+      const pages = document.createElement('main')
+      const heading = document.createElement('h1')
+      heading.textContent = title
+      pages.append(heading)
+      for (const number of selected) {
+        const note = notes[number - 1]
+        if (!note?.hasAttribute('data-has-notes')) continue
+        const entry = note.cloneNode(true)
+        entry.removeAttribute('hidden')
+        for (const step of entry.querySelectorAll(':scope > [data-note-step]')) step.removeAttribute('hidden')
+        const label = document.createElement('h2')
+        label.textContent = number + '/' + slides.length + ' ' + slides[number - 1].getAttribute('aria-label')
+        entry.prepend(label)
+        pages.append(entry)
+      }
+      document.title = 'Notes - ' + title
+      document.body.className = 'printing-notes'
+      document.body.replaceChildren(pages)
+      const styles = document.createElement('style')
+      styles.textContent = css
+      document.head.append(styles)
+      await document.fonts.ready
+      await (${prepareImages.toString()})(pages)
+    })(${JSON.stringify(selected)}, ${JSON.stringify(notePrintCss)})`)
+    if (options.wait) await Bun.sleep(options.wait)
+    return printPdf(chrome)
   })
 }

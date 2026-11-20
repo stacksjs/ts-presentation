@@ -154,6 +154,7 @@ export function readHeadmatter(markdown: string): Frontmatter {
 interface SlideDraft {
   content: string
   notes?: string
+  noteRange?: MarkdownScan['lastComment']
   visible: string
   attributes: Frontmatter
   source: SlideSource
@@ -192,6 +193,7 @@ function splitSlides(lines: string[]): SlideDraft[] {
     drafts.push({
       content,
       notes: note ? raw.slice(note.start + 4, note.end - 3).trim() : undefined,
+      noteRange: note,
       visible: visible?.join('\n') ?? content,
       attributes: matter?.attributes ?? {},
       source: { bodyLine: start, endLine: end, leading, matter },
@@ -259,6 +261,32 @@ function finishDeck(drafts: SlideDraft[], keepSources = false): Deck {
 
 export function parseDeck(markdown: string): Deck {
   return finishDeck(splitSlides(splitLines(markdown)), true)
+}
+
+/** Normalize slide boundaries while preserving the original Markdown and YAML. */
+export function formatDeck(markdown: string): string {
+  const lines = splitLines(markdown)
+  const drafts = splitSlides(lines)
+  if (!drafts.length) return markdown
+  const pieces: string[] = []
+  const parts = (text: string) => {
+    const content = text.replace(/^(?:[ \t]*\n)+|(?:\n[ \t]*)+$/g, '')
+    if (content.trim()) pieces.push(content)
+  }
+  let start = 0
+  for (const { source, notes, noteRange } of drafts) {
+    const { matter, bodyLine, endLine } = source
+    parts(lines.slice(start, matter?.start ?? bodyLine).join('\n'))
+    if (matter) parts(lines.slice(matter.start, bodyLine).join('\n'))
+    const body = lines.slice(bodyLine, endLine).join('\n')
+    parts(noteRange && notes ? body.slice(0, noteRange.start) : body)
+    if (noteRange && notes) pieces.push(`<!--\n${notes}\n-->`)
+    start = endLine
+  }
+  parts(lines.slice(start).join('\n'))
+  const newline = /\r?\n/.exec(markdown)?.[0] ?? '\n'
+  const bom = markdown.startsWith('\uFEFF') ? '\uFEFF' : ''
+  return bom + pieces.join('\n\n').replaceAll('\n', newline) + newline
 }
 
 export async function parseDeckAsync(markdown: string, extensions: readonly PreparserExtension[] = []): Promise<Deck> {

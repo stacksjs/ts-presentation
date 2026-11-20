@@ -42,7 +42,16 @@ bun src/cli.ts export examples/demo/slides.md --format pptx --out output/demo.pp
 bun src/cli.ts export examples/demo/slides.md --format pptx-editable --out output/editable.pptx
 bun src/cli.ts export examples/demo/slides.md --format png --range 1,3-5 --out output/frames
 bun src/cli.ts export examples/demo/slides.md --range 2-4 --with-clicks --out output/rehearsal.pdf
+bun src/cli.ts export examples/demo/slides.md --format md --out output/handout.md
+bun src/cli.ts export-notes examples/demo/slides.md --out output/notes.pdf
+bun src/cli.ts format examples/demo/slides.md
 ```
+
+Markdown exports keep speaker notes and link to PNGs in a sibling
+`<name>-images` directory. Notes PDFs include slide titles, numbers, and all
+note reveal steps for slides with notes. Pass `--range` to select slides.
+The formatter normalizes slide boundaries and note blocks in the entry file
+while preserving the Markdown body and YAML.
 
 PowerPoint uses slide images with editable speaker notes and clickable web
 and slide links. It includes each reveal by default. Pass `--without-clicks` for one

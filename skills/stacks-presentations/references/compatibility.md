@@ -8,6 +8,7 @@ in a new ts-presentation project.
 | Upstream feature | Stacks equivalent |
 | --- | --- |
 | Markdown, frontmatter, slide includes, click steps | Native Bun parser and browser player with labeled separators, fenced YAML, and source ranges |
+| Source formatter | `format` writes consistent slide boundaries and speaker-note blocks while preserving Markdown bodies, YAML, and included files |
 | Preparser extensions | Async raw-line, slide, and speaker-note hooks from `setup/preparser.ts` |
 | Markdown transformers | Async `setup/transformers.ts` hooks for slide Markdown and fenced code, including fences nested in lists and block quotes. Hooks support stable edit offsets between commits, native highlighting, and STX rendering for returned components |
 | Integrated editor and live preview | Dev Markdown pane with autosave, included-file support, conflict detection, and in-place body and title refreshes |
@@ -50,6 +51,7 @@ in a new ts-presentation project.
 | KaTeX sizing settings | `maxSize` for explicit dimensions and `minRuleThickness` for fraction bars, array rules, box borders, and overlines or underlines |
 | KaTeX text-mode boxes | Phantom space, selective height and depth removal, raised boxes and rules, and escaped verbatim text inside `\text{…}` |
 | PowerPoint export | Image slides or editable text and boxes, including supported linear-gradient fills, with separate artwork |
+| Notes and Markdown export | `export-notes` prints notes with slide titles and numbers. `export --format md` links selected slide images and keeps raw speaker-note Markdown |
 | First-party diagram authoring | YAML `charts` fences through `ts-charts` for flowcharts, sequence, state, class, ER, pie, timeline, journey, Gantt, Git history, XY charts, and Sankey diagrams |
 | Draggable elements | Inline directives, drag and arrow components, frontmatter positions, scaled editing, and local Markdown saves |
 | Imported Slidev diagrams | Compatibility fences translate the supported syntax to `ts-charts` input |

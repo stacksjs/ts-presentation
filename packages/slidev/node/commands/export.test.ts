@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'bun:test'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { findChrome } from '../runtime/chrome.ts'
-import { resolveExportSettings } from '../runtime/export-options.ts'
+import { resolveExportSettings, resolveNotesExportSettings } from '../runtime/export-options.ts'
+import { parseDeck } from '../../../parser/src/deck.ts'
 
 const cli = fileURLToPath(new URL('../cli.ts', import.meta.url))
 const chrome = await findChrome()
@@ -27,6 +28,18 @@ describe('export defaults', () => {
     expect(settings).toMatchObject({ format: 'pptx', range: '1', output: resolve('override.pptx'), withClicks: false })
     expect(resolveExportSettings('/deck/slides.md', { export: { withClicks: false } }, { 'with-clicks': true }).withClicks).toBe(true)
   })
+
+  it('resolves Markdown and notes filenames without changing ordinary export defaults', () => {
+    expect(resolveExportSettings('/deck/slides.md', {}, { format: 'md' })).toMatchObject({
+      format: 'md', output: resolve('slides-export.md'), withClicks: false, scale: 1,
+    })
+    expect(resolveNotesExportSettings('/deck/slides.md', { config: { exportFilename: 'reports/talk' } })).toMatchObject({
+      output: resolve('reports/talk-notes.pdf'), timeout: 30_000, wait: 0,
+    })
+    expect(resolveNotesExportSettings('/deck/slides.md', {}, { out: 'paper', timeout: '0', wait: '250' })).toMatchObject({
+      output: resolve('paper.pdf'), timeout: 0, wait: 250,
+    })
+  })
 })
 
 const deck = [
@@ -38,12 +51,16 @@ const deck = [
   '', '---', '', '# Third chapter omitted',
 ].join('\n')
 
-async function exportDeck(root: string, ...args: string[]): Promise<void> {
-  const command = Bun.spawn([process.execPath, cli, 'export', 'slides.md', '--executable-path', chrome!, ...args], {
+async function deckCommand(root: string, name: string, ...args: string[]): Promise<void> {
+  const command = Bun.spawn([process.execPath, cli, name, 'slides.md', ...args], {
     cwd: root, stdout: 'pipe', stderr: 'pipe', timeout: exportTestTimeout - 10_000,
   })
   const [status, output] = await Promise.all([command.exited, new Response(command.stderr).text()])
   if (status !== 0) throw new Error(output.trim() || `Export command exited with status ${status}`)
+}
+
+function exportDeck(root: string, ...args: string[]): Promise<void> {
+  return deckCommand(root, 'export', '--executable-path', chrome!, ...args)
 }
 
 describe('export creates output directories', () => {
@@ -93,3 +110,83 @@ describe('export creates output directories', () => {
     }
   }, exportTestTimeout)
 })
+
+it('formats the entry using the native slide boundaries and leaves included files alone', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-format-'))
+  const path = join(root, 'slides.md')
+  const fragment = join(root, 'part.md')
+  const newline = '\r\n'
+  const head = ['---', '# Keep this YAML comment', 'title: Format', '---']
+  const body = ['# Keep this heading', '', '- First line  ', '  next line', '', '~~~text', '--- inside code', '~~~']
+  const included = ['--- with YAML', 'src: ./part.md', '---']
+  const tail = ['---', '', '```yaml', 'layout: center', '```', '', '# Last slide']
+  const source = '\uFEFF' + ['', ...head, '', '', ...body, '', '', '<!-- Read this -->', '', '', ...included, '', '', ...tail, '', ''].join(newline)
+  const expected = '\uFEFF' + [...head, '', ...body, '', '<!--', 'Read this', '-->', '', ...included, '', ...tail, ''].join(newline)
+  try {
+    await Bun.write(path, source)
+    await Bun.write(fragment, '\n\n# Unchanged include\n\n')
+    await deckCommand(root, 'format')
+    expect(await readFile(path, 'utf8')).toBe(expected)
+    expect(parseDeck(expected)).toEqual(parseDeck(source))
+    expect(await readFile(fragment, 'utf8')).toBe('\n\n# Unchanged include\n\n')
+    await deckCommand(root, 'format')
+    expect(await readFile(path, 'utf8')).toBe(expected)
+  }
+  finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+it.skipIf(!chrome)('prints only selected speaker notes and includes their complete reveals', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-notes-export-'))
+  try {
+    const source = [
+      '---', 'title: Notes review', 'exportFilename: reports/talk', '---',
+      '', '# First', '', '<!--', '[First note](https://example.com/excluded-note)', '-->',
+      '', '---', '', '# Empty', '', '[Audience link](https://example.com/excluded-slide)',
+      '', '---', '', '# Selected', '', '<p v-click>Reveal</p>', '',
+      '<!--', '[Opening note](https://example.com/selected-note)', '', '[click]', '',
+      '[Second note](https://example.com/later-note)', '-->',
+    ].join('\n')
+    await Bun.write(join(root, 'slides.md'), source)
+    await deckCommand(root, 'export-notes', '--executable-path', chrome!, '--range', '2-3')
+    const pdf = await Bun.file(join(root, 'reports', 'talk-notes.pdf')).text()
+    expect(pdf.startsWith('%PDF')).toBe(true)
+    expect(pdf).toMatch(/\/Title \(Notes - Notes review\)/)
+    const mediaBox = /\/MediaBox \[0 0 ([\d.]+) ([\d.]+)\]/.exec(pdf)!
+    expect(Math.abs(Number(mediaBox[1]) - 595)).toBeLessThan(1)
+    expect(Math.abs(Number(mediaBox[2]) - 842)).toBeLessThan(1)
+    expect(pdf).toContain('/URI (https://example.com/selected-note)')
+    expect(pdf).toContain('/URI (https://example.com/later-note)')
+    expect(pdf).not.toContain('excluded-note')
+    expect(pdf).not.toContain('excluded-slide')
+  }
+  finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}, exportTestTimeout)
+
+it.skipIf(!chrome)('exports Markdown with selected reveal images and original speaker-note markup', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-md-export-'))
+  const source = [
+    '# Skipped', '', '---', '', '# Selected [topic]', '',
+    '<p v-click>Reveal</p>', '', '<!--', '**Opening note.**', '', '[click]', '', '- Next point', '-->',
+  ].join('\n')
+  try {
+    await Bun.write(join(root, 'slides.md'), source)
+    await exportDeck(root, '--format', 'md', '--range', '2', '--with-clicks', '--out', 'reports/Talk (Draft)')
+    const md = await Bun.file(join(root, 'reports', 'Talk (Draft).md')).text()
+    expect(md).toContain('![Selected \\[topic\\]](./Talk%20%28Draft%29-images/slide-2-0.png)')
+    expect(md).toContain('./Talk%20%28Draft%29-images/slide-2-1.png')
+    expect(md).toContain('**Opening note.**\n\n[click]\n\n- Next point')
+    expect(md).not.toContain('Skipped')
+    for (const name of ['slide-2-0.png', 'slide-2-1.png']) {
+      const image = Bun.file(join(root, 'reports', 'Talk (Draft)-images', name))
+      expect([...await image.slice(0, 8).bytes()]).toEqual([137, 80, 78, 71, 13, 10, 26, 10])
+    }
+    expect(await Bun.file(join(root, 'slides.md')).text()).toBe(source)
+  }
+  finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}, exportTestTimeout)

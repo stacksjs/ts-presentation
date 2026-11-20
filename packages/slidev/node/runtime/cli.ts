@@ -1,11 +1,11 @@
 #!/usr/bin/env bun
-import { cp, mkdir, mkdtemp, realpath, rm } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { asset, within } from './assets.ts'
 import { findChrome } from './chrome.ts'
-import { resolveExportSettings } from './export-options.ts'
+import { resolveExportSettings, resolveNotesExportSettings } from './export-options.ts'
 import { resolveDeckEntry } from './extension-resolver.ts'
 import { maxCodeLength } from './compile-code.ts'
 import { saveDrag } from './drag-source.ts'
@@ -17,8 +17,9 @@ import { legacySlideLocation } from '../../../client/runtime/navigation.ts'
 import { deckPath, matchDeckPath, normalizeBasePath, resolveRouterMode } from '../../../client/runtime/routing.ts'
 import { prefixCssUrls } from './base-assets.ts'
 import { maxSlideEditLength, readSlideSource, saveSlideSource } from './side-editor-source.ts'
-import { saveSnippet } from './snippet-write.ts'
+import { saveSnippet, snippetRevision, writeDeckFile } from './snippet-write.ts'
 import { routePagePath, writeRoutePages } from './route-pages.ts'
+import { formatDeck } from '../../../parser/src/deck.ts'
 import { version } from '../../../../package.json'
 
 const options = {
@@ -35,17 +36,22 @@ const options = {
   base: { type: 'string' },
   'router-mode': { type: 'string' },
   'executable-path': { type: 'string' },
+  timeout: { type: 'string' },
+  wait: { type: 'string' },
   help: { type: 'boolean', short: 'h' },
 } as const
 
-const help = `ts-presentation <dev|build|export|mcp> [slides.md]
+const help = `ts-presentation <dev|build|format|export|export-notes|mcp> [slides.md]
 
   dev     Serve a local presentation. Optional --port (default: 3030) and --mcp.
   build   Build a static site. Optional --out (default: dist beside the deck).
-  export  Write PDF, PNG, PPTX or editable PPTX using Chrome. Use --format pptx-editable for editable slides.
+  format Normalize slide boundaries and speaker note blocks in the source.
+  export  Write PDF, PNG, PPTX, editable PPTX or Markdown with slide images using Chrome.
           Optional --out and --executable-path.
-          Use --range and --with-clicks to select PDF, PNG, or PPTX frames.
-          PNG/PPTX also support --scale.
+          Use --range and --with-clicks to select slides and reveal frames.
+          PNG, PPTX and Markdown images also support --scale.
+  export-notes  Write the speaker notes to a PDF with slide titles and numbers.
+          Optional --out, --range, --executable-path, --timeout and --wait.
   mcp     Serve deck editing tools over stdio.
   --theme   Override the deck's theme for any command.
   --base    Serve or build under a deployment path such as /talks/demo/.
@@ -64,7 +70,7 @@ async function main(): Promise<void> {
     console.log(help)
     return
   }
-  if ((command !== 'dev' && command !== 'build' && command !== 'export' && command !== 'mcp') || positionals.length > 2) {
+  if ((command !== 'dev' && command !== 'build' && command !== 'format' && command !== 'export' && command !== 'export-notes' && command !== 'mcp') || positionals.length > 2) {
     throw new Error(help)
   }
 
@@ -75,7 +81,18 @@ async function main(): Promise<void> {
     return
   }
   const directory = dirname(source)
-  const base = command === 'export' ? '/' : normalizeBasePath(values.base)
+  if (command === 'format') {
+    const original = await readFile(source, 'utf8')
+    const formatted = formatDeck(original)
+    if (formatted !== original) {
+      const revision = snippetRevision(original)
+      const saved = await writeDeckFile({ path: source, root: directory, revision }, revision, Infinity, 'deck source', () => formatted)
+      if (!saved.ok) throw new Error(await saved.text())
+    }
+    return
+  }
+  const mode = command === 'export-notes' ? 'export' : command
+  const base = mode === 'export' ? '/' : normalizeBasePath(values.base)
   const routerMode = values['router-mode'] === undefined ? undefined : resolveRouterMode(values['router-mode'])
   const publicDir = join(directory, 'public')
   const baseStyle = Bun.file(new URL('../../../client/runtime/player.css', import.meta.url))
@@ -89,7 +106,7 @@ async function main(): Promise<void> {
   if (!player.success || !player.outputs[0]) throw new Error('Could not build the browser player')
   const javascript = await player.outputs[0].text()
   const emptyStyle = '/* This deck has no custom styles. */\n'
-  const compile = createDeckCompiler(source, { base, routerMode, liveCompile: command === 'dev', mcpNavigation: command === 'dev' && values.mcp, mode: command, theme: values.theme })
+  const compile = createDeckCompiler(source, { base, routerMode, liveCompile: command === 'dev', mcpNavigation: command === 'dev' && values.mcp, mode, theme: values.theme })
 
   async function deckStyles(): Promise<string | Bun.BunFile> {
     const css = Bun.file(customStyle)
@@ -299,7 +316,11 @@ async function main(): Promise<void> {
   }
 
   const deck = await compile()
-  const { format, output, scale, range, executablePath, withClicks } = resolveExportSettings(source, deck.headmatter, values)
+  const settings = command === 'export-notes'
+    ? resolveNotesExportSettings(source, deck.headmatter, values)
+    : resolveExportSettings(source, deck.headmatter, values)
+  const { format, output, executablePath } = settings
+  if (await realpath(output).catch(() => undefined) === source) throw new Error('Export output would overwrite the deck source')
   const executable = await findChrome(executablePath)
   if (!executable) throw new Error('Chrome or Chromium is required for export. Pass --executable-path or set CHROME_BIN.')
   const powerPoint = format === 'pptx' || format === 'pptx-editable'
@@ -307,19 +328,30 @@ async function main(): Promise<void> {
   try {
     await mkdir(dirname(output), { recursive: true })
     await writeSite(temp, deck)
+    const browser = { root: temp, executable, canvas: deck.canvas }
+    if (settings.format === 'notes') {
+      const { captureNotesPdf } = await import('./capture.ts')
+      const { timeout, wait, range } = settings
+      await Bun.write(output, await captureNotesPdf({ ...browser, scale: 1, timeout, wait, range }))
+      console.log(output)
+      return
+    }
+    const { scale, range, withClicks } = settings
+    const capture = { ...browser, scale, range, withClicks }
+    if (format === 'md') {
+      const { exportMarkdown } = await import('./markdown-export.ts')
+      await exportMarkdown(output, deck.notesMarkdown, capture)
+      console.log(output)
+      return
+    }
     if (format !== 'pdf') {
       const { captureFrames } = await import('./capture.ts')
       const { title, author, canvas } = deck
       const frames: PowerPointFrame[] = []
       if (format === 'png') await mkdir(output, { recursive: true })
       await captureFrames({
-        root: temp,
-        executable,
-        canvas,
+        ...capture,
         editable: format === 'pptx-editable',
-        range,
-        scale,
-        withClicks,
       }, async (frame, index, total) => {
         if (powerPoint) frames.push(frame)
         else {
@@ -337,7 +369,7 @@ async function main(): Promise<void> {
     }
 
     const { capturePdf } = await import('./capture.ts')
-    const pdf = await capturePdf({ root: temp, executable, canvas: deck.canvas, scale, range, withClicks })
+    const pdf = await capturePdf(capture)
     await Bun.write(output, pdf)
     console.log(output)
   }

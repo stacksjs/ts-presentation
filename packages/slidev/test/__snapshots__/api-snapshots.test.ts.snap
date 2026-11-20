@@ -157,6 +157,8 @@ interface SlideSource {
 }
 export declare function slideSourceOf(slide: Slide): SlideSource | undefined;
 export declare function parseDeck(markdown: string): Deck;
+/** Normalize slide boundaries while preserving the original Markdown and YAML. */
+export declare function formatDeck(markdown: string): string;
 export declare function parseDeckAsync(markdown: string, extensions?: readonly PreparserExtension[]): Promise<Deck>;
 export {};
 
@@ -1206,6 +1208,8 @@ interface SlideSource {
 }
 export declare function slideSourceOf(slide: Slide): SlideSource | undefined;
 export declare function parseDeck(markdown: string): Deck;
+/** Normalize slide boundaries while preserving the original Markdown and YAML. */
+export declare function formatDeck(markdown: string): string;
 export declare function parseDeckAsync(markdown: string, extensions?: readonly PreparserExtension[]): Promise<Deck>;
 export {};
 

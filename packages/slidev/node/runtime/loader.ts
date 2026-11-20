@@ -42,6 +42,7 @@ export interface CompiledDeck extends ExtensionAssets {
   html: string
   title: string
   author?: string
+  notesMarkdown: readonly string[]
   headmatter?: Record<string, unknown>
   canvas: SlideCanvas
   routing: Routing
@@ -234,7 +235,7 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
       loadDeckComponents(layoutRoots, observeOptional),
     ])
     const liveCode = createLiveCodeCompiler(directory, deck.headmatter?.monacoRunAdditionalDeps, observeOptional)
-    const { html, routes, routing, live } = await renderPresentation(deck, {
+    const { html, routes, routing, live, notesMarkdown } = await renderPresentation(deck, {
       base: options.base, routerMode: options.routerMode, liveCompile: options.liveCompile, mcpNavigation: options.mcpNavigation, mode, extensions, setup, writableSnippets, savedDrawings, saveDrawings,
       deckCssRevision: deckCss && snippetRevision(deckCss), sourceBindings, layers, compileExample: liveCode.authored,
       entry: filepath, transformerSources,
@@ -257,7 +258,7 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
       extensionStyles: Boolean(extensions.styles), observe, optional: observeOptional,
     })
     const drawingStore = saveDrawings ? { ...store, slideCount: routes.length } : undefined
-    const compiled = { title: deck.title, author, headmatter: deck.headmatter, canvas, routing, html, styles: prefixCssUrls(extensions.styles, routing.base), client: extensions.client, mounts: extensions.mounts, writableSnippets, writableDrags, writableSlides, routeAliases, pages, drawingStore, live, compileExample: liveCode.edited }
+    const compiled = { title: deck.title, author, notesMarkdown, headmatter: deck.headmatter, canvas, routing, html, styles: prefixCssUrls(extensions.styles, routing.base), client: extensions.client, mounts: extensions.mounts, writableSnippets, writableDrags, writableSlides, routeAliases, pages, drawingStore, live, compileExample: liveCode.edited }
     cached = { files, deck: compiled }
     return compiled
   }

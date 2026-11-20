@@ -107,7 +107,7 @@ export async function renderDeck(deck: Deck, options?: RenderOptions): Promise<s
   return (await renderPresentation(deck, options)).html
 }
 
-export async function renderPresentation(deck: Deck, options: RenderOptions = {}): Promise<{ html: string, routes: SlideRoute[], routing: Routing, live?: LiveDeck }> {
+export async function renderPresentation(deck: Deck, options: RenderOptions = {}): Promise<{ html: string, routes: SlideRoute[], routing: Routing, live?: LiveDeck, notesMarkdown: readonly string[] }> {
   const nested = deck.headmatter?.config as Record<string, unknown> | undefined
   const mode = options.mode ?? (options.liveCompile ? 'dev' : 'build')
   const menuSetting = deck.headmatter?.contextMenu ?? nested?.contextMenu
@@ -467,5 +467,6 @@ export async function renderPresentation(deck: Deck, options: RenderOptions = {}
     drawHidden: !drawings.enabled || drawings.presenterOnly ? ' hidden' : '',
     liveStatus: options.liveCompile ? '<span id="live-update-status" role="status" hidden></span>' : '',
   })
-  return { html: document, routes, routing, live }
+  const notesMarkdown = options.mode === 'export' ? activeSlides.map(slide => slide.notes) : []
+  return { html: document, routes, routing, live, notesMarkdown }
 }
