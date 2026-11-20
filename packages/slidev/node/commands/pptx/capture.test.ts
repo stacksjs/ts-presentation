@@ -423,6 +423,59 @@ $$`)
   }
 }, 45_000)
 
+it.skipIf(!chrome)('aligns empheq margin boxes with flush-left equations and keeps their frames editable', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-marginbox-'))
+  const canvas = { width: 960, height: 540 }
+  try {
+    const entry = join(root, 'slides.md')
+    const display = (frame: string) => String.raw`# Aligned equations
+
+\empheqset{innerbox=\fbox,left=\empheqlbrace,right=\empheqrbrack}
+
+$$
+\newcommand{\panel}[1]{{\fboxsep=12px\fboxrule=2px\fcolorbox{blue}{navy}{#1}}}
+\begin{empheq}[${frame}]{align}
+X&=\frac{1}{2}\tag{A}\\[2px]
+Y&=\frac{3}{4}\tag{B}
+\end{empheq}
+$$`
+    const slides = ['', String.raw`box=\panel`, String.raw`marginbox=\panel`].map(display)
+    await Bun.write(entry, '---\nmath:\n  fleqn: true\n  throwOnError: true\n---\n\n' + slides.join('\n\n---\n\n'))
+    const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
+    const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
+    const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
+    if (status) throw new Error(stderr)
+    const frames: PowerPointFrame[] = []
+    await captureFrames({
+      root: join(root, 'dist'), executable: chrome!, scale: 1, canvas, editable: true, withClicks: false,
+    }, frame => { frames.push(frame) })
+    expect(frames).toHaveLength(3)
+    const layouts = frames.map(frame => {
+      const nodes = frame.editable?.nodes ?? []
+      const equation = nodes.find((node): node is IrRaster => node.kind === 'raster' && !!node.equation?.tags)?.equation
+      const fractions = equation?.cells?.filter(cell => cell.expression.includes('<m:f>')) ?? []
+      expect(fractions).toHaveLength(2)
+      expect(equation?.tags?.map(tag => tag.expression.match(/\([AB]\)/)?.[0])).toEqual(['(A)', '(B)'])
+      const outline = nodes.find(node => node.kind === 'box' && node.fill?.b === 128)
+      return { column: fractions[0].rect.x, tagX: equation!.tags![0].rect.x, outline: outline?.rect }
+    })
+    const [plain, boxed, margin] = layouts
+    expect(plain.outline).toBeUndefined()
+    expect(margin.column).toBeCloseTo(plain.column, 1)
+    expect(boxed.column - margin.column).toBeCloseTo(14, 1)
+    expect(boxed.outline!.x - margin.outline!.x).toBeCloseTo(14, 1)
+    expect(margin.outline!.w).toBeCloseTo(boxed.outline!.w, 1)
+    expect(margin.outline!.x + margin.outline!.w).toBeLessThan(margin.tagX)
+    const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Margin frames' }))
+    const slide = parts.get('ppt/slides/slide3.xml')?.toString() ?? ''
+    expect(slide).toContain('val="000080"')
+    expect(slide).toContain('val="0000FF"')
+    expect(slide.match(/<m:f>/g)).toHaveLength(2)
+    expect(slide.match(/name="Equation tag"/g)).toHaveLength(2)
+  }
+  finally { await rm(root, { recursive: true, force: true }) }
+}, 45_000)
+
 it.skipIf(!chrome)('keeps AMS subequation letters and reveal opacity editable in a PowerPoint range', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-subequations-'))
   const canvas = { width: 960, height: 540 }

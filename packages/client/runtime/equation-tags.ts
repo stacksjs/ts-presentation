@@ -112,6 +112,8 @@ function fitEmpheq(element: HTMLElement): void {
   const outerInset = inset(outer)
   const innerInset = inset(inner)
   const totalInset = outerInset + innerInset
+  // A margin box paints outside its content's horizontal space.
+  const inlineInset = element.hasAttribute('data-empheq-marginbox') ? innerInset : totalInset
   const length = (value: number) => `${Number(value.toFixed(4))}px`
   const assign = (box: HTMLElement, property: string, amount: number) => {
     const value = length(amount)
@@ -119,8 +121,8 @@ function fitEmpheq(element: HTMLElement): void {
   }
   const width = (side: HTMLElement | null) => side ? side.getBoundingClientRect().width / xScale : 0
   function reserve(): void {
-    assign(element, '--empheq-inline-start', width(left) + totalInset)
-    assign(element, '--empheq-inline-end', width(right) + totalInset)
+    assign(element, '--empheq-inline-start', width(left) + inlineInset)
+    assign(element, '--empheq-inline-end', width(right) + inlineInset)
   }
   function body() {
     const root = element.getBoundingClientRect()

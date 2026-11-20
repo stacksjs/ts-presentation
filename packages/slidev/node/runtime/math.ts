@@ -3315,7 +3315,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
         if (!assignment.some(token => !texWhitespace.test(tokenText(token)))) continue
         const equals = assignment.indexOf('=')
         const key = assignment.slice(0, equals).map(tokenText).join('').trim()
-        if (equals < 1 || !/^(?:box|outerbox|innerbox|left|right)$/.test(key))
+        if (equals < 1 || !/^(?:box|outerbox|marginbox|innerbox|left|right)$/.test(key))
           throw new MathParseError(`Unsupported empheq option: ${assignment.map(tokenText).join('').trim()}`)
         const body = assignment.slice(equals + 1)
         const value = withTokens(body, () => {
@@ -3326,6 +3326,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
           return tokens[cursor] === boundary ? unwrapped : body
         })
         const option = key === 'outerbox' ? 'box' : key
+        if (option === 'box') settings.delete('marginbox')
+        else if (option === 'marginbox') settings.delete('box')
         if (value.some(token => !texWhitespace.test(tokenText(token)))) settings.set(option, value)
         else settings.delete(option)
       }
@@ -3341,6 +3343,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const [environment, pairs, extra] = expandDefinition(rawGroup()).join('').replace(/\s/g, '').split('=')
       if (!emphasisEnvironments.test(environment) || extra !== undefined || environment.startsWith('alignat') !== (pairs !== undefined))
         throw new MathParseError('Invalid empheq alignment')
+      const margin = settings?.has('marginbox')
+      if (margin && options?.fleqn !== true) throw new MathParseError('empheq marginbox requires fleqn')
       function box(key: string, side: string): string {
         const option = settings?.get(key)
         if (!option) return ''
@@ -3362,14 +3366,14 @@ export function renderMath(source: string, display = false, configured: MathMacr
           tagState = previousTag
         }
       }
-      const decorations = box('box', 'outer') + box('innerbox', 'inner') + adornment('left') + adornment('right')
+      const decorations = box(margin ? 'marginbox' : 'box', 'outer') + box('innerbox', 'inner') + adornment('left') + adornment('right')
       const single = environment === 'equation' || environment === 'equation*'
       emphasizedDisplay = decorations ? (single ? 'equation' : 'alignment') : undefined
       depth++
       try {
         const content = renderMarkup(matrix(environment, 'empheq', pairs), 0)
         const formula = formulaMarkup(`<mrow>${content}</mrow>`, tex())
-        return decorations ? `<div class="math-empheq">${decorations}${formula}</div>` : formula
+        return decorations ? `<div class="math-empheq"${margin ? ' data-empheq-marginbox' : ''}>${decorations}${formula}</div>` : formula
       }
       finally {
         depth--

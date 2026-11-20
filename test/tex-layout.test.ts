@@ -1543,6 +1543,26 @@ test('applies standalone empheq declarations only to subsequent displays in the 
   expect(html).toContain('<mi>u</mi>')
 })
 
+test('selects the last empheq outer frame option and requires flush-left math for margin frames', () => {
+  const math = createMathRenderer({ throwOnError: true, fleqn: true })
+  const display = (options: string) => String.raw`\begin{empheq}[${options}]{equation*}x=1\end{empheq}`
+  const defaults = String.raw`\empheqset{marginbox=\fcolorbox{blue}{yellow}}`
+  const inherited = math(defaults + display(''), true).split('<annotation')[0]
+  expect(inherited).toContain('class="math-empheq" data-empheq-marginbox')
+  expect(inherited).toContain('--math-frame-fill:yellow;--math-frame-color:blue')
+  const boxed = math(defaults + display(String.raw`outerbox=\fcolorbox{red}{pink}`), true).split('<annotation')[0]
+  expect(boxed).not.toContain('data-empheq-marginbox')
+  expect(boxed).toContain('--math-frame-fill:pink;--math-frame-color:red')
+  const margin = math(display(String.raw`box=\fbox,marginbox=\colorbox{blue}`), true).split('<annotation')[0]
+  expect(margin).toContain('data-empheq-marginbox')
+  expect(margin).toContain('--math-frame-fill:blue;--math-frame-rule:0px')
+  expect(margin.match(/data-empheq-box="outer"/g)).toHaveLength(1)
+  expect(math(defaults + display('box={}'), true).split('<annotation')[0]).not.toContain('data-empheq-box')
+  const centered = createMathRenderer({ throwOnError: true })
+  expect(() => centered(defaults + display(''), true)).toThrow('empheq marginbox requires fleqn')
+  expect(centered(defaults + display(String.raw`box=\fbox`), true)).toContain('data-empheq-box="outer"')
+})
+
 test('uses the short display skip only for the requested top-level alignment', () => {
   const math = createMathRenderer({ throwOnError: true })
   const source = String.raw`\begin{spreadlines}{2px}
