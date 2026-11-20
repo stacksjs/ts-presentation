@@ -2039,6 +2039,19 @@ export type { NavOperations, ShortcutOptions, ShortcutsSetup } from './shortcuts
 export { defineCodeRunnersSetup } from './code-runner.ts';
 export type { CodeRunner, CodeRunnerContext, CodeRunnerOutput, CodeRunnerOutputDom, CodeRunnerOutputError, CodeRunnerOutputHtml, CodeRunnerOutputText, CodeRunnerOutputTextArray, CodeRunnerOutputs, CodeRunnerProviders, CodeRunnersSetup } from './code-runner.ts';
 export * from './transform.ts';
+export { defineRoutesSetup } from './routes.ts';
+export type { PresentationRoute, RoutesSetup } from './routes.ts';
+
+// packages/types/src/routes.d.ts
+export interface PresentationRoute {
+    /** A static path relative to the deck's deployment base. */
+    path: string;
+    /** A file URL for an STX page, typically constructed from import.meta.url. */
+    component: URL;
+    title?: string;
+}
+export type RoutesSetup = (routes: PresentationRoute[]) => readonly PresentationRoute[] | void | Promise<readonly PresentationRoute[] | void>;
+export declare function defineRoutesSetup(setup: RoutesSetup): RoutesSetup;
 
 // packages/types/src/shortcuts.d.ts
 export interface NavOperations {

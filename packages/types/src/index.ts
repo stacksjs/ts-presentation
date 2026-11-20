@@ -11,3 +11,5 @@ export type { NavOperations, ShortcutOptions, ShortcutsSetup } from './shortcuts
 export { defineCodeRunnersSetup } from './code-runner.ts'
 export type { CodeRunner, CodeRunnerContext, CodeRunnerOutput, CodeRunnerOutputDom, CodeRunnerOutputError, CodeRunnerOutputHtml, CodeRunnerOutputText, CodeRunnerOutputTextArray, CodeRunnerOutputs, CodeRunnerProviders, CodeRunnersSetup } from './code-runner.ts'
 export * from './transform.ts'
+export { defineRoutesSetup } from './routes.ts'
+export type { PresentationRoute, RoutesSetup } from './routes.ts'

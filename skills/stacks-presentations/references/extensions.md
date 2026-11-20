@@ -48,6 +48,31 @@ server after editing a theme or addon's server module.
 Use this API to port Vue themes and addons a deck actually needs.
 Keep the theme and addon module interface independent of the deck's data.
 
+## Custom pages
+
+Create `setup/routes.ts` in a deck, theme, or addon. The setup runs in Bun
+and receives the custom routes registered by earlier extensions.
+
+```ts
+import { defineRoutesSetup } from 'ts-presentation'
+
+export default defineRoutesSetup(routes => [
+  ...routes,
+  {
+    path: '/handbook/guide',
+    component: new URL('../pages/Guide.stx', import.meta.url),
+    title: 'Guide',
+  },
+])
+```
+
+The page template can read `deck.title`, `deck.base`, `route.path`, and
+`frontmatter`. STX client scripts and scoped styles work in custom pages.
+Link to the page with `[Guide](/handbook/guide/)`. The dev server serves
+the route, and a static build writes `handbook/guide/index.html`. Both
+honor `--base` and use ordinary browser navigation between the deck and
+the custom page. Use fixed paths with lowercase segments and hyphens.
+
 ## STX components
 
 Save `Callout.stx` to `components/` or a subdirectory in the deck,

@@ -50,6 +50,8 @@ export type { PresentationNavigation, SlideRoute } from '../../../client/runtime
 export type { LayoutContext, PresentationAddon, PresentationLayout, PresentationTheme } from './extensions.ts'
 export type { DrawingOptions } from '../../../types/src/drawings.ts'
 export * from '../../../types/src/transform.ts'
+export { defineRoutesSetup } from '../../../types/src/routes.ts'
+export type { PresentationRoute, RoutesSetup } from '../../../types/src/routes.ts'
 
 export { definePreparserSetup, extractImagesUsage, parseDeck, parseDeckAsync } from '../../../parser/src/deck.ts'
 export type { Deck, PreparserContext, PreparserExtension, PreparserSetup, Slide } from '../../../parser/src/deck.ts'

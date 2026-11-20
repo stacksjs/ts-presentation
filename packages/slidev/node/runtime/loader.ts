@@ -36,6 +36,7 @@ import { createLiveCodeCompiler } from './live-modules.ts'
 import { prefixCssUrls } from './base-assets.ts'
 import type { Routing } from '../../../client/runtime/routing.ts'
 import { expandSnippets } from './snippets.ts'
+import { loadRoutePages } from './route-pages.ts'
 
 export interface CompiledDeck extends ExtensionAssets {
   html: string
@@ -45,6 +46,7 @@ export interface CompiledDeck extends ExtensionAssets {
   canvas: SlideCanvas
   routing: Routing
   routeAliases: ReadonlySet<string>
+  pages: ReadonlyMap<string, string>
   writableSnippets: ReadonlyMap<string, WritableSnippet>
   writableDrags: ReadonlyMap<string, WritableDrag>
   writableSlides: ReadonlyMap<string, WritableSlide>
@@ -250,8 +252,12 @@ export function createDeckCompiler(entry: string, options: CompileOptions = {}):
     })
     const author = typeof deck.headmatter?.author === 'string' ? deck.headmatter.author : undefined
     const routeAliases = new Set(routes.flatMap(route => route.alias ? [route.alias] : []))
+    const pages = mode === 'export' ? new Map<string, string>() : await loadRoutePages({
+      root: directory, roots, base: routing.base, title: deck.title, headmatter: deck.headmatter, routeAliases,
+      extensionStyles: Boolean(extensions.styles), observe, optional: observeOptional,
+    })
     const drawingStore = saveDrawings ? { ...store, slideCount: routes.length } : undefined
-    const compiled = { title: deck.title, author, headmatter: deck.headmatter, canvas, routing, html, styles: prefixCssUrls(extensions.styles, routing.base), client: extensions.client, mounts: extensions.mounts, writableSnippets, writableDrags, writableSlides, routeAliases, drawingStore, live, compileExample: liveCode.edited }
+    const compiled = { title: deck.title, author, headmatter: deck.headmatter, canvas, routing, html, styles: prefixCssUrls(extensions.styles, routing.base), client: extensions.client, mounts: extensions.mounts, writableSnippets, writableDrags, writableSlides, routeAliases, pages, drawingStore, live, compileExample: liveCode.edited }
     cached = { files, deck: compiled }
     return compiled
   }

@@ -18,6 +18,7 @@ import { deckPath, matchDeckPath, normalizeBasePath, resolveRouterMode } from '.
 import { prefixCssUrls } from './base-assets.ts'
 import { maxSlideEditLength, readSlideSource, saveSlideSource } from './side-editor-source.ts'
 import { saveSnippet } from './snippet-write.ts'
+import { routePagePath, writeRoutePages } from './route-pages.ts'
 import { version } from '../../../../package.json'
 
 const options = {
@@ -120,6 +121,7 @@ async function main(): Promise<void> {
       Bun.write(join(output, 'presentation.js'), javascript),
       Bun.write(join(output, 'deck.css'), await deckStyles()),
     ])
+    await writeRoutePages(output, deck.pages)
     return deck
   }
 
@@ -259,13 +261,23 @@ async function main(): Promise<void> {
             const extension = /^\/extensions\/([a-z0-9-]+)(\/.*)$/i.exec(path)
             const mounted = extension ? (await compile()).mounts[extension[1]] : undefined
             if (mounted && extension) return asset(mounted, extension[2], request)
+            const custom = navigable && routePagePath(path)
+            const deck = custom ? await compile() : undefined
+            const page = custom && deck?.pages.get(custom)
+            if (typeof page === 'string') {
+              if (path === custom) {
+                url.pathname = `${base}${custom.slice(1)}/`
+                return Response.redirect(url, 307)
+              }
+              return new Response(request.method === 'HEAD' ? null : page, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+            }
             const found = root ? await asset(root, path.endsWith('/') ? `${path}index.html` : path, request) : undefined
             if (found && found.status !== 404) return found
             if (navigable && /^\/(?:[a-z0-9-]+\/?){1,2}$/i.test(path)) {
-              const deck = await compile()
-              if (deck.routing.mode === 'history' && matchDeckPath(path, key => deck.routeAliases.has(key))) return deckPage(deck)
+              const compiled = deck ?? await compile()
+              if (compiled.routing.mode === 'history' && matchDeckPath(path, key => compiled.routeAliases.has(key))) return deckPage(compiled)
               url.pathname = path
-              const destination = legacySlideLocation(url, deck.routeAliases)
+              const destination = legacySlideLocation(url, compiled.routeAliases)
               if (destination) {
                 destination.pathname = base
                 return Response.redirect(destination, 307)

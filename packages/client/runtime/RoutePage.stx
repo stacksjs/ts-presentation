@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <base href="{{ base }}">
+  <title>{{ title }}</title>
+  <link rel="stylesheet" href="presentation.css">
+  {!! extensionStyles !!}
+  <link rel="stylesheet" href="deck.css">
+  {!! stxRuntime !!}
+</head>
+<body>
+  {!! content !!}
+</body>
+</html>
