@@ -171,8 +171,8 @@ bun run --filter ts-presentation-vscode build
 The VS Code build provides Markdown syntax, audience and presenter commands,
 and a command to stop previews. It launches the project’s local Bun CLI.
 
-The original test tree lives in `packages/slidev/test`. `bun test` runs
-the adapted copied suites alongside the native regression suite. The Bun runtime
+Run `bun test` from the project root to discover the adapted Slidev suites
+under `packages/` and the presentation regression suite under `test/`. The Bun runtime
 uses the published [Stacks STX package](https://github.com/stacksjs/stx) for the
 shell, built-in layouts, and custom templates. Some copied components, Vite
 integrations, and VS Code language tooling still need porting. See the

@@ -7,8 +7,6 @@ import { findChrome } from '../packages/slidev/node/runtime/chrome.ts'
 import { saveDrag } from '../packages/slidev/node/runtime/drag-source.ts'
 import { createDeckCompiler } from '../packages/slidev/node/runtime/loader.ts'
 
-import '../packages/slidev/node/syntax/drag.test.ts'
-
 test('writes empty named and direct component positions without binding identical code or comments', async () => {
   const root = await mkdtemp(join(tmpdir(), 'tp-drag-markdown-'))
   try {

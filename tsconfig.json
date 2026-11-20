@@ -31,6 +31,7 @@
     "src/**/*.ts",
     "test/**/*.ts",
     "examples/**/*.ts",
+    "packages/**/*.test.ts",
     "packages/client/index.ts",
     "packages/client/runtime/**/*.ts",
     "packages/slidev/node/runtime/**/*.ts",

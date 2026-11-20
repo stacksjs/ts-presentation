@@ -6,9 +6,6 @@ import { join } from 'node:path'
 import { createDeckCompiler } from '../packages/slidev/node/runtime/loader.ts'
 import { readSlideSource, saveSlideSource } from '../packages/slidev/node/runtime/side-editor-source.ts'
 
-import '../packages/slidev/test/side-editor.test.ts'
-import '../packages/slidev/test/title-renderer-hmr.test.ts'
-
 test('writes edited frontmatter, body, and notes to an included slide while preserving other source bytes', async () => {
   const root = await mkdtemp(join(tmpdir(), 'tp-side-include-'))
   try {

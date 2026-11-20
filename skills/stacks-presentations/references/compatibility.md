@@ -11,6 +11,7 @@ in a new ts-presentation project.
 | Preparser extensions | Async raw-line, slide, and speaker-note hooks from `setup/preparser.ts` |
 | Integrated editor and live preview | Dev Markdown pane with autosave, included-file support, conflict detection, and in-place body and title refreshes |
 | Scoped styles, layouts, and themes | Slide-local CSS and keyframes, TypeScript theme and addon modules, and STX built-in and custom layouts with named slots |
+| Iframe layouts | Full and split STX layouts with per-slide zoom, viewport sizing for enlarged slides, and design-size layout in thumbnails and print |
 | Monaco editor and runner | Local editor and timed browser-worker runner. Bun compiles TypeScript edits in dev and can save opted-in snippets |
 | Snippets, line highlights, Magic Move | Local file and region imports, numbered click highlights, native token animations |
 | Syntax highlighting themes | `codeTheme` or a local `setup/code-highlighter.ts` selects a first-party palette |

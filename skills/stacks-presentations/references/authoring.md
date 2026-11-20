@@ -15,6 +15,9 @@ deck. For example, `canvasWidth: 800` and `aspectRatio: 4/3` produce an
 - Add a label on a separator, as in `---chapter`. A leading `yaml`
   fence can supply frontmatter when the slide has no dashed YAML block.
 - Use per-slide `layout`, `class`, `routeAlias`, `hide`, or `transition`.
+- Use `iframe`, `iframe-left`, or `iframe-right` with a `url` to embed a page.
+  Set `scale` to zoom the embedded content. Enlarged slides size the iframe
+  to its displayed viewport, while thumbnails and print retain its design size.
 - Put CSS in a `<style>` block on a slide to style that slide. Inside that
   block, use `:scope` to target the slide itself. Keyframes defined in
   slide styles are named per slide. Put imports and shared CSS in `style.css`.
