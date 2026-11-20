@@ -586,7 +586,7 @@ function buildSlideIr(
     }
 
     const math = reason === 'math' && !overflows ? node.math : undefined
-    const style = math && node.opacity === undefined ? styleOf(node) : undefined
+    const style = math ? styleOf(node) : undefined
     let equation: IrRaster['equation']
     if (math && style && style.fontStyle === 'normal' && Number(style.fontWeight) < 600
       && style.boxShadow === 'none' && style.textDecorationLine === 'none'
@@ -594,12 +594,13 @@ function buildSlideIr(
       const color = parseColor(style.color, unparsed)
       const fontSize = parseLength(style.fontSize)
       const bounds = clipToSlide(math.rect, size)
-      if (color?.a === 1 && fontSize > 0 && bounds?.w === math.rect.w && bounds.h === math.rect.h) {
+      const opacity = node.opacity ?? 1
+      if (color?.a === 1 && opacity > 0 && opacity <= 1 && fontSize > 0 && bounds?.w === math.rect.w && bounds.h === math.rect.h) {
         const convertFragment = (fragment: RawMathFragment, display: boolean) => {
           const visible = clipToSlide(fragment.rect, size)
           if (visible?.w !== fragment.rect.w || visible.h !== fragment.rect.h || !(fragment.fontSize > 0)
             || !Number.isFinite(fragment.opacity) || fragment.opacity < 0 || fragment.opacity > 1) return
-          const expression = officeMath(fragment.expression, fragment.fontSize, color, fragment.opacity, display)
+          const expression = officeMath(fragment.expression, fragment.fontSize, color, opacity * fragment.opacity, display)
           if (expression) return { expression, rect: fragment.rect, display }
         }
         const tags = math.tags?.map(tag => convertFragment(tag, false)) ?? []

@@ -15,7 +15,7 @@ const inlineCode = /^`+/
 const protectedHtml = /^<(pre|code|script|style)(?:\s[^>]*)?>[\s\S]*?<\/\1\s*>/i
 const htmlTag = /^<(?:[^>"']|"[^"]*"|'[^']*')+>/
 const slotMarker = /^::\s*([\w.:-]+?)\s*::\s*$/
-const bareDisplay = /^ {0,3}\\begin\{((?:equation|align|alignat|flalign|xalignat|gather|multline)\*?|xxalignat|CD)\}/
+const bareDisplay = /^ {0,3}\\begin\{((?:equation|align|alignat|flalign|xalignat|gather|multline)\*?|xxalignat|CD|subequations)\}/
 
 function inlineMathEnd(line: string, start: number, delimiter: string): number {
   let braces = 0
@@ -302,7 +302,7 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
       let end = index
       while (!body.at(-1)!.trimEnd().endsWith(closing)) {
         const next = mathContinuation(++end)
-        if (next === undefined || bareDisplay.test(next)) break
+        if (next === undefined || (environment[1] !== 'subequations' && bareDisplay.test(next))) break
         body.push(next)
       }
       if (body.at(-1)!.trimEnd().endsWith(closing)) {
@@ -349,7 +349,7 @@ export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): Pr
       return (attrs ? attrs.restore(html) : html)
         .replace(/<p>(<tp-math data-equation="\d+"><\/tp-math>)<\/p>/g, (whole, placeholder) => {
           const index = Number(/\d+/.exec(placeholder)?.[0])
-          return /^<div class="equation-steps"|^<math [^>]* display="block"/.test(math[index] ?? '') ? placeholder : whole
+          return /^<div class="(?:equation-steps|math-subequations)"|^<math [^>]* display="block"/.test(math[index] ?? '') ? placeholder : whole
         })
         .replace(/<tp-math data-equation="(\d+)"><\/tp-math>/g, (whole, index: string) => math[Number(index)] ?? whole)
     },

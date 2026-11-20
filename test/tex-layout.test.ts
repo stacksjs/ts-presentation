@@ -932,6 +932,60 @@ test('resolves local and chained equation references with bounded cycle handling
   expect(html).not.toContain('data-pending-equation')
 })
 
+test('numbers AMS subequation groups in rendered order and links parent and child labels', async () => {
+  const group = String.raw`\begin{subequations}\label{series}
+\def\named{v}
+\begin{equation}
+  \named=\eqref{series}\label{first}
+\end{equation}
+\begin{alignat}{1}
+  b&=\ref{first}\notag\label{suppressed}\\
+  c&=\ref{last}\tag*{Custom}\label{custom}\\
+  d&=4\label{last}
+\end{alignat}
+\[e=5\]
+\begin{gather*}f=6\end{gather*}
+\end{subequations}`
+  const leading = String.raw`\begin{equation}w=0\end{equation}`
+  const following = String.raw`\begin{equation}z=9\end{equation}`
+  const reference = String.raw`See \eqref{series}, \eqref{last}, \eqref{custom}, and \eqref{suppressed}.`
+  const source = [
+    '# References', '', reference, '',
+    '---', 'layout: two-cols', '---', '# Group', '',
+    '::right::', '', group, '', '::left::', '', leading, '',
+    '---', '', '# After', '', following, '', '<!--', String.raw`Speaker note \ref{series} and \eqref{first}.`, '-->',
+  ].join('\n')
+  const first = await renderPresentation(parseDeck(source), { liveCompile: true })
+  const [before, grouped, after] = first.live!.slides
+  expect(before.html).toContain('<a href="#slide-2" data-slide-link="2"><math><mrow><mtext>(2)</mtext>')
+  expect(before.html).toContain('<a href="#slide-2" data-slide-link="2"><math><mrow><mtext>(2b)</mtext>')
+  expect(before.html).toContain('<mtext>(</mtext><mtext>Custom</mtext><mtext>)</mtext>')
+  expect(before.html).toContain('<mtext>(??)</mtext>')
+  expect(grouped.html).toContain('<div class="math-subequations"><math')
+  expect(grouped.html.match(/<math [^>]*display="block"/g)).toHaveLength(5)
+  expect(grouped.html).toContain('<mi>v</mi>')
+  expect(grouped.html).toContain('<mtext>(2a)</mtext>')
+  expect(grouped.html).toContain('<mtext>(2b)</mtext>')
+  expect(grouped.html).not.toContain('<mtext>(2c)</mtext>')
+  expect(after.html).toContain('<mtext>(3)</mtext>')
+  expect(after.notes).toContain('<a href="#slide-2" data-slide-link="2"><math><mrow><mtext>2</mtext>')
+  expect(after.notes).toContain('<mtext>(2a)</mtext>')
+  expect(first.html).not.toContain('data-pending-equation')
+
+  const edited = await renderPresentation(parseDeck(source.replace(leading, 'Prior display removed.')), { liveCompile: true })
+  expect(edited.live?.slides[0].html).toContain('<mtext>(1b)</mtext>')
+  expect(edited.live?.slides[2].html).toContain('<mtext>(2)</mtext>')
+  expect(edited.live?.slides[0].revision).not.toBe(before.revision)
+  expect(edited.live?.frame).toBe(first.live?.frame)
+
+  const math = createMathRenderer({ throwOnError: true })
+  expect(math(group, true)).toContain('<mtext>(1b)</mtext>')
+  expect(math(String.raw`\def\openGroup{\begin{subequations}}\openGroup` + group.slice('\\begin{subequations}'.length), true)).toContain('<mtext>(1b)</mtext>')
+  expect(() => math(group, false)).toThrow('subequations requires display math')
+  expect(() => math(group.replace('\\end{subequations}', ''), true)).toThrow('Unclosed math environment: subequations')
+  expect(() => math(group.replace('\\begin{equation}', '\\begin{subequations}'), true)).toThrow('Invalid subequations display')
+})
+
 test('keeps AMS relation spacing, explicit pair counts, and tags aligned across short rows', () => {
   const math = createMathRenderer({ throwOnError: true })
   const source = String.raw`\def\pairs{2}\def\extra{.4em}

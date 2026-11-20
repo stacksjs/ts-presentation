@@ -1039,6 +1039,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   let delimiterDepth = 0
   let currentColor = ''
   let equationNumber = 0
+  let nextSubequationNumber: ((key?: string) => string) | undefined
   let fullWidthAlignment = false
   let fontScale = 1
   let textItalic = false
@@ -2090,6 +2091,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       return key ? referenceMarkup().label?.(key, { markup: renderMarkup(label, 1), starred: starred === true }) ?? label : label
     }
     if (automatic && !tagState.suppressed) {
+      if (nextSubequationNumber) return nextSubequationNumber(key)
       equationNumber++
       return (key ? referenceMarkup() : references)?.number?.(equationNumber, key)
         ?? numberMarkup?.(equationNumber) ?? tag('mtext', `(${equationNumber})`)
@@ -2650,6 +2652,75 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
   }
 
+  function formulaMarkup(expression: string, tex: string): string {
+    const flush = display && !fullWidthAlignment && state?.options.fleqn === true
+    const label = nextTag(false)
+    const markup = label === undefined ? expression : taggedDisplay(expression, label, state?.options.leqno === true, flush, tagState.raise)
+    const layoutStyle = flush ? 'display:block;padding-inline-start:2em;text-align:start'
+      : label === undefined ? '' : 'display:block;text-align:center'
+    const styles = [layoutStyle, minRule ? `--math-min-rule:${minRule}em` : ''].filter(Boolean).join(';')
+    const layout = styles ? ` style="${styles}"` : ''
+    return `<math xmlns="http://www.w3.org/1998/Math/MathML"${display ? ' display="block"' : ''}${layout}><semantics>${markup}<annotation encoding="application/x-tex">${escapeHtml(tex)}</annotation></semantics></math>`
+  }
+
+  function subequations(): string {
+    if (!display) throw new MathParseError('subequations requires display math')
+    let key: string | undefined
+    let marker = ''
+    const blocks: string[] = []
+    const begin = () => {
+      const parent = ++equationNumber
+      const numbering = referenceMarkup().group?.(parent, key)
+      let member = 0
+      marker = numbering?.marker ?? ''
+      nextSubequationNumber = (key) => {
+        if (member === 26) throw new MathParseError('Too many numbered subequations')
+        const suffix = String.fromCharCode(97 + member++)
+        return numbering?.member(suffix, key) ?? tag('mtext', `(${parent}${suffix})`)
+      }
+    }
+    return inScope(() => {
+      while (peek()) {
+        const start = cursor
+        const token = take()
+        if (token === '\\relax' || declareMacro(token)) continue
+        if (token === '\\label' && !blocks.length) {
+          const label = equationKey()
+          key ??= label || undefined
+          continue
+        }
+        if (token === '\\end') {
+          if (literalGroup() !== 'subequations') break
+          if (peek()) throw new MathParseError('subequations must occupy the display')
+          if (!nextSubequationNumber) begin()
+          return `<div class="math-subequations">${marker}${blocks.join('')}</div>`
+        }
+        if (!nextSubequationNumber) begin()
+        tagState = { suppressed: false }
+        fullWidthAlignment = false
+        // Each child is a complete display, with its own tag and row layout.
+        const content = inScope(() => {
+          if (token === '\\[') {
+            const expression = row(['\\]'], false, true)
+            if (take() !== '\\]') throw new MathParseError('Unclosed display inside subequations')
+            return expression
+          }
+          if (token !== '\\begin') throw new MathParseError('Expected a display environment inside subequations')
+          const environment = literalGroup()
+          if (!/^(?:(?:equation|align|alignat|flalign|xalignat|gather|multline)\*?|xxalignat|CD)$/.test(environment))
+            throw new MathParseError(`Invalid subequations display: ${environment}`)
+          depth++
+          const expression = matrix(environment)
+          depth--
+          return expression
+        })
+        const tex = tokens.slice(start, cursor).map(tokenText).join('')
+        blocks.push(formulaMarkup(`<mrow>${renderMarkup(content, 0)}</mrow>`, tex))
+      }
+      throw new MathParseError('Unclosed math environment: subequations')
+    })
+  }
+
   function explicitCharacter(): string {
     const parts = expandDefinition(rawGroup())
     const value = (mode === 'math' ? parts.filter(token => !texWhitespace.test(token)) : parts).join('')
@@ -2995,15 +3066,16 @@ export function renderMath(source: string, display = false, configured: MathMacr
 
   try {
     if (trailingComment) strictViolation('commentAtEnd', 'A TeX comment at the end of the formula needs a terminating newline')
-    const expression = `<mrow>${renderMarkup(row([], false, true), display ? 0 : 1)}</mrow>`
-    const flush = display && !fullWidthAlignment && state?.options.fleqn === true
-    const label = nextTag(false)
-    const markup = label === undefined ? expression : taggedDisplay(expression, label, state?.options.leqno === true, flush, tagState.raise)
-    const layoutStyle = flush ? 'display:block;padding-inline-start:2em;text-align:start'
-      : label === undefined ? '' : 'display:block;text-align:center'
-    const styles = [layoutStyle, minRule ? `--math-min-rule:${minRule}em` : ''].filter(Boolean).join(';')
-    const layout = styles ? ` style="${styles}"` : ''
-    const content = `<math xmlns="http://www.w3.org/1998/Math/MathML"${display ? ' display="block"' : ''}${layout}><semantics>${markup}<annotation encoding="application/x-tex">${escapeHtml(source)}</annotation></semantics></math>`
+    let first = peek()
+    while (display && (first === '\\relax' || macroDeclaration.test(first))) {
+      take()
+      if (first !== '\\relax') declareMacro(first)
+      first = peek()
+    }
+    const start = cursor
+    const group = first === '\\begin' && (take(), literalGroup() === 'subequations')
+    if (!group) cursor = start
+    const content = group ? subequations() : formulaMarkup(`<mrow>${renderMarkup(row([], false, true), display ? 0 : 1)}</mrow>`, source)
     return localReferences ? localReferences.resolve(localReferences.numberSlide(content, 1)) : content
   }
   catch (error) {

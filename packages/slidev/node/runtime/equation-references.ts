@@ -5,11 +5,13 @@ interface ManualTag {
 
 export interface EquationReferenceMarkup {
   number?: (number: number, key?: string) => string
+  group?: (parent: number, key?: string) => { marker: string, member: (suffix: string, key?: string) => string }
   label?: (key: string, tag: ManualTag) => string
   reference: (key: string, parenthesized: boolean, link: boolean) => string
 }
 
-type Definition = { key?: string, number: number } | { key: string, tag: ManualTag }
+interface EquationGroup { parent: number }
+type Definition = ({ number: number } | { tag: ManualTag } | { group: EquationGroup, suffix?: string }) & { key?: string }
 type Reference = { key: string, parenthesized: boolean, link: boolean }
 type Resolved = { slide: number, tag: ManualTag }
 
@@ -39,10 +41,21 @@ export function createEquationReferences(token: string, deck = false): {
   }
 
   function numberSlide(html: string, slide: number): string {
+    let groups: Map<EquationGroup, number> | undefined
     return html.replace(definitionPattern, (_, index: string) => {
       const definition = definitions[Number(index)]
+      const startGroup = 'group' in definition && definition.suffix === undefined
+      let value: string | number
+      if ('group' in definition) {
+        const { group, suffix } = definition
+        const parents = groups ??= new Map()
+        const parent = deck ? (startGroup ? ++counter : parents.get(group) ?? ++counter) : group.parent
+        parents.set(group, parent)
+        value = `${parent}${suffix ?? ''}`
+      }
+      else value = 'number' in definition ? (deck ? ++counter : definition.number) : ''
       const tag = 'tag' in definition ? definition.tag
-        : { markup: `<mtext>(${deck ? ++counter : definition.number})</mtext>`, starred: false }
+        : { markup: `<mtext>(${value})</mtext>`, starred: false }
       const { key } = definition
       if (key) {
         if (!labels.has(key)) labels.set(key, { slide, tag })
@@ -53,7 +66,7 @@ export function createEquationReferences(token: string, deck = false): {
       }
       // A manual tag's original markup remains in the equation so the deck's
       // HTML transforms can handle its links and styling as usual.
-      return 'tag' in definition ? '' : tag.markup
+      return 'tag' in definition || startGroup ? '' : tag.markup
     })
   }
 
@@ -82,6 +95,10 @@ export function createEquationReferences(token: string, deck = false): {
   return {
     markup: {
       number: (number, key) => !deck && !key ? `<mtext>(${number})</mtext>` : define({ number, key }),
+      group: (parent, key) => {
+        const group = { parent }
+        return { marker: define({ group, key }), member: (suffix, key) => define({ group, suffix, key }) }
+      },
       label: (key, tag) => define({ key, tag }) + tag.markup,
       reference: (key, parenthesized, link) => `<mrow data-pending-equation-ref="${token}-${references.push({ key, parenthesized, link }) - 1}"></mrow>`,
     },

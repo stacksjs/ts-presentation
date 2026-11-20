@@ -83,6 +83,58 @@ x=1\tag{Rate $k^2$}\label{rate}
   }
 }, 45_000)
 
+it.skipIf(!chrome)('keeps AMS subequation letters and reveal opacity editable in a PowerPoint range', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-subequations-'))
+  const canvas = { width: 960, height: 540 }
+  try {
+    const entry = join(root, 'slides.md')
+    await Bun.write(entry, String.raw`# Before
+
+\begin{equation}
+w=0
+\end{equation}
+
+---
+
+# Grouped equations
+
+$$ {1|2|3}
+\begin{subequations}\label{series}
+\begin{equation}
+a=\begin{pmatrix}a&b\\c&d\end{pmatrix}\label{part:first}
+\end{equation}
+\begin{align}
+c&=\frac{1}{2}\\
+d&=f
+\end{align}
+\end{subequations}
+$$`)
+    const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
+    const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
+    const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
+    if (status) throw new Error(stderr)
+    const frames: PowerPointFrame[] = []
+    await captureFrames({ root: join(root, 'dist'), executable: chrome!, scale: 1, canvas, range: '2', editable: true, withClicks: true }, frame => { frames.push(frame) })
+    expect(frames).toHaveLength(3)
+    for (const [step, frame] of frames.entries()) {
+      const equations = frame.editable?.nodes.flatMap(node => node.kind === 'raster' && node.equation ? [node.equation] : []) ?? []
+      expect(equations).toHaveLength(2)
+      const tags = equations.flatMap(equation => equation.tags ?? [])
+      expect(tags.map(tag => /\(2[abc]\)/.exec(tag.expression)?.[0])).toEqual(['(2a)', '(2b)', '(2c)'])
+      expect(tags.map(tag => tag.expression.includes('<a:alpha val="24000"/>'))).toEqual([0, 1, 2].map(index => index !== step))
+      expect(equations[0].expression.includes('<a:alpha val="24000"/>')).toBe(step !== 0)
+      expect(equations[1].expression).toContain('<m:f>')
+    }
+    const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Grouped equations' }))
+    const slide = parts.get('ppt/slides/slide3.xml')?.toString() ?? ''
+    expect(slide.match(/<a14:m>/g)).toHaveLength(5)
+    expect(slide).toContain('>(2c)</m:t>')
+  }
+  finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}, 45_000)
+
 it('sends animated PNGs and orientation-dependent JPEGs through browser capture', () => {
   const animationChunk = Buffer.from('000000086163544c000000010000000000000000', 'hex')
   const animated = Buffer.concat([png.subarray(0, 33), animationChunk, png.subarray(33)])
