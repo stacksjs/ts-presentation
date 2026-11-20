@@ -86,6 +86,13 @@ export interface RawStyle {
   height: string
 }
 
+export interface RawMathElement {
+  name: string
+  attributes: Record<string, string>
+  text: string
+  children: RawMathElement[]
+}
+
 export interface RawNode {
   /** Index into `RawSnapshot.nodes`, and the value of `data-slidev-export-id`. */
   id: number
@@ -111,8 +118,9 @@ export interface RawNode {
   alt?: string
   /** `A` only, resolved absolute. */
   href?: string
-  /** Root of a rendered formula. KaTeX sets it as dozens of positioned spans in its own metric fonts; walked as text the layout falls apart, so it is rasterized whole. */
+  /** Root of a rendered formula. Exported as a unit so browser layout is preserved in the picture fallback. */
   isMath?: boolean
+  math?: { expression: RawMathElement, rect: Rect, display: boolean }
   /** An `SVG` carrying `<foreignObject>` (as Mermaid renders), so its labels are HTML. No PowerPoint renderer draws that; it has to be rasterized. */
   hasForeignObject?: boolean
   /** Reached through `el.shadowRoot`. Mermaid diagrams live in one. */
@@ -277,6 +285,8 @@ export interface IrRaster extends IrBase {
   isolate: boolean
   /** Also hide the element's own children while capturing. Correct only when they are walked and redrawn as shapes; hiding a leaf's children (e.g. an `<svg>`) removes its artwork from the picture. */
   hideDescendants: boolean
+  /** Native Office Math choice with this raster as the compatibility fallback. */
+  equation?: { expression: string, rect: Rect, display: boolean }
 }
 
 export type IrNode = IrBox | IrText | IrImage | IrRaster

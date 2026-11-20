@@ -1,5 +1,5 @@
 // Adapted from Slidev v53.1.0. See licenses/Slidev-MIT.txt.
-import type { RawNode, RawSlide, RawSnapshot, RawStyle } from './ir.ts'
+import type { RawMathElement, RawNode, RawSlide, RawSnapshot, RawStyle } from './ir.ts'
 
 /**
  * The one function that runs inside the browser. Invariant: zero free variables.
@@ -78,6 +78,27 @@ export function collectSnapshot(options: {
 
   const styles: RawStyle[] = []
   const styleIndex = new Map<string, number>()
+
+  function mathExpression(root: Element): RawMathElement | undefined {
+    let nodes = 0
+    let characters = 0
+    function read(element: Element, depth: number): RawMathElement | undefined {
+      if (++nodes > 600 || depth > 40 || element.namespaceURI !== 'http://www.w3.org/1998/Math/MathML') return
+      // Ignore annotations at the root by capturing its presentation child.
+      const attributes = Object.fromEntries(Array.from(element.attributes, attribute => [attribute.name, attribute.value]))
+      const text = Array.from(element.childNodes).filter(node => node.nodeType === 3).map(node => node.nodeValue).join('')
+      characters += text.length
+      if (characters > 4096) return
+      const children: RawMathElement[] = []
+      for (const child of element.children) {
+        const nested = read(child, depth + 1)
+        if (!nested) return
+        children.push(nested)
+      }
+      return { name: element.localName, attributes, text, children }
+    }
+    return read(root, 0)
+  }
   const scaledKeys = [
     'fontSize', 'letterSpacing', 'lineHeight', 'paddingLeft', 'paddingRight',
     'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth', 'borderTopLeftRadius',
@@ -426,6 +447,13 @@ export function collectSnapshot(options: {
       // KaTeX marks its root by class; the MathML it writes for screen readers is display:none.
       if (el.localName === 'math' || el.classList.contains('katex'))
         record.isMath = true
+      const semantics = el.localName === 'math' ? el.firstElementChild : undefined
+      const presentation = semantics?.localName === 'semantics' ? semantics.firstElementChild : undefined
+      if (presentation && !el.hasAttribute('class')) {
+        const expression = mathExpression(presentation)
+        const rect = relative(presentation.getBoundingClientRect())
+        if (expression && rect.w > 0 && rect.h > 0) record.math = { expression, rect, display: el.getAttribute('display') === 'block' }
+      }
       if (el.tagName.toUpperCase() === 'IMG') {
         const image = el as HTMLImageElement
         record.src = image.currentSrc || image.src

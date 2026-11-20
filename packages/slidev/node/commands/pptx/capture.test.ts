@@ -85,6 +85,59 @@ it.skipIf(!chrome)('exports Chromium linear-gradient boxes as editable PowerPoin
   }
 }, 45_000)
 
+it.skipIf(!chrome)('exports supported TeX as editable Office equations with picture alternatives', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-equations-'))
+  const canvas = { width: 960, height: 540 }
+  try {
+    const entry = join(root, 'slides.md')
+    await Bun.write(entry, String.raw`# Editable equations
+
+Inline formula $a^2$ beside editable text.
+
+$$
+\frac{1+x_i^2}{\sqrt[3]{y}}
+$$
+
+$$
+\begin{pmatrix} a&b\\ c&d \end{pmatrix}
+$$
+
+$$
+\cancel{z}
+$$`)
+    const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
+    const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
+    const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
+    if (status) throw new Error(stderr)
+    const frames: PowerPointFrame[] = []
+    await captureFrames({ root: join(root, 'dist'), executable: chrome!, scale: 1, canvas, editable: true, withClicks: false }, frame => { frames.push(frame) })
+    expect(frames).toHaveLength(1)
+    const equations = frames[0].editable?.nodes.filter((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math') ?? []
+    expect(equations).toHaveLength(4)
+    expect(equations.filter(node => node.equation)).toHaveLength(3)
+    for (const equation of equations) expect(Buffer.from(equation.data, 'base64').subarray(1, 4).toString()).toBe('PNG')
+
+    const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Editable equations' }))
+    const slide = parts.get('ppt/slides/slide1.xml')?.toString()
+    expect(slide?.match(/<a14:m>/g)).toHaveLength(3)
+    expect(slide?.match(/<mc:Fallback><p:sp>/g)).toHaveLength(3)
+    expect(slide?.match(/<a:blipFill><a:blip r:embed=/g)).toHaveLength(3)
+    expect(slide?.match(/<p:pic>/g)).toHaveLength(1)
+    expect(slide).toContain('<a14:m><m:oMath><m:sSup>')
+    expect(slide).toContain('<m:oMathPara>')
+    expect(slide).toContain('<m:f><m:num>')
+    expect(slide).toContain('<m:sSubSup>')
+    expect(slide).toContain('<m:rad><m:deg>')
+    expect(slide).toContain('<m:dPr><m:begChr m:val="("/><m:endChr m:val=")"/>')
+    expect(slide).toContain('<m:m><m:mr>')
+    expect(slide).toContain('<a:latin typeface="Cambria Math"/>')
+    expect([...parts.keys()].filter(name => name.startsWith('ppt/media/'))).toHaveLength(4)
+  }
+  finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}, 45_000)
+
 it.skipIf(!chrome)('keeps original images editable and crops them in DrawingML across reveals', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-original-pictures-'))
   const canvas = { width: 960, height: 540 }

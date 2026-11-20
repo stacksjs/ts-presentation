@@ -58,7 +58,7 @@ in a new ts-presentation project.
 | KaTeX text-mode boxes | Phantom space, selective height and depth removal, shifted line dimensions for `\raisebox`, text-style box contents in scripts, and escaped verbatim text inside `\text{…}` |
 | KaTeX math-mode boxes | `\phantom` retains atom spacing. `\hphantom` preserves signed kerns in math and text. Shifted `\rule` reserves space above and below the baseline, including zero-width struts |
 | KaTeX enclosures | `\boxed` expands in math, text, and macro definitions with display-style contents. Framed and colored boxes use TeX padding. Diagonal cancellation strokes preserve the subject's layout and use a fixed thickness for each font size |
-| PowerPoint export | Image slides or editable text and boxes, including supported linear-gradient fills, with separate artwork |
+| PowerPoint export | Image slides or editable text, boxes, and basic Office Math equations with fractions, roots, scripts, and matrices. Supported linear-gradient fills remain editable. Native equations carry picture alternatives, and more complex artwork is stored as separate images |
 | Notes and Markdown export | `export-notes` prints notes with slide titles and numbers. `export --format md` links selected slide images and keeps raw speaker-note Markdown |
 | First-party diagram authoring | YAML `charts` fences through `ts-charts` for flowcharts, sequence, state, class, ER, pie, timeline, journey, Gantt, Git history, XY charts, and Sankey diagrams |
 | Draggable elements | Inline directives, drag and arrow components, frontmatter positions, scaled editing, and local Markdown saves |

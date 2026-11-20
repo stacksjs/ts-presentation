@@ -4,6 +4,7 @@ import type {
   Border,
   IrBox,
   IrNode,
+  IrRaster,
   IrRun,
   IrText,
   LinearGradient,
@@ -17,6 +18,7 @@ import type {
 } from './ir.ts'
 import { isVisible, parseColor, withOpacity } from './color.ts'
 import { linearBackground } from './gradient.ts'
+import { officeMath } from './office-math.ts'
 
 /**
  * `RawSnapshot` to `SlideIr`: every judgement in the exporter, in one pure module with
@@ -535,6 +537,8 @@ function buildSlideIr(
         isolateId: originators.get(node.sourceId),
       })
 
+      if (node.equation) continue
+
       // Count only raster area with no editable text over it: a cover photo
       // covers the whole slide by definition while its title vectorizes
       // perfectly, and counting those sent every cover slide to the fallback.
@@ -580,6 +584,20 @@ function buildSlideIr(
       })
     }
 
+    const math = reason === 'math' && !overflows ? node.math : undefined
+    const style = math && node.opacity === undefined ? styleOf(node) : undefined
+    let equation: IrRaster['equation']
+    if (math && style && style.fontStyle === 'normal' && Number(style.fontWeight) < 600
+      && style.boxShadow === 'none' && style.textDecorationLine === 'none'
+      && !hasDecoration(node) && !rasterReasonFor({ ...node, isMath: false }, style)) {
+      const color = parseColor(style.color, unparsed)
+      const fontSize = parseLength(style.fontSize)
+      const bounds = clipToSlide(math.rect, size)
+      if (color?.a === 1 && fontSize > 0 && bounds?.w === math.rect.w && bounds.h === math.rect.h) {
+        const expression = officeMath(math.expression, fontSize, color)
+        if (expression) equation = { expression, rect: math.rect, display: math.display }
+      }
+    }
     push({
       kind: 'raster',
       sourceId: node.id,
@@ -589,6 +607,7 @@ function buildSlideIr(
       data: '',
       reason,
       isolate,
+      ...(equation ? { equation } : {}),
     }, node)
     return true
   }

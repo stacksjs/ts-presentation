@@ -1,5 +1,5 @@
 import { escapeHtml } from '../html.ts'
-import type { Border, IrBox, IrImage, IrRun, IrText, LinearGradient, Rect, Rgba, SlideIr } from './ir.ts'
+import type { Border, IrBox, IrImage, IrRaster, IrRun, IrText, LinearGradient, Rect, Rgba, SlideIr } from './ir.ts'
 import { EMU_PER_PX, PT_PER_PX } from './ir.ts'
 
 export function xml(text: string): string {
@@ -136,6 +136,17 @@ export function embeddedPicture(id: number, relationship: string, rect: Rect, la
   return `<p:pic><p:nvPicPr><p:cNvPr id="${id}" name="${title}" descr="${title}">${click}</p:cNvPr><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="${relationship}"/>${source}<a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>${transform(rect)}${rectShape(0, rect)}</p:spPr></p:pic>`
 }
 
+function drawEquation({ display, expression, rect }: NonNullable<IrRaster['equation']>, id: number, relationship: string, pictureRect: Rect): string {
+  const math = `<m:oMath>${expression}</m:oMath>`
+  const content = display ? `<m:oMathPara><m:oMathParaPr><m:jc m:val="center"/></m:oMathParaPr>${math}</m:oMathPara>` : math
+  const body = `<p:txBody><a:bodyPr lIns="0" rIns="0" tIns="0" bIns="0" wrap="none" anchor="ctr"><a:noAutofit/></a:bodyPr><a:lstStyle/><a:p><a:pPr algn="ctr"/><a14:m>${content}</a14:m></a:p></p:txBody>`
+  const editable = shape(id, 'Equation', transform(rect) + rectShape(0, rect) + fill() + line(), body)
+  const picture = `<a:blipFill><a:blip r:embed="${relationship}"/><a:stretch><a:fillRect/></a:stretch></a:blipFill>`
+  const fallback = shape(id, 'Picture of math', transform(pictureRect) + rectShape(0, pictureRect) + picture + line())
+  // MS-ODRAWXML §2.2.5 and §3.5 use a picture-filled shape for the fallback.
+  return `<mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"><mc:Choice Requires="a14" xmlns:a14="http://schemas.microsoft.com/office/drawing/2010/main" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math">${editable}</mc:Choice><mc:Fallback>${fallback}</mc:Fallback></mc:AlternateContent>`
+}
+
 export function drawEditable(
   slide: SlideIr,
   image: (data: string, format?: IrImage['format']) => string,
@@ -149,7 +160,11 @@ export function drawEditable(
     if (node.kind === 'image') {
       return embeddedPicture(next(), image(node.data, node.format), node.rect, node.alt ?? 'Image', node.link ? hyperlink(node.link) : undefined, node.crop)
     }
-    return embeddedPicture(next(), image(node.data), node.rect, `Picture of ${node.reason}`)
+    const id = next()
+    const relationship = image(node.data)
+    return node.equation
+      ? drawEquation(node.equation, id, relationship, node.rect)
+      : embeddedPicture(id, relationship, node.rect, `Picture of ${node.reason}`)
   }).join('')
   const background = slide.background ? `<p:bg><p:bgPr>${fill(slide.background)}<a:effectLst/></p:bgPr></p:bg>` : ''
   return { background, shapes, lastShapeId: id }
