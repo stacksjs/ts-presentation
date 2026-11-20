@@ -89,9 +89,10 @@ function parseClick(line: string): { ids: string[], interaction: TaskInteraction
   return { ids: ids.split(','), interaction }
 }
 
-function parseGantt(source: string, now: number, interactionsEnabled = false, configuredAxisFormat = ''): GanttChartOptions | undefined {
+function parseGantt(source: string, now: number, options: Pick<GanttChartOptions, 'axisFormat' | 'timeZone'> & { interactionsEnabled?: boolean } = {}): GanttChartOptions | undefined {
   const chart = readChronology(source, '', { gantt: true })
   if (!chart || !isGanttHeader(chart.header)) return
+  const { axisFormat: configuredAxisFormat, timeZone, interactionsEnabled } = options
 
   let dateFormat = 'YYYY-MM-DD'
   let axisFormat = ''
@@ -159,7 +160,7 @@ function parseGantt(source: string, now: number, interactionsEnabled = false, co
     else task.end = end
     sections.at(-1)!.tasks.push(task)
   }
-  const parseDate = ganttDateParser(dateFormat, now)
+  const parseDate = ganttDateParser(dateFormat, now, timeZone)
   const tasks = sections.flatMap(section => section.tasks)
   const taskIds = new Set(tasks.flatMap(task => task.id ? [task.id] : []))
   let nextId = 1
@@ -185,7 +186,7 @@ function parseGantt(source: string, now: number, interactionsEnabled = false, co
     const interaction = task.id ? interactions.get(task.id) : undefined
     if (interaction) Object.assign(task, interaction)
   }
-  return { sections, title: chart.title, accessibleTitle: chart.accessibleTitle, description: chart.description, dateFormat,
+  return { sections, title: chart.title, accessibleTitle: chart.accessibleTitle, description: chart.description, dateFormat, timeZone,
     axisFormat: axisFormat || configuredAxisFormat || (dateFormat === 'D' ? '%d' : ''), tickInterval: ticks,
     weekday, weekend, topAxis, todayMarker, todayMarkerStyle, inclusiveEndDates,
     excludes: exclusions, includes: inclusions, calendarMatch: 'formatted', startDateFallback: 'iso',
@@ -201,7 +202,8 @@ export function scheduleGantt(source: string, now: number = Date.now()): GanttSc
 export function gantt(source: string, idPrefix: string, options: MermaidOptions = {}): string | undefined {
   const config = options.gantt && typeof options.gantt === 'object' ? options.gantt as Record<string, unknown> : {}
   const axisFormat = typeof config.axisFormat === 'string' ? config.axisFormat : undefined
-  const chart = parseGantt(source, Date.now(), options.securityLevel === 'loose', axisFormat)
+  const timeZone = config.timeZone === 'local' ? 'local' : 'UTC'
+  const chart = parseGantt(source, Date.now(), { axisFormat, timeZone, interactionsEnabled: options.securityLevel === 'loose' })
   if (!chart) return
   const variables = options.themeVariables && typeof options.themeVariables === 'object' ? options.themeVariables as Record<string, unknown> : {}
   const preset = ganttTheme(options.theme)

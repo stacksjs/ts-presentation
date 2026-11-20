@@ -52,6 +52,32 @@ Release :release, 2024-01-05, 2029-12-05`
   expect(longer).not.toContain('class="diagram-gantt-excluded"')
 })
 
+test('renders taskless Gantt directives and opts into the host calendar in frontmatter', async () => {
+  const empty = mermaid('gantt\ntickInterval 1week\nweekday monday', 'empty-schedule')
+  expect(empty).toContain('data-diagram-kind="gantt"')
+  expect(empty).not.toMatch(/data-task-id=|Infinity|NaN/)
+
+  const module = new URL('../packages/slidev/node/runtime/diagram.ts', import.meta.url).pathname
+  const schedule = 'gantt\naxisFormat %H:%M\ntickInterval 1day\nDST change :change, 2020-11-01, 1d'
+  const local = ['---', 'config:', '  gantt:', '    timeZone: local', '---', schedule].join('\n')
+  const code = `
+    import { renderMermaid } from ${JSON.stringify(module)}
+    const local = await renderMermaid(${JSON.stringify(local)}, 'local-calendar')
+    const utc = await renderMermaid(${JSON.stringify(schedule)}, 'utc-calendar')
+    console.log(JSON.stringify({ local, utc }))
+  `
+  const child = Bun.spawn([process.execPath, '-e', code], {
+    env: { ...process.env, TZ: 'America/Los_Angeles' }, stdout: 'pipe', stderr: 'pipe',
+  })
+  const [status, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()])
+  if (status) throw new Error(stderr)
+  const charts = JSON.parse(stdout)
+  expect(charts.local).toContain('data-task-start="2020-11-01T07:00:00.000Z" data-task-end="2020-11-02T08:00:00.000Z"')
+  expect(charts.local).toContain('<title>00:00</title>')
+  expect(charts.local).not.toContain('<title>08:00</title>')
+  expect(charts.utc).toContain('data-task-start="2020-11-01T00:00:00.000Z" data-task-end="2020-11-02T00:00:00.000Z"')
+})
+
 test('honors the custom work week, split holidays, and inclusion overrides in Gantt imports', () => {
   const source = `gantt
 dateFormat DD-MM-YYYY

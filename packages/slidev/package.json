@@ -11,7 +11,7 @@
     ".": "./node/index.ts"
   },
   "dependencies": {
-    "ts-charts": "https://codeload.github.com/stacksjs/ts-charts/tar.gz/26d7b305072a5c2284680ab4c8d1626455317c77",
+    "ts-charts": "https://codeload.github.com/stacksjs/ts-charts/tar.gz/c6a1b7fa7684b1ffef4321ddb8ba9ec892d72c35",
     "ts-syntax-highlighter": "^0.2.20",
     "@stacksjs/stx": "0.2.919"
   }
