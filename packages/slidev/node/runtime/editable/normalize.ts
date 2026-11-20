@@ -595,7 +595,17 @@ function buildSlideIr(
       const bounds = clipToSlide(math.rect, size)
       if (color?.a === 1 && fontSize > 0 && bounds?.w === math.rect.w && bounds.h === math.rect.h) {
         const expression = officeMath(math.expression, fontSize, color)
-        if (expression) equation = { expression, rect: math.rect, display: math.display }
+        if (expression) {
+          const tags = math.tags?.map((tag) => {
+            const visible = clipToSlide(tag.rect, size)
+            if (visible?.w !== tag.rect.w || visible.h !== tag.rect.h || !(tag.fontSize > 0)
+              || !Number.isFinite(tag.opacity) || tag.opacity < 0 || tag.opacity > 1) return
+            const expression = officeMath(tag.expression, tag.fontSize, withOpacity(color, tag.opacity)!)
+            if (expression) return { expression, rect: tag.rect, display: false }
+          })
+          if (!tags || tags.every(tag => tag !== undefined))
+            equation = { expression, rect: math.rect, display: math.display, ...(tags?.length ? { tags } : {}) }
+        }
       }
     }
     push({

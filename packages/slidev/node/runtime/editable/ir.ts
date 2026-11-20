@@ -91,6 +91,14 @@ export interface RawMathElement {
   attributes: Record<string, string>
   text: string
   children: RawMathElement[]
+  opacity?: number
+}
+
+export interface RawMathSnapshot {
+  expression: RawMathElement
+  rect: Rect
+  display: boolean
+  tags?: { expression: RawMathElement, rect: Rect, opacity: number, fontSize: number }[]
 }
 
 export interface RawNode {
@@ -120,7 +128,7 @@ export interface RawNode {
   href?: string
   /** Root of a rendered formula. Exported as a unit so browser layout is preserved in the picture fallback. */
   isMath?: boolean
-  math?: { expression: RawMathElement, rect: Rect, display: boolean }
+  math?: RawMathSnapshot
   /** An `SVG` carrying `<foreignObject>` (as Mermaid renders), so its labels are HTML. No PowerPoint renderer draws that; it has to be rasterized. */
   hasForeignObject?: boolean
   /** Reached through `el.shadowRoot`. Mermaid diagrams live in one. */
@@ -276,6 +284,12 @@ export type RasterReason
     | 'transform'
     | 'writing-mode'
 
+export interface IrEquation {
+  expression: string
+  rect: Rect
+  display: boolean
+}
+
 export interface IrRaster extends IrBase {
   kind: 'raster'
   /** Base64 PNG bytes, filled in by the capture phase. */
@@ -286,7 +300,7 @@ export interface IrRaster extends IrBase {
   /** Also hide the element's own children while capturing. Correct only when they are walked and redrawn as shapes; hiding a leaf's children (e.g. an `<svg>`) removes its artwork from the picture. */
   hideDescendants: boolean
   /** Native Office Math choice with this raster as the compatibility fallback. */
-  equation?: { expression: string, rect: Rect, display: boolean }
+  equation?: IrEquation & { tags?: IrEquation[] }
 }
 
 export type IrNode = IrBox | IrText | IrImage | IrRaster

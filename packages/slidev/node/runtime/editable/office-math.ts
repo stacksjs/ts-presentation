@@ -19,6 +19,10 @@ const accents: Readonly<Record<string, string>> = {
 }
 const stretchMarks = new Set(['⏞', '⏟', '←', '→', '↔', '⇐', '⇒', '⇔', '↼', '⇀'])
 const spaces = [[0.17, '\u2009'], [2 / 9, '\u205f'], [5 / 18, '\u2005'], [0.5, '\u2002'], [1, '\u2003'], [2, '\u2003\u2003']] as const
+const alignmentCellStyles = new Set([
+  'text-align:left', 'text-align:right', 'text-align:center', '--math-cell-align:end', '--math-cell-align:center',
+  'padding-inline:0', 'padding-inline-start:1em', 'math-style:normal', 'padding-block:0.125em',
+])
 
 function only(node: RawMathElement, ...names: string[]): boolean {
   return Object.keys(node.attributes).every(name => names.includes(name))
@@ -65,11 +69,15 @@ function followingTerm(nodes: readonly RawMathElement[], start: number): number 
 export function officeMath(root: RawMathElement, fontSize: number, color: Rgba): string | undefined {
   const size = Math.max(100, Math.min(400000, Math.round(fontSize * PT_PER_PX * 100)))
   const hex = [color.r, color.g, color.b].map(value => Math.round(value).toString(16).padStart(2, '0')).join('').toUpperCase()
-  const properties = `<a:rPr sz="${size}"><a:solidFill><a:srgbClr val="${hex}"/></a:solidFill><a:latin typeface="Cambria Math"/></a:rPr>`
+  let opacity = color.a
+  const properties = () => {
+    const paint = opacity === 1 ? `<a:srgbClr val="${hex}"/>` : `<a:srgbClr val="${hex}"><a:alpha val="${Math.round(opacity * 100000)}"/></a:srgbClr>`
+    return `<a:rPr sz="${size}"><a:solidFill>${paint}</a:solidFill><a:latin typeface="Cambria Math"/></a:rPr>`
+  }
   const wrap = (name: string, content: string) => `<m:${name}>${content}</m:${name}>`
   const setting = (name: string, value: string) => `<m:${name} m:val="${escapeHtml(value)}"/>`
   const run = (text: string, italic = false) =>
-    wrap('r', `<m:rPr><m:sty m:val="${italic ? 'i' : 'p'}"/></m:rPr>${properties}<m:t xml:space="preserve">${escapeHtml(text)}</m:t>`)
+    wrap('r', `<m:rPr><m:sty m:val="${italic ? 'i' : 'p'}"/></m:rPr>${properties()}<m:t xml:space="preserve">${escapeHtml(text)}</m:t>`)
   function sequence(nodes: readonly RawMathElement[]): string | undefined {
     let output = ''
     for (let index = 0; index < nodes.length; index++) {
@@ -125,6 +133,37 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba):
     const upper = convert(last)
     if (upper !== undefined) return limit('limUpp', limit('limLow', body, label), upper)
   }
+  function equationArray(table: RawMathElement, environment: string): string | undefined {
+    if (!/^(?:align(?:ed|at|edat)?|gather(?:ed)?|split)[*]?$/.test(environment)
+      || !only(table, 'class', 'style', 'columnalign', 'data-equation-lines', 'data-equation-environment', 'data-equation-tags', 'data-equation-flush')) return
+    const aligned = !environment.startsWith('gather')
+    let rows = ''
+    for (const row of table.children) {
+      if (row.name !== 'mtr' || row.text.trim() || !only(row, 'data-equation-dim') || !row.children.length
+        || (!aligned && row.children.length !== 1)) return
+      const rowOpacity = row.opacity ?? 1
+      if (!Number.isFinite(rowOpacity) || rowOpacity < 0 || rowOpacity > 1) return
+      const previous = opacity
+      opacity *= rowOpacity
+      try {
+        let expression = ''
+        for (const [index, cell] of row.children.entries()) {
+          const styles = (cell.attributes.style ?? '').split(';').filter(Boolean)
+          if (cell.name !== 'mtd' || cell.text.trim() || !only(cell, 'style')
+            || !styles.every(style => alignmentCellStyles.has(style))) return
+          const content = sequence(cell.children)
+          // Ampersands inside an Office equation array are alignment syntax.
+          if (content === undefined || content.includes('&amp;')) return
+          if (index > 0) expression += run('&')
+          if (styles.includes('padding-inline-start:1em')) expression += run('\u2003')
+          expression += content
+        }
+        rows += wrap('e', expression)
+      }
+      finally { opacity = previous }
+    }
+    if (rows) return wrap('eqArr', rows)
+  }
   function convert(node: RawMathElement): string | undefined {
     const { name, text, attributes, children } = node
     if (tokenNames.has(name)) {
@@ -165,6 +204,15 @@ export function officeMath(root: RawMathElement, fontSize: number, color: Rgba):
     }
     if (name === 'mstyle' && only(node, 'displaystyle', 'scriptlevel') && attributes.scriptlevel === '0')
       return sequence(children)
+    if (name === 'mtable' && attributes['data-equation-environment'])
+      return equationArray(node, attributes['data-equation-environment'])
+    if (name === 'mtable' && attributes.class === 'math-alignment-axis' && only(node, 'class') && children.length === 1) {
+      const [row] = children
+      const [cell] = row.children
+      if (row.name === 'mtr' && only(row) && !row.text.trim() && row.children.length === 1
+        && cell.name === 'mtd' && only(cell) && !cell.text.trim()) return sequence(cell.children)
+      return
+    }
     if (name === 'mtable' && only(node, 'data-equation-lines')) {
       const columns = children[0]?.children.length
       if (!columns || !children.every(row => row.name === 'mtr' && !row.text.trim() && only(row)

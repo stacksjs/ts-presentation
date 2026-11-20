@@ -60,7 +60,9 @@ frame per slide, or `--with-clicks` to include reveals in a PNG export.
 `pptx-editable` rebuilds text, backgrounds, and boxes as PowerPoint
 objects, including supported CSS linear-gradient fills. MathML formulas with
 fractions, roots, scripts, matrices, operator limits, accents, and braces can
-become Office Math objects with picture alternatives. Other formulas,
+become Office Math objects with picture alternatives. Supported AMS alignment
+and gather environments export as equation arrays with separate editable tags
+and per-row click dimming. Other formulas,
 diagrams, and browser artwork are embedded as pictures. Eligible deck-local
 PNG and JPEG images retain their source bytes and slide-edge crops.
 Browser capture preserves effects like

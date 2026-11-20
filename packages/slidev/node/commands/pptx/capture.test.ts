@@ -172,6 +172,72 @@ $$`)
   }
 }, 45_000)
 
+it.skipIf(!chrome)('keeps AMS rows, tags, and click highlights editable in PowerPoint', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-ams-'))
+  const canvas = { width: 960, height: 540 }
+  try {
+    const entry = join(root, 'slides.md')
+    await Bun.write(entry, String.raw`---
+math:
+  leqno: true
+---
+# Aligned equations
+
+$$ {1|2|all}
+\begin{alignat}{2}
+p&=q & r&=s \tag*{Review}\\
+x&=y & t&=u \notag\\
+a&=b & c&=d
+\end{alignat}
+$$
+
+$$
+\begin{gather}u=v\\f=g\end{gather}
+$$
+
+$$
+\begin{align*}a&=b\\[1ex]c&=d\end{align*}
+$$`)
+    const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
+    const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
+    const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
+    if (status) throw new Error(stderr)
+    const frames: PowerPointFrame[] = []
+    await captureFrames({ root: join(root, 'dist'), executable: chrome!, scale: 1, canvas, editable: true, withClicks: true }, frame => { frames.push(frame) })
+    expect(frames).toHaveLength(3)
+    for (const [step, frame] of frames.entries()) {
+      const arrays = frame.editable?.nodes.filter((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math') ?? []
+      expect(arrays).toHaveLength(3)
+      const [aligned, gathered, spaced] = arrays.map(node => node.equation)
+      expect(aligned?.expression).toContain('<m:eqArr>')
+      expect(aligned?.expression.match(/>&amp;<\/m:t>/g)).toHaveLength(9)
+      expect(aligned?.tags).toHaveLength(2)
+      expect(aligned?.tags?.map(tag => /<m:t[^>]*>(.*?)<\/m:t>/.exec(tag.expression)?.[1])).toEqual(['Review', '(1)'])
+      expect(aligned!.tags!.every(tag => tag.rect.x + tag.rect.w < aligned!.rect.x)).toBe(true)
+      expect(aligned?.expression.includes('<a:alpha val="24000"/>')).toBe(step < 2)
+      expect(aligned?.tags?.map(tag => tag.expression.includes('<a:alpha val="24000"/>'))).toEqual([
+        step === 1, step < 2,
+      ])
+      expect(gathered?.expression.match(/<m:e>/g)).toHaveLength(2)
+      expect(gathered?.expression).not.toContain('&amp;')
+      expect(gathered?.tags).toHaveLength(2)
+      expect(spaced).toBeUndefined()
+    }
+    const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Aligned equations' }))
+    const markup = [...parts].filter(([path]) => /^ppt\/slides\/slide\d+\.xml$/.test(path)).map(([, value]) => value.toString())
+    expect(markup).toHaveLength(3)
+    for (const slide of markup) {
+      expect(slide.match(/<m:eqArr>/g)).toHaveLength(2)
+      expect(slide.match(/name="Equation tag"/g)).toHaveLength(4)
+      expect(slide.match(/<mc:Fallback><p:sp>/g)).toHaveLength(2)
+      expect(slide.match(/<p:pic>/g)).toHaveLength(1)
+    }
+  }
+  finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}, 45_000)
+
 it.skipIf(!chrome)('keeps original images editable and crops them in DrawingML across reveals', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-original-pictures-'))
   const canvas = { width: 960, height: 540 }

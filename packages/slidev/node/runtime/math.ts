@@ -1983,6 +1983,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const moreRowSpace = aligned || gathered || cases
     const pad = compact ? '0.06' : ((moreRowSpace ? 0.125 : 0.14) * stretch).toFixed(4).replace(/0+$/, '').replace(/\.$/, '')
     const lines = compact ? ' class="math-compact-array"' : ' data-equation-lines'
+    const amsAlignment = (aligned || environment.startsWith('gather')) ? ` data-equation-environment="${environment}"` : ''
     const gridLayout = displayRows
       ? ` class="math-alignment-grid math-display-grid" style="--math-columns:${columnCount}" data-equation-tags="${leqno ? 'left' : 'right'}"${options?.fleqn ? ' data-equation-flush' : ''}`
       : grid ? ` class="math-alignment-grid" style="--math-columns:${columnAlignment.length}"` : ''
@@ -2020,7 +2021,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
         }).join('')
         return `<mtr>${leqno ? cell : ''}${content}${leqno ? '' : cell}</mtr>`
       }).join('')
-      const table = `<mtable${lines}${align}${gridLayout}>${markup}</mtable>`
+      const table = `<mtable${lines}${align}${gridLayout}${amsAlignment}>${markup}</mtable>`
       if (displayRows) return table
       // Center the whole grid on the math axis beside surrounding inline atoms.
       const centered = grid && style !== 0

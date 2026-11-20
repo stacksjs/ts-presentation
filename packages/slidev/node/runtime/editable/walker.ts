@@ -1,5 +1,5 @@
 // Adapted from Slidev v53.1.0. See licenses/Slidev-MIT.txt.
-import type { RawMathElement, RawNode, RawSlide, RawSnapshot, RawStyle } from './ir.ts'
+import type { RawMathElement, RawMathSnapshot, RawNode, RawSlide, RawSnapshot, RawStyle } from './ir.ts'
 
 /**
  * The one function that runs inside the browser. Invariant: zero free variables.
@@ -95,7 +95,10 @@ export function collectSnapshot(options: {
         if (!nested) return
         children.push(nested)
       }
-      return { name: element.localName, attributes, text, children }
+      const result: RawMathElement = { name: element.localName, attributes, text, children }
+      if (element.localName === 'mtr' && element.hasAttribute('data-equation-dim'))
+        result.opacity = Number(getComputedStyle(element).opacity)
+      return result
     }
     return read(root, 0)
   }
@@ -325,6 +328,53 @@ export function collectSnapshot(options: {
       }
     }
 
+    function mathSnapshot(presentation: Element, display: boolean, scale: number): RawMathSnapshot | undefined {
+      const expression = mathExpression(presentation)
+      if (!expression) return
+      let table = presentation
+      let data = expression
+      while (table.localName === 'mrow' && table.children.length === 1) {
+        table = table.children[0]
+        data = data.children[0]
+      }
+      if (!display || table.localName !== 'mtable' || !table.hasAttribute('data-equation-environment')
+        || !table.hasAttribute('data-equation-tags')) {
+        const rect = relative(presentation.getBoundingClientRect())
+        if (rect.w > 0 && rect.h > 0) return { expression, rect, display }
+        return
+      }
+
+      // Capture the tag ink independently of the alignment grid's full-width gutters.
+      const tags: NonNullable<RawMathSnapshot['tags']> = []
+      const body: DOMRect[] = []
+      for (const [index, row] of Array.from(table.children).entries()) {
+        const mathRow = data.children[index]
+        const cells = Array.from(row.children)
+        const tagIndex = cells.findIndex(cell => cell.getAttribute('class') === 'math-equation-number')
+        if (tagIndex < 0) return
+        const tag = cells[tagIndex]
+        for (const cell of cells) if (cell !== tag) body.push(cell.getBoundingClientRect())
+        const [content] = mathRow.children.splice(tagIndex, 1)
+        if (!tag.children.length && !tag.textContent?.trim()) continue
+        // The contents always have a MathML wrapper or a token as their root.
+        const label = tag.firstElementChild
+        if (!label || tag.children.length !== 1 || content.children.length !== 1 || content.text.trim()) return
+        const rect = relative(label.getBoundingClientRect())
+        if (rect.w <= 0 || rect.h <= 0) return
+        tags.push({
+          rect, expression: content.children[0], opacity: mathRow.opacity ?? 1,
+          fontSize: Number.parseFloat(getComputedStyle(label).fontSize) * scale,
+        })
+      }
+      if (!body.length) return
+      const left = Math.min(...body.map(box => box.left))
+      const top = Math.min(...body.map(box => box.top))
+      const width = Math.max(...body.map(box => box.right)) - left
+      const height = Math.max(...body.map(box => box.bottom)) - top
+      if (width > 0 && height > 0)
+        return { expression, rect: relative({ left, top, width, height }), display, tags }
+    }
+
     function walk(node: Node, parent: number, fromShadowRoot: boolean, inheritedOpacity: number, inheritedScale: number): void {
       if (node.nodeType === 3) {
         const text = node.textContent ?? ''
@@ -450,9 +500,8 @@ export function collectSnapshot(options: {
       const semantics = el.localName === 'math' ? el.firstElementChild : undefined
       const presentation = semantics?.localName === 'semantics' ? semantics.firstElementChild : undefined
       if (presentation && !el.hasAttribute('class') && !computed.getPropertyValue('--math-min-rule').trim()) {
-        const expression = mathExpression(presentation)
-        const rect = relative(presentation.getBoundingClientRect())
-        if (expression && rect.w > 0 && rect.h > 0) record.math = { expression, rect, display: el.getAttribute('display') === 'block' }
+        const source = mathSnapshot(presentation, el.getAttribute('display') === 'block', scale)
+        if (source) record.math = source
       }
       if (el.tagName.toUpperCase() === 'IMG') {
         const image = el as HTMLImageElement
