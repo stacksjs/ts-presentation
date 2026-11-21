@@ -37,6 +37,7 @@ interface Scripts {
   end: number
   upper?: string
   lower?: string
+  primes?: { text: string, beforeUpper: boolean }
 }
 
 function signed(value: string): string {
@@ -74,9 +75,15 @@ function readScript(source: string, start: number): { content: string, end: numb
   if (content) return { content, end: start + content.length }
 }
 
-function readScripts(source: string, start: number): Scripts {
+function readScripts(source: string, start: number, allowPrime = false): Scripts {
   const result: Scripts = { end: start }
-  for (let i = 0; i < 2; i++) {
+  for (;;) {
+    const prime = allowPrime && !result.primes && /^['′″‴⁗]+/.exec(source.slice(result.end))?.[0]
+    if (prime) {
+      result.primes = { text: prime.replaceAll("'", '′'), beforeUpper: result.upper === undefined }
+      result.end += prime.length
+      continue
+    }
     const marker = source[result.end]
     if (marker !== '^' && marker !== '_') break
     const slot = marker === '^' ? 'upper' : 'lower'
@@ -89,22 +96,23 @@ function readScripts(source: string, start: number): Scripts {
   return result
 }
 
-function renderScript(script: string | undefined, math: (source: string) => Markup): Markup {
+function renderScript(script: string | undefined, math: (source: string) => Markup, subscript = false): Markup {
   if (!script) return ''
   if (script.startsWith('$') && script.endsWith('$')) return xml`<mrow>${math(script.slice(1, -1))}</mrow>`
   if (script.startsWith('{') && script.endsWith('}')) return tag('mtext', script.slice(1, -1))
   if (/^[+\-]?\d+(?:[.,]\d+)?$/.test(script)) return tag('mn', signed(script))
   if (/^[a-z]$/.test(script)) return tag('mi', script)
-  if (/^[A-Z]+$/.test(script)) return tag('mtext', script)
-  const symbols: Markup[] = []
-  for (const value of script.match(/[A-Za-z]+|\d+|./gu) ?? []) {
-    if (/^[a-z]$/.test(value)) symbols.push(tag('mi', value))
-    else if (/^[A-Z]+$/.test(value)) symbols.push(tag('mtext', value))
-    else symbols.push(tag('mo', signed(value).replaceAll('.', '·').replaceAll("'", '′')))
-  }
-  return symbols.length > 1 && symbols.some(value => typeof value === 'string' && value.startsWith('<mi'))
-    ? xml`<mrow>${joinMarkup(symbols)}</mrow>`
-    : tag('mo', signed(script).replaceAll('.', '·').replaceAll("'", '′'))
+  if (/^[A-Za-z]+$/.test(script)) return tag('mtext', script)
+  const operator = (value: string) => tag('mo', signed(value).replaceAll('.', '·').replaceAll("'", '′'))
+  if (!/[A-Za-z]/.test(script)) return operator(script)
+  const symbols = (script.match(/[A-Za-z]+|\d+|[^\s]/gu) ?? []).map((value, index) => {
+    if (subscript && index === 0 && value === 'i' && script.startsWith('i,')) return tag('mi', 'i', upright)
+    if (/^[a-z]$/.test(value)) return tag('mi', value)
+    if (/^[A-Za-z]+$/.test(value)) return tag('mtext', value)
+    if (/^\d+$/.test(value)) return tag('mn', value)
+    return operator(value)
+  })
+  return `<mrow>${symbols.join('')}</mrow>`
 }
 
 export function chemicalFormula(source: string, math: (source: string) => Markup): Markup {
@@ -120,8 +128,8 @@ export function chemicalFormula(source: string, math: (source: string) => Markup
   function atom(base: Markup, prescripts?: Scripts, count = true): Markup {
     const quantity = count ? digits.exec(source.slice(cursor))?.[0] : undefined
     if (quantity) cursor += quantity.length
-    let right = readScripts(source, cursor)
-    if (right.upper !== undefined && /^\d+$/.test(right.upper) && isotopeBase.test(source.slice(right.end))) {
+    let right = readScripts(source, cursor, true)
+    if (!right.primes && right.upper !== undefined && /^\d+$/.test(right.upper) && isotopeBase.test(source.slice(right.end))) {
       // A bare mass number next to another element describes the next atom.
       right = { end: cursor }
     }
@@ -135,11 +143,19 @@ export function chemicalFormula(source: string, math: (source: string) => Markup
       right.lower = quantity ?? (count && right.upper ? digits.exec(source.slice(cursor))?.[0] : undefined)
       if (!quantity && right.lower) cursor += right.lower.length
     }
-    const lower = renderScript(right.lower, math)
-    const upper = renderScript(right.upper, math)
+    const lower = renderScript(right.lower, math, true)
+    let upper = right.upper === 'x' && lower ? tag('mo', '×') : renderScript(right.upper, math)
+    if (right.primes) {
+      const prime = tag('mo', right.primes.text)
+      if (!upper) upper = prime
+      else {
+        const scripts = right.primes.beforeUpper ? [prime, upper] : [upper, prime]
+        upper = xml`<mrow>${joinMarkup(scripts)}</mrow>`
+      }
+    }
     if (prescripts) {
       const after = lower || upper ? xml`${lower || '<none/>'}${upper || '<none/>'}` : ''
-      const beforeLower = renderScript(prescripts.lower, math)
+      const beforeLower = renderScript(prescripts.lower, math, true)
       const beforeUpper = renderScript(prescripts.upper, math)
       return xml`<mmultiscripts>${base}${after}<mprescripts/>${beforeLower || '<none/>'}${beforeUpper || '<none/>'}</mmultiscripts>`
     }

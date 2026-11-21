@@ -119,6 +119,19 @@ it('renders hydrate dots, fractional coefficients, grouped species and phase mar
   expect(html).toContain('<msub><mi mathvariant="normal">O</mi><mi>x</mi></msub><mo>↓</mo>')
 })
 
+it('preserves defect notation primes, charges and mixed site subscripts', async () => {
+  const formula = String.raw`\ce{O''_{i,x} + $V$'_{Li,1-2x} + Li^x_{Li} + NO_x + X_{{red}} + X'^2+ + X^{2+}${'′'} + Fe_3^{$x$}}`
+  const html = await renderDeck(parseDeck('$' + formula + '$'))
+  expect(html).toContain('<msubsup><mi mathvariant="normal">O</mi><mrow><mi mathvariant="normal">i</mi><mo>,</mo><mi>x</mi></mrow><mo>′′</mo></msubsup>')
+  expect(html).toContain('<msubsup><mrow><mi>V</mi></mrow><mrow><mtext>Li</mtext><mo>,</mo><mn>1</mn><mo>−</mo><mn>2</mn><mi>x</mi></mrow><mo>′</mo></msubsup>')
+  expect(html).toContain('<msubsup><mi mathvariant="normal">Li</mi><mtext>Li</mtext><mo>×</mo></msubsup>')
+  expect(html).toContain('<msub><mi mathvariant="normal">O</mi><mi>x</mi></msub>')
+  expect(html).toContain('<msub><mi mathvariant="normal">X</mi><mtext>red</mtext></msub>')
+  expect(html).toContain('<msup><mi mathvariant="normal">X</mi><mrow><mo>′</mo><mo>2+</mo></mrow></msup>')
+  expect(html).toContain('<msup><mi mathvariant="normal">X</mi><mrow><mo>2+</mo><mo>′</mo></mrow></msup>')
+  expect(html).toContain('<msubsup><mi mathvariant="normal">Fe</mi><mn>3</mn><mrow><mi>x</mi></mrow></msubsup>')
+})
+
 it('renders two reaction labels with chemical formulas, literal text, and scoped TeX math', async () => {
   const formula = String.raw`\def\pressure{p_i}\ce{A->[H2O][$\pressure$] B <-->[][{<mixed>}] C <=>[\Delta] D}+\pressure`
   const html = await renderDeck(parseDeck('$' + formula + '$'))
