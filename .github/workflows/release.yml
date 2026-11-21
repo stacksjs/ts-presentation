@@ -1,0 +1,56 @@
+name: Releaser
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: pantry-pm/pantry/packages/action@43fc946fc3579f0803bd90bb140d2fb357e56282 # v0.11.210
+        with:
+          version: '0.11.210'
+          install: 'false'
+          packages: bun.com@1.4.4
+
+      - name: Check the release version
+        run: bun -e 'if (process.env.GITHUB_REF_NAME !== `v${(await Bun.file("package.json").json()).version}`) throw new Error("Tag and package version must match")'
+
+      - run: bun install --frozen-lockfile
+
+      - name: Test the Pantry release archive
+        run: |
+          pantry pack . --filename "$RUNNER_TEMP/ts-presentation.tgz"
+          bash scripts/smoke-package.sh "$RUNNER_TEMP/ts-presentation.tgz"
+
+      - name: Publish to Pantry
+        run: pantry publish . --access public --verify-existing
+        env:
+          PANTRY_REGISTRY_TOKEN: ${{ secrets.PANTRY_TOKEN }}
+
+      - name: Create GitHub Release
+        uses: stacksjs/action-releaser@e925e292fd97978624d41cb513d7b1a5e120d693 # v1.2.9
+        with:
+          changelog: CHANGELOG.md
+          files: ${{ runner.temp }}/ts-presentation.tgz
+
+      - name: Publish to npm
+        run: pantry publish . --npm --access public
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
