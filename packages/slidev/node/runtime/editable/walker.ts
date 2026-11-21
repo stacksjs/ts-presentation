@@ -83,8 +83,12 @@ export function collectSnapshot(options: {
   const measuredMathBox = 'mpadded:is([data-math-transform-box="make"], [data-math-transform-box="raise"])'
   const graphicMathBox = 'mpadded:is([data-math-transform-box="rotate"], [data-math-transform-box="scale"], [data-math-transform-box="height"], [data-math-transform-box="total"])'
   const decoratedArray = 'mtable[data-math-array-decoration]'
+  const multilineStack = 'mtable[data-multlined-position]'
+  const alignedFraction = 'mfrac:is([numalign], [denomalign])'
+  const stackedMath = `${multilineStack}, ${alignedFraction}`
+  const measuredLayout = `${decoratedArray}, ${stackedMath}`
   const raisedMathBox = 'mtext.math-raised-box'
-  const positionedMath = `${overlappingMath}, ${measuredMathBox}, ${graphicMathBox}, ${raisedMathBox}, ${decoratedArray}`
+  const positionedMath = `${overlappingMath}, ${measuredMathBox}, ${graphicMathBox}, ${raisedMathBox}, ${measuredLayout}`
   const raisedMathBody = ':scope > span > span > math > mrow'
   function positionedMathInk(element: Element): Element | undefined {
     if (!element.matches(overlappingMath)) return
@@ -757,7 +761,6 @@ export function collectSnapshot(options: {
     function positionedMathFragments(element: Element, expression: RawMathElement, opacity: number, scale: number):
       { cells: RawMathFragment[], rect: RawMathFragment['rect'], rules?: RawMathRule[], pictures?: RawMathPicture[] } | undefined {
       if (!element.matches(positionedMath) && !element.querySelector(positionedMath)) return
-      const containsDecoratedArray = element.querySelector(decoratedArray) !== null
       const cells: RawMathFragment[] = []
       const rules: RawMathRule[] = []
       const pictures: RawMathPicture[] = []
@@ -874,20 +877,59 @@ export function collectSnapshot(options: {
         }
         return true
       }
-      function pictureFence(node: Element): boolean {
-        if (node.localName !== 'mo' || node.getAttribute('stretchy') !== 'true'
-          || !/^[()[\]{}|‖⟨⟩⌊⌋⌈⌉⟮⟯⎰⎱⟦⟧⦃⦄]$/u.test(node.textContent ?? '')) return false
+      function mathPicture(node: Element, fractionRule = false): boolean {
         const box = node.getBoundingClientRect()
         if (!(box.width > 0 && box.height > 0)) return false
         flush()
         const sourceId = nextId++
         node.setAttribute(options.idAttribute, String(sourceId))
-        pictures.push({ sourceId, rect: relative(box) })
+        pictures.push({ sourceId, rect: relative(box), ...(fractionRule && { fractionRule }) })
         bounds.push(box)
         return true
       }
+      function pictureFence(node: Element): boolean {
+        return node.localName === 'mo' && node.getAttribute('stretchy') === 'true'
+          && /^[()[\]{}|‖⟨⟩⌊⌋⌈⌉⟮⟯⎰⎱⟦⟧⦃⦄]$/u.test(node.textContent ?? '') && mathPicture(node)
+      }
+      function visitRow(node: Element, data: RawMathElement): boolean {
+        // The edge spaces and struts have already positioned the visible terms.
+        const boxes = Array.from(node.children)
+        let start = 0
+        let end = boxes.length
+        while (start < end && boxes[start].localName === 'mspace') start++
+        while (end > start && boxes[end - 1].localName === 'mspace') end--
+        const result = boxes.slice(start, end).every((child, index) => visit(child, data.children[start + index]))
+        flush()
+        return result
+      }
+      function collectStack(node: Element, data: RawMathElement): boolean {
+        flush()
+        split = true
+        bounds.push(node.getBoundingClientRect())
+        if (node.matches(multilineStack)) {
+          return Array.from(node.children).every((row, index) => {
+            const body = row.firstElementChild?.firstElementChild
+            const bodyData = data.children[index]?.children[0]?.children[0]
+            return body?.localName === 'mrow' && bodyData && visitRow(body, bodyData)
+          })
+        }
+        if (node.children.length !== 2) return false
+        const thickness = data.attributes.linethickness
+        if ((thickness === undefined || Number.parseFloat(thickness) !== 0) && !mathPicture(node, true)) return false
+        return Array.from(node.children).every((child, index) => {
+          const argument = data.children[index]
+          const aligned = child.classList.contains('math-fraction-alignment') && child.children.length === 1
+          const ink = aligned ? child.children[0] : child
+          const inkData = aligned ? argument.children[0] : argument
+          const collected = ink.localName === 'mrow' && !Object.keys(inkData.attributes).length
+            ? visitRow(ink, inkData) : visit(ink, inkData)
+          flush()
+          return collected
+        })
+      }
       function visit(node: Element, data: RawMathElement): boolean {
         if (node.matches(decoratedArray)) return collectArray(node, data)
+        if (node.matches(stackedMath) || (node.localName === 'mfrac' && node.querySelector(stackedMath))) return collectStack(node, data)
         const content = positionedContent(node, data)
         if (content) {
           flush()
@@ -895,21 +937,21 @@ export function collectSnapshot(options: {
           add([content.element.getBoundingClientRect()], content.expression, content.element, content.graphic)
           return true
         }
-        const array = containsDecoratedArray && node.querySelector(decoratedArray)
-        if (array && data.attributes.class === 'math-alignment-axis' && node.children.length === 1) {
+        const stack = node.querySelector(measuredLayout)
+        if (stack && data.attributes.class === 'math-alignment-axis' && node.children.length === 1) {
           const cell = node.firstElementChild?.firstElementChild
           const column = data.children[0]?.children[0]
           if (cell?.children.length === 1 && column?.children.length === 1)
             return visit(cell.children[0], column.children[0])
         }
         const keys = Object.keys(data.attributes)
-        const plain = node.localName === 'mrow' && !keys.length
-        const fenced = array && node.localName === 'mrow' && keys.length === 1
+        const plain = node.localName === 'mrow' && (!keys.length || data.attributes.class === 'math-multlined-bottom')
+        const fenced = stack && node.localName === 'mrow' && keys.length === 1
           && (keys[0] === 'data-math-delimiters' || keys[0] === 'data-math-cases')
-        const compact = array && node.localName === 'mstyle' && keys.every(key => key === 'scriptlevel' || key === 'displaystyle')
+        const compact = stack && node.localName === 'mstyle' && keys.every(key => key === 'scriptlevel' || key === 'displaystyle')
         if ((plain || fenced || compact) && !data.text.trim() && node.querySelector(positionedMath)) {
           return Array.from(node.children).every((child, index) =>
-            Boolean(array && pictureFence(child)) || visit(child, data.children[index]))
+            Boolean(stack && pictureFence(child)) || visit(child, data.children[index]))
         }
         pieces.push({ element: node, expression: data })
         return true

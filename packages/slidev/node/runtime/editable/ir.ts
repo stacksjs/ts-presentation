@@ -122,7 +122,7 @@ export interface RawMathRule {
   dash?: { axis: 'horizontal' | 'vertical', lengths: number[] }
 }
 
-export interface RawMathPicture { rect: Rect, sourceId: number }
+export interface RawMathPicture { rect: Rect, sourceId: number, fractionRule?: boolean }
 
 export type RawMathSnapshot = {
   rect: Rect

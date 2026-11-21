@@ -2275,6 +2275,14 @@ B=\frac{\splitfrac{x+y+z}{+w}}{n}
 $$
 
 $$
+C=\splitdfrac{u+v+w}{=z}
+$$
+
+$$
+\cfrac[l]{a}{b+c+d}+\cfrac[r]{a}{b+c+d}
+$$
+
+$$
 \frac{\begin{array}{c|c}a&b\\c&d\end{array}}{2}
 $$
 
@@ -2338,8 +2346,41 @@ $$`)
     expect(alignment).toContain('>(R)</m:t>')
     expect(alignment).toContain('>q</m:t>')
     expect(alignment).toContain('name="Equation rule"')
+    const [lines, split, displaySplit, continued] = [...multiline.matchAll(/<mc:Choice\b[^>]*>(.*?)<\/mc:Choice>/g)].map(([, choice]) => choice)
+    expect(multiline.match(/<mc:Fallback><p:sp>/g)).toHaveLength(4)
     expect(multiline.match(/<p:pic>/g)).toHaveLength(3)
-    expect(multiline).not.toContain('<a14:m>')
+    const positions = (choice: string, text: string) => [...choice.matchAll(/<p:sp>(.*?)<\/p:sp>/g)]
+      .filter(([, shape]) => shape.includes(text))
+      .map(([, shape]) => {
+        const [, x, y] = /<a:off x="(\d+)" y="(\d+)"/.exec(shape) ?? []
+        return { x: Number(x), y: Number(y) }
+      })
+    expect(lines.match(/<a14:m>/g)).toHaveLength(3)
+    expect(lines.match(/name="Equation delimiter"/g)).toHaveLength(2)
+    expect(lines).toMatch(/>a<\/m:t>.*?>b<\/m:t>.*?>c<\/m:t>.*?>d<\/m:t>/)
+    const [firstLine] = positions(lines, '>a</m:t>')
+    const [lastLine] = positions(lines, '>c</m:t>')
+    expect(lastLine.x).toBeGreaterThan(firstLine.x)
+    expect(lastLine.y).toBeGreaterThan(firstLine.y)
+    expect(split.match(/<a14:m>/g)).toHaveLength(4)
+    expect(split).toMatch(/>x<\/m:t>.*?>w<\/m:t>.*?>n<\/m:t>/)
+    expect(split.match(/name="Equation rule"/g)).toHaveLength(1)
+    const [splitUpper] = positions(split, '>x</m:t>')
+    const [splitLower] = positions(split, '>w</m:t>')
+    const [fractionBar] = positions(split, 'name="Equation rule"')
+    const [denominator] = positions(split, '>n</m:t>')
+    expect(splitLower.x).toBeGreaterThan(splitUpper.x)
+    expect(splitLower.y).toBeGreaterThan(splitUpper.y)
+    expect(fractionBar.y).toBeGreaterThan(splitLower.y)
+    expect(denominator.y).toBeGreaterThan(fractionBar.y)
+    expect(displaySplit.match(/<a14:m>/g)).toHaveLength(3)
+    expect(displaySplit).not.toContain('name="Equation rule"')
+    expect(continued.match(/<a14:m>/g)).toHaveLength(5)
+    expect(continued.match(/name="Equation rule"/g)).toHaveLength(2)
+    const numerators = positions(continued, '>a</m:t>')
+    const bars = positions(continued, 'name="Equation rule"')
+    expect(numerators).toHaveLength(2)
+    expect(numerators[1].x - bars[1].x).toBeGreaterThan(numerators[0].x - bars[0].x)
     expect(prose.match(/<a14:m>/g)).toHaveLength(2)
     expect(prose.match(/<mc:Fallback><p:sp>/g)).toHaveLength(2)
     expect(prose).toContain('<m:begChr m:val="{"/>')
