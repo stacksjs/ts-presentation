@@ -381,6 +381,8 @@ $\hspace{7em}x\makebox[12px][r]{Wide text}z$
 
 $x{\setlength{\fboxsep}{4px}\fboxrule=2px\framebox[100px][r]{A}}z$
 
+$x\mathmakebox[\dimexpr(\width+8px)*(3/2)\relax][r]{\text{Inset}}z$
+
 ---
 
 # Raised boxes
@@ -393,7 +395,9 @@ $\raisebox{5px}[\height][0px]{Agp}$
 
 $\raisebox{.1\width}{Agp}$
 
-$\raisebox{30px}[2px][0px]{Agp}$`)
+$\raisebox{30px}[2px][0px]{Agp}$
+
+$\raisebox{\dimexpr(\height-\depth)/2+2px\relax}[\dimexpr9px+4px*2][3px]{Agp}$`)
     const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
     const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
     const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
@@ -488,8 +492,8 @@ $\raisebox{30px}[2px][0px]{Agp}$`)
           }
         })
       })()`)
-      expect(text).toHaveLength(6)
-      const [left, centered, right, spread, overflowing, framed] = text
+      expect(text).toHaveLength(7)
+      const [left, centered, right, spread, overflowing, framed, resizedText] = text
       expect([left.width, centered.width, right.width]).toEqual([72, 72, 72])
       expect(left.offset).toBeCloseTo(0, 1)
       expect(centered.offset).toBeCloseTo((centered.width - centered.ink) / 2, 1)
@@ -501,6 +505,8 @@ $\raisebox{30px}[2px][0px]{Agp}$`)
       expect(framed.width).toBeCloseTo(88, 1)
       expect(framed.outer).toBeCloseTo(100, 1)
       expect(framed.offset + framed.ink).toBeCloseTo(88, 1)
+      expect(resizedText.width).toBeCloseTo(2 * (resizedText.ink + 8), 1)
+      expect(resizedText.offset + resizedText.ink).toBeCloseTo(resizedText.width, 1)
 
       await view.evaluate('window.presentationNavigation.go(5)')
       const raised = await view.evaluate<{
@@ -520,8 +526,8 @@ $\raisebox{30px}[2px][0px]{Agp}$`)
           }
         })
       })()`)
-      expect(raised).toHaveLength(4)
-      const [lift, lower, fixed, relativeLift] = raised
+      expect(raised).toHaveLength(5)
+      const [lift, lower, fixed, relativeLift, expression] = raised
       expect(lift.offset).toBeCloseTo(lift.depth, 1)
       expect(lift.ascent).toBeCloseTo(lift.height + lift.depth, 1)
       expect(lift.descent).toBe(0)
@@ -532,6 +538,9 @@ $\raisebox{30px}[2px][0px]{Agp}$`)
       expect(fixed.ascent).toBeCloseTo(fixed.height, 1)
       expect(fixed.descent).toBe(0)
       expect(relativeLift.offset).toBeCloseTo(relativeLift.width / 10, 1)
+      expect(expression.offset).toBeCloseTo((expression.height - expression.depth) / 2 + 2, 1)
+      expect(expression.ascent).toBeCloseTo(17, 1)
+      expect(expression.descent).toBeCloseTo(3, 1)
     }
     finally {
       view.close()
@@ -552,15 +561,15 @@ $\raisebox{30px}[2px][0px]{Agp}$`)
     const rotated = parts.get('ppt/slides/slide3.xml')?.toString() ?? ''
     expect(rotated.match(/<p:pic>/g)).toHaveLength(5)
     const text = frames[3].editable?.nodes.filter((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math') ?? []
-    expect(text).toHaveLength(6)
+    expect(text).toHaveLength(7)
     expect(text[4].rect.w).toBeGreaterThan(45)
-    expect(parts.get('ppt/slides/slide4.xml')?.toString().match(/<p:pic>/g)).toHaveLength(6)
+    expect(parts.get('ppt/slides/slide4.xml')?.toString().match(/<p:pic>/g)).toHaveLength(7)
     const raised = frames[4].editable?.nodes.filter((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math') ?? []
-    expect(raised).toHaveLength(5)
+    expect(raised).toHaveLength(6)
     expect(raised.every(node => node.data && !node.equation)).toBe(true)
     expect(raised[1].rect.h).toBeGreaterThan(raised[0].rect.h + 2)
     expect(raised[4].rect.h).toBeGreaterThan(30)
-    expect(parts.get('ppt/slides/slide5.xml')?.toString().match(/<p:pic>/g)).toHaveLength(5)
+    expect(parts.get('ppt/slides/slide5.xml')?.toString().match(/<p:pic>/g)).toHaveLength(6)
   }
   finally { await rm(root, { recursive: true, force: true }) }
 }, 45_000)
@@ -657,7 +666,7 @@ Y&=\frac{3}{4}\tag{Longer}
 
 # Full-width measured decoration
 
-\begin{empheq}[innerbox=\fbox,left={\makebox[.25\EmphEqdisplaywidth]{L}}]{flalign}
+\begin{empheq}[innerbox=\fbox,left={\makebox[\dimexpr\EmphEqdisplaywidth/4\relax]{L}}]{flalign}
 x&=a & y&=b\\
 z&=c & w&=d
 \end{empheq}`)

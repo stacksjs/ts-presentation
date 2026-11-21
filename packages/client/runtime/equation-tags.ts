@@ -62,6 +62,15 @@ function fitTransformedBox(box: Element): void {
   const extra = Number(ink.getAttribute('data-extra-space') ?? 0)
   const width = measuredWidth - spaces * extra
   const dimensions: Readonly<Record<string, number>> = { width, height, depth, totalheight: totalHeight, center: (height - depth) / 2 }
+  const length = (value: number) => `${Number(value.toFixed(4))}px`
+  if (box.hasAttribute('data-math-box-natural')) {
+    const style = (box as HTMLElement).style
+    for (const metric of ['width', 'height', 'depth', 'totalheight']) {
+      const property = `--math-natural-${metric}`
+      const value = length(dimensions[metric])
+      if (style.getPropertyValue(property) !== value) style.setProperty(property, value)
+    }
+  }
   const boxStyle = sizing === 'scale' ? undefined : getComputedStyle(box)
   function target(specification: string, axis: string): number {
     if (specification === 'length')
@@ -69,7 +78,6 @@ function fitTransformedBox(box: Element): void {
     const [natural, multiplier] = specification.split(':')
     return dimensions[natural] * Number(multiplier)
   }
-  const length = (value: number) => `${Number(value.toFixed(4))}px`
   let advance: number
   let ascent: number
   let descent: number

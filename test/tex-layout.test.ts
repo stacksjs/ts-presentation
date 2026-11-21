@@ -108,6 +108,26 @@ test('supports natural and specified TeX text boxes and scopes their frame dimen
   expect(() => math(String.raw`\setlength{\fboxsep}{-2px}\framebox{Label}`, false)).toThrow('Invalid text frame dimension')
 })
 
+test('parses TeX box dimension expressions with measured operands and integer scaling', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const html = math(String.raw`
+    \def\gap{8px}
+    \makebox[\dimexpr(\width+\gap)*(3/2)\relax][r]{Inset}
+    \raisebox{\dimexpr(\height-\depth)/2+2px\relax}[\dimexpr9px+4px*2][3px]{Raise}
+    \mathmakebox[\dimexpr\width+1em][c]{x^2}
+  `, false).split('<annotation')[0]
+  expect(html).toContain('data-math-box-natural')
+  expect(html).toContain('--math-box-width:calc(((var(--math-natural-width) + 8px) * 2))')
+  expect(html).toContain('--math-box-raise:calc((((var(--math-natural-height) - var(--math-natural-depth)) / 2) + 2px))')
+  expect(html).toContain('--math-box-height:calc((9px + (4px * 2)));--math-box-depth:3px')
+  expect(html).toContain('data-width="length" data-height="c" data-math-box-natural style="--math-box-width:calc((var(--math-natural-width) + 1em))"')
+  expect(html).toContain('<msup><mi>x</mi><mn>2</mn></msup>')
+  expect(() => math(String.raw`\makebox[\dimexpr 1em/(2-2)\relax]{Invalid}`, false)).toThrow('Invalid TeX box dimension expression')
+  expect(() => math(String.raw`\makebox[\dimexpr 1em*2px]{Invalid}`, false)).toThrow('Invalid TeX box dimension expression')
+  expect(() => math(String.raw`\makebox[\dimexpr(1em+2px]{Invalid}`, false)).toThrow('Invalid TeX box dimension expression')
+  expect(() => math(String.raw`\makebox[\dimexpr\EmphEqdisplaywidth+2px]{Invalid}`, false)).toThrow('Empheq display lengths require a side decoration')
+})
+
 test('saves and reuses typeset TeX boxes with local assignments and deck scope', () => {
   const math = createMathRenderer({ throwOnError: true, globalGroup: true })
   const initial = math(String.raw`

@@ -1,3 +1,5 @@
+import { MathParseError } from './math-error.ts'
+
 // TeX absolute units in points at a 10 pt text size. See KaTeX src/units.ts (MIT).
 const pointsPerUnit: Readonly<Record<string, number>> = {
   pt: 1, bp: 803 / 800, px: 803 / 800, pc: 12,
@@ -32,6 +34,73 @@ export function mathDimension(source: string, maximum: number): string | undefin
   if (nativeUnits.has(unit)) return `${amount}${unit}`
   if (unit === 'bp') return `${amount}pt`
   return `${value * pointsPerUnit[unit]}pt`
+}
+
+/** Parse a TeX dimension expression into CSS without passing through source text. */
+export function mathBoxDimensionExpression(source: string, resolve: (operand: string) => string | undefined): string {
+  function invalid(): never {
+    throw new MathParseError('Invalid TeX box dimension expression')
+  }
+  if (source.length > 1024) invalid()
+  // A dimension may start with a numeric coefficient. Leave \relax separate
+  // so it can also terminate an expression immediately after a scalar.
+  const tokens = source.match(/(?:\d+(?:\.\d*)?|\.\d+)(?:\s*(?:[a-z]{2}|\\(?!relax(?![A-Za-z@]))[A-Za-z@]+))?|\\[A-Za-z@]+|\S/g) ?? []
+  if (tokens.at(-1) === '\\relax') tokens.pop()
+  let index = 0
+  type Operand = string | number
+
+  function integer(value: number): number {
+    // e-TeX rounds integer division to the nearest integer, away from zero on ties.
+    if (!Number.isFinite(value) || Math.abs(value) > 2_147_483_647) invalid()
+    return Math.sign(value) * Math.round(Math.abs(value))
+  }
+
+  function combine(left: Operand, operator: string, right: Operand): Operand {
+    if (operator === '/' && right === 0) invalid()
+    if (typeof left === 'string') return `(${left} ${operator} ${right})`
+    if (typeof right !== 'number') invalid()
+    switch (operator) {
+      case '+': return integer(left + right)
+      case '-': return integer(left - right)
+      case '*': return integer(left * right)
+      default: return integer(left / right)
+    }
+  }
+
+  function factor(numeric: boolean, depth: number): Operand {
+    if (depth > 32) invalid()
+    let sign = 1
+    while (tokens[index] === '-' || tokens[index] === '+') {
+      if (tokens[index++] === '-') sign = -sign
+    }
+    const next = tokens[index++]
+    let value: Operand | undefined
+    if (next === '(') {
+      value = expression(numeric, depth + 1)
+      if (tokens[index++] !== ')') invalid()
+    }
+    else if (numeric && /^\d+$/.test(next ?? '')) value = integer(Number(next))
+    else if (!numeric && next) value = resolve(next)
+    if (value === undefined) invalid()
+    return sign === 1 ? value : combine(value, '*', -1)
+  }
+
+  function expression(numeric: boolean, depth: number): Operand {
+    function term(): Operand {
+      let value = factor(numeric, depth)
+      while (tokens[index] === '*' || tokens[index] === '/')
+        value = combine(value, tokens[index++], factor(true, depth))
+      return value
+    }
+    let value = term()
+    while (tokens[index] === '+' || tokens[index] === '-')
+      value = combine(value, tokens[index++], term())
+    return value
+  }
+
+  const value = expression(false, 0)
+  if (index !== tokens.length || typeof value !== 'string') invalid()
+  return `calc(${value})`
 }
 
 export function fractionRule(thickness: string | undefined, minimum: number): string | undefined {

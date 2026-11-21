@@ -8,7 +8,7 @@ import { MathParseError } from './math-error.ts'
 import { chemicalFormula, physicalUnits } from './math-chemistry.ts'
 import type { Markup, MathStyle } from './math-markup.ts'
 import { fractionStyle, joinMarkup, renderMarkup, scriptStyle, xml } from './math-markup.ts'
-import { fractionRule, mathDimension, nullDelimiterWidth } from './math-sizing.ts'
+import { fractionRule, mathBoxDimensionExpression, mathDimension, nullDelimiterWidth } from './math-sizing.ts'
 import { resolveRowClasses, rowSpacing } from './math-spacing.ts'
 import type { MathClass } from './math-spacing.ts'
 import { isCenteredGlyph, isColonRelationCommand, mathSymbol, textSymbol, unicodeColonRelation } from './math-symbols.ts'
@@ -497,6 +497,7 @@ const textLigatures: Readonly<Record<string, string>> = {
 }
 const typesettingNames = new Set(['TeX', 'LaTeX', 'KaTeX'])
 const boxDimension = /^([+-]?(?:\d+(?:\.\d*)?|\.\d+)?)\s*\\(width|height|depth|totalheight)$/
+const boxDimensionExpression = /^\\dimexpr(?![A-Za-z@])/
 type BoxDimensionProperty = 'width' | 'height' | 'raise' | 'depth'
 const graphicsNumber = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/
 const textBoxes = new Set(['colorbox', 'fcolorbox', 'fbox', 'reflectbox', 'scalebox', 'resizebox', 'rotatebox', 'makebox', 'framebox', 'usebox'])
@@ -2026,29 +2027,46 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return `calc(${parts.join('')})`
   }
 
-  function graphicsLength(raw: string, axis: BoxDimensionProperty, lengths: Map<string, string>): string {
+  function naturalBoxDimension(raw: string): { metric: string, factor: number } | undefined {
     const reference = boxDimension.exec(raw)
-    if (reference) {
-      const amount = reference[1]
-      const multiplier = amount === '-' ? -1 : amount === '+' || !amount ? 1 : Number(amount)
-      if (!Number.isFinite(multiplier)) throw new MathParseError('Invalid math box dimension')
-      return `${reference[2]}:${multiplier}`
+    if (!reference) return
+    const [, amount, metric] = reference
+    const factor = amount === '-' ? -1 : amount === '+' || !amount ? 1 : Number(amount)
+    if (!Number.isFinite(factor)) throw new MathParseError('Invalid math box dimension')
+    return { metric, factor }
+  }
+
+  function expressionOperand(raw: string): string | undefined {
+    const natural = naturalBoxDimension(raw)
+    if (natural) {
+      const value = `var(--math-natural-${natural.metric})`
+      return natural.factor === 1 ? value : `(${value} * ${natural.factor})`
     }
-    const length = empheqLength(raw) ?? dimension(raw)
+    return empheqLength(raw) ?? dimension(raw)
+  }
+
+  function graphicsLength(raw: string, axis: BoxDimensionProperty, lengths: Map<string, string>): string {
+    const natural = naturalBoxDimension(raw)
+    if (natural) return `${natural.metric}:${natural.factor}`
+    const expression = boxDimensionExpression.exec(raw)
+    const length = expression
+      ? mathBoxDimensionExpression(raw.slice(expression[0].length), expressionOperand)
+      : empheqLength(raw) ?? dimension(raw)
     if (length === undefined) throw new MathParseError('Invalid math box dimension')
-    lengths.set(axis, length)
+    lengths.set(axis, expression && maxSize !== Infinity ? `min(${maxSize}em, ${length})` : length)
     return 'length'
   }
 
   function transformedBox(content: Markup, kind: string, geometry: Record<string, string | number>, lengths: Map<string, string>): Markup {
     const style = lengths.size ? ` style="${[...lengths].map(([axis, length]) => `--math-box-${axis}:${length}`).join(';')}"` : ''
     const measured = style.includes('var(--empheq-') ? ' data-empheq-measure' : ''
+    const natural = style.includes('var(--math-natural-') ? ' data-math-box-natural' : ''
     const attributes = Object.entries(geometry).map(([axis, value]) => ` data-${axis}="${value}"`).join('')
     const overflow = kind === 'make' || kind === 'frame' || kind === 'raise' ? ' data-math-box-ink' : ''
     const anchor = '<mspace width="0" height="0" depth="0" aria-hidden="true"/>'
     const inline = '<mspace class="math-box-axis-x" width="0" height="0" depth="0" aria-hidden="true"/>'
     const block = '<mspace class="math-box-axis-y" width="0" height="0" depth="0" aria-hidden="true"/>'
-    return xml`<mpadded data-math-transform-box="${kind}"${attributes}${measured}${style}><mrow><mrow${overflow}>${content}</mrow>${anchor}${inline}${block}</mrow></mpadded>`
+    return xml`<mpadded data-math-transform-box="${kind}"${attributes}${measured}${natural}${style}><mrow><mrow${overflow}>${content}</mrow>${anchor}${inline}${block}</mrow></mpadded>`
   }
 
   function scaledBox(name: 'scalebox' | 'resizebox'): Markup {
@@ -2199,7 +2217,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const heightInput = heightOption && read(heightOption)
       const depthOption = rawBracket()
       const depthInput = depthOption && read(depthOption)
-      if ([displacement, heightInput, depthInput].some(value => value && (boxDimension.test(value) || measureEmpheqLength.test(value)))) {
+      if ([displacement, heightInput, depthInput].some(value =>
+        value && (boxDimension.test(value) || boxDimensionExpression.test(value) || measureEmpheqLength.test(value)))) {
         const lengths = new Map<string, string>()
         const geometry = {
           raise: graphicsLength(displacement, 'raise', lengths),
@@ -2286,12 +2305,19 @@ export function renderMath(source: string, display = false, configured: MathMacr
       }
       const value = expandDefinition(tokens.slice(cursor, -1)).join('').trim()
       if (value === '\\width') return
+      if (boxDimensionExpression.test(value)) {
+        const lengths = new Map<string, string>()
+        const target = graphicsLength(value, 'width', lengths)
+        return { target, lengths }
+      }
       const length = dimension(value)
       if (length === undefined) throw new MathParseError('Invalid math box dimension')
       return { length }
     }))
     const content = withMathBoxSpacing(argument)
     if (width === undefined) return content
+    if (width.target !== undefined)
+      return transformedBox(content, 'make', { width: width.target, height: alignment }, width.lengths)
 
     // TeX aligns the right edge for r and the center for c.
     const direction = alignment === 'c' ? 'c' : alignment === 'r' ? 'l' : 'r'
