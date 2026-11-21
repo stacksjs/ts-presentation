@@ -739,11 +739,29 @@ $\frac{\rotatebox{30}{Nested}}{2}$`)
     expect(right.x + right.w - left.x).toBeCloseTo(72, 0)
     expect(text[4].equation!.cells![0].rect.x).toBeLessThan(text[4].equation!.rect.x + text[4].equation!.rect.w)
     expect(text[6].equation?.cells?.[0].expression).toContain('>Inset</m:t>')
-    expect(text[3].equation).toBeUndefined()
-    expect(text[5].equation).toBeUndefined()
+    const spread = text[3].equation
+    expect(spread?.expression).toContain('>x</m:t>')
+    expect(spread?.cells).toHaveLength(3)
+    const [firstWord, lastWord, trailingToken] = spread!.cells!
+    expect(firstWord.expression).toContain('>two</m:t>')
+    expect(lastWord.expression).toContain('>words</m:t>')
+    expect(trailingToken.expression).toContain('>z</m:t>')
+    expect(lastWord.rect.x + lastWord.rect.w - firstWord.rect.x).toBeCloseTo(160, 0)
+    const framed = text[5].equation
+    expect(framed?.expression).toContain('>x</m:t>')
+    expect(framed?.cells).toHaveLength(2)
+    expect(framed?.frames).toHaveLength(1)
+    const [letter, following] = framed!.cells!
+    const [frame] = framed!.frames!
+    expect(letter.expression).toContain('>A</m:t>')
+    expect(following.expression).toContain('>z</m:t>')
+    expect(frame.rect.w).toBeCloseTo(100, 0)
+    expect(frame.border?.width).toBeCloseTo(2)
+    expect(frame.rect.x + frame.rect.w - letter.rect.x - letter.rect.w).toBeCloseTo(6, 0)
     const textSlide = parts.get('ppt/slides/slide4.xml')?.toString() ?? ''
-    expect(textSlide.match(/<a14:m>/g)).toHaveLength(15)
-    expect(textSlide.match(/<p:pic>/g)).toHaveLength(2)
+    expect(textSlide.match(/<a14:m>/g)).toHaveLength(22)
+    expect(textSlide).toContain('name="Equation frame"')
+    expect(textSlide).not.toContain('<p:pic>')
     const raised = frames[4].editable?.nodes.filter((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math') ?? []
     expect(raised).toHaveLength(6)
     for (const node of raised) expect(node.equation?.expression).toContain('>Agp</m:t>')
@@ -789,7 +807,7 @@ math:
 $$
 \newsavebox{\plain}\newsavebox{\wide}
 \sbox{\plain}{\textbf{Fraction} $\frac{1}{2}$}
-\savebox{\wide}[96px][r]{Wide}
+\savebox{\wide}[96px][r]{\textbf{Wide}}
 \usebox{\plain}
 $$
 
@@ -812,12 +830,78 @@ $\usebox{\wide}$`)
     expect(formulas[0].equation?.expression).toContain('<m:f>')
     expect(formulas[0].equation?.expression).toContain('Fraction')
     expect(formulas[1].rect.w).toBeCloseTo(96, 0)
-    expect(formulas[1].data).toBeTruthy()
+    const wide = formulas[1].equation
+    expect(wide?.expression).toContain('>Wide</m:t>')
+    expect(wide?.expression).toContain('<m:sty m:val="b"/>')
+    expect(wide!.rect.x + wide!.rect.w - formulas[1].rect.x).toBeCloseTo(96, 0)
     const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Saved equations' }))
     const slide = parts.get('ppt/slides/slide1.xml')?.toString()
     expect(slide).toContain('<a14:m>')
     expect(slide).toContain('<m:f>')
-    expect(slide?.match(/<p:pic>/g)).toHaveLength(1)
+    expect(slide?.match(/<a14:m>/g)).toHaveLength(2)
+    expect(slide).not.toContain('<p:pic>')
+  }
+  finally { await rm(root, { recursive: true, force: true }) }
+}, 45_000)
+
+it.skipIf(!chrome)('exports styled spread text and colored boxes in tagged equations', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-framed-math-'))
+  const canvas = { width: 960, height: 540 }
+  try {
+    const entry = join(root, 'slides.md')
+    await Bun.write(entry, String.raw`---
+math:
+  minRuleThickness: 0.18
+---
+
+# Math box styles
+
+$x\framebox[250px][s]{\textbf{two words} $t^2$}z$
+
+$$
+\fbox{natural width}
+$$
+
+\begin{align}
+A&={\fboxrule=2px\fcolorbox{112233}{ffe680}{x}}+y\tag{F}\\
+B&=z\tag{G}
+\end{align}
+
+$$
+a^{\fbox{b}}
+$$`)
+    const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
+    const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
+    const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
+    if (status) throw new Error(stderr)
+    const frames: PowerPointFrame[] = []
+    await captureFrames({ root: join(root, 'dist'), executable: chrome!, scale: 1, canvas, editable: true, withClicks: false }, frame => { frames.push(frame) })
+    const formulas = frames[0].editable?.nodes.filter((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math') ?? []
+    expect(formulas).toHaveLength(4)
+
+    const spread = formulas[0].equation
+    const [two, words] = spread?.cells ?? []
+    for (const [cell, word] of [[two, 'two'], [words, 'words']] as const) {
+      expect(cell?.expression).toContain(`>${word}</m:t>`)
+      expect(cell?.expression).toMatch(/<m:sty m:val="b"\/>| b="1"/)
+    }
+    expect(words.rect.x).toBeGreaterThan(two.rect.x + two.rect.w)
+    expect(spread?.cells?.some(cell => cell.expression.includes('<m:sSup>'))).toBe(true)
+    expect(spread?.cells?.at(-1)?.expression).toContain('>z</m:t>')
+    expect(spread?.frames?.[0].rect.w).toBeCloseTo(250, 0)
+    expect(formulas[1].equation?.frames?.[0].border?.width).toBeGreaterThan(3)
+    expect(formulas[1].equation?.expression).toContain('>natural width</m:t>')
+
+    const aligned = formulas[2].equation
+    expect(aligned?.frames?.[0].fill).toEqual({ r: 255, g: 230, b: 128, a: 1 })
+    expect(aligned?.frames?.[0].border?.color).toEqual({ r: 17, g: 34, b: 51, a: 1 })
+    expect(aligned?.cells?.some(cell => cell.expression.includes('>x</m:t>'))).toBe(true)
+    expect(aligned?.tags?.map(tag => tag.expression).join('')).toMatch(/>\(F\)<\/m:t>.*>\(G\)<\/m:t>/)
+    expect(formulas[3].equation).toBeUndefined()
+    const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Styled math boxes' }))
+    const slide = parts.get('ppt/slides/slide1.xml')?.toString() ?? ''
+    expect(slide.match(/name="Equation frame"/g)).toHaveLength(3)
+    expect(slide.match(/<p:pic>/g)).toHaveLength(1)
   }
   finally { await rm(root, { recursive: true, force: true }) }
 }, 45_000)
@@ -1870,15 +1954,17 @@ $$`)
     expect(frames).toHaveLength(8)
     const equations = frames[0].editable?.nodes.filter((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math') ?? []
     expect(equations).toHaveLength(4)
-    expect(equations.filter(node => node.equation)).toHaveLength(3)
+    expect(equations.filter(node => node.equation)).toHaveLength(4)
+    expect(equations[3].equation?.frames?.[0].fill).toEqual({ r: 255, g: 255, b: 0, a: 1 })
     for (const equation of equations) expect(Buffer.from(equation.data, 'base64').subarray(1, 4).toString()).toBe('PNG')
 
     const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Editable equations' }))
     const slide = parts.get('ppt/slides/slide1.xml')?.toString()
-    expect(slide?.match(/<a14:m>/g)).toHaveLength(3)
-    expect(slide?.match(/<mc:Fallback><p:sp>/g)).toHaveLength(3)
-    expect(slide?.match(/<a:blipFill><a:blip r:embed=/g)).toHaveLength(3)
-    expect(slide?.match(/<p:pic>/g)).toHaveLength(1)
+    expect(slide?.match(/<a14:m>/g)).toHaveLength(4)
+    expect(slide?.match(/<mc:Fallback><p:sp>/g)).toHaveLength(4)
+    expect(slide?.match(/<a:blipFill><a:blip r:embed=/g)).toHaveLength(4)
+    expect(slide).toContain('name="Equation frame"')
+    expect(slide).not.toContain('<p:pic>')
     expect(slide).toContain('<a14:m><m:oMath><m:sSup>')
     expect(slide).toContain('<m:oMathPara>')
     expect(slide).toContain('<m:f><m:num>')
@@ -2034,7 +2120,7 @@ z&=\textcolor{#cc000080}{w}
 $$
 
 $$
-\colorbox{yellow}{Still needs a picture}
+\colorbox{yellow}{Highlighted text}
 $$`)
     const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
     const exportDeck = Bun.spawn([process.execPath, cli, 'export', entry, '--format', 'pptx-editable', '--with-clicks', '--output', output, '--executable-path', chrome!], {
@@ -2049,9 +2135,10 @@ $$`)
     const runs = (slide: string) => new Map([...slide.matchAll(/<m:r>(.*?)<m:t xml:space="preserve">([^<]*)<\/m:t><\/m:r>/g)]
       .map(([, properties, token]) => [token, properties]))
 
-    expect(first.match(/<a14:m>/g)).toHaveLength(3)
-    expect(first.match(/<mc:Fallback><p:sp>/g)).toHaveLength(3)
-    expect(first.match(/<p:pic>/g)).toHaveLength(1)
+    expect(first.match(/<a14:m>/g)).toHaveLength(4)
+    expect(first.match(/<mc:Fallback><p:sp>/g)).toHaveLength(4)
+    expect(first).toContain('name="Equation frame"')
+    expect(first).not.toContain('<p:pic>')
     const properties = runs(first)
     const green = '<a:srgbClr val="00CC00"><a:alpha val="50000"/></a:srgbClr>'
     for (const letter of ['B', 'E']) expect(properties.get(letter)).toContain('<a:srgbClr val="663399"/>')

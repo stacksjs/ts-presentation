@@ -80,7 +80,7 @@ export function collectSnapshot(options: {
   const styleIndex = new Map<string, number>()
 
   const overlappingMath = '[data-math-smash-operator], [data-math-cramped-lap]'
-  const measuredMathBox = 'mpadded:is([data-math-transform-box="make"], [data-math-transform-box="raise"])'
+  const measuredMathBox = 'mpadded:is([data-math-transform-box="make"], [data-math-transform-box="frame"], [data-math-transform-box="raise"])'
   const graphicMathBox = 'mpadded:is([data-math-transform-box="rotate"], [data-math-transform-box="scale"], [data-math-transform-box="height"], [data-math-transform-box="total"])'
   const decoratedArray = 'mtable[data-math-array-decoration]'
   const multilineStack = 'mtable[data-multlined-position]'
@@ -90,8 +90,10 @@ export function collectSnapshot(options: {
   const measuredStrut = 'mrow[data-math-strut][aria-hidden="true"]'
   const lineAccent = ':is(mrow, mo):is(.math-overline, .math-underline)'
   const bracketAccent = 'mrow:is(.math-overbracket, .math-underbracket, .math-overlinesegment, .math-underlinesegment)'
-  const measuredStructures = `${decoratedArray}, ${multilineStack}, ${alignedFraction}, ${ruledFraction}, ${adjustedDegree}, ${measuredStrut}, ${bracketAccent}`
-  const unmeasuredRule = 'mroot, msqrt, menclose, .math-frame, .math-angl, .math-text-circled'
+  const frameBox = 'mrow.math-color-box'
+  const sizedFrame = `${frameBox}:is([style], :has(> mpadded[data-math-transform-box="frame"]))`
+  const measuredStructures = `${decoratedArray}, ${multilineStack}, ${alignedFraction}, ${ruledFraction}, ${adjustedDegree}, ${measuredStrut}, ${bracketAccent}, ${sizedFrame}`
+  const unmeasuredRule = 'mroot, msqrt, menclose, .math-angl, .math-text-circled'
   const raisedMathBox = 'mtext.math-raised-box'
   const positionedBoxes = `${overlappingMath}, ${measuredMathBox}, ${graphicMathBox}, ${raisedMathBox}`
   const raisedMathBody = ':scope > span > span > math > mrow'
@@ -122,9 +124,10 @@ export function collectSnapshot(options: {
       const attributes = Object.fromEntries(Array.from(element.attributes)
         .filter(attribute => attribute.name !== 'data-empheq-start' && attribute.name !== 'data-empheq-end')
         .map(attribute => [attribute.name, attribute.value]))
-      // A native Office Math bar has fixed weight. Keep the image fallback
-      // when a custom rule cannot be extracted from its surrounding layout.
+      // Office Math has fixed stroke widths. Keep the image fallback when
+      // a custom stroke cannot be extracted from its surrounding layout.
       if (customThickness && element.matches(lineAccent)) attributes['data-math-custom-line'] = ''
+      if (customThickness && element.matches(`${frameBox}.math-frame`)) attributes['data-math-custom-frame'] = ''
       const text = Array.from(element.childNodes).filter(node => node.nodeType === 3).map(node => node.nodeValue).join('')
       characters += text.length
       if (characters > 4096) return
@@ -767,18 +770,21 @@ export function collectSnapshot(options: {
     }
 
     function positionedMathFragments(element: Element, expression: RawMathElement, opacity: number, scale: number, measuredLayout: string):
-      { cells: RawMathFragment[], rect: RawMathFragment['rect'], rules?: RawMathRule[], pictures?: RawMathPicture[] } | undefined {
+      { cells: RawMathFragment[], rect: RawMathFragment['rect'], frames?: RawMathFrame[], rules?: RawMathRule[], pictures?: RawMathPicture[] } | undefined {
       const positionedMath = `${positionedBoxes}, ${measuredLayout}`
       if (!element.matches(positionedMath) && !element.querySelector(positionedMath)) return
       const formulaColor = getComputedStyle(element.closest('math') ?? element).color
       const cells: RawMathFragment[] = []
+      const frames: RawMathFrame[] = []
       const rules: RawMathRule[] = []
       const pictures: RawMathPicture[] = []
       const bounds: DOMRect[] = []
       let pieces: { element: Element, expression: RawMathElement }[] = []
       let split = false
+      type Wrap = (expression: RawMathElement) => RawMathElement
+      let wrapFont: Wrap = expression => expression
       type GraphicPlacement = Pick<RawMathFragment, 'rect' | 'rotation' | 'visibleBounds'> & { fontScale: number }
-      type PositionedContent = { element: Element, expression: RawMathElement, graphic?: GraphicPlacement }
+      type PositionedContent = { element: Element, expression: RawMathElement, graphic?: GraphicPlacement, spaced?: boolean }
       function add(boxes: DOMRect[], content: RawMathElement, context: Element, graphic?: GraphicPlacement, inheritedColor?: string): void {
         const visible = mathBounds(boxes)
         if (!visible) return
@@ -789,7 +795,7 @@ export function collectSnapshot(options: {
         const expression: RawMathElement = color === formulaColor ? content
           : { name: 'mrow', attributes: { style: `color:${color}` }, color, text: '', children: [content] }
         cells.push({
-          expression, opacity, rect: graphic?.rect ?? visible, fontSize,
+          expression: wrapFont(expression), opacity, rect: graphic?.rect ?? visible, fontSize,
           ...(graphic?.rotation === undefined ? {} : { rotation: graphic.rotation, visibleBounds: graphic.visibleBounds }),
         })
       }
@@ -851,11 +857,10 @@ export function collectSnapshot(options: {
         if (node.matches(measuredMathBox)) {
           const element = node.querySelector(':scope > mrow > mrow[data-math-box-ink]')
           const expression = data.children[0]?.children[0]
-          // Justified text uses CSS word spacing that an equation run cannot reproduce.
-          if (element && expression && !element.hasAttribute('data-extra-space')) {
-            const { 'data-math-box-ink': marker, style, ...attributes } = expression.attributes
+          if (element && expression) {
+            const { 'data-math-box-ink': marker, 'data-extra-space': spacing, style, ...attributes } = expression.attributes
             if (marker === '' && /^transform-origin:left;transform:translate[XY]\(-?[\d.]+px\)$/.test(style ?? ''))
-              return { element, expression: { ...expression, attributes } }
+              return { element, expression: { ...expression, attributes }, spaced: spacing !== undefined }
           }
           return
         }
@@ -866,6 +871,35 @@ export function collectSnapshot(options: {
         const element = raised.querySelector(raisedMathBody)
         const raw = raised === node ? data : data.children[0]
         if (element && raw.children.length === 1) return { element, expression: raw.children[0] }
+      }
+      function collectSpacedText(ink: Element, data: RawMathElement, wrap: Wrap): boolean {
+        const spaced = 'mtext[style*="word-spacing:"]'
+        if (ink.matches(spaced)) {
+          const text = ink.firstChild
+          if (text?.nodeType !== Node.TEXT_NODE || text.nodeValue !== data.text || ink.childNodes.length !== 1
+            || !/^word-spacing:\s*[\d.]+px;?$/.test(data.attributes.style ?? '') || Object.keys(data.attributes).length !== 1) return false
+          const range = document.createRange()
+          for (const word of data.text.matchAll(/[^ \t\r\n]+/gu)) {
+            range.setStart(text, word.index)
+            range.setEnd(text, word.index + word[0].length)
+            add([...range.getClientRects()], wrap({ ...data, attributes: {}, text: word[0] }), ink)
+          }
+          return true
+        }
+        if (!ink.querySelector(spaced)) {
+          add([ink.getBoundingClientRect()], wrap(data), ink)
+          return true
+        }
+        // A run with word spacing is rebuilt word by word. Preserve each
+        // surrounding text style while leaving embedded math as one object.
+        if (ink.localName !== 'mrow' || ink.children.length !== data.children.length || data.text.trim()
+          || (Object.keys(data.attributes).length && !data.color && !textFontStyle(data))) return false
+        return Array.from(ink.children).every((child, index) =>
+          collectSpacedText(child, data.children[index], expression => wrap({ ...data, children: [expression] })))
+      }
+      function textFontStyle(data: RawMathElement): boolean {
+        return data.name === 'mrow' && Object.keys(data.attributes).length === 1 && Boolean(data.attributes.style)
+          && data.attributes.style.split(';').every(declaration => /^font-(?:family:(?:math|serif|sans-serif|monospace)|style:(?:normal|italic)|weight:(?:normal|bold))$/.test(declaration))
       }
       function collectArray(table: Element, data: RawMathElement): boolean {
         flush()
@@ -955,6 +989,26 @@ export function collectSnapshot(options: {
         if (node.localName === 'msqrt') return visitRow(node, data)
         return Array.from(node.children).every((child, index) => visitArgument(child, data.children[index]))
       }
+      function collectFrame(node: Element, data: RawMathElement): boolean {
+        flush()
+        const box = node.getBoundingClientRect()
+        const style = getComputedStyle(node)
+        if (!(box.width > 0 && box.height > 0) || style.transform !== 'none' || style.filter !== 'none'
+          || style.boxShadow !== 'none' || style.backgroundImage !== 'none' || Number(style.opacity) !== 1) return false
+        for (const side of ['top', 'bottom', 'left', 'right']) {
+          const property = `border-${side}`
+          if (style.getPropertyValue(`${property}-width`) !== style.borderTopWidth
+            || style.getPropertyValue(`${property}-style`) !== style.borderTopStyle
+            || style.getPropertyValue(`${property}-color`) !== style.borderTopColor) return false
+        }
+        const width = Number.parseFloat(style.borderTopWidth) * scale
+        if (!Number.isFinite(width) || (width && style.borderTopStyle !== 'solid')
+          || [style.borderTopLeftRadius, style.borderTopRightRadius, style.borderBottomLeftRadius, style.borderBottomRightRadius].some(radius => radius !== '0px')) return false
+        frames.push({ rect: relative(box), width, color: style.borderTopColor, background: style.backgroundColor, opacity })
+        bounds.push(box)
+        split = true
+        return visitRow(node, data)
+      }
       function collectAccent(node: Element, data: RawMathElement, line: boolean): boolean {
         flush()
         const box = node.getBoundingClientRect()
@@ -1018,6 +1072,7 @@ export function collectSnapshot(options: {
           return true
         }
         if (node.matches(multilineStack)) return collectMultline(node, data)
+        if (node.matches(frameBox) && node.matches(measuredLayout)) return collectFrame(node, data)
         const line = node.matches(lineAccent)
         if (node.matches(bracketAccent) || (line && (node.matches(measuredLayout) || node.querySelector(measuredLayout))))
           return collectAccent(node, data, line)
@@ -1033,10 +1088,13 @@ export function collectSnapshot(options: {
         if (content) {
           flush()
           split = true
+          if (content.spaced) return collectSpacedText(content.element, content.expression, expression => expression)
+          if (node.matches(measuredMathBox) && content.element.querySelector(measuredLayout))
+            return visitRow(content.element, content.expression)
           add([content.element.getBoundingClientRect()], content.expression, content.element, content.graphic)
           return true
         }
-        const stack = node.querySelector(measuredLayout)
+        const stack = node.querySelector(`${measuredLayout}, ${measuredMathBox}`)
         if (stack && data.attributes.class === 'math-alignment-axis' && node.children.length === 1) {
           const cell = node.firstElementChild?.firstElementChild
           const column = data.children[0]?.children[0]
@@ -1045,16 +1103,22 @@ export function collectSnapshot(options: {
         }
         const keys = Object.keys(data.attributes)
         const color = stack && node.localName === 'mrow' && keys.length === 1 && keys[0] === 'style' && data.color !== undefined
+        const font = stack && textFontStyle(data)
         const plain = node.localName === 'mrow' && (!keys.length || data.attributes.class === 'math-multlined-bottom')
         const fenced = stack && node.localName === 'mrow' && keys.length === 1
           && (keys[0] === 'data-math-delimiters' || keys[0] === 'data-math-cases')
         const compact = stack && node.localName === 'mstyle' && keys.every(key => key === 'scriptlevel' || key === 'displaystyle')
-        if ((plain || color || fenced || compact) && !data.text.trim() && node.querySelector(positionedMath)) {
-          if (color) flush()
-          const collected = Array.from(node.children).every((child, index) =>
-            Boolean(stack && pictureFence(child)) || visit(child, data.children[index]))
-          if (color) flush()
-          return collected
+        if ((plain || color || font || fenced || compact) && !data.text.trim() && node.querySelector(positionedMath)) {
+          if (color || font) flush()
+          const previous = wrapFont
+          if (font) wrapFont = expression => previous({ ...data, children: [expression] })
+          try {
+            const collected = Array.from(node.children).every((child, index) =>
+              Boolean(stack && pictureFence(child)) || visit(child, data.children[index]))
+            if (color || font) flush()
+            return collected
+          }
+          finally { wrapFont = previous }
         }
         pieces.push({ element: node, expression: data })
         return true
@@ -1062,11 +1126,11 @@ export function collectSnapshot(options: {
       if (!visit(element, expression) || !split) return
       flush()
       const rect = mathBounds(bounds)
-      if (rect && cells.length) return { cells, rect, ...(rules.length && { rules }), ...(pictures.length && { pictures }) }
+      if (rect && cells.length) return { cells, rect, ...(frames.length && { frames }), ...(rules.length && { rules }), ...(pictures.length && { pictures }) }
     }
 
     function mathProjection(presentation: Element, expression: RawMathElement, display: boolean, scale: number, customThickness: boolean): RawMathSnapshot | undefined {
-      const measuredLayout = customThickness ? `${measuredStructures}, ${lineAccent}` : measuredStructures
+      const measuredLayout = customThickness ? `${measuredStructures}, ${lineAccent}, ${frameBox}` : measuredStructures
       const positionedMath = `${positionedBoxes}, ${measuredLayout}`
       let table = presentation
       let data = expression
@@ -1178,6 +1242,7 @@ export function collectSnapshot(options: {
               ? positionedMathFragments(content, cellData.children[0], rowOpacity, scale, measuredLayout) : undefined
             if (positioned) {
               measuredCells.push(...positioned.cells)
+              if (positioned.frames) frames.push(...positioned.frames)
               if (positioned.rules) rules.push(...positioned.rules)
               if (positioned.pictures) pictures.push(...positioned.pictures)
               continue
