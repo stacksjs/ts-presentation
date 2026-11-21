@@ -11,13 +11,10 @@ import { checkLiveCode, maxCodeLength } from './compile-code.ts'
 import { saveDrag } from './drag-source.ts'
 import { saveDrawing } from './drawing-store.ts'
 import type { CompiledDeck } from './loader.ts'
-import { createDeckCompiler } from './loader.ts'
 import { legacySlideLocation } from '../../../client/runtime/navigation.ts'
 import { deckPath, matchDeckPath, normalizeBasePath, resolveRouterMode } from '../../../client/runtime/routing.ts'
 import { maxSlideEditLength, readSlideSource, saveSlideSource } from './side-editor-source.ts'
 import { saveSnippet, snippetRevision, writeDeckFile } from './snippet-write.ts'
-import { routePagePath } from './route-pages.ts'
-import { bundleLiveHighlight, bundlePlayer, deckStyles, playerStyle, writeStaticSite } from './site-output.ts'
 import { formatDeck } from '../../../parser/src/deck.ts'
 import { version } from '../../../../package.json'
 
@@ -115,6 +112,15 @@ async function main(): Promise<void> {
   const base = normalizeBasePath(values.base)
   const routerMode = values['router-mode'] === undefined ? undefined : resolveRouterMode(values['router-mode'])
   const publicDir = join(directory, 'public')
+  const [
+    { createDeckCompiler },
+    { routePagePath },
+    { bundleLiveHighlight, bundlePlayer, deckStyles, playerStyle, writeStaticSite },
+  ] = await Promise.all([
+    import('./loader.ts'),
+    import('./route-pages.ts'),
+    import('./site-output.ts'),
+  ])
   const javascript = await bundlePlayer()
   const compile = createDeckCompiler(source, {
     base, routerMode, mode: command, theme: values.theme, download: values.download,

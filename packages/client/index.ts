@@ -1,4 +1,4 @@
-import { renderTemplateString } from '@stacksjs/stx'
+import { renderTemplateString } from '@stacksjs/stx/render'
 import { fileURLToPath } from 'node:url'
 import { builtinLayouts } from './runtime/builtin-layouts.ts'
 import { htmlTags, rawText } from './runtime/html-tags.ts'

@@ -1,4 +1,6 @@
-import { defaultConfig, getCachedSignalsRuntime, renderComponentWithSlot } from '@stacksjs/stx'
+import { getCachedSignalsRuntime } from '@stacksjs/stx/caching'
+import { defaultConfig } from '@stacksjs/stx/config'
+import { renderComponentWithSlot } from '@stacksjs/stx/utils'
 import { lstat, mkdir, realpath } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'

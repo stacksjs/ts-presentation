@@ -1,4 +1,4 @@
-import { getCachedSignalsRuntime } from '@stacksjs/stx'
+import { getCachedSignalsRuntime } from '@stacksjs/stx/caching'
 import { dirname, resolve } from 'node:path'
 import type { Grammar } from 'ts-syntax-highlighter'
 import { deckFontMarkup } from './fonts.ts'

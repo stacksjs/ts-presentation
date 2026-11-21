@@ -1,4 +1,5 @@
-import { defaultConfig, renderComponentWithSlot } from '@stacksjs/stx'
+import { defaultConfig } from '@stacksjs/stx/config'
+import { renderComponentWithSlot } from '@stacksjs/stx/utils'
 import { readdir, realpath } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
