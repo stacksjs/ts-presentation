@@ -66,7 +66,7 @@ function splitCallbackArgs(raw: string): string[] | undefined {
 interface TaskInteraction { href?: string, callback?: GanttTaskCallback }
 
 function parseClick(line: string): { ids: string[], interaction: TaskInteraction } | undefined {
-  const [, ids, clauses] = /^click\s+([\w.-]+(?:,[\w.-]+)*)\s+(.+)$/i.exec(line) ?? []
+  const [, ids, clauses] = /^click\s+([^\s,]+(?:\s*,\s*[^\s,]+)*)\s+(.+)$/i.exec(line) ?? []
   if (!ids) return
   const interaction: TaskInteraction = {}
   let remaining = clauses
@@ -86,7 +86,7 @@ function parseClick(line: string): { ids: string[], interaction: TaskInteraction
     }
     remaining = remaining.slice(clause.length).trimStart()
   }
-  return { ids: ids.split(','), interaction }
+  return { ids: ids.split(',').map(id => id.trim()), interaction }
 }
 
 function parseGantt(source: string, now: number, options: Pick<GanttChartOptions, 'axisFormat' | 'timeZone'> & { interactionsEnabled?: boolean } = {}): GanttChartOptions | undefined {

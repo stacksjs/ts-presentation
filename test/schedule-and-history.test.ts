@@ -739,9 +739,9 @@ axisFormat %A
 tickInterval 1week
 weekday monday
 todayMarker stroke-width:5px,stroke:#058,opacity:.5
-Delivery :task, ${today}, 14d
-Next :unsafe, after task, 1d
-click task href "#review/1"
+Delivery :release/setup, ${today}, 14d
+Next :unsafe, after release/setup, 1d
+click release/setup href "#review/1"
 click unsafe href "javascript:alert(1)"`
   const options = { gantt: { topAxis: true, barHeight: 30, barGap: 8, leftPadding: 112, rightPadding: 40 } }
   const plain = mermaid(source, 'plain', options)
@@ -1269,9 +1269,9 @@ test.skipIf(!chrome)('applies GitGraph symbol and commit selectors and styles on
     'commit id:"revert" type:REVERSE', 'cherry-pick id:"fix.parser"', 'merge feature id:"release"',
   ].join('\n')
   const schedule = [
-    'gantt', 'todayMarker off', 'Review :review.stage, 2026-01-01, 6d',
-    'Run :verify, 2026-01-02, 6d', 'Plain :plain, 2026-01-03, 6d',
-    'click review.stage href "https://example.test/review"', 'click verify call review()',
+    'gantt', 'todayMarker off', 'Review :review/révision.stage, 2026-01-01, 6d',
+    'Run :verify, after review/révision.stage, 6d', 'Plain :plain, 2026-01-03, 6d',
+    'click review/révision.stage, verify href "https://example.test/review"', 'click verify call review()',
   ].join('\n')
   const git = await renderMermaid(history, 'symbol-selectors', undefined, {
     themeCSS: [
@@ -1281,7 +1281,7 @@ test.skipIf(!chrome)('applies GitGraph symbol and commit selectors and styles on
       '.commit-cherry-pick { opacity: .55 }', '.gitTitleText { fill: #173652 }',
     ].join('\n'),
   })
-  const ganttStyles = '#review\\.stage-text { font-style: italic }\n.taskText { fill: #223344 }\n.clickable { fill: #996633 }'
+  const ganttStyles = '#review\\/révision\\.stage-text { font-style: italic }\n.taskText { fill: #223344 }\n.clickable { fill: #996633 }'
   const interactive = await renderMermaid(schedule, 'interactive-tasks', undefined, { themeCSS: ganttStyles, securityLevel: 'loose' })
   const strict = await renderMermaid(schedule, 'plain-tasks', undefined, { themeCSS: ganttStyles })
   expect(git).toBeDefined()
@@ -1290,7 +1290,9 @@ test.skipIf(!chrome)('applies GitGraph symbol and commit selectors and styles on
   const css = await Bun.file(new URL('../packages/client/runtime/player.css', import.meta.url)).text()
   const server = Bun.serve({
     hostname: '127.0.0.1', port: 0,
-    fetch: () => new Response(`<!doctype html><style>${css}</style>${git}${interactive}${strict}`, { headers: { 'Content-Type': 'text/html' } }),
+    fetch: () => new Response(`<!doctype html><style>${css}</style>${git}${interactive}${strict}`, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    }),
   })
   const browser = new Bun.WebView({ width: 960, height: 620, backend: { type: 'chrome', path: chrome!, url: false } })
   try {
@@ -1307,9 +1309,10 @@ test.skipIf(!chrome)('applies GitGraph symbol and commit selectors and styles on
         cherry: [...document.querySelectorAll('[data-git-symbol="cherry-pick"] :is(.diagram-git-dot, .diagram-git-pick-stem, .diagram-git-pick-berry)')]
           .map(element => getComputedStyle(element).opacity),
         title: git('.diagram-title').fill,
-        actions: ['review.stage', 'verify', 'plain'].map(id => task('interactive-tasks', id).fill),
-        strict: task('plain-tasks', 'review.stage').fill,
-        escapedId: task('interactive-tasks', 'review.stage').fontStyle,
+        actions: ['review/révision.stage', 'verify', 'plain'].map(id => task('interactive-tasks', id).fill),
+        strict: task('plain-tasks', 'review/révision.stage').fill,
+        escapedId: task('interactive-tasks', 'review/révision.stage').fontStyle,
+        links: [...document.querySelectorAll('#tp-diagram-interactive-tasks a')].map(link => link.getAttribute('href')),
       };
     })()`)
     expect(styles).toEqual({
@@ -1318,6 +1321,7 @@ test.skipIf(!chrome)('applies GitGraph symbol and commit selectors and styles on
       cherry: ['0.55', '0.55', '0.55', '0.55'], title: 'rgb(23, 54, 82)',
       actions: ['rgb(153, 102, 51)', 'rgb(153, 102, 51)', 'rgb(34, 51, 68)'],
       strict: 'rgb(34, 51, 68)', escapedId: 'italic',
+      links: ['https://example.test/review', 'https://example.test/review'],
     })
   }
   finally {
