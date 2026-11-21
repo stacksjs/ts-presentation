@@ -152,6 +152,9 @@ speaker notes. Each hook can be asynchronous.
 - Use `\number\numexpr 2*(3+4)\relax` to print a computed integer.
   The same arithmetic can set a box scale, as in
   `\makebox[\dimexpr12px*\numexpr 2+3\relax\relax]{Label}`.
+- Use `\ifmmode ... \else ... \fi` to select math or text content.
+  `\ifdefined\myMacro ... \fi` checks for a command before using it.
+  `\ifcase` selects a zero-based branch separated by `\or`.
 - Put ranges after a display opener, as in `$$ {hide|1|2|all}`. Each
   additional range uses one click. Add `{at: 3, startLine: 2, finally: 'all'}`
   after the ranges to control click and line numbering and the final state.

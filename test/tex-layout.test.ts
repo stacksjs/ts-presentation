@@ -318,6 +318,53 @@ test('uses integer expressions in eager macro definitions and measured math box 
     .toThrow('Too many math macro expansions')
 })
 
+test('selects TeX conditional branches without expanding skipped text', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const plain = (formula: string) => math(formula, false).split('<annotation')[0]
+  const source = String.raw`
+    \def\present{P}
+    \ifdefined\present\present\else\unknown\fi
+    \unless\ifdefined\absent A\else\unknown\fi
+    \iffalse \ifx\unknown\other\bad\else\bad\fi
+    \else \ifodd-3 O\else\unknown\fi\fi
+    \ifnum\numexpr7/2\relax=4 N\else\unknown\fi
+    \ifnum3<1\else T\fi
+  `
+  expect(plain(source)).toContain('<mi>P</mi><mi>A</mi><mi>O</mi><mi>N</mi><mi>T</mi>')
+
+  const cases = String.raw`
+    \def\choose#1{\ifcase#1 First\or \unknown\or Third\else Other\fi}
+    \text{\choose0, \choose2, \choose{-1}, \choose9}
+  `
+  expect(plain(cases)).toContain('<mtext>First, Third, Other, Other</mtext>')
+  expect(plain(String.raw`\ifcase18 A\or B\fi Z`)).toContain('<mrow><mi>Z</mi></mrow>')
+  expect(() => plain(String.raw`\iftrue A`)).toThrow('Unclosed TeX conditional')
+  expect(() => plain(String.raw`\iffalse A`)).toThrow('Unclosed TeX conditional')
+  expect(() => plain(String.raw`\iftrue A\or B\fi`)).toThrow('Unexpected \\or')
+  expect(() => plain(String.raw`\ifnum3+1 A\fi`)).toThrow('Expected <, =, or >')
+  expect(() => plain(String.raw`\unless\ifcase0 A\fi`)).toThrow('Expected a Boolean TeX conditional')
+})
+
+test('evaluates TeX conditionals in eager definitions and through delayed expansion', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const source = String.raw`
+    \def\value{9}
+    \edef\saved{\ifnum\value>7 \alpha\else\undefined\fi}
+    \def\value{2}
+    \def\mathLabel#1{\mathbf{#1}}
+    \def\plainLabel#1{#1}
+    \def\label{\ifmmode\expandafter\mathLabel\else\expandafter\plainLabel\fi}
+    \saved\label{M}+\text{\label{words}}
+  `
+  const html = math(source, false).split('<annotation')[0]
+  expect(html).toContain('<mi>α</mi><mrow class="math-bold"')
+  expect(html).toContain('<mtext>words</mtext>')
+  expect(math(String.raw`\let\when=\iftrue\let\otherwise=\else\let\endchoice=\fi\when X\otherwise\unknown\endchoice`, false))
+    .toContain('<mrow><mi>X</mi></mrow>')
+  expect(math(String.raw`\let\alias=\unbound\def\unbound{A}\ifdefined\alias\unknown\else X\fi`, false))
+    .toContain('<mrow><mi>X</mi></mrow>')
+})
+
 test('keeps a snapshot of the lookahead and primitive meanings when using let', () => {
   const math = createMathRenderer({ throwOnError: true })
   const clauses = math(String.raw`\def\original{A}\def\action{\def\original{B}\next}\futurelet\next\action\original`, false)
