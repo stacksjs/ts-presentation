@@ -1,8 +1,8 @@
 const strut = 'data-math-strut'
 const frameRow = 'data-equation-frame-row'
 const empheq = '.math-empheq'
-const scaledBox = 'data-math-scaled-box'
-const selector = `${empheq}, mpadded[${scaledBox}], mrow[${strut}], mtr[${frameRow}], mtable[data-equation-tags]:is(.math-display-grid, .math-tagged-display, .math-multline)`
+const transformBox = 'data-math-transform-box'
+const selector = `${empheq}, mpadded[${transformBox}], mrow[${strut}], mtr[${frameRow}], mtable[data-equation-tags]:is(.math-display-grid, .math-tagged-display, .math-multline)`
 const shifted = 'data-equation-tag-shifted'
 
 function fitStrut(element: Element): void {
@@ -27,51 +27,82 @@ function fitStrut(element: Element): void {
   }
 }
 
-function fitScaledBox(box: Element): void {
+function fitTransformedBox(box: Element): void {
   const frame = box.firstElementChild
   if (!frame) return
-  const [ink, baseline, direction] = frame.children
-  if (!ink || !baseline || !direction) return
+  const [ink, baseline, inline, block] = frame.children
+  if (!ink || !baseline || !inline || !block) return
   const frameStyle = getComputedStyle(frame)
   const width = Number.parseFloat(frameStyle.width)
   const totalHeight = Number.parseFloat(frameStyle.height)
+  if (!Number.isFinite(width) || !Number.isFinite(totalHeight)) return
+
+  // Project onto the screen axis most aligned with the box's local y axis,
+  // then remove the horizontal contribution from a rotated ancestor.
   const bounds = frame.getBoundingClientRect()
-  if (!Number.isFinite(width) || !Number.isFinite(totalHeight) || (totalHeight && !bounds.height)) return
-  const base = baseline.getBoundingClientRect().top
-  const inverted = direction.getBoundingClientRect().top < base
-  const offset = inverted ? bounds.bottom - base : base - bounds.top
-  const height = bounds.height ? Math.min(totalHeight, Math.max(0, offset * totalHeight / bounds.height)) : 0
+  const base = baseline.getBoundingClientRect()
+  const inlineProbe = inline.getBoundingClientRect()
+  const blockProbe = block.getBoundingClientRect()
+  const axis = Math.abs(blockProbe.left - base.left) > Math.abs(blockProbe.top - base.top) ? 'left' : 'top'
+  const blockStep = blockProbe[axis] - base[axis]
+  const span = width * (inlineProbe[axis] - base[axis])
+  const start = base[axis] + (frameStyle.direction === 'rtl' ? Math.min(0, span) : Math.min(0, -span))
+  const extent = blockStep ? (start - bounds[axis]) / Math.abs(blockStep) : 0
+  const height = Math.min(totalHeight, Math.max(0, blockStep < 0 ? totalHeight - extent : extent))
   const depth = totalHeight - height
 
   const horizontal = box.getAttribute('data-width') ?? ''
   const vertical = box.getAttribute('data-height') ?? ''
-  const sizing = box.getAttribute(scaledBox)
-  let x = Number(horizontal)
-  let y = Number(vertical)
-  if (sizing !== 'scale') {
-    const style = getComputedStyle(box)
-    const dimensions: Readonly<Record<string, number>> = { width, height, depth, totalheight: totalHeight }
-    function target(specification: string, axis: 'width' | 'height'): number {
-      if (specification === 'length')
-        return Number.parseFloat(style.getPropertyValue(`--math-box-${axis}`))
-      const [natural, multiplier] = specification.split(':')
-      return dimensions[natural] * Number(multiplier)
-    }
-    const naturalHeight = sizing === 'total' ? totalHeight : height
-    x = width ? target(horizontal, 'width') / width : 1
-    y = naturalHeight ? target(vertical, 'height') / naturalHeight : 1
-    if (horizontal === '!') x = y
-    if (vertical === '!') y = x
+  const sizing = box.getAttribute(transformBox)
+  const dimensions: Readonly<Record<string, number>> = { width, height, depth, totalheight: totalHeight, center: (height - depth) / 2 }
+  const boxStyle = sizing === 'scale' ? undefined : getComputedStyle(box)
+  function target(specification: string, axis: 'width' | 'height'): number {
+    if (specification === 'length')
+      return Number.parseFloat(boxStyle?.getPropertyValue(`--math-box-${axis}`) ?? '')
+    const [natural, multiplier] = specification.split(':')
+    return dimensions[natural] * Number(multiplier)
   }
-  const advance = width * Math.abs(x)
-  const ascent = (y < 0 ? depth : height) * Math.abs(y)
-  const descent = (y < 0 ? height : depth) * Math.abs(y)
-  if (![x, y, advance, ascent, descent].every(Number.isFinite)) return
+  const length = (value: number) => `${Number(value.toFixed(4))}px`
+  let advance: number
+  let ascent: number
+  let descent: number
+  let origin: string
+  let transform: string
+  if (sizing === 'rotate') {
+    const angle = Number(box.getAttribute('data-angle'))
+    const x = target(horizontal, 'width')
+    const y = height - target(vertical, 'height')
+    const cosine = Math.cos(angle)
+    const sine = Math.sin(angle)
+    const left = x - x * cosine + y * sine + Math.min(0, width * cosine) + Math.min(0, -totalHeight * sine)
+    const top = y - x * sine - y * cosine + Math.min(0, width * sine) + Math.min(0, totalHeight * cosine)
+    advance = Math.abs(width * cosine) + Math.abs(totalHeight * sine)
+    const bottom = top + Math.abs(width * sine) + Math.abs(totalHeight * cosine)
+    ascent = Math.max(0, height - top)
+    descent = Math.max(0, bottom - height)
+    origin = `${length(x)} ${length(y)}`
+    transform = `translateX(${length(-left)}) rotate(${angle}rad)`
+  }
+  else {
+    let x = Number(horizontal)
+    let y = Number(vertical)
+    if (sizing !== 'scale') {
+      const naturalHeight = sizing === 'total' ? totalHeight : height
+      x = width ? target(horizontal, 'width') / width : 1
+      y = naturalHeight ? target(vertical, 'height') / naturalHeight : 1
+      if (horizontal === '!') x = y
+      if (vertical === '!') y = x
+    }
+    advance = width * Math.abs(x)
+    ascent = (y < 0 ? depth : height) * Math.abs(y)
+    descent = (y < 0 ? height : depth) * Math.abs(y)
+    origin = `left ${length(height)}`
+    transform = `translateX(${length(x < 0 ? advance : 0)}) scale(${x},${y})`
+  }
+  if (![advance, ascent, descent].every(Number.isFinite)) return
 
   // MPadded reserves the transformed dimensions at the original baseline.
-  const length = (value: number) => `${Number(value.toFixed(4))}px`
-  const transform = `translateX(${length(x < 0 ? advance : 0)}) scale(${x},${y})`
-  const style = `transform-origin:left ${length(height)};transform:${transform}`
+  const style = `transform-origin:${origin};transform:${transform}`
   if (ink.getAttribute('style') !== style) ink.setAttribute('style', style)
   for (const [attribute, value] of [['width', advance], ['height', ascent], ['depth', descent]] as const) {
     const dimension = length(value)
@@ -251,7 +282,7 @@ export function createEquationFit(): (root: ParentNode, watch?: boolean) => void
   let frame: number | undefined
   function fit(element: Element): void {
     if (element.hasAttribute(strut)) fitStrut(element)
-    else if (element.hasAttribute(scaledBox)) fitScaledBox(element)
+    else if (element.hasAttribute(transformBox)) fitTransformedBox(element)
     else if (element.hasAttribute(frameRow)) fitFrames(element)
     else if (element.matches(empheq)) fitEmpheq(element as HTMLElement)
     else fitTable(element)
@@ -294,7 +325,7 @@ export function createEquationFit(): (root: ParentNode, watch?: boolean) => void
       if (element.hasAttribute(strut)) {
         for (const child of element.firstElementChild?.children ?? []) observe(child, element)
       }
-      else if (element.hasAttribute(scaledBox) && element.firstElementChild) {
+      else if (element.hasAttribute(transformBox) && element.firstElementChild) {
         observe(element.firstElementChild, element)
       }
       else if (element.hasAttribute(frameRow)) {

@@ -61,15 +61,34 @@ test('parses TeX scale and resize boxes with measured lengths and text arguments
 \text{\resizebox{1.5\width}{-\depth}{Nested}}
 \resizebox{!}{!}{Natural}`
   const html = math(source, false).split('<annotation')[0]
-  expect(html).toContain('data-math-scaled-box="scale" data-width="2" data-height="-0.5"')
+  expect(html).toContain('data-math-transform-box="scale" data-width="2" data-height="-0.5"')
   expect(html).toContain('<msup>')
-  expect(html).toContain('data-math-scaled-box="total" data-width="!" data-height="length" style="--math-box-height:0.5em"')
-  expect(html).toContain('data-math-scaled-box="height" data-width="width:1.5" data-height="depth:-1"')
-  expect(html.match(/data-math-scaled-box=/g)).toHaveLength(3)
+  expect(html).toContain('data-math-transform-box="total" data-width="!" data-height="length" style="--math-box-height:0.5em"')
+  expect(html).toContain('data-math-transform-box="height" data-width="width:1.5" data-height="depth:-1"')
+  expect(html.match(/data-math-transform-box=/g)).toHaveLength(3)
   expect(html).toContain('<mtext>Natural</mtext>')
   expect(() => math(String.raw`\scalebox{na}{x}`, false)).toThrow()
   expect(() => math(String.raw`\scalebox{2}[large]{x}`, false)).toThrow('Invalid math scale factor')
   expect(() => math(String.raw`\resizebox{min-content}{30px}{x}`, false)).toThrow('Invalid math box dimension')
+})
+
+test('parses TeX rotations with default and custom origins, dimensions, and angular units', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const source = String.raw`\def\quarter{90}
+\rotatebox{\quarter}{Text $x^2$}
+\text{\rotatebox[origin={rB},x={0.5\width},y=3pt,units=-400]{100}{Custom}}
+\rotatebox[origin=rt]{180}{Top}
+\rotatebox[origin]{360}{Unchanged}`
+  const html = math(source, false).split('<annotation')[0]
+  expect(html).toContain(`data-math-transform-box="rotate" data-width="width:0" data-height="height:0" data-angle="${-Math.PI / 2}"`)
+  expect(html).toContain(`data-width="width:0.5" data-height="length" data-angle="${Math.PI / 2}" style="--math-box-height:3pt"`)
+  expect(html).toContain(`data-width="width:1" data-height="height:1" data-angle="${-Math.PI}"`)
+  expect(html).toContain('<msup>')
+  expect(html.match(/data-math-transform-box=/g)).toHaveLength(3)
+  expect(html).toContain('<mtext>Unchanged</mtext>')
+  expect(() => math(String.raw`\rotatebox[origin=q]{90}{x}`, false)).toThrow('Invalid math rotation origin')
+  expect(() => math(String.raw`\rotatebox[units=0]{90}{x}`, false)).toThrow('Invalid math rotation units')
+  expect(() => math(String.raw`\rotatebox{clockwise}{x}`, false)).toThrow('Invalid math rotation angle')
 })
 
 test('scopes legacy font declarations and selects MathML branches without expanding skipped input', () => {

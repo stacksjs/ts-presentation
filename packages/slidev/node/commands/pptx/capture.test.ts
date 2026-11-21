@@ -321,7 +321,7 @@ it.skipIf(!chrome)('exports cramped superscripts, stacks, and measured laps as e
   }
 }, 45_000)
 
-it.skipIf(!chrome)('reserves the scaled math box dimensions in the browser and PowerPoint', async () => {
+it.skipIf(!chrome)('reserves scaled and rotated math box dimensions in the browser and PowerPoint', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-scaled-box-'))
   const canvas = { width: 960, height: 540 }
   try {
@@ -349,7 +349,21 @@ $x\scalebox{1}[-2]{\scalebox{1}[1.5]{Agp}}z$
 
 $$
 \frac{1}{2}
-$$`)
+$$
+
+---
+
+# Rotated equations
+
+$x\rotatebox{90}{Agp}z$
+
+$x\rotatebox[origin=c]{180}{Agp}z$
+
+$x\rotatebox[x=0.5\width,y=3px]{90}{Agp}z$
+
+$x\rotatebox[origin=lB,units=-400]{100}{Agp}z$
+
+$x\rotatebox[origin=c]{36}{\scalebox{1.3}[-1.2]{Agp}}z$`)
     const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
     const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
     const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
@@ -366,12 +380,12 @@ $$`)
     const view = new Bun.WebView({ ...canvas, backend: { type: 'chrome', path: chrome!, url: false } })
     try {
       await view.navigate(server.url.href)
-      const dimensions = await view.evaluate<{
+      const measure = () => view.evaluate<{
         width: number, height: number, depth: number, natural: number[], error: number
       }[]>(`(async () => {
         await document.fonts.ready
         await new Promise(requestAnimationFrame)
-        return [...document.querySelectorAll('mpadded[data-math-scaled-box]')].map(box => {
+        return [...document.querySelectorAll('#stage > article:not([hidden]) mpadded[data-math-transform-box]')].map(box => {
           const inner = box.firstElementChild
           const ink = inner.firstElementChild
           const frame = box.getBoundingClientRect()
@@ -383,6 +397,7 @@ $$`)
           }
         })
       })()`)
+      const dimensions = await measure()
       expect(dimensions).toHaveLength(6)
       for (const { error } of dimensions) expect(error).toBeLessThan(0.1)
       const [reflected, wide, tall, relative, nested, inner] = dimensions
@@ -397,6 +412,33 @@ $$`)
       expect(relative.depth).toBeGreaterThan(0)
       expect(nested.height).toBeCloseTo(inner.depth * 2, 1)
       expect(nested.depth).toBeCloseTo(inner.height * 2, 1)
+
+      await view.evaluate('window.presentationNavigation.go(3)')
+      const rotated = await measure()
+      expect(rotated).toHaveLength(6)
+      for (const { error } of rotated) expect(error).toBeLessThan(0.15)
+      const [baseline, center, offset, clockwise, , nestedScale] = rotated
+      expect(baseline.width).toBeCloseTo(baseline.natural[1], 1)
+      expect(baseline.height).toBeCloseTo(baseline.natural[0], 1)
+      expect(baseline.depth).toBe(0)
+      expect(center.width).toBeCloseTo(center.natural[0], 1)
+      expect(center.height + center.depth).toBeCloseTo(center.natural[1], 1)
+      expect(offset.height - offset.depth).toBeCloseTo(6, 1)
+      expect(offset.height + offset.depth).toBeCloseTo(offset.natural[0], 1)
+      expect(clockwise.height).toBe(0)
+      expect(clockwise.depth).toBeCloseTo(clockwise.natural[0], 1)
+
+      await view.evaluate(`(async () => {
+        const scale = document.querySelector('#stage > article:not([hidden]) [data-math-transform-box="scale"]')
+        const before = scale.getAttribute('width')
+        scale.style.fontSize = '42px'
+        for (let i = 0; i < 30 && scale.getAttribute('width') === before; i++) await new Promise(requestAnimationFrame)
+        await new Promise(requestAnimationFrame)
+      })()`)
+      const resized = (await measure()).at(-1)!
+      expect(resized.width).toBeGreaterThan(nestedScale.width)
+      expect(resized.width).toBeCloseTo(resized.natural[0] * 1.3, 1)
+      expect(resized.error).toBeLessThan(0.15)
     }
     finally {
       view.close()
@@ -414,6 +456,8 @@ $$`)
     const slide = parts.get('ppt/slides/slide1.xml')?.toString() ?? ''
     expect(slide.match(/<p:pic>/g)).toHaveLength(5)
     expect(parts.get('ppt/slides/slide2.xml')?.toString()).toContain('<m:f>')
+    const rotated = parts.get('ppt/slides/slide3.xml')?.toString() ?? ''
+    expect(rotated.match(/<p:pic>/g)).toHaveLength(5)
   }
   finally { await rm(root, { recursive: true, force: true }) }
 }, 45_000)

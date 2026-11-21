@@ -1237,8 +1237,9 @@ math .math-measured-r { justify-self: end; }
   inherits: false;
   initial-value: 0px;
 }
-/* A paint-only offset reveals the local vertical direction after reflection. */
-math .math-box-baseline-direction { transform: translateY(1px); }
+/* Paint-only offsets expose the projected axes without changing the box size. */
+math .math-box-axis-x { transform: translateX(1px); }
+math .math-box-axis-y { transform: translateY(1px); }
 math .math-reflect { transform: scaleX(-1); }
 math :is(.math-cancel, .math-bcancel, .math-xcancel) { position: relative; }
 math .math-cancel-track {

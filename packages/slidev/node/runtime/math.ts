@@ -494,7 +494,8 @@ const textLigatures: Readonly<Record<string, string>> = {
   '\x60': '\u2018', "'": '\u2019',
 }
 const typesettingNames = new Set(['TeX', 'LaTeX', 'KaTeX'])
-const textBoxes = new Set(['colorbox', 'fcolorbox', 'fbox', 'reflectbox', 'scalebox', 'resizebox'])
+const graphicsNumber = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/
+const textBoxes = new Set(['colorbox', 'fcolorbox', 'fbox', 'reflectbox', 'scalebox', 'resizebox', 'rotatebox'])
 const verticalBoxCommands = new Set(['phantom', 'hphantom', 'vphantom', 'smash', 'raisebox', 'rule'])
 const textSymbols: Record<string, string> = {
   '\\textdollar': '$', '\\textunderscore': '_', '\\textbackslash': '\\',
@@ -1904,6 +1905,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
 
   function textBox(name: string): Markup {
     if (name === 'scalebox' || name === 'resizebox') return scaledBox(name)
+    if (name === 'rotatebox') return rotatedBox()
     if (name === 'reflectbox') return xml`<mrow class="math-reflect">${textArgument('hbox')}</mrow>`
     if (name === 'fbox') return xml`<mrow class="math-color-box math-frame">${textArgument('hbox')}</mrow>`
     const { frame, background } = readBoxColors(name)
@@ -1911,53 +1913,95 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return xml`<mrow class="math-color-box${frame ? ' math-frame' : ''}" style="background-color:${background}${frame ? `;border-color:${frame}` : ''}">${content}</mrow>`
   }
 
+  function readGraphicsNumber(raw: string, message: string): number {
+    const value = Number(raw)
+    if (!graphicsNumber.test(raw) || !Number.isFinite(value)) throw new MathParseError(message)
+    return value
+  }
+
+  function graphicsLength(raw: string, axis: 'width' | 'height', lengths: Map<string, string>): string {
+    const reference = /^([+-]?(?:\d+(?:\.\d*)?|\.\d+)?)\s*\\(width|height|depth|totalheight)$/.exec(raw)
+    if (reference) {
+      const amount = reference[1]
+      const multiplier = amount === '-' ? -1 : amount === '+' || !amount ? 1 : Number(amount)
+      if (!Number.isFinite(multiplier)) throw new MathParseError('Invalid math box dimension')
+      return `${reference[2]}:${multiplier}`
+    }
+    const length = dimension(raw)
+    if (length === undefined) throw new MathParseError('Invalid math box dimension')
+    lengths.set(axis, length)
+    return 'length'
+  }
+
+  function transformedBox(content: Markup, kind: string, horizontal: string, vertical: string, lengths: Map<string, string>, angle?: number): Markup {
+    const style = lengths.size ? ` style="${[...lengths].map(([axis, length]) => `--math-box-${axis}:${length}`).join(';')}"` : ''
+    const rotation = angle === undefined ? '' : ` data-angle="${angle}"`
+    const anchor = '<mspace width="0" height="0" depth="0" aria-hidden="true"/>'
+    const inline = '<mspace class="math-box-axis-x" width="0" height="0" depth="0" aria-hidden="true"/>'
+    const block = '<mspace class="math-box-axis-y" width="0" height="0" depth="0" aria-hidden="true"/>'
+    return xml`<mpadded data-math-transform-box="${kind}" data-width="${horizontal}" data-height="${vertical}"${rotation}${style}><mrow><mrow>${content}</mrow>${anchor}${inline}${block}</mrow></mpadded>`
+  }
+
   function scaledBox(name: 'scalebox' | 'resizebox'): Markup {
     const read = (input: string[]) => expandDefinition(input).join('').trim()
-    const number = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/
-    let sizing: 'scale' | 'height' | 'total'
-    let horizontal: string
-    let vertical: string
-    const lengths: string[] = []
+    const lengths = new Map<string, string>()
     if (name === 'scalebox') {
-      function factor(input: string[]): string {
-        const raw = read(input)
-        const value = Number(raw)
-        if (!number.test(raw) || !Number.isFinite(value)) throw new MathParseError('Invalid math scale factor')
-        return String(value)
-      }
-      sizing = 'scale'
-      horizontal = factor(rawGroup())
+      const factor = (input: string[]) => String(readGraphicsNumber(read(input), 'Invalid math scale factor'))
+      const horizontal = factor(rawGroup())
       const optional = rawBracket()
-      vertical = optional ? factor(optional) : horizontal
+      const vertical = optional ? factor(optional) : horizontal
+      return transformedBox(textArgument('hbox'), 'scale', horizontal, vertical, lengths)
     }
-    else {
-      function size(axis: 'width' | 'height'): string {
-        const raw = read(rawGroup())
-        if (raw === '!') return raw
-        const reference = /^([+-]?(?:\d+(?:\.\d*)?|\.\d+)?)\s*\\(width|height|depth|totalheight)$/.exec(raw)
-        if (reference) {
-          const amount = reference[1]
-          const multiplier = amount === '-' ? -1 : amount === '+' || !amount ? 1 : Number(amount)
-          if (!Number.isFinite(multiplier)) throw new MathParseError('Invalid math box dimension')
-          return `${reference[2]}:${multiplier}`
-        }
-        const length = dimension(raw)
-        if (length === undefined) throw new MathParseError('Invalid math box dimension')
-        lengths.push(`--math-box-${axis}:${length}`)
-        return 'length'
-      }
-      const starred = peek() === '*'
-      if (starred) take()
-      sizing = starred ? 'total' : 'height'
-      horizontal = size('width')
-      vertical = size('height')
+    const starred = peek() === '*'
+    if (starred) take()
+    function size(axis: 'width' | 'height'): string {
+      const raw = read(rawGroup())
+      return raw === '!' ? raw : graphicsLength(raw, axis, lengths)
     }
+    const horizontal = size('width')
+    const vertical = size('height')
     const content = textArgument('hbox')
     if (horizontal === '!' && vertical === '!') return content
-    const style = lengths.length ? ` style="${lengths.join(';')}"` : ''
-    const anchor = '<mspace width="0" height="0" depth="0" aria-hidden="true"/>'
-    const direction = '<mspace class="math-box-baseline-direction" width="0" height="0" depth="0" aria-hidden="true"/>'
-    return xml`<mpadded data-math-scaled-box="${sizing}" data-width="${horizontal}" data-height="${vertical}"${style}><mrow><mrow>${content}</mrow>${anchor}${direction}</mrow></mpadded>`
+    return transformedBox(content, starred ? 'total' : 'height', horizontal, vertical, lengths)
+  }
+
+  function rotatedBox(): Markup {
+    const optional = rawBracket()
+    const lengths = new Map<string, string>()
+    let horizontal = optional ? 'width:0.5' : 'width:0'
+    let vertical = optional ? 'center:1' : 'height:0'
+    let units = 360
+    for (const assignment of optional ? expandDefinition(optional).join('').split(',') : []) {
+      if (!assignment.trim()) continue
+      const [key, value, extra] = assignment.split('=')
+      const name = key.trim()
+      const argument = value?.trim().replace(/^\{([^{}]*)\}$/, '$1').trim()
+      if (extra !== undefined) throw new MathParseError('Invalid math rotation option')
+      if (name === 'origin') {
+        const origin = argument ?? 'c'
+        if (!/^[lrctbB]{1,2}$/.test(origin)) throw new MathParseError('Invalid math rotation origin')
+        for (const position of origin) {
+          if (position === 'l' || position === 'r') horizontal = position === 'l' ? 'width:0' : 'width:1'
+          else if (position === 't') vertical = 'height:1'
+          else if (position === 'b') vertical = 'depth:-1'
+          else if (position === 'B') vertical = 'height:0'
+        }
+      }
+      else if (name === 'x' || name === 'y') {
+        const length = graphicsLength(argument ?? '', name === 'x' ? 'width' : 'height', lengths)
+        if (name === 'x') horizontal = length
+        else vertical = length
+      }
+      else if (name === 'units') {
+        units = readGraphicsNumber(argument ?? '', 'Invalid math rotation units')
+        if (!units) throw new MathParseError('Invalid math rotation units')
+      }
+      else throw new MathParseError(`Unsupported math rotation option: ${name}`)
+    }
+    const angle = readGraphicsNumber(expandDefinition(rawGroup()).join('').trim(), 'Invalid math rotation angle')
+    const radians = -(angle % units) / units * 2 * Math.PI
+    const content = textArgument('hbox')
+    return radians ? transformedBox(content, 'rotate', horizontal, vertical, lengths, radians) : content
   }
 
   function readBoxColors(name: string): { frame?: string, background: string } {
