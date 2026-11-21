@@ -17,6 +17,7 @@ in a new ts-presentation project.
 | Integrated editor and live preview | Dev Markdown pane with autosave, included-file support, conflict detection, and in-place body and title refreshes |
 | Scoped styles, layouts, and themes | Slide-local CSS and keyframes, TypeScript theme and addon modules, and STX built-in and custom layouts with named slots |
 | Deck components | First-party STX components from the deck, theme, or addons, with props, scoped Markdown slots, reactive text and native HTML attribute bindings, scoped styles, and client setup scripts. Vue-style bindings, event handlers, and visibility directives run through STX |
+| Vue-style STX setup and slots | Supported setup imports such as `ref` and `computed` resolve through STX in `.stx` components, including aliased imports. Reactive `v-if` and `v-else` branches update with their signals. Pass a scoped default Markdown slot with `<Card v-slot="{ value }">` or `<template v-slot="slotProps">` and read its values in Markdown text and native attribute bindings |
 | STX built-in components | `BlueSky` plays public post embeds from Bluesky URLs or AT URIs in audience and presenter views, with a link in previews and exports. `PoweredBySlidev` adds a linked credit |
 | Iframe layouts | Full and split STX layouts with per-slide zoom, viewport sizing for enlarged slides, and design-size layout in thumbnails and print |
 | Global and per-slide layers | STX layers from the deck, theme, or addons, slide context bindings, persistent matching global content, and a custom toolbar slot |

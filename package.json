@@ -38,7 +38,7 @@
   "dependencies": {
     "ts-charts": "https://codeload.github.com/stacksjs/ts-charts/tar.gz/8f52ad0da5763365b958036d093371f3b4777c8d",
     "ts-syntax-highlighter": "^0.2.20",
-    "@stacksjs/stx": "0.2.919"
+    "@stacksjs/stx": "https://registry.pantry.dev/@stacksjs/stx@8279a3b"
   },
   "devDependencies": {
     "better-dx": "^0.2.15"

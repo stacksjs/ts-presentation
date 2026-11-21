@@ -304,18 +304,27 @@ test.skipIf(!chrome)('counts projected STX list items in click groups and reveal
 test.skipIf(!chrome)('runs Vue template syntax and setup bindings in an STX slide component', async () => project(async (root) => {
   const entry = join(root, 'slides.md')
   await Promise.all([
-    Bun.write(entry, '# Compatibility\n\n<VueCounter :count="2" />\n'),
+    Bun.write(entry, [
+      '# Compatibility', '',
+      '<VueCounter :count="2" v-slot="{ current }"><strong :data-count="current">{{ current }}</strong></VueCounter>', '',
+      '<VueCounter :count="5">',
+      '<template v-slot="slotProps">**{{ slotProps.current }}**</template>',
+      '</VueCounter>',
+    ].join('\n')),
     Bun.write(join(root, 'components', 'VueCounter.stx'), [
       '<script setup lang="ts">',
+      'import { computed, ref as vueRef } from "vue"',
       'const props = defineProps({ count: { default: 0 } })',
-      'const counter = ref<number>(props.count)',
+      'const counter = vueRef<number>(props.count)',
+      'const title = computed(() => counter.value > 2 ? "Complete" : "Pending")',
       '</script>',
       '<template>',
       '  <div class="vue-counter">',
       '    <button type="button" v-on:click="counter += 1">Increase</button>',
-      '    <output v-bind:aria-label="counter">{{ counter }}</output>',
-      '    <p v-show="counter > 2">Threshold reached</p>',
-      '    <p v-show="counter <= 2">Keep going</p>',
+      '    <output v-bind:aria-label="counter" :title><slot :current="counter">{{ counter }}</slot></output>',
+      '    <p v-if="counter > 2">Threshold reached</p>',
+      '    <p v-else>Keep going</p>',
+      '    <small v-show="counter > 2">Ready</small>',
       '  </div>',
       '</template>',
     ].join('\n')),
@@ -329,15 +338,22 @@ test.skipIf(!chrome)('runs Vue template syntax and setup bindings in an STX slid
   const view = new Bun.WebView({ width: 960, height: 540, backend: { type: 'chrome', path: chrome!, url: false } })
   try {
     await view.navigate(server.url.href)
-    const readOutput = `(() => {
-      const card = document.querySelector('.vue-counter')
+    const readOutput = `[...document.querySelectorAll('.vue-counter')].map(card => {
       const output = card.querySelector('output')
       const visible = Array.from(card.querySelectorAll('p')).find(p => getComputedStyle(p).display !== 'none')
-      return [output.textContent, output.getAttribute('aria-label'), visible?.textContent]
-    })()`
-    expect(await view.evaluate(readOutput)).toEqual(['2', '2', 'Keep going'])
+      const value = output.querySelector('strong')
+      return [value?.textContent, value?.getAttribute('data-count'), output.getAttribute('aria-label'), output.title, visible?.textContent,
+        getComputedStyle(card.querySelector('small')).display !== 'none']
+    })`
+    expect(await view.evaluate(readOutput)).toEqual([
+      ['2', '2', '2', 'Pending', 'Keep going', false],
+      ['5', null, '5', 'Complete', 'Threshold reached', true],
+    ])
     await view.evaluate('document.querySelector(".vue-counter button").click()')
-    expect(await view.evaluate(readOutput)).toEqual(['3', '3', 'Threshold reached'])
+    expect(await view.evaluate(readOutput)).toEqual([
+      ['3', '3', '3', 'Complete', 'Threshold reached', true],
+      ['5', null, '5', 'Complete', 'Threshold reached', true],
+    ])
   }
   finally {
     view.close()

@@ -155,21 +155,21 @@ interface MarkdownSlot {
   binding?: string
 }
 
-function readSlots(source: string, component: (tag: Tag) => boolean): MarkdownSlot[] {
+function readSlots(source: string, component: (tag: Tag) => boolean, defaultBinding?: string): MarkdownSlot[] {
   const slots: MarkdownSlot[] = []
   let rest = ''
   let cursor = 0
   for (const range of findRanges(source, tag => tag.name === 'template' || component(tag))) {
     if (range.tag.name !== 'template') continue
-    const slot = /^\s+(?:#|v-slot:)([a-z][\w-]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'))?\s*$/i.exec(range.tag.attrs)
+    const slot = /^\s+(?:(?:#|v-slot:)([a-z][\w-]*)|v-slot)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'))?\s*$/i.exec(range.tag.attrs)
     if (!slot) continue
-    const [, name, double, single] = slot
+    const [, name = 'default', double, single] = slot
     rest += source.slice(cursor, range.tag.start)
     cursor = range.end
     const binding = unescapeHtml(double ?? single ?? '').trim()
     slots.push({ name, content: range.body, binding: binding || undefined })
   }
-  slots.unshift({ name: 'default', content: rest + source.slice(cursor) })
+  slots.unshift({ name: 'default', content: rest + source.slice(cursor), binding: defaultBinding })
   return slots
 }
 
@@ -266,10 +266,15 @@ const slideDirectives = /^v-(?:click(?:-hide)?|after|drag)(?:\.[\w-]+)*$/
 function readProps(markup: string, frontmatter: Record<string, unknown>, parentProps: Record<string, unknown> | undefined) {
   const props: Record<string, unknown> = Object.create(null)
   const forwarded: [string, string][] = []
+  let defaultBinding: string | undefined
   for (const [, attribute, double, single, bare] of markup.matchAll(attributes)) {
     const bound = attribute.startsWith(':') || attribute.startsWith('v-bind:')
     const key = attribute.replace(/^(?::|v-bind:)/, '')
     const value = double ?? single ?? bare
+    if (attribute === 'v-slot' || attribute === 'v-slot:default' || attribute === '#default') {
+      defaultBinding ??= unescapeHtml(value ?? '').trim() || undefined
+      continue
+    }
     if (slideDirectives.test(key)) {
       forwarded.push([attribute, value === undefined ? '' : unescapeHtml(value)])
       continue
@@ -279,7 +284,7 @@ function readProps(markup: string, frontmatter: Record<string, unknown>, parentP
     if (Object.hasOwn(props, normalized)) continue
     props[normalized] = value === undefined ? !bound : bound ? readBoundValue(unescapeHtml(value).trim(), frontmatter, parentProps) : unescapeHtml(value)
   }
-  return { props, forwarded }
+  return { props, forwarded, defaultBinding }
 }
 
 function forwardDirectives(html: string, directives: [string, string][]): string {
@@ -334,10 +339,10 @@ export function createDeckComponentRenderer(
       }
       const { tag, body } = range
       const file = components.get(tag.name)!
-      const { props, forwarded } = readProps(tag.attrs, bindingFrontmatter, parentProps)
+      const { props, forwarded, defaultBinding } = readProps(tag.attrs, bindingFrontmatter, parentProps)
       const values = new Map<string, string>()
       let slots = ''
-      for (const slot of readSlots(body, isComponent)) {
+      for (const slot of readSlots(body, isComponent, defaultBinding)) {
         if (!slot.content.trim()) continue
         const content = slot.content.replace(/^\r?\n|\r?\n[ \t]*$/g, '')
         const inline = !slot.content.includes('\n')
