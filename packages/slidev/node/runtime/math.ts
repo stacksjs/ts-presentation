@@ -494,7 +494,7 @@ const textLigatures: Readonly<Record<string, string>> = {
   '\x60': '\u2018', "'": '\u2019',
 }
 const typesettingNames = new Set(['TeX', 'LaTeX', 'KaTeX'])
-const textBoxes = new Set(['colorbox', 'fcolorbox', 'fbox', 'reflectbox'])
+const textBoxes = new Set(['colorbox', 'fcolorbox', 'fbox', 'reflectbox', 'scalebox', 'resizebox'])
 const verticalBoxCommands = new Set(['phantom', 'hphantom', 'vphantom', 'smash', 'raisebox', 'rule'])
 const textSymbols: Record<string, string> = {
   '\\textdollar': '$', '\\textunderscore': '_', '\\textbackslash': '\\',
@@ -1903,11 +1903,61 @@ export function renderMath(source: string, display = false, configured: MathMacr
   }
 
   function textBox(name: string): Markup {
+    if (name === 'scalebox' || name === 'resizebox') return scaledBox(name)
     if (name === 'reflectbox') return xml`<mrow class="math-reflect">${textArgument('hbox')}</mrow>`
     if (name === 'fbox') return xml`<mrow class="math-color-box math-frame">${textArgument('hbox')}</mrow>`
     const { frame, background } = readBoxColors(name)
     const content = textArgument('hbox')
     return xml`<mrow class="math-color-box${frame ? ' math-frame' : ''}" style="background-color:${background}${frame ? `;border-color:${frame}` : ''}">${content}</mrow>`
+  }
+
+  function scaledBox(name: 'scalebox' | 'resizebox'): Markup {
+    const read = (input: string[]) => expandDefinition(input).join('').trim()
+    const number = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/
+    let sizing: 'scale' | 'height' | 'total'
+    let horizontal: string
+    let vertical: string
+    const lengths: string[] = []
+    if (name === 'scalebox') {
+      function factor(input: string[]): string {
+        const raw = read(input)
+        const value = Number(raw)
+        if (!number.test(raw) || !Number.isFinite(value)) throw new MathParseError('Invalid math scale factor')
+        return String(value)
+      }
+      sizing = 'scale'
+      horizontal = factor(rawGroup())
+      const optional = rawBracket()
+      vertical = optional ? factor(optional) : horizontal
+    }
+    else {
+      function size(axis: 'width' | 'height'): string {
+        const raw = read(rawGroup())
+        if (raw === '!') return raw
+        const reference = /^([+-]?(?:\d+(?:\.\d*)?|\.\d+)?)\s*\\(width|height|depth|totalheight)$/.exec(raw)
+        if (reference) {
+          const amount = reference[1]
+          const multiplier = amount === '-' ? -1 : amount === '+' || !amount ? 1 : Number(amount)
+          if (!Number.isFinite(multiplier)) throw new MathParseError('Invalid math box dimension')
+          return `${reference[2]}:${multiplier}`
+        }
+        const length = dimension(raw)
+        if (length === undefined) throw new MathParseError('Invalid math box dimension')
+        lengths.push(`--math-box-${axis}:${length}`)
+        return 'length'
+      }
+      const starred = peek() === '*'
+      if (starred) take()
+      sizing = starred ? 'total' : 'height'
+      horizontal = size('width')
+      vertical = size('height')
+    }
+    const content = textArgument('hbox')
+    if (horizontal === '!' && vertical === '!') return content
+    const style = lengths.length ? ` style="${lengths.join(';')}"` : ''
+    const anchor = '<mspace width="0" height="0" depth="0" aria-hidden="true"/>'
+    const direction = '<mspace class="math-box-baseline-direction" width="0" height="0" depth="0" aria-hidden="true"/>'
+    return xml`<mpadded data-math-scaled-box="${sizing}" data-width="${horizontal}" data-height="${vertical}"${style}><mrow><mrow>${content}</mrow>${anchor}${direction}</mrow></mpadded>`
   }
 
   function readBoxColors(name: string): { frame?: string, background: string } {

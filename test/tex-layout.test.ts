@@ -54,6 +54,24 @@ test('renders named TeX spaces and keeps nonbreaking spaces in the same inline f
   expect(math(String.raw`x+~y`, false).split('<annotation')[0]).not.toContain('data-math-break')
 })
 
+test('parses TeX scale and resize boxes with measured lengths and text arguments', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const source = String.raw`\def\double{2}\scalebox{\double}[-.5]{Text $x^2$}
+\resizebox*{!}{0.5em}{Descender}
+\text{\resizebox{1.5\width}{-\depth}{Nested}}
+\resizebox{!}{!}{Natural}`
+  const html = math(source, false).split('<annotation')[0]
+  expect(html).toContain('data-math-scaled-box="scale" data-width="2" data-height="-0.5"')
+  expect(html).toContain('<msup>')
+  expect(html).toContain('data-math-scaled-box="total" data-width="!" data-height="length" style="--math-box-height:0.5em"')
+  expect(html).toContain('data-math-scaled-box="height" data-width="width:1.5" data-height="depth:-1"')
+  expect(html.match(/data-math-scaled-box=/g)).toHaveLength(3)
+  expect(html).toContain('<mtext>Natural</mtext>')
+  expect(() => math(String.raw`\scalebox{na}{x}`, false)).toThrow()
+  expect(() => math(String.raw`\scalebox{2}[large]{x}`, false)).toThrow('Invalid math scale factor')
+  expect(() => math(String.raw`\resizebox{min-content}{30px}{x}`, false)).toThrow('Invalid math box dimension')
+})
+
 test('scopes legacy font declarations and selects MathML branches without expanding skipped input', () => {
   const math = createMathRenderer({ throwOnError: true })
   const html = math(String.raw`{\cal A{\bf B} C} D+\mathrm{x\mathit{y}}+\Alpha\Gamma\varGamma`, false)

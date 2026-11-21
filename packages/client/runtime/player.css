@@ -1227,6 +1227,18 @@ math .math-measured-box > * { grid-area: 1 / 1; }
 math .math-measured-l { justify-self: start; }
 math .math-measured-c { justify-self: center; }
 math .math-measured-r { justify-self: end; }
+@property --math-box-width {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --math-box-height {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+/* A paint-only offset reveals the local vertical direction after reflection. */
+math .math-box-baseline-direction { transform: translateY(1px); }
 math .math-reflect { transform: scaleX(-1); }
 math :is(.math-cancel, .math-bcancel, .math-xcancel) { position: relative; }
 math .math-cancel-track {

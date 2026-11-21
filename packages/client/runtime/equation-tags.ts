@@ -1,7 +1,8 @@
 const strut = 'data-math-strut'
 const frameRow = 'data-equation-frame-row'
 const empheq = '.math-empheq'
-const selector = `${empheq}, mrow[${strut}], mtr[${frameRow}], mtable[data-equation-tags]:is(.math-display-grid, .math-tagged-display, .math-multline)`
+const scaledBox = 'data-math-scaled-box'
+const selector = `${empheq}, mpadded[${scaledBox}], mrow[${strut}], mtr[${frameRow}], mtable[data-equation-tags]:is(.math-display-grid, .math-tagged-display, .math-multline)`
 const shifted = 'data-equation-tag-shifted'
 
 function fitStrut(element: Element): void {
@@ -23,6 +24,58 @@ function fitStrut(element: Element): void {
     if (!Number.isFinite(length)) continue
     const value = `${Number(length.toFixed(4))}px`
     if (space.getAttribute(name) !== value) space.setAttribute(name, value)
+  }
+}
+
+function fitScaledBox(box: Element): void {
+  const frame = box.firstElementChild
+  if (!frame) return
+  const [ink, baseline, direction] = frame.children
+  if (!ink || !baseline || !direction) return
+  const frameStyle = getComputedStyle(frame)
+  const width = Number.parseFloat(frameStyle.width)
+  const totalHeight = Number.parseFloat(frameStyle.height)
+  const bounds = frame.getBoundingClientRect()
+  if (!Number.isFinite(width) || !Number.isFinite(totalHeight) || (totalHeight && !bounds.height)) return
+  const base = baseline.getBoundingClientRect().top
+  const inverted = direction.getBoundingClientRect().top < base
+  const offset = inverted ? bounds.bottom - base : base - bounds.top
+  const height = bounds.height ? Math.min(totalHeight, Math.max(0, offset * totalHeight / bounds.height)) : 0
+  const depth = totalHeight - height
+
+  const horizontal = box.getAttribute('data-width') ?? ''
+  const vertical = box.getAttribute('data-height') ?? ''
+  const sizing = box.getAttribute(scaledBox)
+  let x = Number(horizontal)
+  let y = Number(vertical)
+  if (sizing !== 'scale') {
+    const style = getComputedStyle(box)
+    const dimensions: Readonly<Record<string, number>> = { width, height, depth, totalheight: totalHeight }
+    function target(specification: string, axis: 'width' | 'height'): number {
+      if (specification === 'length')
+        return Number.parseFloat(style.getPropertyValue(`--math-box-${axis}`))
+      const [natural, multiplier] = specification.split(':')
+      return dimensions[natural] * Number(multiplier)
+    }
+    const naturalHeight = sizing === 'total' ? totalHeight : height
+    x = width ? target(horizontal, 'width') / width : 1
+    y = naturalHeight ? target(vertical, 'height') / naturalHeight : 1
+    if (horizontal === '!') x = y
+    if (vertical === '!') y = x
+  }
+  const advance = width * Math.abs(x)
+  const ascent = (y < 0 ? depth : height) * Math.abs(y)
+  const descent = (y < 0 ? height : depth) * Math.abs(y)
+  if (![x, y, advance, ascent, descent].every(Number.isFinite)) return
+
+  // MPadded reserves the transformed dimensions at the original baseline.
+  const length = (value: number) => `${Number(value.toFixed(4))}px`
+  const transform = `translateX(${length(x < 0 ? advance : 0)}) scale(${x},${y})`
+  const style = `transform-origin:left ${length(height)};transform:${transform}`
+  if (ink.getAttribute('style') !== style) ink.setAttribute('style', style)
+  for (const [attribute, value] of [['width', advance], ['height', ascent], ['depth', descent]] as const) {
+    const dimension = length(value)
+    if (box.getAttribute(attribute) !== dimension) box.setAttribute(attribute, dimension)
   }
 }
 
@@ -198,6 +251,7 @@ export function createEquationFit(): (root: ParentNode, watch?: boolean) => void
   let frame: number | undefined
   function fit(element: Element): void {
     if (element.hasAttribute(strut)) fitStrut(element)
+    else if (element.hasAttribute(scaledBox)) fitScaledBox(element)
     else if (element.hasAttribute(frameRow)) fitFrames(element)
     else if (element.matches(empheq)) fitEmpheq(element as HTMLElement)
     else fitTable(element)
@@ -239,6 +293,9 @@ export function createEquationFit(): (root: ParentNode, watch?: boolean) => void
       // The unpadded glyphs change size even when the outer strut has fixed dimensions.
       if (element.hasAttribute(strut)) {
         for (const child of element.firstElementChild?.children ?? []) observe(child, element)
+      }
+      else if (element.hasAttribute(scaledBox) && element.firstElementChild) {
+        observe(element.firstElementChild, element)
       }
       else if (element.hasAttribute(frameRow)) {
         observe(element, element)

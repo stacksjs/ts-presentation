@@ -321,6 +321,103 @@ it.skipIf(!chrome)('exports cramped superscripts, stacks, and measured laps as e
   }
 }, 45_000)
 
+it.skipIf(!chrome)('reserves the scaled math box dimensions in the browser and PowerPoint', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-scaled-box-'))
+  const canvas = { width: 960, height: 540 }
+  try {
+    const entry = join(root, 'slides.md')
+    await Bun.write(entry, String.raw`---
+math:
+  throwOnError: true
+---
+
+# Scaled equations
+
+$x\scalebox{-2}[-0.5]{Agp}z$
+
+$x\resizebox{90px}{!}{Agp}z$
+
+$x\resizebox*{!}{40px}{Agp}z$
+
+$x\resizebox{1.5\width}{38px}{Agp}z$
+
+$x\scalebox{1}[-2]{\scalebox{1}[1.5]{Agp}}z$
+
+---
+
+# Native equation
+
+$$
+\frac{1}{2}
+$$`)
+    const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
+    const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
+    const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
+    if (status) throw new Error(stderr)
+    const dist = join(root, 'dist')
+    const server = Bun.serve({
+      hostname: '127.0.0.1', port: 0,
+      fetch(request) {
+        const name = new URL(request.url).pathname.slice(1) || 'index.html'
+        if (!['index.html', 'presentation.js', 'presentation.css', 'deck.css'].includes(name)) return new Response(null, { status: 404 })
+        return new Response(Bun.file(join(dist, name)))
+      },
+    })
+    const view = new Bun.WebView({ ...canvas, backend: { type: 'chrome', path: chrome!, url: false } })
+    try {
+      await view.navigate(server.url.href)
+      const dimensions = await view.evaluate<{
+        width: number, height: number, depth: number, natural: number[], error: number
+      }[]>(`(async () => {
+        await document.fonts.ready
+        await new Promise(requestAnimationFrame)
+        return [...document.querySelectorAll('mpadded[data-math-scaled-box]')].map(box => {
+          const inner = box.firstElementChild
+          const ink = inner.firstElementChild
+          const frame = box.getBoundingClientRect()
+          const drawing = ink.getBoundingClientRect()
+          return {
+            width: parseFloat(box.getAttribute('width')), height: parseFloat(box.getAttribute('height')), depth: parseFloat(box.getAttribute('depth')),
+            natural: [parseFloat(getComputedStyle(inner).width), parseFloat(getComputedStyle(inner).height)],
+            error: Math.max(...['x', 'y', 'width', 'height'].map(key => Math.abs(frame[key] - drawing[key]))),
+          }
+        })
+      })()`)
+      expect(dimensions).toHaveLength(6)
+      for (const { error } of dimensions) expect(error).toBeLessThan(0.1)
+      const [reflected, wide, tall, relative, nested, inner] = dimensions
+      expect(reflected.width).toBeCloseTo(reflected.natural[0] * 2, 1)
+      expect(reflected.height + reflected.depth).toBeCloseTo(reflected.natural[1] * 0.5, 1)
+      expect(reflected.depth).toBeGreaterThan(reflected.height)
+      expect(wide.width).toBeCloseTo(90, 1)
+      expect(wide.height + wide.depth).toBeCloseTo(wide.natural[1] * 90 / wide.natural[0], 1)
+      expect(tall.height + tall.depth).toBeCloseTo(40, 1)
+      expect(relative.width).toBeCloseTo(relative.natural[0] * 1.5, 1)
+      expect(relative.height).toBeCloseTo(38, 1)
+      expect(relative.depth).toBeGreaterThan(0)
+      expect(nested.height).toBeCloseTo(inner.depth * 2, 1)
+      expect(nested.depth).toBeCloseTo(inner.height * 2, 1)
+    }
+    finally {
+      view.close()
+      await server.stop(true)
+    }
+
+    const frames: PowerPointFrame[] = []
+    await captureFrames({ root: dist, executable: chrome!, scale: 1, canvas, editable: true, withClicks: false }, frame => { frames.push(frame) })
+    const rendered = frames[0].editable?.nodes.filter((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math') ?? []
+    expect(rendered).toHaveLength(5)
+    expect(rendered.every(node => node.data && !node.equation)).toBe(true)
+    const plain = frames[1].editable?.nodes.find((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math')
+    expect(plain?.equation?.expression).toContain('<m:f>')
+    const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Scaled equations' }))
+    const slide = parts.get('ppt/slides/slide1.xml')?.toString() ?? ''
+    expect(slide.match(/<p:pic>/g)).toHaveLength(5)
+    expect(parts.get('ppt/slides/slide2.xml')?.toString()).toContain('<m:f>')
+  }
+  finally { await rm(root, { recursive: true, force: true }) }
+}, 45_000)
+
 it.skipIf(!chrome)('keeps empheq frames and delimiters aligned around editable numbered reveals', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-empheq-'))
   const canvas = { width: 960, height: 540 }
