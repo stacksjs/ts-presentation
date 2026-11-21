@@ -1,5 +1,5 @@
 // Adapted from Slidev v53.1.0. See licenses/Slidev-MIT.txt.
-import type { RawChartPart, RawChartRun, RawMathElement, RawMathFragment, RawMathFrame, RawMathPicture, RawMathRule, RawMathSnapshot, RawNode, RawSlide, RawSnapshot, RawStyle } from './ir.ts'
+import type { RawChartPaint, RawChartPart, RawChartRun, RawMathElement, RawMathFragment, RawMathFrame, RawMathPicture, RawMathRule, RawMathSnapshot, RawNode, RawSlide, RawSnapshot, RawStyle } from './ir.ts'
 
 /**
  * The one function that runs inside the browser. Invariant: zero free variables.
@@ -384,6 +384,9 @@ export function collectSnapshot(options: {
     function chartArtwork(svg: SVGSVGElement): RawChartPart[] | undefined {
       const parts: RawChartPart[] = []
       const clips = new Map(Array.from(svg.querySelectorAll<SVGClipPathElement>('clipPath[id]'), clip => [clip.id, clip]))
+      type ChartShape = Extract<RawChartPart, { kind: 'shape' }>
+      const gradients = new Map<string, Exclude<RawChartPaint, string>>()
+      const referenceId = (value: string) => /^url\("?#([\w-]+)"?\)$/.exec(value)?.[1]
       let count = 0
 
       function scaleOf(matrix: DOMMatrix | null, allowRotation = false): number | undefined {
@@ -407,7 +410,7 @@ export function collectSnapshot(options: {
       }
 
       function clipBounds(element: SVGGraphicsElement, path: string, outer: DOMRect): DOMRect | undefined {
-        const id = /^url\("?#([\w-]+)"?\)$/.exec(path)?.[1]
+        const id = referenceId(path)
         const clip = id ? clips.get(id) : undefined
         const rect = clip?.firstElementChild as SVGRectElement | null | undefined
         // Treemap label clips are axis-aligned rectangles in the enclosing group's units.
@@ -429,11 +432,74 @@ export function collectSnapshot(options: {
           Math.max(0, Math.min(y + bounds.height * scale, outer.bottom) - top))
       }
 
-      function simplePaint(style: CSSStyleDeclaration): boolean {
-        return style.filter === 'none' && style.backdropFilter === 'none' && style.mixBlendMode === 'normal'
+      function simplePaint(style: CSSStyleDeclaration, allowFilter = false): boolean {
+        return (allowFilter || style.filter === 'none') && style.backdropFilter === 'none' && style.mixBlendMode === 'normal'
           && style.maskImage === 'none' && !style.transform.startsWith('matrix3d(')
           && style.getPropertyValue('marker-start') === 'none'
           && style.getPropertyValue('marker-mid') === 'none' && style.getPropertyValue('marker-end') === 'none'
+      }
+
+      function objectLength(length: SVGLength): number {
+        if (length.unitType === 2) return length.valueInSpecifiedUnits / 100
+        return length.unitType === 1 ? length.valueInSpecifiedUnits : NaN
+      }
+
+      function definition(paint: string, tag: string): SVGElement | undefined {
+        const id = referenceId(paint)
+        const element = id ? svg.getElementById(id) as SVGElement | null : null
+        if (element?.localName === tag && element.ownerSVGElement === svg && element.parentElement?.localName === 'defs')
+          return element
+      }
+
+      function readPaint(value: string): RawChartPaint | undefined {
+        if (!value.startsWith('url(')) return value
+        const cached = gradients.get(value)
+        if (cached) return cached
+        const gradient = definition(value, 'linearGradient') as SVGLinearGradientElement | undefined
+        if (!gradient || gradient.href.baseVal || gradient.gradientUnits.baseVal !== 2 || gradient.spreadMethod.baseVal !== 1
+          || gradient.gradientTransform.baseVal.numberOfItems || gradient.children.length < 2 || gradient.children.length > 32
+          || getComputedStyle(gradient).colorInterpolation === 'linearRGB') return
+        const [x1, y1, x2, y2] = [gradient.x1, gradient.y1, gradient.x2, gradient.y2].map(length => objectLength(length.baseVal))
+        // Border and fill gradients span the full object along one axis in DrawingML.
+        let angle: number
+        if (y1 === y2 && x1 === 0 && x2 === 1) angle = 0
+        else if (x1 === x2 && y1 === 0 && y2 === 1) angle = 90
+        else if (y1 === y2 && x1 === 1 && x2 === 0) angle = 180
+        else if (x1 === x2 && y1 === 1 && y2 === 0) angle = 270
+        else return
+        const stops: Exclude<RawChartPaint, string>['stops'] = []
+        for (const child of Array.from(gradient.children)) {
+          if (child.localName !== 'stop') return
+          const position = (child as SVGStopElement).offset.baseVal
+          if (!(position >= (stops.at(-1)?.position ?? 0) && position <= 1)) return
+          const style = getComputedStyle(child)
+          stops.push({ position, color: style.stopColor, opacity: Number(style.stopOpacity) })
+        }
+        const paint = { angle, stops }
+        gradients.set(value, paint)
+        return paint
+      }
+
+      function readShadow(value: string, box: DOMRect, clip: DOMRect, scale: number, stroke: number): ChartShape['shadow'] {
+        const filter = definition(value, 'filter') as SVGFilterElement | undefined
+        const child = filter?.firstElementChild as SVGFEDropShadowElement | null | undefined
+        if (!filter || filter.children.length !== 1 || child?.localName !== 'feDropShadow'
+          || filter.hasAttribute('href') || filter.hasAttributeNS('http://www.w3.org/1999/xlink', 'href')
+          || filter.filterUnits.baseVal !== 2 || filter.primitiveUnits.baseVal !== 1
+          || (child.in1.baseVal && child.in1.baseVal !== 'SourceGraphic')
+          || ['x', 'y', 'width', 'height'].some(attribute => child.hasAttribute(attribute))) return
+        const [x, y, w, h] = [filter.x, filter.y, filter.width, filter.height].map(length => objectLength(length.baseVal))
+        if (![x, y, w, h].every(Number.isFinite) || !(w > 0 && h > 0)) return
+        const dx = child.dx.baseVal * scale
+        const dy = child.dy.baseVal * scale
+        const deviation = child.stdDeviationX.baseVal * scale
+        if (![dx, dy, deviation].every(Number.isFinite) || deviation < 0 || child.stdDeviationX.baseVal !== child.stdDeviationY.baseVal) return
+        const pad = stroke / 2 + 3 * deviation
+        const bounds = new DOMRect(box.x + dx - pad, box.y + dy - pad, box.width + 2 * pad, box.height + 2 * pad)
+        const region = new DOMRect(box.x + x * box.width, box.y + y * box.height, w * box.width, h * box.height)
+        if (!contained(bounds, region) || !contained(bounds, clip)) return
+        const style = getComputedStyle(child)
+        return { rect: relative(bounds), dx, dy, deviation, color: style.floodColor, opacity: Number(style.floodOpacity) }
       }
 
       const hasCharacterCoordinates = (element: Element) =>
@@ -549,7 +615,8 @@ export function collectSnapshot(options: {
         const style = getComputedStyle(element)
         const opacity = Number(style.opacity)
         if (style.display === 'none' || opacity === 0) return true
-        if (!simplePaint(style)) return false
+        const isShape = element.localName !== 'g' && element.localName !== 'text'
+        if (!simplePaint(style, isShape)) return false
         const clip = style.clipPath === 'none' ? outerClip : clipBounds(graphic, style.clipPath, outerClip)
         if (!clip) return false
         // Opacity on a group applies after painting the group, including overlaps.
@@ -570,9 +637,18 @@ export function collectSnapshot(options: {
         const fill = element.localName === 'line' ? 'none' : style.fill
         if (strokeWidth && fill !== 'none' && Number(style.fillOpacity) > 0 && opacity !== 1) return false
         if (!Number.isFinite(strokeWidth) || !contained(box, clip, strokeWidth / 2)) return false
-        const part: Extract<RawChartPart, { kind: 'shape' }> = {
-          kind: 'shape', rect: relative(box), fill, fillOpacity: Number(style.fillOpacity) * opacity,
-          stroke: style.stroke, strokeOpacity: Number(style.strokeOpacity) * opacity, strokeWidth,
+        const fillPaint = readPaint(fill)
+        const strokePaint = strokeWidth ? readPaint(style.stroke) : 'none'
+        if (fillPaint === undefined || strokePaint === undefined) return false
+        const part: ChartShape = {
+          kind: 'shape', rect: relative(box), fill: fillPaint, fillOpacity: Number(style.fillOpacity) * opacity,
+          stroke: strokePaint, strokeOpacity: Number(style.strokeOpacity) * opacity, strokeWidth,
+        }
+        if (style.filter !== 'none') {
+          if (opacity !== 1 || scaleOf(matrix) === undefined) return false
+          const shadow = readShadow(style.filter, box, clip, scale, strokeWidth)
+          if (!shadow) return false
+          part.shadow = shadow
         }
         if (preset) {
           const rotation = Math.atan2(matrix.b, matrix.a) * 180 / Math.PI

@@ -136,13 +136,19 @@ export type RawMathSnapshot = {
 
 export interface RawChartRun { text: string, style: number, fill: string, opacity: number }
 
+export type RawChartPaint = string | {
+  angle: number
+  stops: { position: number, color: string, opacity: number }[]
+}
+
 /** Browser-measured SVG artwork in document paint order. */
 export type RawChartPart =
   | {
-    kind: 'shape', rect: Rect, fill: string, fillOpacity: number, stroke: string, strokeOpacity: number, strokeWidth: number,
+    kind: 'shape', rect: Rect, fill: RawChartPaint, fillOpacity: number, stroke: RawChartPaint, strokeOpacity: number, strokeWidth: number,
     radius?: number, ellipse?: boolean, path?: { data: string, scale: number, x: number, y: number },
     rotation?: number, visibleBounds?: Rect,
     dashes?: number[], cap?: Border['cap'], join?: Border['join'],
+    shadow?: { rect: Rect, dx: number, dy: number, deviation: number, color: string, opacity: number },
   }
   | {
     kind: 'text', lines: { rect: Rect, runs: RawChartRun[] }[],
@@ -230,6 +236,8 @@ export interface Rgba {
 export interface Border {
   width: number
   color: Rgba
+  /** SVG outlines use one gradient for all four sides of the shape. */
+  gradient?: LinearGradient
   style: 'solid' | 'dashed' | 'dotted'
   /** SVG paint lengths in canvas pixels. */
   dashes?: number[]

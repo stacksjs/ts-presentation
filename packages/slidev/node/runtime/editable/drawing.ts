@@ -43,7 +43,7 @@ function line(border?: Border): string {
       stops += `<a:ds d="${percentage(border.dashes[index])}" sp="${percentage(border.dashes[index + 1])}"/>`
     dash = `<a:custDash>${stops}</a:custDash>`
   }
-  return `<a:ln w="${Math.round(border.width * EMU_PER_PX)}"${cap}>${fill(border.color)}${dash}${join}</a:ln>`
+  return `<a:ln w="${Math.round(border.width * EMU_PER_PX)}"${cap}>${border.gradient ? gradientFill(border.gradient) : fill(border.color)}${dash}${join}</a:ln>`
 }
 
 function transform(rect: Rect, rotation?: number): string {
@@ -71,7 +71,7 @@ function boxGeometry(box: IrBox, stroked: boolean): string {
     const tag = tags[command.kind]
     return `<a:${tag}>${points}</a:${tag}>`
   }).join('')
-  return `<a:custGeom><a:avLst/><a:gdLst/><a:ahLst/><a:cxnLst/><a:rect l="0" t="0" r="r" b="b"/><a:pathLst><a:path w="${Math.round(box.rect.w * EMU_PER_PX)}" h="${Math.round(box.rect.h * EMU_PER_PX)}" fill="${box.fill ? 'norm' : 'none'}" stroke="${Number(stroked)}">${commands}</a:path></a:pathLst></a:custGeom>`
+  return `<a:custGeom><a:avLst/><a:gdLst/><a:ahLst/><a:cxnLst/><a:rect l="0" t="0" r="r" b="b"/><a:pathLst><a:path w="${Math.round(box.rect.w * EMU_PER_PX)}" h="${Math.round(box.rect.h * EMU_PER_PX)}" fill="${box.fill || box.gradient ? 'norm' : 'none'}" stroke="${Number(stroked)}">${commands}</a:path></a:pathLst></a:custGeom>`
 }
 
 function shape(id: number, name: string, properties: string, body = ''): string {
@@ -82,7 +82,7 @@ function drawBox(box: IrBox, nextId: () => number, name?: string): string {
   const borders = box.borders ?? []
   const first = borders[0]
   const uniform = first && borders.length === 4 && borders.every(border =>
-    border?.width === first.width && border.style === first.style && rgb(border.color) === rgb(first.color))
+    border?.width === first.width && border.style === first.style && border.gradient === first.gradient && rgb(border.color) === rgb(first.color))
   const { x, y, w, h } = box.rect
   let result = ''
   if (box.fill || box.gradient || uniform || box.shadow) {

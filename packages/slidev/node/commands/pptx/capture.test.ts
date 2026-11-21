@@ -98,6 +98,69 @@ it.skipIf(!chrome)('exports GitGraph, Gantt, and mind map shapes, paths, and lab
   }
 }, 45_000)
 
+it.skipIf(!chrome)('exports Neo GitGraph gradient outlines and shadows as editable PowerPoint effects', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-neo-gitgraph-'))
+  const canvas = { width: 960, height: 540 }
+  try {
+    const entry = join(root, 'slides.md')
+    await Bun.write(entry, [
+      '# Release history', '',
+      '~~~mermaid', '---', 'config:', '  look: neo', '  theme: neo', '  themeVariables:',
+      '    gradientStart: "#112233"', '    gradientStop: "#77bbcc"',
+      '    dropShadow: "drop-shadow(2px 3px 2px rgba(31, 45, 59, .45))"', '---',
+      'gitGraph', '  commit id: "Start"', '  branch review', '  commit id: "Review" tag: "v1"',
+      '  checkout main', '  merge review', '~~~',
+      '', '---', '', '# Vertical task gradient', '',
+      '<svg data-diagram-kind="gantt" xmlns="http://www.w3.org/2000/svg" width="320" height="110" viewBox="0 0 320 110">',
+      '<defs><linearGradient id="task-paint" x1="0%" x2="0%" y1="100%" y2="0%">',
+      '<stop offset="0%" stop-color="#296585" /><stop offset="65%" stop-color="#55a3b1" stop-opacity=".5" />',
+      '<stop offset="100%" stop-color="#a9d5da" /></linearGradient></defs>',
+      '<g data-diagram-kind="gantt"><path d="M20 20H300V90H20Z" fill="url(#task-paint)" /></g>',
+      '</svg>',
+    ].join('\n'))
+    const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
+    const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
+    const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
+    if (status) throw new Error(stderr)
+    const frames: PowerPointFrame[] = []
+    await captureFrames({ root: join(root, 'dist'), executable: chrome!, scale: 1, canvas, editable: true, withClicks: false }, frame => { frames.push(frame) })
+    expect(frames).toHaveLength(2)
+    const elements = frames[0].editable?.nodes ?? []
+    const shapes = elements.filter(node => node.kind === 'box')
+    const outlines = shapes.flatMap(shape => shape.borders?.[0]?.gradient ?? [])
+    expect(outlines).toHaveLength(2)
+    for (const outline of outlines) {
+      expect(outline).toEqual({
+        angle: 0, stops: [
+          { position: 0, color: { r: 17, g: 34, b: 51, a: 1 } },
+          { position: 1, color: { r: 119, g: 187, b: 204, a: 1 } },
+        ],
+      })
+    }
+    const shadows = shapes.flatMap(shape => shape.shadow ?? [])
+    expect(shadows).toHaveLength(3)
+    for (const shadow of shadows) {
+      expect(shadow.color).toMatchObject({ r: 31, g: 45, b: 59 })
+      expect(shadow.color.a).toBeCloseTo(.45)
+      expect(shadow.angle).toBeCloseTo(56.31)
+      expect(shadow.blur / shadow.offset).toBeCloseTo(4 / Math.hypot(2, 3))
+    }
+    const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Editable chart effects' }))
+    const graph = parts.get('ppt/slides/slide1.xml')?.toString() ?? ''
+    const task = parts.get('ppt/slides/slide2.xml')?.toString() ?? ''
+    expect(graph.match(/<a:ln\b[^>]*><a:gradFill\b/g)).toHaveLength(2)
+    expect(graph.match(/<a:outerShdw\b/g)).toHaveLength(3)
+    expect(graph).toContain('>Review</a:t>')
+    expect(graph).toContain('>v1</a:t>')
+    expect(graph).not.toContain('<p:pic>')
+    expect(task).toContain('fill="norm" stroke="0"')
+    expect(task).toContain('<a:gs pos="65000"><a:srgbClr val="55A3B1"><a:alpha val="50000"/>')
+    expect(task).toContain('<a:lin ang="16200000"')
+    expect(task).not.toContain('<p:pic>')
+  }
+  finally { await rm(root, { recursive: true, force: true }) }
+}, 45_000)
+
 it.skipIf(!chrome)('keeps treemap rectangles and formatted multiline labels editable in PowerPoint', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-treemap-'))
   const canvas = { width: 960, height: 540 }

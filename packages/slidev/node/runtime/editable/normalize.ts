@@ -9,12 +9,14 @@ import type {
   IrText,
   LinearGradient,
   RasterReason,
+  RawChartPaint,
   RawMathFragment,
   RawNode,
   RawSlide,
   RawSnapshot,
   RawStyle,
   Rect,
+  Rgba,
   SlideIr,
 } from './ir.ts'
 import { isVisible, parseColor, withOpacity } from './color.ts'
@@ -559,6 +561,23 @@ function buildSlideIr(
     }
   }
 
+  function chartPaint(paint: RawChartPaint, opacity: number): { color?: Rgba, gradient?: LinearGradient } | undefined {
+    if (paint === 'none') return {}
+    if (typeof paint === 'string') {
+      const color = withOpacity(parseColor(paint), opacity)
+      if (color) return isVisible(color) ? { color } : {}
+      return
+    }
+    const stops: LinearGradient['stops'] = []
+    for (const stop of paint.stops) {
+      const color = withOpacity(parseColor(stop.color), stop.opacity * opacity)
+      if (!color) return
+      stops.push({ position: stop.position, color })
+    }
+    if (!stops.some(stop => isVisible(stop.color))) return {}
+    return { color: stops[0].color, gradient: { angle: paint.angle, stops } }
+  }
+
   function emitChart(node: RawNode, style: RawStyle | undefined): boolean {
     if (!node.chartParts?.length || !style || style.boxShadow !== 'none'
       || [style.borderTopLeftRadius, style.borderTopWidth, style.borderRightWidth, style.borderBottomWidth, style.borderLeftWidth].some(value => parseLength(value) > 0)
@@ -585,9 +604,9 @@ function buildSlideIr(
       }
       if (part.kind === 'shape') {
         if (!insideSlide(part.visibleBounds ?? part.rect, part.strokeWidth / 2)) return false
-        const fill = part.fill === 'none' ? undefined : parseColor(part.fill)
-        const stroke = part.strokeWidth > 0 ? parseColor(part.stroke) : undefined
-        if ((part.fill !== 'none' && !fill) || (part.strokeWidth > 0 && !stroke)) return false
+        const fill = chartPaint(part.fill, part.fillOpacity)
+        const stroke = part.strokeWidth > 0 ? chartPaint(part.stroke, part.strokeOpacity) : {}
+        if (!fill || !stroke) return false
         const box: IrBox = { kind: 'box', sourceId, rect: part.rect, radius: part.radius, rotation: part.rotation }
         if (part.ellipse) box.geometry = { kind: 'ellipse' }
         else if (part.path) {
@@ -596,17 +615,25 @@ function buildSlideIr(
           box.geometry = { kind: 'path', commands }
           box.rect = { ...part.rect, w: part.rect.w || 1, h: part.rect.h || 1 }
         }
-        const background = withOpacity(fill, part.fillOpacity)
-        const outline = withOpacity(stroke, part.strokeOpacity)
-        if (isVisible(background)) box.fill = background
-        if (isVisible(outline)) {
+        if (fill.gradient) box.gradient = fill.gradient
+        else if (fill.color) box.fill = fill.color
+        if (stroke.color) {
           const border: Border = {
-            width: part.strokeWidth, color: outline!, style: 'solid',
+            width: part.strokeWidth, color: stroke.color, gradient: stroke.gradient, style: 'solid',
             dashes: part.dashes, cap: part.cap, join: part.join,
           }
           box.borders = [border, border, border, border]
         }
-        if (box.fill || box.borders) result.push(box)
+        if (part.shadow) {
+          const { rect, dx, dy, deviation, opacity, color: flood } = part.shadow
+          const color = withOpacity(parseColor(flood), opacity)
+          if (!color || !insideSlide(rect)) return false
+          if (isVisible(color)) {
+            // SVG uses Gaussian deviation and PowerPoint stores the blur radius.
+            box.shadow = { color, blur: 2 * deviation, offset: Math.hypot(dx, dy), angle: Math.atan2(dy, dx) * 180 / Math.PI }
+          }
+        }
+        if (box.fill || box.gradient || box.borders) result.push(box)
         continue
       }
       if (!part.lines.length) return false
