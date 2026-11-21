@@ -1,7 +1,7 @@
 import type { GitCommitStyle, GitGraphDirection, GitGraphOperation, GitGraphOptions, GitHistory } from 'ts-charts/diagrams'
 import { buildGitHistory as buildHistory, gitGraphChart } from 'ts-charts/diagrams'
 import type { MermaidOptions } from '../authoring-setup.ts'
-import { diagramFontFamily, diagramPixels, readChronology, sizeChronologySvg } from './chronology.ts'
+import { decodeDiagramEntities, diagramFontFamily, diagramPixels, maskDiagramEntities, readChronology, sizeChronologySvg } from './chronology.ts'
 import { gitGraphLabelEffects, gitGraphPreset, gitGraphStyleIndex, gitGraphThemeFamily, reduxBranchColors, usesReduxBranchColors } from './gitgraph-themes.ts'
 import { syntaxMask } from './syntax.ts'
 
@@ -25,7 +25,7 @@ function commands(lines: string[]): string[] {
     const end = comment < 0 ? line.length : comment
     let cursor = 0
     const parts: string[] = []
-    for (const stop of mask.slice(0, end).matchAll(/;/g)) {
+    for (const stop of maskDiagramEntities(mask.slice(0, end)).matchAll(/;/g)) {
       parts.push(line.slice(cursor, stop.index).trim())
       cursor = stop.index + 1
     }
@@ -56,7 +56,7 @@ function fields(raw: Token[], permitted: string[], recover?: 'commit' | 'merge')
     const token = raw[cursor++]
     if (allowMessage && token.quoted) {
       if (result.has('msg')) return
-      result.set('msg', [token.value])
+      result.set('msg', [decodeDiagramEntities(token.value)])
       continue
     }
     const key = token.value
@@ -71,7 +71,7 @@ function fields(raw: Token[], permitted: string[], recover?: 'commit' | 'merge')
     }
     if ((result.has(key) && key !== 'tag') || (key === 'msg' && !value.quoted)) return
     const values = result.get(key) ?? []
-    values.push(value.value)
+    values.push(key === 'type' || key === 'order' ? value.value : decodeDiagramEntities(value.value))
     result.set(key, values)
   }
   return result
@@ -82,7 +82,7 @@ function settings(value: unknown): Record<string, unknown> {
 }
 
 function parseGitHistory(source: string, config: Record<string, unknown>): GitGraphOptions | undefined {
-  const chart = readChronology(logicalLines(source), '', { singleQuotes: true })
+  const chart = readChronology(logicalLines(source), '', { singleQuotes: true, entities: true })
   if (!chart) return
   const rows = commands([chart.header, ...chart.rows])
   const header = /^gitGraph(?:\s+(LR|TB|BT))?\s*:?$/.exec(rows.shift() ?? '')
@@ -93,7 +93,7 @@ function parseGitHistory(source: string, config: Record<string, unknown>): GitGr
     if (!fieldsForLine?.length || fieldsForLine[0].quoted) return
     const [command, argument, ...rest] = fieldsForLine
     const op = command.value
-    const first = argument?.value === ':' && !argument.quoted ? undefined : argument?.value
+    const first = argument && (argument.quoted || argument.value !== ':') ? decodeDiagramEntities(argument.value) : undefined
     if (op === 'branch') {
       const attrs = fields(rest, ['order'])
       const order = attrs?.get('order')?.[0]

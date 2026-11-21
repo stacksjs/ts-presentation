@@ -1,5 +1,29 @@
 import { syntaxMask } from './syntax.ts'
 
+const diagramEntity = /#(\d+|[a-zA-Z][a-zA-Z0-9]*);/g
+const legacyEntityEncoding = new TextDecoder('windows-1252')
+
+export function decodeDiagramEntities(text: string): string {
+  return text.replace(diagramEntity, (source, name: string) => {
+    if (/^\d/.test(name)) {
+      const code = Number(name)
+      if (code >= 0x80 && code <= 0x9F) return legacyEntityEncoding.decode(Uint8Array.of(code))
+      if (code > 0x10FFFF || (code >= 0xD800 && code <= 0xDFFF) || code === 0xFFFE || code === 0xFFFF
+        || (code < 0x20 && code !== 0x9 && code !== 0xA && code !== 0xD)) return '\uFFFD'
+      return String.fromCodePoint(code)
+    }
+    // Pass a single entity to Bun's character reference decoder so diagram
+    // text around it never passes through Markdown formatting.
+    const entity = `&${name};`
+    const decoded = Bun.markdown.render(entity, {})
+    return decoded === entity ? source : decoded
+  })
+}
+
+export function maskDiagramEntities(text: string): string {
+  return text.replace(diagramEntity, entity => ' '.repeat(entity.length))
+}
+
 export interface Chronology {
   header: string
   title: string
@@ -22,7 +46,7 @@ export function sizeChronologySvg(svg: string | undefined, useMaxWidth: unknown)
   return svg?.replace(/^(<svg\b[^>]*\bviewBox="0 0 ([\d.]+) ([\d.]+)")/, '$1 width="$2" height="$3"')
 }
 
-export function readChronology(source: string | readonly string[], title: string, syntax: { singleQuotes?: boolean, gantt?: boolean } = {}): Chronology | undefined {
+export function readChronology(source: string | readonly string[], title: string, syntax: { singleQuotes?: boolean, gantt?: boolean, entities?: boolean } = {}): Chronology | undefined {
   const lines = (typeof source === 'string' ? source.split(/\r?\n/) : source).map(line => line.trim())
   const header = lines.findIndex(line => line && !/^(?:%%|#)/.test(line))
   if (header < 0) return
@@ -52,5 +76,11 @@ export function readChronology(source: string | readonly string[], title: string
     else if (accDesc !== undefined) chart.description = accDesc
     else chart.rows.push(row)
   }
-  return description ? undefined : chart
+  if (description) return
+  if (syntax.entities) {
+    chart.title = decodeDiagramEntities(chart.title)
+    chart.accessibleTitle = decodeDiagramEntities(chart.accessibleTitle)
+    chart.description = decodeDiagramEntities(chart.description)
+  }
+  return chart
 }

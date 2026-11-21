@@ -301,6 +301,32 @@ test('preserves leading hash and semicolon task labels and their dependency date
   expect(svg).toContain('># Review the release</tspan>')
 })
 
+test('decodes Mermaid entities in Gantt labels and keeps escaped task references connected', async () => {
+  const source = `gantt
+title Release #38; review
+accTitle: Ship #quot;today#quot;
+accDescr {
+  Draft #8594; publish
+}
+section Notes #middot; review
+Ship#58; #quot;today#quot; *literal* :release#58;api, 2026-03-06, 1d
+#35; Follow-up #CounterClockwiseContourIntegral; #notAnEntity; :followup, after release#58;api, 1d
+click release#58;api href "#agenda"`
+  const schedule = scheduleGantt(source)
+  expect(schedule?.sections).toEqual(['', 'Notes · review'])
+  expect(schedule?.tasks.map(({ id, name, start }) => [id, name, start])).toEqual([
+    ['release:api', 'Ship: "today" *literal*', Date.UTC(2026, 2, 6)],
+    ['followup', '# Follow-up ∳ #notAnEntity;', Date.UTC(2026, 2, 7)],
+  ])
+  const deck = parseDeck(['# Agenda', '', '~~~mermaid {securityLevel:"loose"}', source, '~~~'].join('\n'))
+  const html = await renderDeck(deck)
+  expect(html).toContain('>Release &amp; review</tspan>')
+  expect(html).toContain('>Ship &quot;today&quot;</title>')
+  expect(html).toContain('>Draft → publish</desc>')
+  expect(html).toContain('data-task-id="release:api"')
+  expect(html).toContain('href="#agenda"')
+})
+
 test('diagnoses unknown imported Gantt dependencies and renders the remaining schedule', async () => {
   const source = `gantt
 Review :review, after missing draft prior, 1d
@@ -479,6 +505,26 @@ test('dispatches gitGraph when its header and first commit share a line', () => 
   const svg = mermaid('gitGraph; commit id: "first; draft"; commit id: "publish"', 'history')!
   expect(svg).toContain('data-commit-id="first; draft"')
   expect(svg).toContain('data-parent-ids="first; draft"')
+})
+
+test('decodes GitGraph entities after splitting commands and escapes the result in SVG', async () => {
+  const source = `gitGraph; commit id:"first#59; draft" tag:"#quot;ready#quot;";
+title Release #38; review
+accDescr: Merge #60;review#62;
+branch release#47;review; commit id:"patch#46;1" msg:"#60;script#62; #amp;quot;"
+switch main; cherry-pick id:"patch#46;1"; merge release#47;review id:"publish" tag:"#10003;"`
+  const history = buildGitHistory(source)
+  expect(history?.branches.map(branch => branch.name)).toEqual(['main', 'release/review'])
+  expect(history?.commits[0].id).toBe('first; draft')
+  expect(history?.commits[1].message).toBe('<script> &quot;')
+  expect(history?.commits[2].picked).toBe('patch.1')
+  expect(history?.commits[3].parents.map(parent => parent.id)).toContain('patch.1')
+  const html = await renderDeck(parseDeck(['# Release', '', '~~~mermaid', source, '~~~'].join('\n')))
+  expect(html).toContain('>Release &amp; review</tspan>')
+  expect(html).toContain('>Merge &lt;review&gt;</desc>')
+  expect(html).toContain('>&quot;ready&quot;</tspan>')
+  expect(html).toContain('>✓</tspan>')
+  expect(html).toContain('data-commit-message="&lt;script&gt; &amp;quot;"')
 })
 
 test('preserves GitGraph declaration order for default orders and explicit ties', () => {

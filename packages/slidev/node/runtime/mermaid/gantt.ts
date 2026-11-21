@@ -1,7 +1,7 @@
 import type { GanttChartOptions, GanttMarkerStyle, GanttSchedule, GanttTask, GanttTaskCallback, GanttTaskTag, GanttWeekday } from 'ts-charts/diagrams'
 import { ganttChart, ganttDateParser, ganttDurationEnd, scheduleGantt as scheduleTasks } from 'ts-charts/diagrams'
 import type { MermaidOptions } from '../authoring-setup.ts'
-import { diagramFontFamily, diagramPixels, readChronology, sizeChronologySvg } from './chronology.ts'
+import { decodeDiagramEntities, diagramFontFamily, diagramPixels, readChronology, sizeChronologySvg } from './chronology.ts'
 import { ganttTheme } from './gantt-themes.ts'
 
 function isTag(value: string): value is GanttTaskTag {
@@ -86,11 +86,11 @@ function parseClick(line: string): { ids: string[], interaction: TaskInteraction
     }
     remaining = remaining.slice(clause.length).trimStart()
   }
-  return { ids: ids.split(',').map(id => id.trim()), interaction }
+  return { ids: ids.split(',').map(id => decodeDiagramEntities(id.trim())), interaction }
 }
 
 function parseGantt(source: string, now: number, options: Pick<GanttChartOptions, 'axisFormat' | 'timeZone'> & { interactionsEnabled?: boolean } = {}): GanttChartOptions | undefined {
-  const chart = readChronology(source, '', { gantt: true })
+  const chart = readChronology(source, '', { gantt: true, entities: true })
   if (!chart || !isGanttHeader(chart.header)) return
   const { axisFormat: configuredAxisFormat, timeZone, interactionsEnabled } = options
 
@@ -115,7 +115,7 @@ function parseGantt(source: string, now: number, options: Pick<GanttChartOptions
       case 'tickinterval': ticks = text; continue
       case 'excludes': exclusions.push(...text.split(/[\s,]+/).filter(Boolean)); continue
       case 'includes': inclusions.push(...text.split(/[\s,]+/).filter(Boolean)); continue
-      case 'section': if (!text) return; sections.push({ name: text.replace(/<\/?br(?:\s|\\t)*\/?>/gi, '<br>'), tasks: [] }); continue
+      case 'section': if (!text) return; sections.push({ name: decodeDiagramEntities(text).replace(/<\/?br(?:\s|\\t)*\/?>/gi, '<br>'), tasks: [] }); continue
       case 'weekday': {
         const day = text.toLowerCase()
         if (!isWeekday(day)) return
@@ -151,12 +151,12 @@ function parseGantt(source: string, now: number, options: Pick<GanttChartOptions
     if (segments.length < 1 || segments.length > 3 || segments.slice(0, -1).some(segment => !segment)) return
     const id = segments.length === 3 ? segments.shift() : undefined
     const [start, end] = segments.length === 2 ? segments : [undefined, segments[0]]
-    const task: GanttTask = { id, name, tags }
+    const task: GanttTask = { id: id && decodeDiagramEntities(id), name: decodeDiagramEntities(name), tags }
     const after = start && /^after\s+(.+)$/.exec(start)?.[1]
     const until = /^until\s+(.+)$/.exec(end)?.[1]
-    if (after) task.after = after.split(/\s+/)
+    if (after) task.after = after.split(/\s+/).map(decodeDiagramEntities)
     else if (start) task.start = start
-    if (until) task.until = until.split(/\s+/)
+    if (until) task.until = until.split(/\s+/).map(decodeDiagramEntities)
     else task.end = end
     sections.at(-1)!.tasks.push(task)
   }
