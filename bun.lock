@@ -59,8 +59,11 @@
       "version": "0.1.0",
     },
   },
+  "overrides": {
+    "@buddysh/buddy": "https://registry.pantry.dev/@buddysh/buddy@f5dfd38",
+  },
   "packages": {
-    "@buddysh/buddy": ["@buddysh/buddy@0.11.17", "", { "dependencies": { "prompts": "^2.4.2", "ts-pantry": "^0.11.64" }, "peerDependencies": { "@anthropic-ai/sdk": ">=0.117.1 <0.123.0" }, "optionalPeers": ["@anthropic-ai/sdk"], "bin": { "buddy": "./dist/bin/cli.js" } }, "sha512-OKHiFqymJLVwtgvg2BbNKLLoZB6Dm2xs+nwxo34SsPnDx3btrq6HFOa3Y+JsHexr64fK8VrPMIne2mNS+tEi3A=="],
+    "@buddysh/buddy": ["@buddysh/buddy@https://registry.pantry.dev/@buddysh/buddy@f5dfd38", { "dependencies": { "@stacksjs/clapp": "^0.2.17", "ts-pantry": "^0.11.64" }, "peerDependencies": { "@anthropic-ai/sdk": ">=0.117.1 <0.123.0" }, "optionalPeers": ["@anthropic-ai/sdk"], "bin": { "buddy": "./dist/bin/entry.js", "bud": "./dist/bin/stacks.js", "stacks": "./dist/bin/stacks.js" } }, "sha512-QkBpX4kEKRxpCgvmGMboI51GjENdcQk47BgES8fkoRDbUVdPG9GgkDhZW5mH1ppHtoXBy0A32nHWRIohBVvuCw=="],
 
     "@cwcss/crosswind": ["@cwcss/crosswind@0.2.19", "", { "dependencies": { "@stacksjs/clapp": "^0.2.0", "bunfig": "^0.15.17" }, "bin": { "crosswind": "./dist/cli.js" } }, "sha512-NswUZPNHbdkW4rxvmwjjIM7jyfQ/rr0X1J1uwjTUwixc3BXQs1Fk7pP5cC7MxkGGnmRTFs2O9J+U9tJ36ZJ7fQ=="],
 
@@ -154,13 +157,7 @@
 
     "create-ts-presentation-theme": ["create-ts-presentation-theme@workspace:packages/create-theme"],
 
-    "kleur": ["kleur@3.0.3", "", {}, "sha512-eTIzlVOSUR+JxdDFepEYcBMtZ9Qqdef+rnzWdRZuMbOywu5tO2w2N7rqjoANZ5k9vywhL6Br1VRjUIgTQx4E8w=="],
-
     "pickier": ["pickier@0.1.94", "", { "dependencies": { "@stacksjs/clapp": "^0.2.17", "@stacksjs/clarity": "^0.3.24" }, "optionalDependencies": { "@stacksjs/ts-spell-check": "^0.1.1" }, "bin": { "pickier": "./dist/bin/cli.js" } }, "sha512-ob7i7JjyMR1cp/B1x16KXSaMF/yIlYpZ6qiQTDRMehKK91IAWD6yLgUxisbl2bv0+roqhBf3A3PchXTgWcwvJw=="],
-
-    "prompts": ["prompts@2.4.2", "", { "dependencies": { "kleur": "^3.0.3", "sisteransi": "^1.0.5" } }, "sha512-NxNv/kLguCA7p3jE8oL2aEBsrJWgAakBpgmgK6lpPWV+WuOmY6r2/zbAVnP+T8bQlA0nzHXSJSJW0Hq7ylaD2Q=="],
-
-    "sisteransi": ["sisteransi@1.0.5", "", {}, "sha512-bLGGlR1QxBcynn2d5YmDX4MGjlZvy2MRBDRNHLJ8VI6l6+9FUiyTFNJ0IveOSP0bcXgVDPRcfGqA0pjaqUpfVg=="],
 
     "stx-router": ["stx-router@0.2.921", "", {}, "sha512-Jez2yg1LK5oGHGLOvZpaPIhOnZ5JX+nvNJxrwMj81kMgwwGiBdTSgNUyh2nposGhlT/ui2/LygPRnrp50y8XMA=="],
 

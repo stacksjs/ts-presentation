@@ -43,6 +43,9 @@
   "devDependencies": {
     "better-dx": "^0.2.15"
   },
+  "overrides": {
+    "@buddysh/buddy": "https://registry.pantry.dev/@buddysh/buddy@f5dfd38"
+  },
   "files": [
     "licenses",
     "README.md",
