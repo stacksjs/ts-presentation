@@ -1849,6 +1849,52 @@ test.skipIf(!chrome)('routes GitGraph connectors around intervening commit dots 
   }
 })
 
+test.skipIf(!chrome)('separates GitGraph fork crossings and keeps them clear of long commit labels', async () => {
+  const history = [
+    'commit id:"Prepare and validate the release candidate for all supported platforms"',
+    'branch review', 'commit id:"Reviewed"', 'checkout main',
+    'branch validation', 'commit id:"Validated"',
+  ].join('\n')
+  const graphs = ['LR', 'TB', 'BT'].map(direction => mermaid(`gitGraph ${direction}:\n${history}`, `fork-${direction}`, {
+    gitGraph: { parallelCommits: true, rotateCommitLabel: true },
+    themeVariables: { commitLabelBackground: '#f2f5ff' },
+  }))
+  expect(graphs.every(Boolean)).toBe(true)
+  const server = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response(`<!doctype html><meta charset="utf-8">${graphs.join('')}`, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    }),
+  })
+  const browser = new Bun.WebView({ width: 1100, height: 780, backend: { type: 'chrome', path: chrome!, url: false } })
+  try {
+    await browser.navigate(server.url.href)
+    const layouts = await browser.evaluate<{ separation: number, hitsLabel: boolean }[]>(`[...document.querySelectorAll('svg')].map((svg, index) => {
+      const paths = [...svg.querySelectorAll('.diagram-git-edge')]
+      const labels = [...svg.querySelectorAll('.diagram-git-label-box')].map(box => box.getBoundingClientRect())
+      const turns = paths.map(path => Number(/Q([\\d.]+) ([\\d.]+)/.exec(path.getAttribute('d'))[index === 0 ? 1 : 2]))
+      const hitsLabel = paths.some(path => {
+        const transform = path.getScreenCTM()
+        for (let distance = 0; distance < path.getTotalLength(); distance += 2) {
+          const { x, y } = path.getPointAtLength(distance).matrixTransform(transform)
+          if (labels.some(label => x > label.left && x < label.right && y > label.top && y < label.bottom)) return true
+        }
+        return false
+      })
+      return { separation: (turns[0] - turns[1]) * (index === 2 ? -1 : 1), hitsLabel }
+    })`)
+    expect(layouts).toHaveLength(3)
+    for (const layout of layouts) {
+      expect(layout.separation).toBeGreaterThanOrEqual(6)
+      expect(layout.hitsLabel).toBe(false)
+    }
+  }
+  finally {
+    browser.close()
+    await server.stop(true)
+  }
+})
+
 test.skipIf(!chrome)('applies scoped indexed CSS to imported Gantt and GitGraph diagrams', async () => {
   const schedule = [
     'gantt', 'excludes 2026-03-06', 'section Draft', 'Draft :draft, 2026-03-01, 7d', 'section Review',

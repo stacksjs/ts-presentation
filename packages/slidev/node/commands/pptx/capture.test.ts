@@ -35,6 +35,7 @@ it.skipIf(!chrome)('exports GitGraph, Gantt, and mind map shapes, paths, and lab
       '~~~mermaid', '---', 'config:', '  theme: redux', '  themeVariables:', '    commitLabelBackground: "#ecd9ff"', '---',
       'gitGraph', '  commit id: "start"', '  branch review',
       '  commit id: "change" type: REVERSE', '  checkout main',
+      '  branch validation', '  commit id: "validated"', '  checkout main',
       '  cherry-pick id: "change"', '  merge review tag: "Release"', '~~~', '',
       '---', '', '# Delivery schedule', '',
       '~~~mermaid', 'gantt', '  dateFormat YYYY-MM-DD', '  todayMarker off',
@@ -69,6 +70,7 @@ it.skipIf(!chrome)('exports GitGraph, Gantt, and mind map shapes, paths, and lab
     expect(graph).toContain('<a:custDash>')
     expect(graph.match(/<a:xfrm rot="2700000">/g)?.length).toBeGreaterThanOrEqual(4)
     expect(graph).toContain('>review</a:t>')
+    expect(graph).toContain('>validated</a:t>')
     expect(graph).toContain('>Release</a:t>')
     expect(graph).not.toContain('<p:pic>')
     expect(schedule).toContain('<a:prstGeom prst="roundRect">')
