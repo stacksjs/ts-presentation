@@ -45,7 +45,11 @@ jobs:
           archive=$(bun pm pack --destination "$smoke" --quiet)
           cd "$smoke"
           printf '{"private":true,"type":"module"}\n' > package.json
-          bun add --prefer-offline "$archive"
+          bun add --no-cache "$archive"
+          if grep -Fq '"data-uri-to-buffer"' bun.lock; then
+            printf 'Standalone installation pulled in the removed GIF dependency\n' >&2
+            exit 1
+          fi
           cat > slides.md <<'EOF'
           # Standalone chart build
 
