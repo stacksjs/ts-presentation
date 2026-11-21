@@ -712,10 +712,38 @@ function buildSlideIr(
             fill: fill.a ? { ...fill, a: fill.a * alpha * opacity } : undefined,
           }
         }) ?? []
-        if (tags.every(tag => tag !== undefined) && bodies.every(body => body !== undefined) && frames.every(frame => frame !== undefined)) {
+        const rules = math.rules?.map(({ rect, color, opacity: alpha, ellipse, dash }): IrBox | undefined => {
+          const visible = clipToSlide(rect, size)
+          const paint = withOpacity(parseColor(color, unparsed), opacity * alpha)
+          if (!visible || Math.abs(visible.w - rect.w) > 1e-6 || Math.abs(visible.h - rect.h) > 1e-6 || !paint) return
+          if (dash) {
+            const horizontal = dash.axis === 'horizontal'
+            const border: Border = { width: horizontal ? rect.h : rect.w, style: 'dashed', color: paint, dashes: dash.lengths }
+            return { kind: 'box', sourceId: node.id, rect, borders: horizontal ? [border, undefined, undefined, undefined] : [undefined, undefined, undefined, border] }
+          }
+          return { kind: 'box', sourceId: node.id, rect, fill: paint, ...(ellipse && { geometry: { kind: 'ellipse' } }) }
+        }) ?? []
+        const pictures = math.pictures?.map(picture => {
+          const visible = clipToSlide(picture.rect, size)
+          if (!node.pageRect || visible?.w !== picture.rect.w || visible.h !== picture.rect.h) return
+          return { ...picture, data: '' }
+        }) ?? []
+        if (tags.every(tag => tag !== undefined) && bodies.every(body => body !== undefined)
+          && frames.every(frame => frame !== undefined) && rules.every(rule => rule !== undefined) && pictures.every(picture => picture !== undefined)) {
           const [body, ...cells] = bodies
-          if (body) equation = { ...body, ...(tags.length ? { tags } : {}), ...(cells.length ? { cells } : {}), ...(frames.length ? { frames } : {}) }
+          if (body) equation = {
+            ...body, ...(tags.length && { tags }), ...(cells.length && { cells }), ...(frames.length && { frames }),
+            ...(rules.length && { rules }), ...(pictures.length && { pictures }),
+          }
         }
+      }
+    }
+    if (equation?.pictures?.length && node.pageRect) {
+      for (const picture of equation.pictures) {
+        requests.push({
+          sourceId: picture.sourceId, isolate: true, hideDescendants: false,
+          clip: { ...picture.rect, x: node.pageRect.x + picture.rect.x - node.rect.x, y: node.pageRect.y + picture.rect.y - node.rect.y },
+        })
       }
     }
     push({

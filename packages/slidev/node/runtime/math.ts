@@ -687,7 +687,7 @@ function arrayColumns(spec: string): { columns: ArrayColumn[], after: ArrayRule[
   return { columns, after }
 }
 
-function arrayRuleStyles(borders: [CellSide, ArrayRule[] | undefined][], minimum: number): string[] {
+function arrayRuleStyles(borders: [CellSide, ArrayRule[] | undefined][], minimum: number, dots: boolean): string[] {
   const styles: string[] = []
   const strokes: string[] = []
   const width = minimum ? `max(1px,${minimum}em)` : '1px'
@@ -714,7 +714,10 @@ function arrayRuleStyles(borders: [CellSide, ArrayRule[] | undefined][], minimum
       strokes.push(`${ink} ${position} / ${size} no-repeat border-box`)
     }
   }
-  if (strokes.length) styles.push(`background:${strokes.join(',')}`)
+  if (strokes.length) {
+    if (dots) strokes.unshift('var(--math-array-dot-ink) center 65% / var(--math-dot-step) 0.14em repeat-x content-box')
+    styles.push(`background:${strokes.join(',')}`)
+  }
   return styles
 }
 
@@ -3844,6 +3847,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const grid = aligned || cases || alignment.length > 0 || displayRows || gatherAlignment !== '' || position !== 'c' || jot !== undefined
     const rowRules = rows.reduce((count, entry) => count + entry.before.length, rules.length)
     const columnRules = layout.columns.reduce((count, column) => count + column.before.length, layout.after.length)
+    const decorated = rowRules || columnRules || rows.some(row => row.cells.some(cell => typeof cell === 'object'))
     const rectangular = grid || columnArray || tags || rowRules > 0 || rows.some(row => row.columns > row.cells.length)
     if (rectangular && columnCount * Math.max(1, rows.length) > 6000) throw new MathParseError('Math array has too many cells')
     if (rowRules * columnCount + columnRules * rows.length > 24000)
@@ -3936,13 +3940,17 @@ export function renderMath(source: string, display = false, configured: MathMacr
             styling.push(`--math-dot-step:${Number((0.26 + dots.spacing / 6).toFixed(4))}em`)
             if (grid) styling.push(`grid-column:span ${span}`)
           }
+          let marks = ''
           if (rowRules || columnRules) {
-            styling.push(...arrayRuleStyles([
+            const borders: [CellSide, ArrayRule[] | undefined][] = [
               ['left', layout.columns[index]?.before],
               ['right', index + span === columnCount ? layout.after : undefined],
               ['top', entry.before],
               ['bottom', rowIndex === rows.length - 1 ? rules : undefined],
-            ], minRule))
+            ]
+            styling.push(...arrayRuleStyles(borders, minRule, Boolean(dots)))
+            marks = borders.flatMap(([side, rules]) =>
+              rules?.length ? [`${side}:${rules.map(rule => rule[0]).join('')}`] : []).join(' ')
           }
           if (entry.arrow) styling.push('padding-block:0em')
           else if (compact || stretch !== 1 || moreRowSpace) styling.push(`padding-block:${pad}em`)
@@ -3961,7 +3969,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
           const frame = frameStart ? `<mspace data-equation-frame="${frameStart.span}" aria-hidden="true" width="0"/>` : ''
           const edges = emphasized ? (index === 0 ? ' data-empheq-start' : '')
             + (index + span === columnCount ? ' data-empheq-end' : '') : ''
-          return `<mtd${cellAttrs}${edges}${settings}>${grid ? `<mrow>${sized}</mrow>` : sized}${frame}</mtd>`
+          return `<mtd${cellAttrs}${edges}${settings}${marks ? ` data-math-array-rules="${marks}"` : ''}>${grid ? `<mrow>${sized}</mrow>` : sized}${frame}</mtd>`
         }).join('')
         const arrow = entry.arrow ? ` data-equation-arrow="${entry.arrow}"` : ''
         const continuation = entry.flushAbove || entry.flushBelow ? ' data-equation-continuation' : ''
@@ -3973,7 +3981,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
         return `${prose(rowIndex)}<mtr${arrow}${continuation}${frameRow}${margins}>${leqno ? cell : ''}${content}${leqno ? '' : cell}</mtr>`
       }).join('') + prose(rows.length)
       const baseline = position === 't' ? ' align="baseline 1"' : position === 'b' ? ' align="baseline -1"' : ''
-      const matrix = `<mtable${lines} data-math-array${align}${layoutClass}${gridLayout}${amsAlignment}${rowSpacing}${baseline}>${markup}</mtable>`
+      const matrix = `<mtable${lines} data-math-array${decorated ? ' data-math-array-decoration' : ''}${align}${layoutClass}${gridLayout}${amsAlignment}${rowSpacing}${baseline}>${markup}</mtable>`
       const sizedTable = compact ? mathSize(tableCellStyle, matrix) : matrix
       const table = cramped ? renderMarkup(crampedMath(sizedTable), style) : sizedTable
       if (displayRows) return table

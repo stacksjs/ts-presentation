@@ -1028,8 +1028,9 @@ math .math-frame { border: var(--math-box-rule, max(0.04em, var(--math-min-rule,
 math .math-vcenter > mtr > mtd { padding: 0; }
 math .math-alignment-axis > mtr > mtd { padding: 0; }
 math .math-array-dots {
+  --math-array-dot-ink: radial-gradient(circle closest-side, currentColor 70%, transparent 85%);
   min-inline-size: 1em;
-  background-image: radial-gradient(circle closest-side, currentColor 70%, transparent 85%);
+  background-image: var(--math-array-dot-ink);
   background-size: var(--math-dot-step) 0.14em;
   background-position: center 65%;
   background-repeat: repeat-x;
@@ -1039,7 +1040,7 @@ math .math-array-dots {
 }
 math .math-array-dots mo { opacity: 0; }
 @media (forced-colors: active) {
-  math .math-array-dots { background-image: none; }
+  math .math-array-dots { --math-array-dot-ink: linear-gradient(transparent, transparent); background-image: none; }
   math .math-array-dots mo { opacity: 1; }
 }
 @supports (grid-template-columns: subgrid) and (display: math) {

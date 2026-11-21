@@ -1,5 +1,5 @@
 // Adapted from Slidev v53.1.0. See licenses/Slidev-MIT.txt.
-import type { RawChartPart, RawChartRun, RawMathElement, RawMathFragment, RawMathFrame, RawMathSnapshot, RawNode, RawSlide, RawSnapshot, RawStyle } from './ir.ts'
+import type { RawChartPart, RawChartRun, RawMathElement, RawMathFragment, RawMathFrame, RawMathPicture, RawMathRule, RawMathSnapshot, RawNode, RawSlide, RawSnapshot, RawStyle } from './ir.ts'
 
 /**
  * The one function that runs inside the browser. Invariant: zero free variables.
@@ -82,8 +82,9 @@ export function collectSnapshot(options: {
   const overlappingMath = '[data-math-smash-operator], [data-math-cramped-lap]'
   const measuredMathBox = 'mpadded:is([data-math-transform-box="make"], [data-math-transform-box="raise"])'
   const graphicMathBox = 'mpadded:is([data-math-transform-box="rotate"], [data-math-transform-box="scale"], [data-math-transform-box="height"], [data-math-transform-box="total"])'
+  const decoratedArray = 'mtable[data-math-array-decoration]'
   const raisedMathBox = 'mtext.math-raised-box'
-  const positionedMath = `${overlappingMath}, ${measuredMathBox}, ${graphicMathBox}, ${raisedMathBox}`
+  const positionedMath = `${overlappingMath}, ${measuredMathBox}, ${graphicMathBox}, ${raisedMathBox}, ${decoratedArray}`
   const raisedMathBody = ':scope > span > span > math > mrow'
   function positionedMathInk(element: Element): Element | undefined {
     if (!element.matches(overlappingMath)) return
@@ -631,6 +632,75 @@ export function collectSnapshot(options: {
       if (width > 0 && height > 0) return relative({ left, top, width, height })
     }
 
+    function arrayPaint(cell: Element, style: CSSStyleDeclaration, box: DOMRect, opacity: number, scale: number): RawMathRule[] | undefined {
+      const result: RawMathRule[] = []
+      const dots = cell.classList.contains('math-array-dots') && style.backgroundImage.startsWith('radial-gradient(')
+      const layers = style.backgroundSize.split(/,\s*/)
+      let nextLayer = Number(dots)
+      const rules = cell.getAttribute('data-math-array-rules')?.split(' ') ?? []
+      for (const mark of rules) {
+        const [, side, pattern] = /^(left|right|top|bottom):([sd]+)$/.exec(mark) ?? []
+        if (!side || !pattern) return
+        const vertical = side === 'left' || side === 'right'
+        const far = side === 'right' || side === 'bottom'
+        const border = `border-${side}`
+        const single = pattern.length === 1
+        const computedWidth = Number.parseFloat(style.getPropertyValue(`${border}-width`))
+        const computedStyle = style.getPropertyValue(`${border}-style`)
+        if (single && (computedStyle === 'none' || computedStyle === 'hidden' || computedWidth === 0)) continue
+        if (single && computedStyle !== 'solid' && computedStyle !== 'dashed') return
+        const color = single ? style.getPropertyValue(`${border}-color`) : style.color
+        if (!color) return
+        for (const [index, value] of Array.from(pattern).entries()) {
+          const layer = single ? undefined : layers[nextLayer++]
+          if (!single && !(vertical ? /^[\d.]+px 100%$/ : /^100% [\d.]+px$/).test(layer ?? '')) return
+          const width = single ? computedWidth : Number.parseFloat(vertical ? layer! : layer!.slice(5))
+          if (!(width > 0)) return
+          const step = Math.max(Number.parseFloat(style.fontSize) * (vertical ? 0.2 : 0.25), width * 2)
+          const offset = (single ? 0 : (far ? pattern.length - 1 - index : index) * step) * scale
+          const weight = width * scale
+          const left = vertical ? far ? box.right - offset - weight : box.left + offset : box.left
+          const top = vertical ? box.top : far ? box.bottom - offset - weight : box.top + offset
+          const rect = relative({ left, top, width: vertical ? weight : box.width, height: vertical ? box.height : weight })
+          const dashed = single ? computedStyle === 'dashed' : value === 'd'
+          const length = single ? weight : scale
+          result.push({
+            rect, color, opacity,
+            ...(dashed && { dash: { axis: vertical ? 'vertical' : 'horizontal', lengths: [3 * length, 2 * length] } }),
+          })
+        }
+      }
+
+      if (dots) {
+        const [, rawStep, rawSize] = /^([\d.]+)px ([\d.]+)px$/.exec(layers[0]) ?? []
+        const first = (value: string) => value.split(/,\s*/, 1)[0]
+        if (!(Number(rawStep) > 0 && Number(rawSize) > 0)
+          || nextLayer !== layers.length || first(style.backgroundPosition) !== '50% 65%'
+          || first(style.backgroundRepeat) !== 'repeat-x'
+          || first(style.backgroundOrigin) !== 'content-box' || first(style.backgroundClip) !== 'content-box') return
+        const length = (value: string) => (Number.parseFloat(value) || 0) * scale
+        const left = box.left + length(style.borderLeftWidth) + length(style.paddingLeft)
+        const right = box.right - length(style.borderRightWidth) - length(style.paddingRight)
+        const top = box.top + length(style.borderTopWidth) + length(style.paddingTop)
+        const bottom = box.bottom - length(style.borderBottomWidth) - length(style.paddingBottom)
+        const step = Number(rawStep) * scale
+        const tileHeight = Number(rawSize) * scale
+        const diameter = Math.min(step, tileHeight) * 0.78
+        const center = (left + right) / 2
+        const sides = Math.floor((right - left - diameter) / (2 * step))
+        if (!Number.isFinite(sides) || sides > 160) return
+        for (let index = -sides; index <= sides; index++) {
+          const x = center + index * step - diameter / 2
+          const y = top + (bottom - top - tileHeight) * 0.65 + (tileHeight - diameter) / 2
+          result.push({ rect: relative({ left: x, top: y, width: diameter, height: diameter }), color: style.color, opacity, ellipse: true })
+        }
+      }
+      else if (style.backgroundImage !== 'none') {
+        if (!nextLayer || nextLayer !== layers.length || !/^(?:linear|repeating-linear)-gradient\(/.test(style.backgroundImage)) return
+      }
+      return result
+    }
+
     function intertextFragments(element: Element, data: RawMathElement, opacity: number, scale: number): RawMathFragment[] {
       const fontSize = Number.parseFloat(getComputedStyle(element).fontSize) * scale
       const fragments: RawMathFragment[] = []
@@ -685,9 +755,12 @@ export function collectSnapshot(options: {
     }
 
     function positionedMathFragments(element: Element, expression: RawMathElement, opacity: number, scale: number):
-      { cells: RawMathFragment[], rect: RawMathFragment['rect'] } | undefined {
+      { cells: RawMathFragment[], rect: RawMathFragment['rect'], rules?: RawMathRule[], pictures?: RawMathPicture[] } | undefined {
       if (!element.matches(positionedMath) && !element.querySelector(positionedMath)) return
+      const containsDecoratedArray = element.querySelector(decoratedArray) !== null
       const cells: RawMathFragment[] = []
+      const rules: RawMathRule[] = []
+      const pictures: RawMathPicture[] = []
       const bounds: DOMRect[] = []
       let pieces: { element: Element, expression: RawMathElement }[] = []
       let split = false
@@ -775,23 +848,76 @@ export function collectSnapshot(options: {
         const raw = raised === node ? data : data.children[0]
         if (element && raw.children.length === 1) return { element, expression: raw.children[0] }
       }
-      function visit(node: Element, data: RawMathElement): void {
+      function collectArray(table: Element, data: RawMathElement): boolean {
+        flush()
+        split = true
+        bounds.push(table.getBoundingClientRect())
+        for (const [rowIndex, row] of Array.from(table.children).entries()) {
+          if (row.localName !== 'mtr') return false
+          for (const [cellIndex, cell] of Array.from(row.children).entries()) {
+            if (cell.localName !== 'mtd' || rules.length > 1800) return false
+            const style = getComputedStyle(cell)
+            if (style.backgroundColor !== 'rgba(0, 0, 0, 0)' || style.filter !== 'none' || style.boxShadow !== 'none'
+              || style.clipPath !== 'none' || style.transform !== 'none' || Number(style.opacity) !== 1) return false
+            const decorations = arrayPaint(cell, style, cell.getBoundingClientRect(), opacity, scale)
+            if (!decorations) return false
+            rules.push(...decorations)
+            if (cell.classList.contains('math-array-dots') && style.backgroundImage.startsWith('radial-gradient(')) continue
+            const rowData = data.children[rowIndex]?.children[cellIndex]
+            if (!rowData || rowData.text.trim() || rowData.children.length !== cell.children.length) return false
+            const content: RawMathElement = {
+              name: 'mrow', text: '', children: rowData.children,
+              attributes: { style: `color:${style.color}` }, color: style.color,
+            }
+            add(Array.from(cell.children, ink => ink.getBoundingClientRect()), content, cell)
+          }
+        }
+        return true
+      }
+      function pictureFence(node: Element): boolean {
+        if (node.localName !== 'mo' || node.getAttribute('stretchy') !== 'true'
+          || !/^[()[\]{}|‖⟨⟩⌊⌋⌈⌉⟮⟯⎰⎱⟦⟧⦃⦄]$/u.test(node.textContent ?? '')) return false
+        const box = node.getBoundingClientRect()
+        if (!(box.width > 0 && box.height > 0)) return false
+        flush()
+        const sourceId = nextId++
+        node.setAttribute(options.idAttribute, String(sourceId))
+        pictures.push({ sourceId, rect: relative(box) })
+        bounds.push(box)
+        return true
+      }
+      function visit(node: Element, data: RawMathElement): boolean {
+        if (node.matches(decoratedArray)) return collectArray(node, data)
         const content = positionedContent(node, data)
         if (content) {
           flush()
           split = true
           add([content.element.getBoundingClientRect()], content.expression, content.element, content.graphic)
+          return true
         }
-        else if (node.localName === 'mrow' && !data.text.trim() && !Object.keys(data.attributes).length && node.querySelector(positionedMath)) {
-          for (const [index, child] of Array.from(node.children).entries()) visit(child, data.children[index])
+        const array = containsDecoratedArray && node.querySelector(decoratedArray)
+        if (array && data.attributes.class === 'math-alignment-axis' && node.children.length === 1) {
+          const cell = node.firstElementChild?.firstElementChild
+          const column = data.children[0]?.children[0]
+          if (cell?.children.length === 1 && column?.children.length === 1)
+            return visit(cell.children[0], column.children[0])
         }
-        else pieces.push({ element: node, expression: data })
+        const keys = Object.keys(data.attributes)
+        const plain = node.localName === 'mrow' && !keys.length
+        const fenced = array && node.localName === 'mrow' && keys.length === 1
+          && (keys[0] === 'data-math-delimiters' || keys[0] === 'data-math-cases')
+        const compact = array && node.localName === 'mstyle' && keys.every(key => key === 'scriptlevel' || key === 'displaystyle')
+        if ((plain || fenced || compact) && !data.text.trim() && node.querySelector(positionedMath)) {
+          return Array.from(node.children).every((child, index) =>
+            Boolean(array && pictureFence(child)) || visit(child, data.children[index]))
+        }
+        pieces.push({ element: node, expression: data })
+        return true
       }
-      visit(element, expression)
-      if (!split) return
+      if (!visit(element, expression) || !split) return
       flush()
       const rect = mathBounds(bounds)
-      if (rect && cells.length) return { cells, rect }
+      if (rect && cells.length) return { cells, rect, ...(rules.length && { rules }), ...(pictures.length && { pictures }) }
     }
 
     function mathProjection(presentation: Element, expression: RawMathElement, display: boolean, scale: number): RawMathSnapshot | undefined {
@@ -821,6 +947,8 @@ export function collectSnapshot(options: {
       const tags: RawMathFragment[] = []
       const measuredCells: RawMathFragment[] = []
       const frames: RawMathFrame[] = []
+      const rules: RawMathRule[] = []
+      const pictures: RawMathPicture[] = []
       const body: DOMRect[] = []
       let singleFormula: RawMathSnapshot | undefined
       for (const [index, row] of Array.from(table.children).entries()) {
@@ -903,6 +1031,8 @@ export function collectSnapshot(options: {
               ? positionedMathFragments(content, cellData.children[0], rowOpacity, scale) : undefined
             if (positioned) {
               measuredCells.push(...positioned.cells)
+              if (positioned.rules) rules.push(...positioned.rules)
+              if (positioned.pictures) pictures.push(...positioned.pictures)
               continue
             }
             const boxes = Array.from(cell.children, child => child.getBoundingClientRect())
@@ -920,7 +1050,10 @@ export function collectSnapshot(options: {
       const rect = mathBounds(body)
       if (!rect) return
       if (!positionedCells) return { expression, rect, display, tags }
-      if (measuredCells.length) return { rect, display, tags, cells: measuredCells, ...(frames.length ? { frames } : {}) }
+      if (measuredCells.length) return {
+        rect, display, tags, cells: measuredCells, ...(frames.length && { frames }),
+        ...(rules.length && { rules }), ...(pictures.length && { pictures }),
+      }
     }
 
     function walk(node: Node, parent: number, fromShadowRoot: boolean, inheritedOpacity: number, inheritedScale: number): void {
@@ -1051,10 +1184,15 @@ export function collectSnapshot(options: {
       const fragment = semantics?.localName === 'mrow' && el.getAttribute('class') === 'math-inline-fragment'
         && el.parentElement?.classList.contains('math-inline')
       const presentation = fragment ? semantics : semantics?.localName === 'semantics' && !el.hasAttribute('class') ? semantics.firstElementChild : undefined
-      if (presentation && !computed.getPropertyValue('--math-min-rule').trim()) {
-        const expression = mathExpression(presentation)
-        const source = expression && mathProjection(presentation, expression, el.getAttribute('display') === 'block', scale)
-        if (source) record.math = source
+      if (presentation) {
+        const customThickness = computed.getPropertyValue('--math-min-rule').trim()
+        const hasMeasuredRules = customThickness && presentation.querySelector(decoratedArray)
+          && !presentation.querySelector('mfrac, mroot, msqrt, menclose, .math-frame, .math-overline, .math-underline')
+        if (!customThickness || hasMeasuredRules) {
+          const expression = mathExpression(presentation)
+          const source = expression && mathProjection(presentation, expression, el.getAttribute('display') === 'block', scale)
+          if (source && (!customThickness || source.rules?.length)) record.math = source
+        }
       }
       if (el.tagName.toUpperCase() === 'IMG') {
         const image = el as HTMLImageElement

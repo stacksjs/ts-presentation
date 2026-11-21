@@ -131,6 +131,19 @@ export async function captureEditable(browser: Browser, canvas: SlideCanvas, sli
       const rect = clipToSlide(request?.clip ?? node.rect, { w: canvas.width, h: canvas.height })
       if (!rect) throw new Error('Artwork fell outside the canvas')
       node.data = await picture(browser, rect, request?.isolateId ?? node.sourceId, request?.hideDescendants ?? false, attribute)
+      if (node.kind === 'raster' && node.equation?.pictures) {
+        try {
+          for (const decoration of node.equation.pictures) {
+            const clip = requests.get(decoration.sourceId)?.clip
+            if (!clip) throw new Error('Missing equation delimiter bounds')
+            decoration.data = await picture(browser, clip, decoration.sourceId, false, attribute)
+          }
+        }
+        catch {
+          node.equation = undefined
+          warnings.push('could not isolate an equation delimiter')
+        }
+      }
       // The browser already cropped the picture to its visible geometry.
       if (node.kind === 'image') node.crop = undefined
     }

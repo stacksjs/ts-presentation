@@ -76,7 +76,7 @@ function shape(id: number, name: string, properties: string, body = ''): string 
   return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr${body ? ' txBox="1"' : ''}/><p:nvPr/></p:nvSpPr><p:spPr>${properties}</p:spPr>${body}</p:sp>`
 }
 
-function drawBox(box: IrBox, nextId: () => number): string {
+function drawBox(box: IrBox, nextId: () => number, name?: string): string {
   const borders = box.borders ?? []
   const first = borders[0]
   const uniform = first && borders.length === 4 && borders.every(border =>
@@ -87,7 +87,7 @@ function drawBox(box: IrBox, nextId: () => number): string {
     const shadow = box.shadow
     const effects = shadow ? `<a:effectLst><a:outerShdw blurRad="${Math.round(shadow.blur * EMU_PER_PX)}" dist="${Math.round(shadow.offset * EMU_PER_PX)}" dir="${Math.round((shadow.angle + 360) % 360 * 60000)}">${rgb(shadow.color)}</a:outerShdw></a:effectLst>` : ''
     const paint = box.gradient ? gradientFill(box.gradient) : fill(box.fill)
-    result += shape(nextId(), box.geometry ? 'Chart shape' : 'Box', transform(box.rect, box.rotation) + boxGeometry(box, Boolean(uniform)) + paint + line(uniform ? first : undefined) + effects)
+    result += shape(nextId(), name ?? (box.geometry ? 'Chart shape' : 'Box'), transform(box.rect, box.rotation) + boxGeometry(box, Boolean(uniform)) + paint + line(uniform ? first : undefined) + effects)
   }
   if (!uniform) {
     borders.forEach((border, side) => {
@@ -101,12 +101,12 @@ function drawBox(box: IrBox, nextId: () => number): string {
         h: horizontal ? thickness : h,
       }
       if (border.style === 'solid') {
-        result += shape(nextId(), 'Border', transform(edge) + rectShape(0, edge) + fill(border.color) + line())
+        result += shape(nextId(), name ?? 'Border', transform(edge) + rectShape(0, edge) + fill(border.color) + line())
       }
       else {
         const stroke = horizontal ? extents(edge.w, 0, edge.x, edge.y + thickness / 2)
           : extents(0, edge.h, edge.x + thickness / 2, edge.y)
-        result += shape(nextId(), 'Border', `${stroke}<a:prstGeom prst="line"><a:avLst/></a:prstGeom>${line(border)}`)
+        result += shape(nextId(), name ?? 'Border', `${stroke}<a:prstGeom prst="line"><a:avLst/></a:prstGeom>${line(border)}`)
       }
     })
   }
@@ -173,7 +173,7 @@ function mathShape({ display, expression, rect, rotation }: IrEquation, id: numb
   return shape(id, name, transform(rect, rotation) + rectShape(0, rect) + fill() + line(), body)
 }
 
-function drawEquation(equation: NonNullable<IrRaster['equation']>, id: number, relationship: string, pictureRect: Rect, nextId: () => number): string {
+function drawEquation(equation: NonNullable<IrRaster['equation']>, id: number, relationship: string, pictureRect: Rect, nextId: () => number, image: (data: string) => string): string {
   const decorations = equation.frames?.map(({ rect, border, fill: background }) => {
     if (!border && !background) return ''
     // DrawingML centers the stroke and CSS draws it within the measured box.
@@ -182,7 +182,10 @@ function drawEquation(equation: NonNullable<IrRaster['equation']>, id: number, r
     const path = { x: rect.x + inset, y: rect.y + inset, w: rect.w - width, h: rect.h - width }
     return shape(nextId(), 'Equation frame', transform(path) + rectShape(0, path) + fill(background) + line(border))
   }).join('') ?? ''
-  const editable = decorations + mathShape(equation, id, 'Equation')
+  const strokes = equation.rules?.map(rule => drawBox(rule, nextId, 'Equation rule')).join('') ?? ''
+  const delimiters = equation.pictures?.map(picture =>
+    embeddedPicture(nextId(), image(picture.data), picture.rect, 'Equation delimiter')).join('') ?? ''
+  const editable = decorations + strokes + delimiters + mathShape(equation, id, 'Equation')
     + (equation.cells?.map(cell => mathShape(cell, nextId(), 'Equation cell')).join('') ?? '')
     + (equation.tags?.map(tag => mathShape(tag, nextId(), 'Equation tag')).join('') ?? '')
   const picture = `<a:blipFill><a:blip r:embed="${relationship}"/><a:stretch><a:fillRect/></a:stretch></a:blipFill>`
@@ -207,7 +210,7 @@ export function drawEditable(
     const id = next()
     const relationship = image(node.data)
     return node.equation
-      ? drawEquation(node.equation, id, relationship, node.rect, next)
+      ? drawEquation(node.equation, id, relationship, node.rect, next, image)
       : embeddedPicture(id, relationship, node.rect, `Picture of ${node.reason}`)
   }).join('')
   const background = slide.background ? `<p:bg><p:bgPr>${fill(slide.background)}<a:effectLst/></p:bgPr></p:bg>` : ''

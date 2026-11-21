@@ -2247,6 +2247,21 @@ $$
 \begin{pmatrix}a&b&c\\\hdotsfor[1.5]{3}\\d&e&f\end{pmatrix}
 $$
 
+$$
+\left[\begin{array}{|r::l|}
+\hline
+1&x\\
+\hline\hdashline
+\hdotsfor[0.8]{2}\\
+3&-y\\
+\hline
+\end{array}\right]
+$$
+
+\begin{align}
+u&=\begin{array}{c|c}p&q\\r&s\end{array}\tag{R}
+\end{align}
+
 ---
 
 # Nested multiline equation
@@ -2257,6 +2272,10 @@ $$
 
 $$
 B=\frac{\splitfrac{x+y+z}{+w}}{n}
+$$
+
+$$
+\frac{\begin{array}{c|c}a&b\\c&d\end{array}}{2}
 $$
 
 ---
@@ -2301,13 +2320,25 @@ $$`)
     const first = /<m:eqArr>(.*?)<\/m:eqArr>/.exec(cases)?.[1] ?? ''
     expect(first.match(/>&amp;<\/m:t>/g)).toHaveLength(6)
     expect(first).toContain('>otherwise</m:t>')
-    expect(arrays.match(/<a14:m>/g)).toHaveLength(1)
-    expect(arrays.match(/<p:pic>/g)).toHaveLength(1)
+    expect(arrays.match(/<a14:m>/g)).toHaveLength(5)
+    expect(arrays).not.toContain('<p:pic>')
+    expect(arrays).toContain('name="Equation rule"')
     expect(arrays).toContain('<m:dPr><m:begChr m:val="["/><m:endChr m:val="]"/></m:dPr><m:e><m:m>')
     expect(arrays.match(/<m:mr>/g)).toHaveLength(2)
-    expect(dotted.match(/<p:pic>/g)).toHaveLength(1)
-    expect(dotted).not.toContain('<a14:m>')
-    expect(multiline.match(/<p:pic>/g)).toHaveLength(2)
+    const [dottedMatrix, ruledMatrix, alignment] = [...dotted.matchAll(/<mc:Choice\b[^>]*>(.*?)<\/mc:Choice>/g)].map(([, choice]) => choice)
+    expect(dotted.match(/<mc:Fallback><p:sp>/g)).toHaveLength(3)
+    expect(dottedMatrix.match(/<a14:m>/g)).toHaveLength(6)
+    expect(dottedMatrix.match(/name="Equation delimiter"/g)).toHaveLength(2)
+    expect(dottedMatrix).toContain('<a:prstGeom prst="ellipse">')
+    expect(ruledMatrix.match(/<a14:m>/g)).toHaveLength(4)
+    expect(ruledMatrix.match(/name="Equation delimiter"/g)).toHaveLength(2)
+    expect(ruledMatrix).toContain('<a:prstGeom prst="ellipse">')
+    expect(ruledMatrix).toContain('<a:custDash>')
+    expect(ruledMatrix).toContain('>−</m:t>')
+    expect(alignment).toContain('>(R)</m:t>')
+    expect(alignment).toContain('>q</m:t>')
+    expect(alignment).toContain('name="Equation rule"')
+    expect(multiline.match(/<p:pic>/g)).toHaveLength(3)
     expect(multiline).not.toContain('<a14:m>')
     expect(prose.match(/<a14:m>/g)).toHaveLength(2)
     expect(prose.match(/<mc:Fallback><p:sp>/g)).toHaveLength(2)
