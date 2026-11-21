@@ -10,6 +10,6 @@
     "./style": "./runtime/player.css"
   },
   "dependencies": {
-    "@stacksjs/stx": "https://registry.pantry.dev/@stacksjs/stx@6fd929f"
+    "@stacksjs/stx": "https://registry.pantry.dev/@stacksjs/stx@bf7ed0c"
   }
 }

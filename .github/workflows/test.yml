@@ -22,10 +22,10 @@ jobs:
           install: 'false'
           packages: bun.com@1.4.4
       - run: bun install --frozen-lockfile
-      - name: Verify removed third-party packages stay out of the workspace
+      - name: Verify removed dependencies stay out of the workspace
         run: |
-          if grep -Eq '"(prompts|@types/dom-speech-recognition|data-uri-to-buffer)"' bun.lock; then
-            printf 'The workspace lockfile includes a removed third-party package\n' >&2
+          if grep -Eq '"(prompts|@types/dom-speech-recognition|data-uri-to-buffer|bun-plugin-stx)"' bun.lock; then
+            printf 'The workspace lockfile includes a removed dependency\n' >&2
             exit 1
           fi
       - name: Install the MathML font used by Chrome on Linux
@@ -44,7 +44,7 @@ jobs:
         run: bun test --timeout 45000 --reporter junit --reporter-outfile "$RUNNER_TEMP/bun-test.xml"
       - name: Verify every mapped Slidev case ran
         run: bun test/verify-slidev-report.ts "$RUNNER_TEMP/bun-test.xml"
-      - name: Build charts from the packed CLI
+      - name: Build charts and STX components from the packed CLI
         run: |
           smoke=$(mktemp -d "$RUNNER_TEMP/presentation-package.XXXXXX")
           trap 'rm -rf "$smoke"' EXIT
@@ -52,12 +52,21 @@ jobs:
           cd "$smoke"
           printf '{"private":true,"type":"module"}\n' > package.json
           bun add --no-cache "$archive"
-          if grep -Fq '"data-uri-to-buffer"' bun.lock; then
-            printf 'Standalone installation pulled in the removed GIF dependency\n' >&2
+          if grep -Eq '"(prompts|@types/dom-speech-recognition|data-uri-to-buffer|bun-plugin-stx)"' bun.lock; then
+            printf 'The standalone lockfile includes a removed dependency\n' >&2
             exit 1
           fi
+          mkdir components
+          cat > components/Standalone.stx <<'EOF'
+          <template>
+            <p v-if="props.visible" data-smoke="stx-visible">Standalone {{ props.name }}</p>
+            <p v-else data-smoke="stx-hidden">Hidden branch</p>
+          </template>
+          EOF
           cat > slides.md <<'EOF'
           # Standalone chart build
+
+          <Standalone name="component" :visible="true" />
 
           ~~~mermaid
           gantt
@@ -93,4 +102,9 @@ jobs:
               exit 1
             fi
           done
+          grep -Fq 'data-smoke="stx-visible">Standalone component</p>' dist/index.html
+          if grep -Fq 'data-smoke="stx-hidden"' dist/index.html; then
+            printf 'The packed CLI rendered the hidden STX branch\n' >&2
+            exit 1
+          fi
           test ! -e node_modules/@ts-charts/hierarchy
