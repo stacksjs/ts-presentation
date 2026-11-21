@@ -110,7 +110,10 @@ function drawRun(run: IrRun, value: string, hyperlink: (href: string) => Hyperli
 
 function drawText(node: IrText, id: number, hyperlink: (href: string) => HyperlinkRef | undefined): string {
   const singleLine = node.lineCount === 1
-  const slack = node.valign === 'middle' || node.besideArtwork ? 0 : singleLine ? 12 : 2
+  // Viewers may wrap even a no-wrap box when a substituted font widens the
+  // line. Use spare room in the measured container to keep it on one line.
+  const lineRoom = Math.max(12, Math.min(node.rect.w * 0.12, node.elementRect.w - node.rect.w))
+  const slack = node.valign === 'middle' || node.besideArtwork ? 0 : singleLine ? lineRoom : 2
   const x = node.rect.x - (node.align === 'center' ? slack / 2 : node.align === 'right' ? slack : 0)
   const align = { left: 'l', center: 'ctr', right: 'r', justify: 'just' }[node.align]
   const spacing = singleLine ? '' : `<a:lnSpc><a:spcPts val="${Math.max(0, Math.min(158400, Math.round(node.lineHeight * PT_PER_PX * 100)))}"/></a:lnSpc>`
@@ -124,7 +127,7 @@ function drawText(node: IrText, id: number, hyperlink: (href: string) => Hyperli
   paragraphs = paragraphs.endsWith(paragraph) && paragraphs !== paragraph
     ? paragraphs.slice(0, -paragraph.length)
     : `${paragraphs}</a:p>`
-  const body = `<p:txBody><a:bodyPr lIns="0" rIns="0" tIns="0" bIns="0" wrap="${singleLine ? 'none' : 'square'}" anchor="${node.valign === 'middle' ? 'ctr' : 't'}"><a:noAutofit/></a:bodyPr><a:lstStyle/>${paragraphs}</p:txBody>`
+  const body = `<p:txBody><a:bodyPr lIns="0" rIns="0" tIns="0" bIns="0" wrap="${singleLine || node.noWrap ? 'none' : 'square'}" anchor="${node.valign === 'middle' ? 'ctr' : 't'}"><a:noAutofit/></a:bodyPr><a:lstStyle/>${paragraphs}</p:txBody>`
   return shape(id, 'Text', extents(node.rect.w + slack, node.rect.h, x, node.rect.y) + rectShape(0, node.rect) + fill() + line(), body)
 }
 

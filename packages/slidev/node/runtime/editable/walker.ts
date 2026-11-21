@@ -1,5 +1,5 @@
 // Adapted from Slidev v53.1.0. See licenses/Slidev-MIT.txt.
-import type { RawMathElement, RawMathFragment, RawMathFrame, RawMathSnapshot, RawNode, RawSlide, RawSnapshot, RawStyle } from './ir.ts'
+import type { RawChartPart, RawMathElement, RawMathFragment, RawMathFrame, RawMathSnapshot, RawNode, RawSlide, RawSnapshot, RawStyle } from './ir.ts'
 
 /**
  * The one function that runs inside the browser. Invariant: zero free variables.
@@ -359,6 +359,132 @@ export function collectSnapshot(options: {
         w: rect.width,
         h: rect.height,
       }
+    }
+
+    function chartArtwork(svg: SVGSVGElement): RawChartPart[] | undefined {
+      const parts: RawChartPart[] = []
+      const clips = new Map(Array.from(svg.querySelectorAll<SVGClipPathElement>('clipPath[id]'), clip => [clip.id, clip]))
+      let count = 0
+
+      function scaleOf(matrix: DOMMatrix | null): number | undefined {
+        if (matrix && matrix.is2D !== false && Math.abs(matrix.b) < 1e-6 && Math.abs(matrix.c) < 1e-6
+          && matrix.a > 0 && Math.abs(matrix.a - matrix.d) < 1e-6)
+          return matrix.a
+      }
+
+      function contained(box: DOMRect, clip: DOMRect, stroke = 0): boolean {
+        const tolerance = 0.35
+        return box.left - stroke >= clip.left - tolerance && box.top - stroke >= clip.top - tolerance
+          && box.right + stroke <= clip.right + tolerance && box.bottom + stroke <= clip.bottom + tolerance
+      }
+
+      function clipBounds(element: SVGGraphicsElement, path: string, outer: DOMRect): DOMRect | undefined {
+        const id = /^url\("?#([\w-]+)"?\)$/.exec(path)?.[1]
+        const clip = id ? clips.get(id) : undefined
+        const rect = clip?.firstElementChild as SVGRectElement | null | undefined
+        // Treemap label clips are axis-aligned rectangles in the enclosing group's units.
+        if (!clip || clip.children.length !== 1 || rect?.localName !== 'rect'
+          || clip.clipPathUnits.baseVal !== 1 || clip.hasAttribute('transform') || rect.hasAttribute('transform')) return
+        const computed = getComputedStyle(rect)
+        if (computed.transform !== 'none' || computed.rotate !== 'none' || computed.scale !== 'none' || computed.translate !== 'none'
+          || !['auto', '0px'].includes(computed.rx) || !['auto', '0px'].includes(computed.ry)) return
+        const matrix = element.getScreenCTM()
+        const scale = scaleOf(matrix)
+        if (!matrix || scale === undefined) return
+        const bounds = rect.getBBox()
+        const x = bounds.x * scale + matrix.e
+        const y = bounds.y * scale + matrix.f
+        const left = Math.max(x, outer.left)
+        const top = Math.max(y, outer.top)
+        return new DOMRect(left, top,
+          Math.max(0, Math.min(x + bounds.width * scale, outer.right) - left),
+          Math.max(0, Math.min(y + bounds.height * scale, outer.bottom) - top))
+      }
+
+      function simplePaint(style: CSSStyleDeclaration): boolean {
+        return style.filter === 'none' && style.backdropFilter === 'none' && style.mixBlendMode === 'normal'
+          && style.maskImage === 'none' && !style.transform.startsWith('matrix3d(')
+          && style.getPropertyValue('marker-start') === 'none'
+          && style.getPropertyValue('marker-mid') === 'none' && style.getPropertyValue('marker-end') === 'none'
+      }
+
+      function readLabel(element: SVGTextElement, style: CSSStyleDeclaration, scale: number, clip: DOMRect): boolean {
+        const lines: Extract<RawChartPart, { kind: 'text' }>['lines'] = []
+        const sources = element.children.length ? Array.from(element.children) : [element]
+        if (element.children.length && Array.from(element.childNodes).some(node => node.nodeType === 3 && node.textContent?.trim())) return false
+        const align = style.textAnchor === 'middle' ? 'center' : style.textAnchor === 'end' ? 'right' : 'left'
+        const fill = style.fill
+        const opacity = Number(style.fillOpacity)
+        const textStyle = intern(style, scale, true)
+        const typography = ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing', 'textDecorationLine', 'textTransform'] as const
+        if (fill === 'none' || opacity === 0) return true
+        if (style.stroke !== 'none' || style.textShadow !== 'none' || style.writingMode !== 'horizontal-tb'
+          || style.direction !== 'ltr' || Number.parseFloat(style.fontSize) <= 0) return false
+        for (const line of sources) {
+          if (line !== element && (line.localName !== 'tspan' || line.children.length)) return false
+          if (line.hasAttribute('textLength') || line.hasAttribute('rotate')) return false
+          const lineStyle = getComputedStyle(line)
+          if (lineStyle.visibility !== 'visible' || lineStyle.display === 'none' || Number(lineStyle.opacity) === 0) continue
+          if (typography.some(property => lineStyle[property] !== style[property]) || lineStyle.textAnchor !== style.textAnchor
+            || lineStyle.fill !== fill || lineStyle.fillOpacity !== style.fillOpacity || lineStyle.stroke !== 'none'
+            || lineStyle.textShadow !== 'none' || Number(lineStyle.opacity) !== 1 || !simplePaint(lineStyle)
+            || (line !== element && (lineStyle.clipPath !== 'none' || lineStyle.transform !== 'none'
+              || lineStyle.rotate !== 'none' || lineStyle.scale !== 'none' || lineStyle.translate !== 'none'))) return false
+          const text = (line.textContent ?? '').replace(/\s+/g, ' ').trim()
+          if (!text) continue
+          const box = line.getBoundingClientRect()
+          if (!contained(box, clip)) return false
+          lines.push({ rect: relative(box), text })
+        }
+        if (lines.length) {
+          resolveStack(style.fontFamily)
+          parts.push({ kind: 'text', lines, style: textStyle, fill, opacity, align })
+        }
+        return true
+      }
+
+      function collect(element: Element, outerClip: DOMRect, depth = 0): boolean {
+        if (++count > 12_000 || depth > 32) return false
+        if (['title', 'desc', 'style', 'clipPath', 'defs'].includes(element.localName)) return true
+        if (element.namespaceURI !== 'http://www.w3.org/2000/svg' || !['g', 'text', 'rect'].includes(element.localName)) return false
+        const graphic = element as SVGGraphicsElement
+        const style = getComputedStyle(element)
+        if (style.display === 'none' || Number(style.opacity) === 0) return true
+        // Group opacity is composited after its children paint, which cannot be
+        // reproduced by turning down the opacity of overlapping Office shapes.
+        if (Number(style.opacity) !== 1 || !simplePaint(style)) return false
+        const clip = style.clipPath === 'none' ? outerClip : clipBounds(graphic, style.clipPath, outerClip)
+        if (!clip) return false
+        if (element.localName === 'g') return Array.from(element.children).every(child => collect(child, clip, depth + 1))
+        if (style.visibility !== 'visible') return true
+        const scale = scaleOf(graphic.getScreenCTM())
+        if (scale === undefined) return false
+        if (element.localName === 'text') return readLabel(element as SVGTextElement, style, scale, clip)
+        if (style.strokeDasharray !== 'none' || style.vectorEffect !== 'none'
+          || !['auto', '0px'].includes(style.rx) || !['auto', '0px'].includes(style.ry)) return false
+        const box = element.getBoundingClientRect()
+        if (!box.width || !box.height) return true
+        if (style.stroke !== 'none' && !/^(?:0|[\d.]+px)$/.test(style.strokeWidth)) return false
+        const strokeWidth = style.stroke === 'none' || Number(style.strokeOpacity) === 0 ? 0 : Number.parseFloat(style.strokeWidth) * scale
+        if (!Number.isFinite(strokeWidth) || !contained(box, clip, strokeWidth / 2)) return false
+        parts.push({
+          kind: 'rect', rect: relative(box), fill: style.fill, fillOpacity: Number(style.fillOpacity),
+          stroke: style.stroke, strokeOpacity: Number(style.strokeOpacity), strokeWidth,
+        })
+        return true
+      }
+
+      const bounds = svg.getBoundingClientRect()
+      const style = getComputedStyle(svg)
+      if (!simplePaint(style) || style.clipPath !== 'none') return
+      for (let ancestor = svg.parentElement; ancestor && ancestor !== container; ancestor = ancestor.parentElement) {
+        const parentStyle = getComputedStyle(ancestor)
+        if (parentStyle.overflowX === 'visible' && parentStyle.overflowY === 'visible') continue
+        const parent = ancestor.getBoundingClientRect()
+        if ((parentStyle.overflowX !== 'visible' && (bounds.left < parent.left - 0.35 || bounds.right > parent.right + 0.35))
+          || (parentStyle.overflowY !== 'visible' && (bounds.top < parent.top - 0.35 || bounds.bottom > parent.bottom + 0.35))) return
+      }
+      if (Array.from(svg.children).every(element => collect(element, bounds)) && parts.length) return parts
     }
 
     function mathBounds(boxes: DOMRect[]) {
@@ -760,10 +886,13 @@ export function collectSnapshot(options: {
         }
         else if (/^(https?:|mailto:|\/\/)/i.test(href)) record.href = (el as HTMLAnchorElement).href
       }
-      if (el.tagName.toUpperCase() === 'SVG' && el.querySelector('foreignObject'))
-        // Mermaid puts its labels in <foreignObject> HTML with no <text>
-        // element; the normalizer routes these to a picture.
-        record.hasForeignObject = true
+      if (record.tag === 'SVG') {
+        if (el.querySelector('foreignObject')) record.hasForeignObject = true
+        if (!record.hasForeignObject && effectiveOpacity === 1 && el.getAttribute('data-diagram-kind') === 'treemap') {
+          const parts = chartArtwork(el as SVGSVGElement)
+          if (parts) record.chartParts = parts
+        }
+      }
 
       // `::marker` is a pseudo-element, so a bullet has no text node. Reading
       // `content` alone recovers only custom markers: Chromium reports it as

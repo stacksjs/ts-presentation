@@ -98,6 +98,20 @@ describe('presentation links', () => {
 })
 
 describe('unit conversions', () => {
+  it('gives a centered single line font substitution room without moving its anchor', async () => {
+    const heading: IrText = {
+      ...textNode([{ text: 'Release investment', fontSize: 52, fontFamily: 'Arial' }]),
+      rect: { x: 100, y: 45, w: 400, h: 60 },
+      elementRect: { x: 0, y: 45, w: 600, h: 60 },
+      align: 'center',
+    }
+    const xml = await slideXml([slide([heading])])
+    expect(xml).toContain('<a:off x="723900" y="428625"/>')
+    expect(xml).toContain('<a:ext cx="4267200" cy="571500"/>')
+    expect(xml).toContain('wrap="none"')
+    expect(xml).toContain('<a:pPr algn="ctr">')
+  })
+
   it('writes font size in points, not pixels', async () => {
     const xml = await slideXml([
       slide([

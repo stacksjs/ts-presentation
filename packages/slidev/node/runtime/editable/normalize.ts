@@ -558,6 +558,61 @@ function buildSlideIr(
     }
   }
 
+  function emitChart(node: RawNode, style: RawStyle | undefined): boolean {
+    if (!node.chartParts?.length || !style || style.boxShadow !== 'none' || hasDecoration(node)
+      || rasterReasonFor({ ...node, tag: 'DIV' }, style)) return false
+    const result: IrNode[] = []
+    const sourceId = node.id
+    const link = linkFor(node)
+    const insideSlide = (rect: Rect, stroke = 0) => {
+      const tolerance = 0.35
+      return rect.x - stroke >= -tolerance && rect.y - stroke >= -tolerance
+        && rect.x + rect.w + stroke <= size.w + tolerance && rect.y + rect.h + stroke <= size.h + tolerance
+    }
+
+    for (const part of node.chartParts) {
+      if (part.kind === 'rect') {
+        if (!insideSlide(part.rect, part.strokeWidth / 2)) return false
+        const fill = part.fill === 'none' ? undefined : parseColor(part.fill)
+        const stroke = part.strokeWidth > 0 ? parseColor(part.stroke) : undefined
+        if ((part.fill !== 'none' && !fill) || (part.strokeWidth > 0 && !stroke)) return false
+        const box: IrBox = { kind: 'box', sourceId, rect: part.rect }
+        const background = withOpacity(fill, part.fillOpacity)
+        const outline = withOpacity(stroke, part.strokeOpacity)
+        if (isVisible(background)) box.fill = background
+        if (isVisible(outline)) {
+          const border: Border = { width: part.strokeWidth, color: outline!, style: 'solid' }
+          box.borders = [border, border, border, border]
+        }
+        if (box.fill || box.borders) result.push(box)
+        continue
+      }
+      const labelStyle = styles[part.style]
+      if (!labelStyle || !part.lines.length || !parseColor(part.fill)) return false
+      const rects = part.lines.map(line => line.rect)
+      const rect = boundsOf(rects)
+      if (!insideSlide(rect)) return false
+      const anchor = part.align === 'left' ? 0 : part.align === 'right' ? 1 : 0.5
+      const origin = rects[0].x + rects[0].w * anchor
+      const lineHeight = rects.length > 1 ? rects[1].y - rects[0].y : rect.h
+      // A DrawingML text box preserves one shared anchor and line pitch.
+      if (lineHeight <= 0 || rects.some((line, index) => Math.abs(line.x + line.w * anchor - origin) > 0.8
+        || Math.abs(line.y - rects[0].y - lineHeight * index) > 0.8)) return false
+      const runs = part.lines.map(({ text }, index) => ({
+        ...runFrom(text, { ...labelStyle, color: part.fill }, fontResolution, undefined, link, part.opacity),
+        breakBefore: index > 0,
+      }))
+      result.push({
+        kind: 'text', sourceId, rect, elementRect: rect, lineCount: rects.length,
+        align: part.align, valign: 'middle', lineHeight, noWrap: true, runs,
+      })
+    }
+
+    // Keep a single picture fallback if any visible SVG feature needs it.
+    for (const item of result) push(item, node)
+    return result.length > 0
+  }
+
   /** Whether a picture was actually emitted for this element. */
   function emitRaster(node: RawNode, reason: RasterReason): boolean {
     // A pseudo-element has no DOM node to screenshot, so it alone is captured
@@ -748,6 +803,7 @@ function buildSlideIr(
     }
 
     const style = styleOf(node)
+    if (emitChart(node, style)) return
     const reason = rasterReason(node, style)
     // Treat the element as rasterized only when a picture was actually placed:
     // a zero-sized wrapper has no box of its own while its positioned
@@ -881,6 +937,10 @@ function buildSlideIr(
       return
     }
     const style = styleOf(node)
+    if (emitChart(node, style)) {
+      out.push({ ...node, tag: '#artwork' })
+      return
+    }
     const reason = rasterReason(node, style)
     // An inline <svg> icon still becomes a picture, but only if it has a box;
     // otherwise its subtree is walked as usual rather than dropped.

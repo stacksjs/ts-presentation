@@ -118,6 +118,11 @@ export type RawMathSnapshot = {
   frames?: RawMathFrame[]
 } & ({ expression: RawMathElement, cells?: never } | { cells: RawMathFragment[], expression?: never })
 
+/** Browser-measured SVG artwork in document paint order. */
+export type RawChartPart =
+  | { kind: 'rect', rect: Rect, fill: string, fillOpacity: number, stroke: string, strokeOpacity: number, strokeWidth: number }
+  | { kind: 'text', lines: { rect: Rect, text: string }[], style: number, fill: string, opacity: number, align: 'left' | 'center' | 'right' }
+
 export interface RawNode {
   /** Index into `RawSnapshot.nodes`, and the value of `data-slidev-export-id`. */
   id: number
@@ -148,6 +153,7 @@ export interface RawNode {
   math?: RawMathSnapshot
   /** An `SVG` carrying `<foreignObject>` (as Mermaid renders), so its labels are HTML. No PowerPoint renderer draws that; it has to be rasterized. */
   hasForeignObject?: boolean
+  chartParts?: RawChartPart[]
   /** Reached through `el.shadowRoot`. Mermaid diagrams live in one. */
   fromShadowRoot?: boolean
   /** Opacity compounded from every ancestor, present only when below 1. DrawingML has no group opacity, so a wrapper's transparency is folded into each descendant's colors. */
@@ -259,6 +265,8 @@ export interface IrText extends IrBase {
   elementRect: Rect
   /** Distinct line-box tops. One means the box must not be allowed to re-wrap. */
   lineCount: number
+  /** The source already positioned every line, including multiline SVG labels. */
+  noWrap?: boolean
   align: 'left' | 'center' | 'right' | 'justify'
   /** Defaults to top, since the box is measured from the glyphs; middle is for chip labels, whose box is the decoration rather than the ink. */
   valign?: 'top' | 'middle'

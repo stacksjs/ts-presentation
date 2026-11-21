@@ -20,7 +20,8 @@ frame per reveal by default. Pass `--without-clicks` for one frame per slide.
 Use `--with-clicks` for progressive PNG frames. The browser build keeps live
 code and interactive components available.
 
-`pptx-editable` creates editable text and boxes. Single-layer sRGB linear
+`pptx-editable` creates editable text and boxes. Supported treemap cells and
+labels become editable rectangles and text boxes. Single-layer sRGB linear
 gradients can retain their angle and color stops as editable fills. Layered
 backgrounds, gradients clipped to text, and complex artwork such as SVG,
 equations, and video frames use separate pictures. Deck-local static

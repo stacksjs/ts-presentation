@@ -25,6 +25,64 @@ it('accepts native PNG and JPEG data URIs and sends mismatches or SVG through br
   expect(dataPicture('data:image/svg+xml;base64,PHN2Zy8+')).toBeUndefined()
 })
 
+it.skipIf(!chrome)('keeps treemap rectangles and formatted multiline labels editable in PowerPoint', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-treemap-'))
+  const canvas = { width: 960, height: 540 }
+  try {
+    const entry = join(root, 'slides.md')
+    await Bun.write(entry, [
+      '# Release investment', '',
+      '~~~mermaid', '---', 'config:', '  treemap:', '    nodeHeight: 26', "    valueFormat: '$0,0'", '---',
+      'treemap-beta', '"Platform"', '  "Authoring experience": 62000:::accent',
+      '  "Performance and reliability for complex presentations": 38000',
+      '"Delivery"', '  "Web export": 36000', '  "PowerPoint": 24000',
+      'classDef accent fill:#e97451,stroke:#102030,stroke-width:2,color:#283951;', '~~~', '',
+      '---', '', '# Product allocation', '',
+      '~~~charts', 'type: treemap', 'height: 240', 'showValues: false', 'nodes:',
+      '  - label: Foundations', '    value: 18', '  - label: Reporting', '    value: 10', '~~~', '',
+      '---', '', '# Composited allocation', '',
+      '~~~mermaid', 'treemap-beta', '"Data":::translucent', '  "Streaming": 61', '  "Storage": 39',
+      'classDef translucent opacity:0.45;', '~~~',
+    ].join('\n'))
+    const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
+    const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
+    const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
+    if (status) throw new Error(stderr)
+
+    const frames: PowerPointFrame[] = []
+    await captureFrames({ root: join(root, 'dist'), executable: chrome!, scale: 1, canvas, editable: true, withClicks: false }, frame => { frames.push(frame) })
+    expect(frames).toHaveLength(3)
+    const first = frames[0].editable?.nodes ?? []
+    const accent = first.find(node => node.kind === 'box' && node.fill?.r === 233 && node.fill.g === 116 && node.fill.b === 81)
+    expect(accent?.kind).toBe('box')
+    if (accent?.kind !== 'box') throw new Error('The treemap leaf lost its editable rectangle')
+    expect(accent.rect.w).toBeGreaterThan(100)
+    expect(accent.rect.y).toBeGreaterThan(120)
+    expect(accent.borders?.[0]?.color).toEqual({ r: 16, g: 32, b: 48, a: 1 })
+    const wrapped = first.find(node => node.kind === 'text' && node.runs.map(run => run.text).join(' ') === 'Performance and reliability for complex presentations')
+    expect(wrapped).toMatchObject({ kind: 'text', align: 'center', noWrap: true })
+    expect(wrapped?.kind === 'text' && wrapped.lineCount).toBeGreaterThan(1)
+    expect(first.some(node => node.kind === 'raster')).toBe(false)
+
+    const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Editable treemaps' }))
+    const imported = parts.get('ppt/slides/slide1.xml')?.toString() ?? ''
+    const native = parts.get('ppt/slides/slide2.xml')?.toString() ?? ''
+    const composite = parts.get('ppt/slides/slide3.xml')?.toString() ?? ''
+    expect(imported).toContain('$62,000')
+    expect(imported).toContain('Authoring experience')
+    expect(imported).toContain('<a:br/>')
+    expect(imported).toContain('val="E97451"')
+    expect(imported).not.toContain('<p:pic>')
+    expect(native).toContain('Foundations')
+    expect(native).not.toContain('<p:pic>')
+    expect(composite).toContain('Composited allocation')
+    expect(composite).toContain('<p:pic>')
+  }
+  finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}, 45_000)
+
 it.skipIf(!chrome)('navigates linked equation references and exports their formatted tags as editable math', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-equation-reference-'))
   const canvas = { width: 960, height: 540 }
