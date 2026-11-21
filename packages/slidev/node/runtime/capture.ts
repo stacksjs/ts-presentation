@@ -247,21 +247,28 @@ export async function captureFrames(options: CaptureOptions, onFrame: (frame: Po
           return copy.textContent.trim()
         }).join('\\n')).filter(Boolean).join('\\n\\n')
         const bounds = active.getBoundingClientRect()
-        const links = [...active.querySelectorAll('a[href]')].flatMap(link => {
+        const links = [...active.querySelectorAll('a[href]')].flatMap((link, linkId) => {
           const value = link.getAttribute('href').trim()
           const click = link.getAttribute('data-slide-click')
-          const internal = /^#slide-[1-9]\\d*$/.test(value) && link.hasAttribute('data-slide-link')
+          const svg = link.closest('svg')
+          const chartJump = svg && link.classList.contains('diagram-gantt-link') && /^#slide-[1-9]\\d*(?:\\/\\d+)?$/.test(value)
+          const internal = chartJump || (/^#slide-[1-9]\\d*$/.test(value) && link.hasAttribute('data-slide-link'))
           if ((!internal && !/^(https?:|mailto:|\\/\\/)/i.test(value)) || getComputedStyle(link).visibility !== 'visible'
             || link.closest('[inert], [hidden], [data-reveal-hidden], [data-switch-hidden]')) return []
-          const href = internal ? value + (click && /^\\d+$/.test(click) ? '/' + click : '') : URL.parse(value, document.baseURI)?.href
+          const step = !chartJump && click && /^\\d+$/.test(click) ? '/' + click : ''
+          const href = internal ? value + step : URL.parse(value, document.baseURI)?.href
           if (!href) return []
-          const inArtwork = !!link.closest('math, .katex, svg')
+          if (svg) link.setAttribute('data-presentation-export-link', String(linkId))
+          const inArtwork = Boolean(svg || link.closest('math, .katex'))
           return [...link.getClientRects()].flatMap(rect => {
             const x = Math.max(bounds.left, rect.left)
             const y = Math.max(bounds.top, rect.top)
             const width = Math.min(bounds.right, rect.right) - x
             const height = Math.min(bounds.bottom, rect.bottom) - y
-            return width > 0 && height > 0 ? [{ href, label: link.textContent.trim() || href, x: x - bounds.left, y: y - bounds.top, width, height, inArtwork }] : []
+            return width > 0 && height > 0 ? [{
+              href, label: link.textContent.trim() || href, x: x - bounds.left, y: y - bounds.top, width, height, inArtwork,
+              ...(svg ? { artworkLinkId: linkId } : {}),
+            }] : []
           })
         })
         return { title: active.getAttribute('aria-label') || '', notes, links }

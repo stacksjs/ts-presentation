@@ -141,6 +141,8 @@ export type RawChartPaint = string | {
   stops: { position: number, color: string, opacity: number }[]
 }
 
+export interface RawChartLink { href: string, artworkLinkId?: number }
+
 /** Browser-measured SVG artwork in document paint order. */
 export type RawChartPart =
   | {
@@ -149,10 +151,12 @@ export type RawChartPart =
     rotation?: number, visibleBounds?: Rect,
     dashes?: number[], cap?: Border['cap'], join?: Border['join'],
     shadow?: { rect: Rect, dx: number, dy: number, deviation: number, color: string, opacity: number },
+    link?: RawChartLink,
   }
   | {
     kind: 'text', lines: { rect: Rect, runs: RawChartRun[] }[],
     align: 'left' | 'center' | 'right', rotation?: number, visibleBounds?: Rect,
+    link?: RawChartLink,
   }
   | { kind: 'picture', sourceId: number, rect: Rect }
 
@@ -255,10 +259,13 @@ interface IrBase {
   rect: Rect
   /** The `RawNode.id` this came from. Only for diagnostics. */
   sourceId: number
+  /** Identifies the SVG anchor when an editable chart part carries its hyperlink. */
+  artworkLinkId?: number
 }
 
 export interface IrBox extends IrBase {
   kind: 'box'
+  link?: string
   fill?: Rgba
   gradient?: LinearGradient
   /**

@@ -98,6 +98,56 @@ it.skipIf(!chrome)('exports GitGraph, Gantt, and mind map shapes, paths, and lab
   }
 }, 45_000)
 
+it.skipIf(!chrome)('keeps Gantt task hyperlinks on editable bars and labels with clickable raster fallback', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-gantt-links-'))
+  const canvas = { width: 960, height: 540 }
+  try {
+    const entry = join(root, 'slides.md')
+    await Bun.write(entry, [
+      '# Delivery plan', '',
+      '```mermaid', '---', 'config:', '  securityLevel: loose', '---',
+      'gantt', '  todayMarker off', '  Draft :draft, 2030-01-07, 2d',
+      '  Review :review, after draft, 1d', '  Callback task :notify, after review, 1d',
+      '  Relative documentation :docs, after notify, 1d',
+      '  click draft href "https://example.test/review?view=plan&mode=summary"',
+      '  click review href "#slide-2"', '  click notify call delivery.notify()', '  click docs href "./review.html"', '```',
+      '', '---', '', '# Review notes', '',
+      'Destination slide for the review task.',
+      '', '---', '', '# Raster schedule', '',
+      '```mermaid', '---', 'config:', '  securityLevel: loose',
+      '  themeCSS: ".diagram-gantt-bar { filter: blur(1px); }"', '---',
+      'gantt', '  todayMarker off', '  Raster draft :draft, 2030-01-07, 2d',
+      '  click draft href "https://example.test/raster"', '```',
+    ].join('\n'))
+    const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
+    const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
+    const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
+    if (status) throw new Error(stderr)
+    const frames: PowerPointFrame[] = []
+    await captureFrames({ root: join(root, 'dist'), executable: chrome!, scale: 1, canvas, editable: true, withClicks: false }, frame => { frames.push(frame) })
+    expect(frames).toHaveLength(3)
+    const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Gantt task links' }))
+    const editable = parts.get('ppt/slides/slide1.xml')!.toString()
+    const links = parts.get('ppt/slides/_rels/slide1.xml.rels')!.toString()
+    const raster = parts.get('ppt/slides/slide3.xml')!.toString()
+    const rasterLinks = parts.get('ppt/slides/_rels/slide3.xml.rels')!.toString()
+    expect(editable).not.toContain('<p:pic>')
+    for (const label of ['Draft', 'Review', 'Callback task', 'Relative documentation'])
+      expect(editable).toContain(`>${label}</a:t>`)
+    expect(editable.match(/<a:hlinkClick\b/g)).toHaveLength(4)
+    expect(editable).toMatch(/<a:rPr [^>]*u="sng"[^>]*>.*?<a:hlinkClick [^>]+\/>.*?<a:t xml:space="preserve">Draft<\/a:t>/)
+    expect(editable.match(/name="Box"><a:hlinkClick\b/g)).toHaveLength(2)
+    expect(editable.match(/action="ppaction:\/\/hlinksldjump"/g)).toHaveLength(2)
+    expect(links).toMatch(/relationships\/hyperlink" Target="https:\/\/example\.test\/review\?view=plan&amp;mode=summary" TargetMode="External"/)
+    expect(links).toMatch(/relationships\/slide" Target="slide2\.xml"/)
+    expect(links).not.toContain('review.html')
+    expect(raster).toContain('<p:pic>')
+    expect(raster.match(/<a:hlinkClick\b/g)).toHaveLength(1)
+    expect(rasterLinks).toContain('Target="https://example.test/raster" TargetMode="External"')
+  }
+  finally { await rm(root, { recursive: true, force: true }) }
+}, 45_000)
+
 it.skipIf(!chrome)('exports Neo GitGraph gradient outlines and shadows as editable PowerPoint effects', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-neo-gitgraph-'))
   const canvas = { width: 960, height: 540 }

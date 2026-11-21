@@ -74,11 +74,13 @@ function boxGeometry(box: IrBox, stroked: boolean): string {
   return `<a:custGeom><a:avLst/><a:gdLst/><a:ahLst/><a:cxnLst/><a:rect l="0" t="0" r="r" b="b"/><a:pathLst><a:path w="${Math.round(box.rect.w * EMU_PER_PX)}" h="${Math.round(box.rect.h * EMU_PER_PX)}" fill="${box.fill || box.gradient ? 'norm' : 'none'}" stroke="${Number(stroked)}">${commands}</a:path></a:pathLst></a:custGeom>`
 }
 
-function shape(id: number, name: string, properties: string, body = ''): string {
-  return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr${body ? ' txBox="1"' : ''}/><p:nvPr/></p:nvSpPr><p:spPr>${properties}</p:spPr>${body}</p:sp>`
+function shape(id: number, name: string, properties: string, body = '', link?: HyperlinkRef): string {
+  const action = drawHyperlink(link)
+  const tail = action ? `>${action}</p:cNvPr>` : '/>'
+  return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"${tail}<p:cNvSpPr${body ? ' txBox="1"' : ''}/><p:nvPr/></p:nvSpPr><p:spPr>${properties}</p:spPr>${body}</p:sp>`
 }
 
-function drawBox(box: IrBox, nextId: () => number, name?: string): string {
+function drawBox(box: IrBox, nextId: () => number, name?: string, link?: HyperlinkRef): string {
   const borders = box.borders ?? []
   const first = borders[0]
   const uniform = first && borders.length === 4 && borders.every(border =>
@@ -89,7 +91,7 @@ function drawBox(box: IrBox, nextId: () => number, name?: string): string {
     const shadow = box.shadow
     const effects = shadow ? `<a:effectLst><a:outerShdw blurRad="${Math.round(shadow.blur * EMU_PER_PX)}" dist="${Math.round(shadow.offset * EMU_PER_PX)}" dir="${Math.round((shadow.angle + 360) % 360 * 60000)}">${rgb(shadow.color)}</a:outerShdw></a:effectLst>` : ''
     const paint = box.gradient ? gradientFill(box.gradient) : fill(box.fill)
-    result += shape(nextId(), name ?? (box.geometry ? 'Chart shape' : 'Box'), transform(box.rect, box.rotation) + boxGeometry(box, Boolean(uniform)) + paint + line(uniform ? first : undefined) + effects)
+    result += shape(nextId(), name ?? (box.geometry ? 'Chart shape' : 'Box'), transform(box.rect, box.rotation) + boxGeometry(box, Boolean(uniform)) + paint + line(uniform ? first : undefined) + effects, '', link)
   }
   if (!uniform) {
     borders.forEach((border, side) => {
@@ -205,7 +207,7 @@ export function drawEditable(
   let id = 1
   const next = () => ++id
   const shapes = slide.nodes.map((node) => {
-    if (node.kind === 'box') return drawBox(node, next)
+    if (node.kind === 'box') return drawBox(node, next, undefined, node.link ? hyperlink(node.link) : undefined)
     if (node.kind === 'text') return drawText(node, next(), hyperlink)
     if (node.kind === 'image') {
       return embeddedPicture(next(), image(node.data, node.format), node.rect, node.alt ?? 'Image', node.link ? hyperlink(node.link) : undefined, node.crop)

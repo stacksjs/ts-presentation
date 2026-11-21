@@ -607,7 +607,10 @@ function buildSlideIr(
         const fill = chartPaint(part.fill, part.fillOpacity)
         const stroke = part.strokeWidth > 0 ? chartPaint(part.stroke, part.strokeOpacity) : {}
         if (!fill || !stroke) return false
-        const box: IrBox = { kind: 'box', sourceId, rect: part.rect, radius: part.radius, rotation: part.rotation }
+        const box: IrBox = {
+          kind: 'box', sourceId, rect: part.rect, radius: part.radius, rotation: part.rotation,
+          ...(part.link && { link: part.link.href, artworkLinkId: part.link.artworkLinkId }),
+        }
         if (part.ellipse) box.geometry = { kind: 'ellipse' }
         else if (part.path) {
           const commands = svgPath(part.path.data, part.path.scale, part.path.x, part.path.y)
@@ -651,7 +654,7 @@ function buildSlideIr(
         for (const [runIndex, fragment] of line.runs.entries()) {
           const labelStyle = styles[fragment.style]
           if (!labelStyle || !isVisible(parseColor(fragment.fill))) return false
-          const run = runFrom(fragment.text, { ...labelStyle, color: fragment.fill }, fontResolution, undefined, link, fragment.opacity)
+          const run = runFrom(fragment.text, { ...labelStyle, color: fragment.fill }, fontResolution, undefined, part.link?.href ?? link, fragment.opacity)
           if (lineIndex > 0 && runIndex === 0) run.breakBefore = true
           runs.push(run)
         }
@@ -659,6 +662,7 @@ function buildSlideIr(
       result.push({
         kind: 'text', sourceId, rect, elementRect: rect, lineCount: rects.length,
         align: part.align, valign: 'middle', lineHeight, noWrap: true, rotation: part.rotation, runs,
+        ...(part.link && { artworkLinkId: part.link.artworkLinkId }),
       })
     }
 

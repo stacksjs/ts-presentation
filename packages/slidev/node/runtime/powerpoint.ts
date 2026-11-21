@@ -14,6 +14,7 @@ export interface FrameLink {
   width: number
   height: number
   inArtwork?: boolean
+  artworkLinkId?: number
 }
 
 export type PowerPointFrame = {
@@ -173,8 +174,10 @@ export function createPowerPoint(frames: readonly PowerPointFrame[], options: Po
     else {
       shapes = embeddedPicture(2, image(frame.image), { x: 0, y: 0, w: width, h: height }, frame.title)
     }
-    // Links inside raster artwork need their own hit areas even in an editable deck.
-    shapes += (frame.links ?? []).filter(link => (!frame.editable || link.inArtwork) && validRectangle(link)).map((link) => {
+    // Editable shapes and labels already carry their links. Keep hit areas for artwork that uses a picture.
+    const nativeLinks = new Set(frame.editable?.nodes.map(node => node.artworkLinkId))
+    shapes += (frame.links ?? []).filter(link => (!frame.editable || link.inArtwork)
+      && (link.artworkLinkId === undefined || !nativeLinks.has(link.artworkLinkId)) && validRectangle(link)).map((link) => {
       const action = drawHyperlink(hyperlink(link.href))
       return action ? `<p:sp><p:nvSpPr><p:cNvPr id="${++shapeId}" name="${xml(link.label)}">${action}</p:cNvPr><p:cNvSpPr/><p:nvPr/></p:nvSpPr>
       <p:spPr>${extents(link.width, link.height, link.x, link.y)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:solidFill><a:srgbClr val="FFFFFF"><a:alpha val="0"/></a:srgbClr></a:solidFill><a:ln><a:noFill/></a:ln></p:spPr></p:sp>` : ''

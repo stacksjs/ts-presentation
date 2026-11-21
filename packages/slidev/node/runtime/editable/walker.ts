@@ -1,5 +1,5 @@
 // Adapted from Slidev v53.1.0. See licenses/Slidev-MIT.txt.
-import type { RawChartPaint, RawChartPart, RawChartRun, RawMathElement, RawMathFragment, RawMathFrame, RawMathPicture, RawMathRule, RawMathSnapshot, RawNode, RawSlide, RawSnapshot, RawStyle } from './ir.ts'
+import type { RawChartLink, RawChartPaint, RawChartPart, RawChartRun, RawMathElement, RawMathFragment, RawMathFrame, RawMathPicture, RawMathRule, RawMathSnapshot, RawNode, RawSlide, RawSnapshot, RawStyle } from './ir.ts'
 
 /**
  * The one function that runs inside the browser. Invariant: zero free variables.
@@ -544,7 +544,7 @@ export function collectSnapshot(options: {
         return runs
       }
 
-      function readLabel(element: SVGTextElement, style: CSSStyleDeclaration, matrix: DOMMatrix, scale: number, clip: DOMRect): boolean {
+      function readLabel(element: SVGTextElement, style: CSSStyleDeclaration, matrix: DOMMatrix, scale: number, clip: DOMRect, link?: RawChartLink): boolean {
         const lines: Extract<RawChartPart, { kind: 'text' }>['lines'] = []
         const sources = element.children.length ? Array.from(element.children) : [element]
         const align = style.textAnchor === 'middle' ? 'center' : style.textAnchor === 'end' ? 'right' : 'left'
@@ -563,19 +563,22 @@ export function collectSnapshot(options: {
           const runs = inlineLabel(element, style, scale)
           if (!runs) return false
           const rect = relative(rotated ? beforeRotation(bounds, bounds, matrix, scale) : visible)
-          if (runs.length) parts.push({ kind: 'text', lines: [{ rect, runs }], align, ...rotationInfo })
+          if (runs.length) parts.push({ kind: 'text', lines: [{ rect, runs }], align, ...rotationInfo, ...(link && { link }) })
           return true
         }
         if (fill === 'none' || opacity === 0) return true
         if (element.children.length && Array.from(element.childNodes).some(node => node.nodeType === 3 && node.textContent?.trim())) return false
         const textStyle = intern(style, scale, true)
-        const typography = ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing', 'textDecorationLine', 'textTransform'] as const
+        const typography = ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing', 'textTransform'] as const
         for (const line of sources) {
           if (line !== element && (line.localName !== 'tspan' || line.children.length)) return false
           if (line.hasAttribute('textLength') || line.hasAttribute('rotate')) return false
           const lineStyle = getComputedStyle(line)
           if (lineStyle.visibility !== 'visible' || lineStyle.display === 'none' || Number(lineStyle.opacity) === 0) continue
+          // Text decoration paints through tspans even when their computed value is none.
+          const decoration = lineStyle.textDecorationLine
           if (typography.some(property => lineStyle[property] !== style[property]) || lineStyle.textAnchor !== style.textAnchor
+            || (decoration !== 'none' && decoration !== style.textDecorationLine)
             || lineStyle.fill !== fill || lineStyle.fillOpacity !== style.fillOpacity || lineStyle.stroke !== 'none'
             || lineStyle.textShadow !== 'none' || Number(lineStyle.opacity) !== 1 || !simplePaint(lineStyle)
             || (line !== element && (lineStyle.clipPath !== 'none' || lineStyle.transform !== 'none'
@@ -589,12 +592,22 @@ export function collectSnapshot(options: {
         }
         if (lines.length) {
           resolveStack(style.fontFamily)
-          parts.push({ kind: 'text', lines, align, ...rotationInfo })
+          parts.push({ kind: 'text', lines, align, ...rotationInfo, ...(link && { link }) })
         }
         return true
       }
 
-      function collect(element: Element, outerClip: DOMRect, depth = 0): boolean {
+      function chartLink(element: Element): RawChartLink | undefined {
+        if (element.closest('[inert], [hidden], [data-reveal-hidden], [data-switch-hidden]')) return
+        const raw = element.getAttribute('href')?.trim() ?? ''
+        const href = /^#slide-[1-9]\d*(?:\/\d+)?$/.test(raw) && element.classList.contains('diagram-gantt-link') ? raw
+          : /^(?:https?:|mailto:|\/\/)/i.test(raw) ? URL.parse(raw, document.baseURI)?.href : undefined
+        if (!href) return
+        const source = element.getAttribute('data-presentation-export-link')
+        return source && /^\d+$/.test(source) ? { href, artworkLinkId: Number(source) } : { href }
+      }
+
+      function collect(element: Element, outerClip: DOMRect, depth = 0, link?: RawChartLink): boolean {
         if (++count > 12_000 || depth > 32) return false
         if (['title', 'desc', 'style', 'clipPath', 'defs'].includes(element.localName)) return true
         if (element.localName === 'foreignObject' && element.hasAttribute('data-mindmap-icon')
@@ -610,24 +623,31 @@ export function collectSnapshot(options: {
           parts.push({ kind: 'picture', sourceId, rect: relative(bounds) })
           return true
         }
-        if (element.namespaceURI !== 'http://www.w3.org/2000/svg' || !['g', 'text', 'rect', 'circle', 'ellipse', 'path', 'polygon', 'line'].includes(element.localName)) return false
+        if (element.namespaceURI !== 'http://www.w3.org/2000/svg' || !['a', 'g', 'text', 'rect', 'circle', 'ellipse', 'path', 'polygon', 'line'].includes(element.localName)) return false
         const graphic = element as SVGGraphicsElement
         const style = getComputedStyle(element)
         const opacity = Number(style.opacity)
         if (style.display === 'none' || opacity === 0) return true
-        const isShape = element.localName !== 'g' && element.localName !== 'text'
+        const group = element.localName === 'g' || element.localName === 'a'
+        const isShape = !group && element.localName !== 'text'
         if (!simplePaint(style, isShape)) return false
         const clip = style.clipPath === 'none' ? outerClip : clipBounds(graphic, style.clipPath, outerClip)
         if (!clip) return false
         // Opacity on a group applies after painting the group, including overlaps.
-        if (element.localName === 'g') return opacity === 1 && Array.from(element.children).every(child => collect(child, clip, depth + 1))
+        if (group) {
+          if (element.localName === 'a') {
+            if (link) return false
+            link = chartLink(element)
+          }
+          return opacity === 1 && Array.from(element.children).every(child => collect(child, clip, depth + 1, link))
+        }
         if (style.visibility !== 'visible') return true
         const tag = element.localName
         const preset = ['rect', 'ellipse', 'circle'].includes(tag)
         const matrix = graphic.getScreenCTM()
         const scale = scaleOf(matrix, preset || tag === 'text')
         if (!matrix || scale === undefined) return false
-        if (element.localName === 'text') return opacity === 1 && readLabel(element as SVGTextElement, style, matrix, scale, clip)
+        if (element.localName === 'text') return opacity === 1 && readLabel(element as SVGTextElement, style, matrix, scale, clip, link)
         if (style.vectorEffect !== 'none') return false
         const box = element.getBoundingClientRect()
         if (preset && (!box.width || !box.height)) return true
@@ -643,6 +663,7 @@ export function collectSnapshot(options: {
         const part: ChartShape = {
           kind: 'shape', rect: relative(box), fill: fillPaint, fillOpacity: Number(style.fillOpacity) * opacity,
           stroke: strokePaint, strokeOpacity: Number(style.strokeOpacity) * opacity, strokeWidth,
+          ...(link && { link }),
         }
         if (style.filter !== 'none') {
           if (opacity !== 1 || scaleOf(matrix) === undefined) return false
