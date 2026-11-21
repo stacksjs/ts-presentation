@@ -115,7 +115,7 @@ async function fractionRule({ data, rect, sourceId }: { data: string, rect: Rect
       bottom = Math.max(bottom, y + 1)
     }
   }
-  if (right - left < Math.max(2, width * 0.75) || bottom - top > height / 3)
+  if (right - left < Math.max(2, width * 0.75) || top === 0 || bottom === height)
     throw new Error('The fraction did not produce a horizontal rule')
   // Use each row's center alpha to retain the thickness of antialiased hairlines.
   const center = Math.floor((left + right) / 2)

@@ -2310,10 +2310,6 @@ $$
 \cfrac[l]{a}{b+c+d}+\cfrac[r]{a}{b+c+d}
 $$
 
-$$
-\frac{\begin{array}{c|c}a&b\\c&d\end{array}}{2}
-$$
-
 ---
 
 # Conditions in prose
@@ -2324,6 +2320,18 @@ $$
 
 $$
 \begin{rcases*}x&for \(x\geq0\)\\0&otherwise\end{rcases*}
+$$
+
+---
+
+# Nested ruled arrays and fractions
+
+$$
+\frac{\begin{array}{c|c}a&b\\c&d\end{array}}{2}
+$$
+
+$$
+\begin{array}{c|c}\genfrac{}{}{.25em}{0}{p}{q}&s\\t&w\end{array}
 $$`)
     const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
     const exportDeck = Bun.spawn([process.execPath, cli, 'export', entry, '--format', 'pptx-editable', '--output', output, '--executable-path', chrome!], {
@@ -2339,6 +2347,7 @@ $$`)
     const dotted = parts.get('ppt/slides/slide4.xml')?.toString() ?? ''
     const multiline = parts.get('ppt/slides/slide5.xml')?.toString() ?? ''
     const prose = parts.get('ppt/slides/slide6.xml')?.toString() ?? ''
+    const nested = parts.get('ppt/slides/slide7.xml')?.toString() ?? ''
     expect(compact.match(/<a14:m>/g)).toHaveLength(4)
     expect(compact.match(/<mc:Fallback><p:sp>/g)).toHaveLength(4)
     expect(compact).toMatch(/<m:nary>.*?<m:sub><m:m><m:mr>/)
@@ -2376,7 +2385,7 @@ $$`)
     expect(alignment).toContain('name="Equation rule"')
     const [lines, split, displaySplit, continued] = [...multiline.matchAll(/<mc:Choice\b[^>]*>(.*?)<\/mc:Choice>/g)].map(([, choice]) => choice)
     expect(multiline.match(/<mc:Fallback><p:sp>/g)).toHaveLength(4)
-    expect(multiline.match(/<p:pic>/g)).toHaveLength(3)
+    expect(multiline.match(/<p:pic>/g)).toHaveLength(2)
     const positions = (choice: string, text: string) => [...choice.matchAll(/<p:sp>(.*?)<\/p:sp>/g)]
       .filter(([, shape]) => shape.includes(text))
       .map(([, shape]) => {
@@ -2415,6 +2424,94 @@ $$`)
     expect(prose).toContain('<m:endChr m:val="}"/>')
     expect(prose).toMatch(/<m:eqArr>.*?<m:nary>.*?when\s*<\/m:t>.*?>n<\/m:t>.*?&gt;<\/m:t>/)
     expect(prose).toContain('>otherwise</m:t>')
+    const nestedChoices = [...nested.matchAll(/<mc:Choice\b[^>]*>(.*?)<\/mc:Choice>/g)].map(([, choice]) => choice)
+    expect(nestedChoices).toHaveLength(2)
+    for (const choice of nestedChoices) {
+      expect(choice.match(/<a14:m>/g)).toHaveLength(5)
+      expect(choice.match(/name="Equation rule"/g)).toHaveLength(3)
+    }
+  }
+  finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}, 45_000)
+
+it.skipIf(!chrome)('keeps custom fraction rules, colored terms, and surrounding AMS equations editable', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-fraction-rules-'))
+  const canvas = { width: 960, height: 540 }
+  try {
+    const entry = join(root, 'slides.md')
+    await Bun.write(entry, String.raw`---
+math:
+  minRuleThickness: 0.18
+---
+
+# Custom fraction rules
+
+$$
+\textcolor{red}{s}+p+{a \above{2em} b}
+$$
+
+$$
+\textcolor{#0055cc}{\genfrac{[}{]}{.5em}{0}{c}{d}} + e
+$$
+
+$$
+\frac{q}{r}
+$$
+
+---
+
+# AMS groups
+
+\begin{align}
+u&=\frac{x}{y}\tag{F}\\
+v&=\binom{n}{k}\tag{Z}
+\end{align}
+
+$$
+p+q
+$$
+
+$$
+\overline{X}+\frac{a}{b}
+$$
+
+$$
+t^{\genfrac{}{}{.5em}{2}{u}{v}}
+$$`)
+    const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
+    const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
+    const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
+    if (status) throw new Error(stderr)
+    const frames: PowerPointFrame[] = []
+    await captureFrames({ root: join(root, 'dist'), executable: chrome!, scale: 1, canvas, editable: true, withClicks: false }, frame => { frames.push(frame) })
+    expect(frames).toHaveLength(2)
+    const equations = frames[0].editable?.nodes.filter((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math') ?? []
+    expect(equations).toHaveLength(3)
+    const [thick, colored, minimum] = equations.map(node => node.equation?.rules?.[0])
+    expect(thick!.rect.h).toBeGreaterThan(colored!.rect.h * 2)
+    expect(colored!.rect.h).toBeGreaterThan(minimum!.rect.h * 2)
+    expect(minimum!.rect.h).toBeGreaterThan(3)
+    expect(colored!.fill).toEqual({ r: 0, g: 85, b: 204, a: 1 })
+    const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Custom fraction rules' }))
+    const fractions = parts.get('ppt/slides/slide1.xml')?.toString() ?? ''
+    const ams = parts.get('ppt/slides/slide2.xml')?.toString() ?? ''
+    expect(fractions.match(/name="Equation rule"/g)).toHaveLength(3)
+    expect(fractions.match(/name="Equation delimiter"/g)).toHaveLength(2)
+    expect(fractions.match(/<a14:m>/g)).toHaveLength(8)
+    const runColors = new Map([...fractions.matchAll(/<m:r>(.*?)<m:t[^>]*>([^<]*)<\/m:t><\/m:r>/g)]
+      .map(([, properties, content]) => [content, /<a:srgbClr val="([0-9A-F]+)"/.exec(properties)?.[1]]))
+    expect(runColors.get('c')).toBe('0055CC')
+    expect(runColors.get('s')).toBe('FF0000')
+    expect(runColors.get('p')).toBe(runColors.get('e'))
+    expect(runColors.get('p')).not.toBe(runColors.get('s'))
+    expect(ams.match(/name="Equation rule"/g)).toHaveLength(1)
+    expect(ams.match(/<mc:Fallback><p:sp>/g)).toHaveLength(2)
+    expect(ams.match(/<p:pic>/g)).toHaveLength(2)
+    expect(ams).toContain('>(F)</m:t>')
+    expect(ams).toContain('>(Z)</m:t>')
+    expect(ams).toContain('<m:type m:val="noBar"/>')
   }
   finally {
     await rm(root, { recursive: true, force: true })

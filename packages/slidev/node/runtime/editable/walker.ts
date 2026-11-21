@@ -85,10 +85,11 @@ export function collectSnapshot(options: {
   const decoratedArray = 'mtable[data-math-array-decoration]'
   const multilineStack = 'mtable[data-multlined-position]'
   const alignedFraction = 'mfrac:is([numalign], [denomalign])'
+  const ruledFraction = 'mfrac[linethickness]:not([linethickness="0"], [linethickness="0px"], [linethickness="0em"])'
   const adjustedDegree = 'mrow.math-root-offset'
   const measuredStrut = 'mrow[data-math-strut][aria-hidden="true"]'
-  const measuredStructure = `${multilineStack}, ${alignedFraction}, ${adjustedDegree}, ${measuredStrut}`
-  const measuredLayout = `${decoratedArray}, ${measuredStructure}`
+  const measuredLayout = `${decoratedArray}, ${multilineStack}, ${alignedFraction}, ${ruledFraction}, ${adjustedDegree}, ${measuredStrut}`
+  const unmeasuredRule = 'mroot, msqrt, menclose, .math-frame, .math-angl, .math-text-circled, .math-overline, .math-underline, .math-overbracket, .math-underbracket, .math-overlinesegment, .math-underlinesegment'
   const raisedMathBox = 'mtext.math-raised-box'
   const positionedMath = `${overlappingMath}, ${measuredMathBox}, ${graphicMathBox}, ${raisedMathBox}, ${measuredLayout}`
   const raisedMathBody = ':scope > span > span > math > mrow'
@@ -763,6 +764,7 @@ export function collectSnapshot(options: {
     function positionedMathFragments(element: Element, expression: RawMathElement, opacity: number, scale: number):
       { cells: RawMathFragment[], rect: RawMathFragment['rect'], rules?: RawMathRule[], pictures?: RawMathPicture[] } | undefined {
       if (!element.matches(positionedMath) && !element.querySelector(positionedMath)) return
+      const formulaColor = getComputedStyle(element.closest('math') ?? element).color
       const cells: RawMathFragment[] = []
       const rules: RawMathRule[] = []
       const pictures: RawMathPicture[] = []
@@ -771,13 +773,17 @@ export function collectSnapshot(options: {
       let split = false
       type GraphicPlacement = Pick<RawMathFragment, 'rect' | 'rotation' | 'visibleBounds'> & { fontScale: number }
       type PositionedContent = { element: Element, expression: RawMathElement, graphic?: GraphicPlacement }
-      function add(boxes: DOMRect[], content: RawMathElement, context: Element, graphic?: GraphicPlacement): void {
+      function add(boxes: DOMRect[], content: RawMathElement, context: Element, graphic?: GraphicPlacement, inheritedColor?: string): void {
         const visible = mathBounds(boxes)
         if (!visible) return
         bounds.push(...boxes)
-        const fontSize = Number.parseFloat(getComputedStyle(context).fontSize) * scale * (graphic?.fontScale ?? 1)
+        const style = getComputedStyle(context)
+        const fontSize = Number.parseFloat(style.fontSize) * scale * (graphic?.fontScale ?? 1)
+        const color = inheritedColor ?? style.color
+        const expression: RawMathElement = color === formulaColor ? content
+          : { name: 'mrow', attributes: { style: `color:${color}` }, color, text: '', children: [content] }
         cells.push({
-          expression: content, opacity, rect: graphic?.rect ?? visible, fontSize,
+          expression, opacity, rect: graphic?.rect ?? visible, fontSize,
           ...(graphic?.rotation === undefined ? {} : { rotation: graphic.rotation, visibleBounds: graphic.visibleBounds }),
         })
       }
@@ -785,7 +791,9 @@ export function collectSnapshot(options: {
         if (!pieces.length) return
         const content = pieces.length === 1 ? pieces[0].expression
           : { name: 'mrow', attributes: {}, text: '', children: pieces.map(piece => piece.expression) }
-        add(pieces.map(piece => piece.element.getBoundingClientRect()), content, pieces[0].element)
+        const first = pieces[0].element
+        const inheritedColor = first.parentElement ? getComputedStyle(first.parentElement).color : undefined
+        add(pieces.map(piece => piece.element.getBoundingClientRect()), content, first, undefined, inheritedColor)
         pieces = []
       }
       function graphicPlacement(ink: Element, angle?: number): GraphicPlacement | undefined {
@@ -870,10 +878,11 @@ export function collectSnapshot(options: {
             if (cell.classList.contains('math-array-dots') && style.backgroundImage.startsWith('radial-gradient(')) continue
             const rowData = data.children[rowIndex]?.children[cellIndex]
             if (!rowData || rowData.text.trim() || rowData.children.length !== cell.children.length) return false
-            const content: RawMathElement = {
-              name: 'mrow', text: '', children: rowData.children,
-              attributes: { style: `color:${style.color}` }, color: style.color,
+            if (cell.querySelector(positionedMath)) {
+              if (!visitRow(cell, rowData)) return false
+              continue
             }
+            const content: RawMathElement = { name: 'mrow', text: '', children: rowData.children, attributes: {} }
             add(Array.from(cell.children, ink => ink.getBoundingClientRect()), content, cell)
           }
         }
@@ -911,18 +920,21 @@ export function collectSnapshot(options: {
         flush()
         return collected
       }
-      function collectStack(node: Element, data: RawMathElement): boolean {
+      function collectMultline(node: Element, data: RawMathElement): boolean {
         flush()
         split = true
         bounds.push(node.getBoundingClientRect())
-        if (node.matches(multilineStack)) {
-          return Array.from(node.children).every((row, index) => {
-            const body = row.firstElementChild?.firstElementChild
-            const bodyData = data.children[index]?.children[0]?.children[0]
-            return body?.localName === 'mrow' && bodyData && visitRow(body, bodyData)
-          })
-        }
+        return Array.from(node.children).every((row, index) => {
+          const body = row.firstElementChild?.firstElementChild
+          const bodyData = data.children[index]?.children[0]?.children[0]
+          return body?.localName === 'mrow' && bodyData && visitRow(body, bodyData)
+        })
+      }
+      function collectFraction(node: Element, data: RawMathElement): boolean {
         if (node.children.length !== 2) return false
+        flush()
+        split = true
+        bounds.push(node.getBoundingClientRect())
         const thickness = data.attributes.linethickness
         if ((thickness === undefined || Number.parseFloat(thickness) !== 0) && !mathPicture(node, 'fraction-rule')) return false
         return Array.from(node.children).every((child, index) => {
@@ -945,9 +957,10 @@ export function collectSnapshot(options: {
           split = true
           return true
         }
-        if (node.matches(multilineStack) || node.matches(alignedFraction)
-          || (node.localName === 'mfrac' && node.querySelector(measuredStructure))) return collectStack(node, data)
-        if (node.matches('mroot, msqrt') && node.querySelector(measuredStructure)) return collectRadical(node, data)
+        if (node.matches(multilineStack)) return collectMultline(node, data)
+        if (node.matches('mfrac') && (node.matches(`${alignedFraction}, ${ruledFraction}`)
+          || node.querySelector(measuredLayout))) return collectFraction(node, data)
+        if (node.matches('mroot, msqrt') && node.querySelector(measuredLayout)) return collectRadical(node, data)
         const content = positionedContent(node, data)
         if (content) {
           flush()
@@ -963,13 +976,17 @@ export function collectSnapshot(options: {
             return visit(cell.children[0], column.children[0])
         }
         const keys = Object.keys(data.attributes)
+        const color = stack && node.localName === 'mrow' && keys.length === 1 && keys[0] === 'style' && data.color !== undefined
         const plain = node.localName === 'mrow' && (!keys.length || data.attributes.class === 'math-multlined-bottom')
         const fenced = stack && node.localName === 'mrow' && keys.length === 1
           && (keys[0] === 'data-math-delimiters' || keys[0] === 'data-math-cases')
         const compact = stack && node.localName === 'mstyle' && keys.every(key => key === 'scriptlevel' || key === 'displaystyle')
-        if ((plain || fenced || compact) && !data.text.trim() && node.querySelector(positionedMath)) {
-          return Array.from(node.children).every((child, index) =>
+        if ((plain || color || fenced || compact) && !data.text.trim() && node.querySelector(positionedMath)) {
+          if (color) flush()
+          const collected = Array.from(node.children).every((child, index) =>
             Boolean(stack && pictureFence(child)) || visit(child, data.children[index]))
+          if (color) flush()
+          return collected
         }
         pieces.push({ element: node, expression: data })
         return true
@@ -1246,12 +1263,10 @@ export function collectSnapshot(options: {
       const presentation = fragment ? semantics : semantics?.localName === 'semantics' && !el.hasAttribute('class') ? semantics.firstElementChild : undefined
       if (presentation) {
         const customThickness = computed.getPropertyValue('--math-min-rule').trim()
-        const hasMeasuredRules = customThickness && presentation.querySelector(decoratedArray)
-          && !presentation.querySelector('mfrac, mroot, msqrt, menclose, .math-frame, .math-overline, .math-underline')
-        if (!customThickness || hasMeasuredRules) {
+        if (!customThickness || (!presentation.matches(unmeasuredRule) && !presentation.querySelector(unmeasuredRule))) {
           const expression = mathExpression(presentation)
           const source = expression && mathProjection(presentation, expression, el.getAttribute('display') === 'block', scale)
-          if (source && (!customThickness || source.rules?.length)) record.math = source
+          if (source) record.math = source
         }
       }
       if (el.tagName.toUpperCase() === 'IMG') {
