@@ -1731,8 +1731,10 @@ $$
 \smash[t]{\sqrt{t}}+\smash[b]{v}+\smash{x}
 $$
 
+\mathtoolsset{prescript-sup-format=\mathit,prescript-sub-format=\mathbf,prescript-arg-format=\mathrm,centercolon}
+
 $$
-\prescript{14}{6}{\mathrm C}\quad\ce{^{14}_{6}C^-}
+\prescript{14}{6}{C}\quad\ce{^{14}_{6}C^-}\quad x:=y
 $$
 
 $$
@@ -1876,8 +1878,10 @@ $$`)
     expect(prescripts).toHaveLength(2)
     for (const script of prescripts)
       expect(script).toMatch(/^<m:sub>.*?>6<\/m:t>.*?<\/m:sub><m:sup>.*?>14<\/m:t>.*?<\/m:sup><m:e>/)
+    expect(prescripts[0]).toMatch(/^<m:sub>.*?<m:sty m:val="b"\/>.*?<\/m:sub><m:sup>.*?<m:sty m:val="i"\/>/)
     expect(prescripts[0]).toContain('<m:sty m:val="p"/>')
     expect(prescripts[1]).toMatch(/<m:e><m:sSup><m:e>.*?>C<\/m:t>.*?<\/m:e><m:sup>.*?>−<\/m:t>/)
+    expect(spacing).toContain('>∶</m:t>')
     expect([...parts.keys()].filter(name => name.startsWith('ppt/media/'))).toHaveLength(23)
 
     const alphabets = parts.get('ppt/slides/slide5.xml')?.toString() ?? ''

@@ -53,7 +53,7 @@ const operators: Record<string, string> = {
   lt: '<', gt: '>', ni: '∋', owns: '∋', notni: '∌', nmid: '∤', nparallel: '∦',
   nleq: '≰', ngeq: '≱', nsubseteq: '⊈', nsupseteq: '⊉',
   prime: '′', backprime: '‵', smallsetminus: '∖',
-  otimes: '⊗', oplus: '⊕', odot: '⊙', wedge: '∧', vee: '∨', colon: ':',
+  otimes: '⊗', oplus: '⊕', odot: '⊙', wedge: '∧', vee: '∨', colon: ':', ordinarycolon: ':',
 }
 const functions = new Set(['sin', 'cos', 'tan', 'cot', 'sec', 'csc', 'arcsin', 'arccos', 'arctan', 'sinh', 'cosh', 'tanh',
   'log', 'ln', 'exp', 'min', 'max', 'argmin', 'argmax', 'det', 'lim', 'sup', 'inf', 'gcd', 'Pr',
@@ -1012,8 +1012,9 @@ const intertextCommands: ReadonlyMap<string, IntertextKind> = new Map([
   ['\\shortintertext', 'short'],
 ])
 const mathtoolsBooleanOptions = new Set([
-  'original-intertext', 'original-shortintertext', 'showonlyrefs', 'showmanualtags',
+  'original-intertext', 'original-shortintertext', 'showonlyrefs', 'showmanualtags', 'centercolon',
 ])
+const prescriptFormatOptions = new Set(['prescript-sup-format', 'prescript-sub-format', 'prescript-arg-format'])
 const equationReferences = new Set(['\\ref', '\\eqref', '\\refeq', '\\noeqref'])
 const mathtoolsSpacingOptions = new Set([
   'above-intertext-sep', 'below-intertext-sep', 'above-shortintertext-sep', 'below-shortintertext-sep',
@@ -1257,6 +1258,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   let filteredNumbering = false
   let equationJot: string | undefined
   let mathtoolsOptions: ReadonlyMap<string, string> | undefined
+  let prescriptFormats: ReadonlyMap<string, string[]> | undefined
   let tagForms: ReadonlyMap<string, TagForm> | undefined
   let tagFormName = 'default'
   let formattingTag = false
@@ -1327,6 +1329,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const previousMonospace = textMonospace
     const previousJot = equationJot
     const previousMathtoolsOptions = mathtoolsOptions
+    const previousPrescriptFormats = prescriptFormats
     const previousEmphasisDefaults = emphasisDefaults
     const previousEmphasisFactor = emphasisFactor
     const previousEmphasisShortfall = emphasisShortfall
@@ -1342,6 +1345,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       textMonospace = previousMonospace
       equationJot = previousJot
       mathtoolsOptions = previousMathtoolsOptions
+      prescriptFormats = previousPrescriptFormats
       emphasisDefaults = previousEmphasisDefaults
       emphasisFactor = previousEmphasisFactor
       emphasisShortfall = previousEmphasisShortfall
@@ -1922,6 +1926,16 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return delimitedArgument([']'])
   }
 
+  function unwrapOptionGroup(body: string[]): string[] {
+    return withTokens(body, () => {
+      space()
+      if (tokenText(tokens[cursor] ?? '') !== '{') return body
+      const unwrapped = rawGroup()
+      space()
+      return tokens[cursor] === boundary ? unwrapped : body
+    })
+  }
+
   function withTokens<T>(body: string[], read: () => T): T {
     // Expand a local argument without shifting the rest of the formula.
     const outer = tokens
@@ -2200,6 +2214,13 @@ export function renderMath(source: string, display = false, configured: MathMacr
 
   function argument(primitive = false): Markup {
     return primitive ? argumentAtom(true).markup : fragmentArgument().markup
+  }
+
+  function prescriptArgument(part: 'sup' | 'sub' | 'arg'): Markup {
+    const format = prescriptFormats?.get(`prescript-${part}-format`)
+    if (!format?.length) return argument()
+    return withTokens([...format, '{', ...rawGroup(), '}'], () =>
+      inScope(() => xml`<mrow>${row([boundary])}</mrow>`))
   }
 
   function scriptArgument(): Markup {
@@ -3993,14 +4014,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
         const key = assignment.slice(0, equals).map(tokenText).join('').trim()
         if (equals < 1 || !/^(?:box|outerbox|marginbox|innerbox|left|right)$/.test(key))
           throw new MathParseError(`Unsupported empheq option: ${assignment.map(tokenText).join('').trim()}`)
-        const body = assignment.slice(equals + 1)
-        const value = withTokens(body, () => {
-          space()
-          if (tokenText(tokens[cursor] ?? '') !== '{') return body
-          const unwrapped = rawGroup()
-          space()
-          return tokens[cursor] === boundary ? unwrapped : body
-        })
+        const value = unwrapOptionGroup(assignment.slice(equals + 1))
         const option = key === 'outerbox' ? 'box' : key
         if (option === 'box') settings.delete('marginbox')
         else if (option === 'marginbox') settings.delete('box')
@@ -4159,32 +4173,47 @@ export function renderMath(source: string, display = false, configured: MathMacr
 
   function setMathtoolsOptions(): void {
     const selected = new Map(mathtoolsOptions)
-    for (const assignment of expandDefinition(rawGroup()).join('').split(',')) {
-      if (!assignment.trim()) continue
-      const equals = assignment.indexOf('=')
-      const name = (equals < 0 ? assignment : assignment.slice(0, equals)).trim()
-      const key = name.replace(/^(above|below)(?:shortintertextdim|-short-intertext-(?:dim|sep))$/, '$1-shortintertext-sep')
-      const value = equals < 0 ? undefined : assignment.slice(equals + 1).trim().replace(/^\{([^{}]*)\}$/, '$1').trim()
-      if (mathtoolsBooleanOptions.has(key)) {
-        if (value !== undefined && value !== 'true' && value !== 'false')
-          throw new MathParseError(`Expected true or false for Mathtools option ${name}`)
-        selected.set(key, value ?? 'true')
-        continue
+    const formats = new Map(prescriptFormats)
+    withTokens([...rawGroup(), ','], () => {
+      for (expand(); tokens[cursor] !== boundary; expand()) {
+        const assignment = delimitedArgument([','])
+        if (!assignment.length) continue
+        const equals = assignment.indexOf('=')
+        const name = expandDefinition(equals < 0 ? assignment : assignment.slice(0, equals)).join('').trim()
+        const key = name.replace(/^(above|below)(?:shortintertextdim|-short-intertext-(?:dim|sep))$/, '$1-shortintertext-sep')
+        const body = equals < 0 ? undefined : assignment.slice(equals + 1)
+        if (prescriptFormatOptions.has(key)) {
+          if (!body) throw new MathParseError(`Expected a formatter for Mathtools option ${name}`)
+          // Preserve the TeX tokens so a formatter can be a macro taking an
+          // argument and keeps its meaning at the point of use.
+          const format = unwrapOptionGroup(body)
+          if (format.some(token => !texWhitespace.test(tokenText(token)))) formats.set(key, format)
+          else formats.delete(key)
+          continue
+        }
+        const value = body && expandDefinition(body).join('').trim().replace(/^\{([^{}]*)\}$/, '$1').trim()
+        if (mathtoolsBooleanOptions.has(key)) {
+          if (value !== undefined && value !== 'true' && value !== 'false')
+            throw new MathParseError(`Expected true or false for Mathtools option ${name}`)
+          selected.set(key, value ?? 'true')
+          continue
+        }
+        if (!mathtoolsSpacingOptions.has(key)) throw new MathParseError(`Unsupported Mathtools option: ${name}`)
+        const register = /^([+-]?)\s*(\d+(?:\.\d*)?|\.\d+)?\s*\\(origjot|jot)$/.exec(value ?? '')
+        let length = value
+        if (register) {
+          const base = (register[3] === 'jot' && equationJot) || '3pt'
+          const multiplier = Number(register[1] + (register[2] ?? '1'))
+          const magnitude = (Number.parseFloat(base) * multiplier).toFixed(12).replace(/\.?0+$/, '')
+          length = magnitude + /[a-z]+$/.exec(base)![0]
+        }
+        const size = length === undefined ? undefined : dimension(length)
+        if (size === undefined) throw new MathParseError(`Invalid math dimension for Mathtools option ${name}`)
+        selected.set(key, size)
       }
-      if (!mathtoolsSpacingOptions.has(key)) throw new MathParseError(`Unsupported Mathtools option: ${name}`)
-      const register = /^([+-]?)\s*(\d+(?:\.\d*)?|\.\d+)?\s*\\(origjot|jot)$/.exec(value ?? '')
-      let length = value
-      if (register) {
-        const base = (register[3] === 'jot' && equationJot) || '3pt'
-        const multiplier = Number(register[1] + (register[2] ?? '1'))
-        const magnitude = (Number.parseFloat(base) * multiplier).toFixed(12).replace(/\.?0+$/, '')
-        length = magnitude + /[a-z]+$/.exec(base)![0]
-      }
-      const size = length === undefined ? undefined : dimension(length)
-      if (size === undefined) throw new MathParseError(`Invalid math dimension for Mathtools option ${name}`)
-      selected.set(key, size)
-    }
+    })
     mathtoolsOptions = selected
+    prescriptFormats = formats
   }
 
   function declareTagForm(command: string): void {
@@ -4422,6 +4451,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (!token.startsWith('\\')) {
       if (/^(?:[}&#$]|#[1-9])$/.test(token)) throw new MathParseError(`Unexpected math token: ${token}`)
       if (token === '~') return { markup: spaceMarkup(spacing.nobreakspace) }
+      if (token === ':' && mathtoolsOptions?.get('centercolon') === 'true') return supplementalAtom(['∶', 'relation'])
       if (token === '®') {
         strictViolation('mathVsTextAccents', 'The registered sign is a text-mode symbol')
         return { markup: '<mi mathvariant="normal">®</mi>' }
@@ -4597,9 +4627,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
     if (spacingCommands.has(name)) return { markup: spacingMarkup(name) }
     if (name === 'prescript') {
-      const upper = inScript(argument())
-      const lower = inScript(argument())
-      return { markup: xml`<mmultiscripts>${argument()}<mprescripts/>${lower}${upper}</mmultiscripts>` }
+      const upper = inScript(prescriptArgument('sup'))
+      const lower = inScript(prescriptArgument('sub'))
+      const base = prescriptArgument('arg')
+      return { markup: xml`<mmultiscripts>${base}<mprescripts/>${lower}${upper}</mmultiscripts>` }
     }
     if (name === 'sideset') return sidedOperator()
     if (name === 'adjustlimits') return adjustLimits()

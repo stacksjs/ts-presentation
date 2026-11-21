@@ -190,6 +190,13 @@ speaker notes. Each hook can be asynchronous.
   uppercase gamma and `\varGamma` for its italic form.
   Legacy font declarations such as `{\bf x}` and `{\cal A}` apply within
   their group and respect nested font changes.
+- Use `\mathtoolsset{centercolon}` to center the colon in math such as
+  `$x:=y$`. Use `\ordinarycolon` for the regular colon or disable the
+  setting with `centercolon=false`. To format the left subscript of
+  `\prescript{14}{6}{C}`, set `prescript-sub-format=\mathbf`.
+  Use `prescript-sup-format` and `prescript-arg-format` to style the
+  left superscript and base separately. Scope these settings with a TeX group,
+  or put `\mathtoolsset{...}` on its own line for later formulas on the slide.
 - Use `{a \over b}` for an infix fraction, `{a \above{2pt} b}` for a
   custom rule, or `{n \choose k}` for a binomial coefficient. Braces
   delimit each fraction group. Use `\limits` or `\nolimits` with a

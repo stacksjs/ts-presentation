@@ -40,6 +40,46 @@ test('renders mathtools colons as single relation atoms, including literal Unico
   expect(math(String.raw`\N \Reals \Bbbk a\lArr b`, false)).toContain('<mi>ℕ</mi><mi>ℝ</mi><mi>𝕜</mi>')
 })
 
+test('scopes centered colons to math and keeps an ordinary colon available', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const formula = math(String.raw`
+    \mathtoolsset{centercolon}
+    a:=b \quad \text{Label: A} \quad c\ordinarycolon d \quad
+    {\mathtoolsset{centercolon=false}x:y} \quad u:v
+  `, true)
+  expect(formula).toContain('<mi>a</mi>' + thick + operator('∶') + operator('=') + thick + '<mi>b</mi>')
+  expect(formula).toContain('<mtext>Label: A</mtext>')
+  expect(formula).toContain('<mi>c</mi>' + thick + operator(':') + thick + '<mi>d</mi>')
+  expect(formula).toContain('<mrow><mi>x</mi><mo>:</mo><mi>y</mi></mrow>')
+  expect(formula).toContain('<mi>u</mi>' + thick + operator('∶') + thick + '<mi>v</mi>')
+  expect(math('u:v', true)).not.toContain('∶')
+  expect(() => math(String.raw`\mathtoolsset{centercolon=maybe} a:b`, true)).toThrow('Expected true or false')
+})
+
+test('applies scoped Mathtools prescript formatters at the point of use', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const formula = math(String.raw`
+    \def\options{prescript-sup-format=\style,prescript-sub-format=\mathbf,prescript-arg-format=\mathrm}
+    \mathtoolsset{\options}
+    \def\style#1{\mathchoice{D}{T}{#1}{S}}
+    \prescript{P}{Z}{X} + x^{\prescript{P}{}{X}}
+    {\mathtoolsset{prescript-arg-format={},prescript-sup-format={\text{a,b}\mathbf}}
+     \prescript{U}{V}{R}}
+    \prescript{P}{Z}{R}
+  `, true)
+  const scripts = [...formula.matchAll(/<mmultiscripts>(.*?)<\/mmultiscripts>/g)].map(([, markup]) => markup)
+  expect(scripts).toHaveLength(4)
+  expect(scripts[0]).toContain('class="math-normal" mathvariant="normal"')
+  expect(scripts[0]).toContain('class="math-bold" mathvariant="bold"')
+  expect(scripts[0]).toEndWith('<mrow><mi>P</mi></mrow>')
+  expect(scripts[1]).toEndWith('<mrow><mi>S</mi></mrow>')
+  expect(scripts[2]).toStartWith('<mrow><mi>R</mi></mrow><mprescripts/>')
+  expect(scripts[2]).toContain('<mtext>a,b</mtext>')
+  expect(scripts[3]).toContain('class="math-normal" mathvariant="normal"')
+  expect(scripts[3]).toEndWith('<mrow><mi>P</mi></mrow>')
+  expect(() => math(String.raw`\mathtoolsset{prescript-arg-format}`, true)).toThrow('Expected a formatter')
+})
+
 test('renders named TeX spaces and keeps nonbreaking spaces in the same inline fragment', () => {
   const math = createMathRenderer({ throwOnError: true }, true)
   const source = String.raw`\text{x\thinspace y\enspace z} +\nobreakspace y =
