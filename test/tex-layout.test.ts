@@ -388,6 +388,47 @@ test('compares TeX token meanings before expanding either operand', () => {
   expect(() => math(String.raw`\ifx\missing`, false)).toThrow('Expected a token after \\ifx')
 })
 
+test('compares expanded character codes and categories in TeX conditionals', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const source = String.raw`
+    \def\letter{x}
+    \let\alias=\letter
+    \let\literal=y
+    \def\spaceToken{ }
+    \let\ifletter=\ifcat
+    \if\letter\string xA\else\fail\fi
+    \ifletter\alias\literal B\else\fail\fi
+    \unless\ifcat\literal\string yC\else\fail\fi
+    \ifcat\number1*D\else\fail\fi
+    \ifcat\relax\frac E\else\fail\fi
+    \ifcat\spaceToken\spaceToken F\else\fail\fi
+    \ifcat^_ \fail\else G\fi
+    \if##1\else\fail\fi
+    \iffalse\if\undefined\bad\fail\fi\else H\fi
+  `
+  expect(math(source, false)).toContain('<mi>A</mi><mi>B</mi><mi>C</mi><mi>D</mi><mi>E</mi><mi>F</mi><mi>G</mi><mn>1</mn><mi>H</mi>')
+  expect(() => math(String.raw`\if x`, false)).toThrow('Expected a token after \\if')
+  expect(() => math(String.raw`\iftrue\ifcat x\else y\fi\fi`, false)).toThrow('Expected two tokens in \\ifcat')
+})
+
+test('compares inhibited active characters and expands protected operands while defining macros', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const source = String.raw`
+    \def~{x}
+    \protected\def\protectedLetter{a}
+    \edef\result{
+      \ifcat\protectedLetter zA\else\fail\fi
+      \if\noexpand~\string~B\else\fail\fi
+      \ifcat\noexpand~\string~\fail\else C\fi
+      \ifcat\noexpand\protectedLetter\relax D\else\fail\fi
+      \ifcat\iftrue x\else\bad\fi zE\else\fail\fi
+    }
+    \def\protectedLetter{9}
+    \result
+  `
+  expect(math(source, false)).toContain('<mi>A</mi><mi>B</mi><mi>C</mi><mi>D</mi><mi>E</mi>')
+})
+
 test('preserves macro flags and character categories in TeX meaning tests', () => {
   let calls = 0
   const same = () => { calls++; return 'unused' }

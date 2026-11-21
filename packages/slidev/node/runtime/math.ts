@@ -312,14 +312,23 @@ function tokenize(source: string, onTrailingComment?: () => void): string[] {
 }
 
 type MathMode = 'math' | 'text'
-const conditionalTests = ['\\iftrue', '\\iffalse', '\\ifmmode', '\\ifdefined', '\\ifx', '\\ifnum', '\\ifodd', '\\ifcase'] as const
+const conditionalTests = ['\\iftrue', '\\iffalse', '\\ifmmode', '\\ifdefined', '\\if', '\\ifcat', '\\ifx', '\\ifnum', '\\ifodd', '\\ifcase'] as const
 const conditionalDelimiters = ['\\or', '\\else', '\\fi'] as const
 type ConditionalTest = typeof conditionalTests[number]
 type ConditionalDelimiter = typeof conditionalDelimiters[number]
 type ConditionalBranch = 'boolean' | 'case' | 'else'
 const conditionalTestNames = new Set<string>(conditionalTests)
 const conditionalDelimiterNames = new Set<string>(conditionalDelimiters)
-const otherTeXConditional = /^\\if(?:cat|dim|vmode|hmode|inner|void|hbox|vbox|eof|csname|fontchar)?$/
+const otherTeXConditional = /^\\if(?:dim|vmode|hmode|inner|void|hbox|vbox|eof|csname|fontchar)$/
+const characterCategories: Readonly<Record<string, string>> = {
+  '{': 'begin-group',
+  '}': 'end-group',
+  '$': 'math-shift',
+  '&': 'alignment',
+  '#': 'parameter',
+  '^': 'superscript',
+  _: 'subscript',
+}
 const expansionPrimitives = ['\\expandafter', '\\noexpand', '\\unexpanded', '\\detokenize', '\\string', '\\@firstoftwo', '\\@secondoftwo', '\\@ifnextchar', '\\@ifstar', '\\TextOrMath', '\\html@mathml', '\\message', '\\errmessage', '\\char', '\\number', '\\numexpr', '\\MoveEqLeft', '\\unless'] as const
 const expansionPrimitiveNames = new Set<string>([...expansionPrimitives, ...conditionalTests, ...conditionalDelimiters])
 const macroDeclaration = /^\\(?:[gex]?def|(?:future)?let|(?:new|renew|provide)command|DeclarePairedDelimiter(?:X(?:PP)?)?|Declare(?:Left|Right)Delimiter|MakeAboxedCommand|mathtoolsset|empheqset|EmphEqdelimiter(?:factor|shortfall)|(?:new|renew|use)tagform|fboxsep|fboxrule|setlength|newsavebox|sbox|savebox|global|long|protected)$/
@@ -1514,6 +1523,26 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return meaning.startsWith('\\') && !defined(meaning) ? undefined : meaning
   }
 
+  function readExpandedComparisonToken(command: '\\if' | '\\ifcat', eager: boolean, conditionalDepth: number): { character: string, category: string } {
+    do {
+      if (conditionals.length <= conditionalDepth && isConditionalDelimiter(macroPrimitive(tokens[cursor])))
+        throw new MathParseError(`Expected two tokens in ${command}`)
+    } while (expandOnce(eager, true) !== false)
+    const token = readRawExpansionToken(command)
+    if (token.startsWith(literalCharacterToken)) return { character: tokenCharacters(token), category: 'other' }
+    const meaning = conditionalTokenMeaning(token)
+    // An inhibited active character retains its code. Control sequences
+    // without character meanings all compare as the same sentinel.
+    if (token.startsWith(inhibitedToken) && !tokenText(token).startsWith('\\'))
+      return { character: tokenText(token), category: 'active' }
+    if (typeof meaning !== 'string' || meaning.startsWith('\\') || meaning === '~')
+      return { character: '', category: 'control-sequence' }
+    if (meaning.startsWith(literalCharacterToken))
+      return { character: tokenCharacters(meaning), category: 'other' }
+    const category = characterCategories[meaning] ?? (meaning === ' ' ? 'space' : /^\p{L}/u.test(meaning) ? 'letter' : 'other')
+    return { character: meaning, category }
+  }
+
   function openConditional(test: ConditionalTest, invert: boolean, eager: boolean): string[] {
     function condition(): boolean {
       if (test === '\\iftrue') return true
@@ -1522,6 +1551,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
       if (test === '\\ifdefined') {
         const token = tokenText(readRawExpansionToken(test))
         return !token.startsWith('\\') || defined(token)
+      }
+      if (test === '\\if' || test === '\\ifcat') {
+        const conditionalDepth = conditionals.length
+        const left = readExpandedComparisonToken(test, eager, conditionalDepth)
+        const right = readExpandedComparisonToken(test, eager, conditionalDepth)
+        return test === '\\if' ? left.character === right.character : left.category === right.category
       }
       if (test === '\\ifx') {
         const left = conditionalTokenMeaning(readRawExpansionToken(test))

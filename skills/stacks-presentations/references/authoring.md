@@ -155,6 +155,9 @@ speaker notes. Each hook can be asynchronous.
 - Use `\ifmmode ... \else ... \fi` to select math or text content.
   `\ifdefined\myMacro ... \fi` checks for a command before using it.
   `\ifcase` selects a zero-based branch separated by `\or`.
+- Use `\if\myMacro x ... \else ... \fi` to compare expanded character
+  codes. Use `\ifcat\myMacro x ... \fi` to check for the same TeX category
+  as `x`, such as another letter.
 - Use `\ifx\first\second ... \else ... \fi` to compare two tokens
   without expanding them. A `\let` alias keeps the meaning it captured.
 - Put ranges after a display opener, as in `$$ {hide|1|2|all}`. Each
