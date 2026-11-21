@@ -135,16 +135,22 @@ function fitEmpheq(element: HTMLElement): void {
       bottom: (Math.max(...boxes.map(box => box.bottom)) - root.top) / yScale,
     }
   }
+  const fences = Array.from(element.querySelectorAll(':scope > .math-empheq-side [data-empheq-delimiter]'), fence => ({
+    fence,
+    phantom: fence.nextElementSibling,
+    pad: fence.getAttribute('data-empheq-delimiter') === 'inner' ? innerInset : 0,
+    factor: Number(fence.getAttribute('data-empheq-factor') ?? 950) / 1000,
+    shortfall: Number.parseFloat(getComputedStyle(fence).getPropertyValue('--empheq-shortfall')) || 0,
+  }))
   function stretch(bounds: NonNullable<ReturnType<typeof body>>): void {
-    for (const fence of element.querySelectorAll(':scope > .math-empheq-side [data-empheq-delimiter]')) {
-      const pad = fence.getAttribute('data-empheq-delimiter') === 'inner' ? innerInset : 0
-      const space = fence.nextElementSibling
-      const height = bounds.bottom - bounds.y + 2 * pad
-      const size = length(height / 2)
-      if (space && space.getAttribute('height') !== size) {
-        space.setAttribute('height', size)
-        space.setAttribute('depth', size)
-        fence.setAttribute('minsize', length(height))
+    for (const { fence, phantom, pad, factor, shortfall } of fences) {
+      const naturalHeight = bounds.bottom - bounds.y + 2 * pad
+      const target = Math.max(0, naturalHeight * factor, naturalHeight - shortfall)
+      const half = length(target / 2)
+      if (phantom && phantom.getAttribute('height') !== half) {
+        phantom.setAttribute('height', half)
+        phantom.setAttribute('depth', half)
+        fence.setAttribute('minsize', length(target))
       }
     }
   }

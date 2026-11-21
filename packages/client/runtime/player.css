@@ -810,6 +810,12 @@ v-switch { display: block; }
   background-color: var(--math-frame-fill, transparent);
   padding: var(--math-frame-padding, 0.3em);
 }
+/* Resolve relative TeX lengths in the delimiter's font before sizing it. */
+@property --empheq-shortfall {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 1pt;
+}
 .math-empheq [data-empheq-ready] { visibility: visible; }
 @supports (display: math) {
   math mfrac > .math-fraction-alignment {

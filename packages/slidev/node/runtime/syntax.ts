@@ -18,6 +18,8 @@ const slotMarker = /^::\s*([\w.:-]+?)\s*::\s*$/
 const bareDisplay = /^ {0,3}\\begin\{((?:equation|align|alignat|flalign|xalignat|gather|multline)\*?|xxalignat|CD|subequations|spreadlines|empheq)\}/
 const openSpreadlines = /^ {0,3}\\begin\{spreadlines\}[ \t]*\{/
 const mathDeclarationStart = /^ {0,3}\\(mathtoolsset|empheqset|Declare(?:Left|Right)Delimiter|newtagform|renewtagform|usetagform)(?=[ \t[{])/
+const emphasisRegisterStart = /^ {0,3}(\\EmphEqdelimiter(?:factor|shortfall)|\\setlength[ \t]*(?:\{[ \t]*\\EmphEqdelimitershortfall[ \t]*\}|\\EmphEqdelimitershortfall))(?![A-Za-z@])/
+const emphasisRegisterValue = /^[ \t]*[+-]?[ \t]*(?:\d+(?:\.\d*)?|\.\d+)(?:[ \t]*[a-z]{2})?/
 const closeSpreadlines = /^ {0,3}\\end\{spreadlines\}[ \t]*(?:%.*)?$/
 
 function inlineMathEnd(line: string, start: number, delimiter: string): number {
@@ -36,7 +38,8 @@ function inlineMathEnd(line: string, start: number, delimiter: string): number {
 }
 
 function mathDeclarationLine(line: string): { source: string, inline: boolean } | undefined {
-  const opening = mathDeclarationStart.exec(line)
+  const register = emphasisRegisterStart.exec(line)
+  const opening = register ?? mathDeclarationStart.exec(line)
   if (!opening) return
   let at = opening[0].length
   function nextArgument(open: string, close: string): boolean {
@@ -50,10 +53,21 @@ function mathDeclarationLine(line: string): { source: string, inline: boolean } 
   const command = opening[1]
   const inline = command.endsWith('tagform')
   const optionalBracket = () => !/^[ \t]*\[/.test(line.slice(at)) || nextArgument('[', ']')
-  if (command.startsWith('Declare') && !optionalBracket()) return
-  if (!nextArgument('{', '}')) return
-  if (inline && command !== 'usetagform') {
-    if (!optionalBracket() || !nextArgument('{', '}') || !nextArgument('{', '}')) return
+  if (register) {
+    if (command.startsWith('\\EmphEq')) at += /^[ \t]*=?[ \t]*/.exec(line.slice(at))![0].length
+    if (!nextArgument('{', '}')) {
+      if (command.startsWith('\\setlength')) return
+      const value = emphasisRegisterValue.exec(line.slice(at))
+      if (!value) return
+      at += value[0].length
+    }
+  }
+  else {
+    if (command.startsWith('Declare') && !optionalBracket()) return
+    if (!nextArgument('{', '}')) return
+    if (inline && command !== 'usetagform') {
+      if (!optionalBracket() || !nextArgument('{', '}') || !nextArgument('{', '}')) return
+    }
   }
   if (/^[ \t]*(?:%.*)?$/.test(line.slice(at))) return { source: line.slice(0, at), inline }
 }
@@ -142,7 +156,7 @@ function tabsMarkup(id: string, tabs: GroupFence[]): string {
 
 export function prepareMarkdown(source: string, syntax: MarkdownSyntax = {}): PreparedMarkdown {
   const attrs = syntax.comark && source.includes('{') ? createComarkAttributes() : undefined
-  if (!attrs && !source.includes('$') && !source.includes('\\(') && !source.includes('\\[') && !source.includes('\\begin{') && !source.includes('\\mathtoolsset') && !source.includes('tagform') && !source.includes('\\empheqset') && !source.includes('\\Declare') && !source.includes('\\ref') && !source.includes('\\eqref') && !source.includes('\\noeqref') && !source.includes('{monaco') && !source.includes('{live') && !source.includes('mermaid') && !source.includes('v-click') && !source.includes('v-after') && !source.includes('```') && !source.includes('~~~')) {
+  if (!attrs && !source.includes('$') && !source.includes('\\(') && !source.includes('\\[') && !source.includes('\\begin{') && !source.includes('\\mathtoolsset') && !source.includes('tagform') && !source.includes('\\empheqset') && !source.includes('\\EmphEqdelimiter') && !source.includes('\\Declare') && !source.includes('\\ref') && !source.includes('\\eqref') && !source.includes('\\noeqref') && !source.includes('{monaco') && !source.includes('{live') && !source.includes('mermaid') && !source.includes('v-click') && !source.includes('v-after') && !source.includes('```') && !source.includes('~~~')) {
     return { source, restore: html => html }
   }
 

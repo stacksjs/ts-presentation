@@ -310,7 +310,7 @@ function tokenize(source: string, onTrailingComment?: () => void): string[] {
 type MathMode = 'math' | 'text'
 const expansionPrimitives = ['\\expandafter', '\\noexpand', '\\@firstoftwo', '\\@secondoftwo', '\\@ifnextchar', '\\@ifstar', '\\TextOrMath', '\\html@mathml', '\\message', '\\errmessage', '\\char', '\\MoveEqLeft'] as const
 const expansionPrimitiveNames = new Set<string>(expansionPrimitives)
-const macroDeclaration = /^\\(?:[gex]?def|(?:future)?let|(?:new|renew|provide)command|DeclarePairedDelimiter(?:X(?:PP)?)?|Declare(?:Left|Right)Delimiter|MakeAboxedCommand|mathtoolsset|empheqset|(?:new|renew|use)tagform|setlength|global|long)$/
+const macroDeclaration = /^\\(?:[gex]?def|(?:future)?let|(?:new|renew|provide)command|DeclarePairedDelimiter(?:X(?:PP)?)?|Declare(?:Left|Right)Delimiter|MakeAboxedCommand|mathtoolsset|empheqset|EmphEqdelimiter(?:factor|shortfall)|(?:new|renew|use)tagform|setlength|global|long)$/
 const tagFormDeclaration = /^\\(?:new|renew|use)tagform$/
 const tagValueToken = '\u0000equation-tag-value'
 const assignmentCommand = /^\\(?:[gex]?def|(?:future)?let)$/
@@ -978,6 +978,8 @@ const mathtoolsSpacingOptions = new Set([
 const arrowBetweenLines = '\\ArrowBetweenLines'
 const emphasisEnvironments = /^(?:(?:equation|align|alignat|flalign|gather|multline)\*?)$/
 const emphasisEdges = ' data-empheq-start data-empheq-end'
+const emphasisFactorCommand = '\\EmphEqdelimiterfactor'
+const emphasisShortfallCommand = '\\EmphEqdelimitershortfall'
 const swapAboveDisplaySkip = '\\SwapAboveDisplaySkip'
 const flushSpaceAbove = '\\MTFlushSpaceAbove'
 const flushSpaceBelow = '\\MTFlushSpaceBelow'
@@ -1150,6 +1152,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
   let shortDisplaySkip = false
   let emphasizedDisplay: 'equation' | 'alignment' | undefined
   let emphasisDefaults: ReadonlyMap<string, string[]> | undefined
+  let emphasisFactor = 950
+  let emphasisShortfall: string | undefined
   let emphasisSide = false
   let fontScale = 1
   let textItalic = false
@@ -1203,6 +1207,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const previousJot = equationJot
     const previousMathtoolsOptions = mathtoolsOptions
     const previousEmphasisDefaults = emphasisDefaults
+    const previousEmphasisFactor = emphasisFactor
+    const previousEmphasisShortfall = emphasisShortfall
     const previousTagForms = tagForms
     const previousTagFormName = tagFormName
     scopes.push({ undo: new Map() })
@@ -1214,6 +1220,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
       equationJot = previousJot
       mathtoolsOptions = previousMathtoolsOptions
       emphasisDefaults = previousEmphasisDefaults
+      emphasisFactor = previousEmphasisFactor
+      emphasisShortfall = previousEmphasisShortfall
       tagForms = previousTagForms
       tagFormName = previousTagFormName
       while (scopes.length > before) restoreScope()
@@ -3527,6 +3535,22 @@ export function renderMath(source: string, display = false, configured: MathMacr
     tagForms = new Map(tagForms).set(name, { left, right, inner })
   }
 
+  function readEmphasisFactor(): number {
+    let raw: string
+    if (peek() === '{') raw = expandDefinition(rawGroup()).join('').trim()
+    else {
+      const sign = peek()
+      raw = sign === '+' || sign === '-' ? take() : ''
+      space()
+      for (expand(false); /^\d$/.test(tokenValue(tokens[cursor] ?? '')); expand(false))
+        raw += tokenValue(tokens[cursor++])
+    }
+    const value = Number(raw.replace(/\s/g, ''))
+    if (!/^[+-]?\s*\d+$/.test(raw) || !Number.isSafeInteger(value) || Math.abs(value) > 2_147_483_647)
+      throw new MathParseError('Expected an integer for \\EmphEqdelimiterfactor')
+    return value
+  }
+
   function declareMacro(token: string): boolean {
     if (!macroDeclaration.test(token)) return false
     let global = false
@@ -3558,9 +3582,17 @@ export function renderMath(source: string, display = false, configured: MathMacr
         assign(command, macro)
       return true
     }
+    if (token === emphasisFactorCommand || token === emphasisShortfallCommand) {
+      if (peek() === '=') take()
+      if (token === emphasisFactorCommand) emphasisFactor = readEmphasisFactor()
+      else emphasisShortfall = readDimension()
+      return true
+    }
     if (name === 'setlength') {
-      if (literalGroup() !== '\\jot') throw new MathParseError('Unsupported math length register')
-      equationJot = readDimension()
+      const register = literalGroup().trim()
+      if (register === '\\jot') equationJot = readDimension()
+      else if (register === emphasisShortfallCommand) emphasisShortfall = readDimension()
+      else throw new MathParseError('Unsupported math length register')
       return true
     }
     function definitionTarget(grouped = false): string {
@@ -3719,7 +3751,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const input = expandDefinition(rawGroup()).filter(token => !texWhitespace.test(token))
       if (input.length !== 1) throw new MathParseError('Expected one glyph for an empheq delimiter')
       const symbol = delimiter(input[0], 'empheq')
-      return { markup: symbol === '.' ? '' : `<mrow class="math-empheq-delimiter"><mo stretchy="true" symmetric="false" data-empheq-delimiter="${size}" lspace="0em" rspace="0em">${escapeHtml(symbol)}</mo><mspace width="0"/></mrow>` }
+      if (symbol === '.') return { markup: '' }
+      const factor = emphasisFactor === 950 ? '' : ` data-empheq-factor="${emphasisFactor}"`
+      const shortfall = emphasisShortfall ? ` style="--empheq-shortfall:${emphasisShortfall}"` : ''
+      return { markup: `<mrow class="math-empheq-delimiter"><mo stretchy="true" symmetric="false" data-empheq-delimiter="${size}"${factor}${shortfall} lspace="0em" rspace="0em">${escapeHtml(symbol)}</mo><mspace width="0"/></mrow>` }
     }
     if (token === arrowBetweenLines) throw new MathParseError(`${token} requires an align, alignat, aligned, or alignedat environment`)
     if (token === flushSpaceAbove || token === flushSpaceBelow) throw new MathParseError(`${token} requires an alignment environment`)

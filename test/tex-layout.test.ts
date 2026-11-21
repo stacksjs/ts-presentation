@@ -1509,11 +1509,15 @@ test('applies standalone empheq declarations only to subsequent displays in the 
   const source = String.raw`# First
 
 \DeclareLeftDelimiter[\enspace\text{Deck default}]{\lbrace} % A local delimiter
+\EmphEqdelimiterfactor=1080 % A local factor
+\setlength\EmphEqdelimitershortfall{.35em}
 \empheqset{box=\fbox,left=\empheqlbrace}
 
 \begin{empheq}{equation*}x=1\end{empheq}
 
 \begin{spreadlines}{4px}
+\EmphEqdelimiterfactor{750}
+\EmphEqdelimitershortfall=1px
 \empheqset{left={},box={}}
 \begin{empheq}{equation*}y=2\end{empheq}
 \end{spreadlines}
@@ -1536,11 +1540,40 @@ test('applies standalone empheq declarations only to subsequent displays in the 
   for (const display of displays) {
     expect(display).toContain('<mtext>Deck default</mtext>')
     expect(display).toContain('data-empheq-box="outer"')
+    expect(display).toContain('data-empheq-factor="1080" style="--empheq-shortfall:.35em"')
     expect(display).not.toContain('--math-frame-fill:red')
   }
   expect(html).toMatch(/<pre><code class="language-tex">[\s\S]*?empheqset[\s\S]*?<\/code>/)
   expect(html).toContain('<mi>y</mi>')
   expect(html).toContain('<mi>u</mi>')
+})
+
+test('scopes empheq delimiter factors and shortfalls around a display group', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const display = String.raw`\begin{empheq}[left=\empheqlbrack,right=\empheqbigrbrack]{equation*}x=1\end{empheq}`
+  const source = String.raw`\def\factor{1100}
+\EmphEqdelimiterfactor=\factor
+\setlength{\EmphEqdelimitershortfall}{0.5em}
+\begin{spreadlines}{3px}
+${display}
+\begin{spreadlines}{2px}
+\EmphEqdelimiterfactor{650}
+\EmphEqdelimitershortfall=-2pt
+${display}
+\end{spreadlines}
+${display}
+\end{spreadlines}`
+  const settings = [...math(source, true).matchAll(/data-empheq-delimiter="(body|inner)" data-empheq-factor="(\d+)" style="--empheq-shortfall:([^"]+)"/g)]
+    .map(([, size, factor, shortfall]) => [size, factor, shortfall])
+  expect(settings).toEqual([
+    ['body', '1100', '0.5em'], ['inner', '1100', '0.5em'],
+    ['body', '650', '-2pt'], ['inner', '650', '-2pt'],
+    ['body', '1100', '0.5em'], ['inner', '1100', '0.5em'],
+  ])
+  expect(math(display, true)).not.toContain('data-empheq-factor')
+  expect(() => math(String.raw`\EmphEqdelimiterfactor={12.5}` + display, true)).toThrow('Expected an integer')
+  expect(() => math(String.raw`\EmphEqdelimiterfactor=2147483648` + display, true)).toThrow('Expected an integer')
+  expect(() => math(String.raw`\EmphEqdelimitershortfall={2fr}` + display, true)).toThrow('Invalid math dimension')
 })
 
 test('selects the last empheq outer frame option and requires flush-left math for margin frames', () => {

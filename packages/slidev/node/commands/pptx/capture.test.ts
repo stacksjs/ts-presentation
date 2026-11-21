@@ -336,7 +336,9 @@ See \eqref{a} and \eqref{b}.
 
 \DeclareLeftDelimiter[\enspace P\Rightarrow]{\lbrace}
 \DeclareRightDelimiter[\Leftarrow Q\enspace]{\rbrack}
-\empheqset{innerbox=\fbox,left=\empheqbiglbrace,right=\empheqrbrack}
+\EmphEqdelimiterfactor=650
+\setlength{\EmphEqdelimitershortfall}{0.5em}
+\empheqset{innerbox=\fbox,left=\empheqbiglbrace,right={\EmphEqdelimiterfactor=1120\empheqrbrack}}
 
 $$ {1|2|all}
 \newcommand{\panel}[1]{\fcolorbox{blue}{navy}{#1}}
@@ -365,7 +367,8 @@ $$`)
       expect(markup).toContain('data-slide-link="2"><math><mrow><mtext>(2)</mtext>')
       await view.navigate(server.url.href + '#slide-2')
       const layout = await view.evaluate<{
-        positioned: boolean, affixOrder: boolean, delimiters: number[], bodyHeight: number, border: string, fill: string
+        positioned: boolean, affixOrder: boolean, delimiters: { ink: number, minimum: number, target: number }[],
+        bodyHeight: number, border: string, fill: string
       }>(`(async () => {
         await document.fonts.ready
         await new Promise(requestAnimationFrame)
@@ -380,20 +383,40 @@ $$`)
         const end = rect('mtr:last-child [data-empheq-end]')
         const tag = rect('.math-equation-number')
         const paint = getComputedStyle(wrapper('[data-empheq-box="outer"]'))
+        const groupBounds = group.getBoundingClientRect()
+        const scale = groupBounds.height / parseFloat(getComputedStyle(group).height)
+        const cells = [...group.querySelectorAll('.math-display-grid > mtr > mtd:not(.math-equation-number, [aria-hidden])')]
+          .map(cell => cell.getBoundingClientRect()).filter(cell => cell.width && cell.height)
+        const bodyHeight = Math.max(...cells.map(cell => cell.bottom)) - Math.min(...cells.map(cell => cell.top))
+        const innerPaint = getComputedStyle(wrapper('[data-empheq-box="inner"]'))
+        const inset = parseFloat(innerPaint.borderTopWidth) + parseFloat(innerPaint.paddingTop)
         return {
           positioned: outer.left < left.left && left.right <= inner.left + 0.5
             && inner.left < start.left && inner.right > end.right && inner.top < start.top && inner.bottom > end.bottom
             && right.left >= inner.right - 0.5 && outer.right > right.right && tag.left >= outer.right - 0.5,
           affixOrder: rect('[data-empheq-side="left"] [data-empheq-delimiter]').right < rect('[data-empheq-side="left"] mi').left
             && rect('[data-empheq-side="right"] mi').right < rect('[data-empheq-side="right"] [data-empheq-delimiter]').left,
-          delimiters: Array.from(group.querySelectorAll('[data-empheq-delimiter]'), el => el.getBoundingClientRect().height),
-          bodyHeight: end.bottom - start.top, border: paint.borderTopColor, fill: paint.backgroundColor,
+          delimiters: Array.from(group.querySelectorAll('[data-empheq-delimiter]'), (fence, index) => {
+            const height = bodyHeight / scale + (index === 0 ? 2 * inset : 0)
+            const shortfall = parseFloat(getComputedStyle(fence).fontSize) * 0.5
+            return {
+              ink: fence.getBoundingClientRect().height,
+              minimum: parseFloat(fence.getAttribute('minsize')),
+              // The left fence is limited by the shortfall, the right one by the factor.
+              target: index === 0 ? height - shortfall : height * 1.12,
+            }
+          }),
+          bodyHeight, border: paint.borderTopColor, fill: paint.backgroundColor,
         }
       })()`)
       expect(layout.positioned).toBe(true)
       expect(layout.affixOrder).toBe(true)
       expect(layout.delimiters).toHaveLength(2)
-      expect(Math.min(...layout.delimiters)).toBeGreaterThan(layout.bodyHeight * 0.85)
+      for (const { ink, minimum, target } of layout.delimiters) {
+        expect(minimum).toBeCloseTo(target, 1)
+        expect(ink).toBeGreaterThan(layout.bodyHeight * 0.85)
+      }
+      expect(layout.delimiters[1].ink).toBeGreaterThan(layout.bodyHeight)
       expect(layout.border).toBe('rgb(0, 0, 255)')
       expect(layout.fill).toBe('rgb(0, 0, 128)')
     }
