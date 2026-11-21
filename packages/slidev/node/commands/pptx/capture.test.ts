@@ -2474,7 +2474,7 @@ p+q
 $$
 
 $$
-\overline{X}+\frac{a}{b}
+\sqrt{X}+\frac{a}{b}
 $$
 
 $$
@@ -2512,6 +2512,80 @@ $$`)
     expect(ams).toContain('>(F)</m:t>')
     expect(ams).toContain('>(Z)</m:t>')
     expect(ams).toContain('<m:type m:val="noBar"/>')
+  }
+  finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}, 45_000)
+
+it.skipIf(!chrome)('exports TeX line and bracket accents as editable rules with their terms and labels', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-ruled-accents-'))
+  const canvas = { width: 960, height: 540 }
+  try {
+    const entry = join(root, 'slides.md')
+    await Bun.write(entry, String.raw`---
+math:
+  minRuleThickness: 0.18
+---
+
+# Measured accents
+
+$$
+\textcolor{#0055cc}{\overline{a+b}} + \underline{c+d} + \underbar{note}
+$$
+
+$$
+\overbracket{x+y}^{n} + \underbracket{z+w}_{m}
+$$
+
+$$
+\overlinesegment{p} + \underlinesegment{q}
+$$
+
+---
+
+# Accents in alignments
+
+\begin{align}
+A&=\frac{\overbracket{r+s}^{h}}{t}\tag{A}\\
+B&=\underline{u+v}\tag{B}
+\end{align}
+
+$$
+z_{\underline{x}}
+$$`)
+    const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
+    const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
+    const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
+    if (status) throw new Error(stderr)
+    const frames: PowerPointFrame[] = []
+    await captureFrames({ root: join(root, 'dist'), executable: chrome!, scale: 1, canvas, editable: true, withClicks: false }, frame => { frames.push(frame) })
+    expect(frames).toHaveLength(2)
+    const equations = frames[0].editable?.nodes.filter((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math') ?? []
+    expect(equations).toHaveLength(3)
+    const [line, bracket, segment] = equations.map(node => node.equation!)
+    expect(line.rules).toHaveLength(3)
+    const [over, under] = line.rules!
+    expect(over.fill).toEqual({ r: 0, g: 85, b: 204, a: 1 })
+    expect(over.rect.h).toBeGreaterThan(3)
+    expect(over.rect.y + over.rect.h).toBeLessThanOrEqual(line.rect.y + 0.1)
+    const underTerm = line.cells!.find(item => item.expression.includes('>c</m:t>'))!
+    expect(under.rect.y).toBeGreaterThanOrEqual(underTerm.rect.y + underTerm.rect.h - 0.1)
+    expect(bracket.rules).toHaveLength(6)
+    expect(bracket.rules![0].rect.h).toBeGreaterThan(3)
+    expect(bracket.rules![1].rect.y).toBeGreaterThan(bracket.rules![0].rect.y)
+    expect(bracket.rules![4].rect.y).toBeLessThan(bracket.rules![3].rect.y)
+    expect(segment.rules!.length).toBeGreaterThanOrEqual(6)
+    const document = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Ruled accents' }))
+    const accents = document.get('ppt/slides/slide1.xml')?.toString() ?? ''
+    const ams = document.get('ppt/slides/slide2.xml')?.toString() ?? ''
+    expect(accents.match(/<mc:Fallback><p:sp>/g)).toHaveLength(3)
+    expect(accents).not.toContain('<p:pic>')
+    for (const text of ['a', 'note', 'n', 'm', 'p', 'q']) expect(accents).toContain(`>${text}</m:t>`)
+    expect(ams.match(/name="Equation rule"/g)).toHaveLength(5)
+    expect(ams.match(/<p:pic>/g)).toHaveLength(1)
+    expect(ams).not.toContain('<m:bar>')
+    for (const text of ['r', 'h', 't', 'u', '(A)', '(B)']) expect(ams).toContain(`>${text}</m:t>`)
   }
   finally {
     await rm(root, { recursive: true, force: true })

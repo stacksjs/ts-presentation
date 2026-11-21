@@ -88,10 +88,12 @@ export function collectSnapshot(options: {
   const ruledFraction = 'mfrac[linethickness]:not([linethickness="0"], [linethickness="0px"], [linethickness="0em"])'
   const adjustedDegree = 'mrow.math-root-offset'
   const measuredStrut = 'mrow[data-math-strut][aria-hidden="true"]'
-  const measuredLayout = `${decoratedArray}, ${multilineStack}, ${alignedFraction}, ${ruledFraction}, ${adjustedDegree}, ${measuredStrut}`
-  const unmeasuredRule = 'mroot, msqrt, menclose, .math-frame, .math-angl, .math-text-circled, .math-overline, .math-underline, .math-overbracket, .math-underbracket, .math-overlinesegment, .math-underlinesegment'
+  const lineAccent = ':is(mrow, mo):is(.math-overline, .math-underline)'
+  const bracketAccent = 'mrow:is(.math-overbracket, .math-underbracket, .math-overlinesegment, .math-underlinesegment)'
+  const measuredStructures = `${decoratedArray}, ${multilineStack}, ${alignedFraction}, ${ruledFraction}, ${adjustedDegree}, ${measuredStrut}, ${bracketAccent}`
+  const unmeasuredRule = 'mroot, msqrt, menclose, .math-frame, .math-angl, .math-text-circled'
   const raisedMathBox = 'mtext.math-raised-box'
-  const positionedMath = `${overlappingMath}, ${measuredMathBox}, ${graphicMathBox}, ${raisedMathBox}, ${measuredLayout}`
+  const positionedBoxes = `${overlappingMath}, ${measuredMathBox}, ${graphicMathBox}, ${raisedMathBox}`
   const raisedMathBody = ':scope > span > span > math > mrow'
   function positionedMathInk(element: Element): Element | undefined {
     if (!element.matches(overlappingMath)) return
@@ -100,7 +102,7 @@ export function collectSnapshot(options: {
     if (ink && /^math-overlap-[lcr]$/.test(ink.getAttribute('class') ?? '') && ink.children.length === 1) return ink
   }
 
-  function mathExpression(root: Element): RawMathElement | undefined {
+  function mathExpression(root: Element, customThickness: boolean): RawMathElement | undefined {
     let nodes = 0
     let characters = 0
     function read(element: Element, depth: number): RawMathElement | undefined {
@@ -120,6 +122,9 @@ export function collectSnapshot(options: {
       const attributes = Object.fromEntries(Array.from(element.attributes)
         .filter(attribute => attribute.name !== 'data-empheq-start' && attribute.name !== 'data-empheq-end')
         .map(attribute => [attribute.name, attribute.value]))
+      // A native Office Math bar has fixed weight. Keep the image fallback
+      // when a custom rule cannot be extracted from its surrounding layout.
+      if (customThickness && element.matches(lineAccent)) attributes['data-math-custom-line'] = ''
       const text = Array.from(element.childNodes).filter(node => node.nodeType === 3).map(node => node.nodeValue).join('')
       characters += text.length
       if (characters > 4096) return
@@ -761,8 +766,9 @@ export function collectSnapshot(options: {
       return fragments
     }
 
-    function positionedMathFragments(element: Element, expression: RawMathElement, opacity: number, scale: number):
+    function positionedMathFragments(element: Element, expression: RawMathElement, opacity: number, scale: number, measuredLayout: string):
       { cells: RawMathFragment[], rect: RawMathFragment['rect'], rules?: RawMathRule[], pictures?: RawMathPicture[] } | undefined {
+      const positionedMath = `${positionedBoxes}, ${measuredLayout}`
       if (!element.matches(positionedMath) && !element.querySelector(positionedMath)) return
       const formulaColor = getComputedStyle(element.closest('math') ?? element).color
       const cells: RawMathFragment[] = []
@@ -949,6 +955,60 @@ export function collectSnapshot(options: {
         if (node.localName === 'msqrt') return visitRow(node, data)
         return Array.from(node.children).every((child, index) => visitArgument(child, data.children[index]))
       }
+      function collectAccent(node: Element, data: RawMathElement, line: boolean): boolean {
+        flush()
+        const box = node.getBoundingClientRect()
+        const style = getComputedStyle(node)
+        if (!(box.width > 0 && box.height > 0) || style.transform !== 'none' || style.filter !== 'none'
+          || style.boxShadow !== 'none' || style.backgroundColor !== 'rgba(0, 0, 0, 0)' || Number(style.opacity) !== 1) return false
+        const below = /math-under/.test(data.attributes.class)
+        const px = (value: string) => Number.parseFloat(value) * scale
+        function rule(left: number, top: number, width: number, height: number, color = style.color): void {
+          if (width > 0 && height > 0) rules.push({ rect: relative({ left, top, width, height }), opacity, color })
+        }
+        if (line) {
+          const weight = px(below ? style.borderBottomWidth : style.borderTopWidth)
+          const edge = below ? style.borderBottomStyle : style.borderTopStyle
+          if (!(weight > 0 && weight < box.height) || edge !== 'solid' || style.backgroundImage !== 'none') return false
+          rule(box.left, below ? box.bottom - weight : box.top, box.width, weight, below ? style.borderBottomColor : style.borderTopColor)
+          if (node.localName === 'mo') {
+            const { class: _accent, 'data-math-custom-line': _weight, ...attributes } = data.attributes
+            const ink = new DOMRect(box.left, box.top + (below ? 0 : weight), box.width, box.height - weight)
+            add([ink], { ...data, attributes }, node)
+          }
+        }
+        else {
+          // The renderer paints two short caps and one full-width bar. Check
+          // all three layers before reproducing their geometry in DrawingML.
+          const gradient = `linear-gradient(${style.color}, ${style.color})`
+          const sizes = /^(\d+(?:\.\d+)?)px (\d+(?:\.\d+)?)px, \1px \2px, 100% \1px$/.exec(style.backgroundSize)
+          if (!sizes || !style.color.startsWith('rgb(') || style.backgroundImage !== `${gradient}, ${gradient}, ${gradient}`
+            || style.backgroundRepeat !== 'no-repeat, no-repeat, no-repeat'
+            || style.backgroundOrigin !== 'padding-box, padding-box, padding-box'
+            || style.backgroundClip !== 'border-box, border-box, border-box'
+            || [style.borderTopWidth, style.borderBottomWidth, style.borderLeftWidth, style.borderRightWidth].some(length => length !== '0px')) return false
+          const [weight, cap] = sizes.slice(1).map(px)
+          const anchor = below ? '100%' : '0%'
+          const position = style.backgroundPosition.split(', ').at(-1) ?? ''
+          if (style.backgroundPosition !== `0% ${anchor}, 100% ${anchor}, ${position}` || !position.startsWith('50% ')) return false
+          const placement = position.slice(4)
+          const inset = below ? /^calc\(100% - ([\d.]+px)\)$/.exec(placement)?.[1] : /^[\d.]+px$/.exec(placement)?.[0]
+          const offset = position === `50% ${anchor}` ? 0 : inset ? px(inset) : NaN
+          if (!(weight > 0 && weight <= box.width / 2 && cap > 0 && cap <= box.height && offset + weight <= box.height)) return false
+          const top = below ? box.bottom - offset - weight : box.top + offset
+          const capTop = below ? box.bottom - cap : box.top
+          rule(box.left, top, box.width, weight)
+          for (const x of [box.left, box.right - weight]) {
+            // Keep the rectangles disjoint so fading a row has no seams.
+            rule(x, capTop, weight, Math.min(top - capTop, cap))
+            const bottom = Math.max(top + weight, capTop)
+            rule(x, bottom, weight, capTop + cap - bottom)
+          }
+        }
+        bounds.push(box)
+        split = true
+        return node.localName === 'mo' || visitRow(node, data)
+      }
       function visit(node: Element, data: RawMathElement): boolean {
         if (node.matches(decoratedArray)) return collectArray(node, data)
         if (node.matches(measuredStrut)) {
@@ -958,6 +1018,14 @@ export function collectSnapshot(options: {
           return true
         }
         if (node.matches(multilineStack)) return collectMultline(node, data)
+        const line = node.matches(lineAccent)
+        if (node.matches(bracketAccent) || (line && (node.matches(measuredLayout) || node.querySelector(measuredLayout))))
+          return collectAccent(node, data, line)
+        if (node.matches('munder, mover, munderover') && node.firstElementChild?.matches(`${bracketAccent}, ${lineAccent}`)
+          && (node.firstElementChild.matches(measuredLayout) || node.firstElementChild.querySelector(measuredLayout))) {
+          flush()
+          return Array.from(node.children).every((child, index) => visitArgument(child, data.children[index]))
+        }
         if (node.matches('mfrac') && (node.matches(`${alignedFraction}, ${ruledFraction}`)
           || node.querySelector(measuredLayout))) return collectFraction(node, data)
         if (node.matches('mroot, msqrt') && node.querySelector(measuredLayout)) return collectRadical(node, data)
@@ -997,7 +1065,9 @@ export function collectSnapshot(options: {
       if (rect && cells.length) return { cells, rect, ...(rules.length && { rules }), ...(pictures.length && { pictures }) }
     }
 
-    function mathProjection(presentation: Element, expression: RawMathElement, display: boolean, scale: number): RawMathSnapshot | undefined {
+    function mathProjection(presentation: Element, expression: RawMathElement, display: boolean, scale: number, customThickness: boolean): RawMathSnapshot | undefined {
+      const measuredLayout = customThickness ? `${measuredStructures}, ${lineAccent}` : measuredStructures
+      const positionedMath = `${positionedBoxes}, ${measuredLayout}`
       let table = presentation
       let data = expression
       while (table.localName === 'mrow' && table.children.length === 1) {
@@ -1010,7 +1080,7 @@ export function collectSnapshot(options: {
       const positionedCells = ams && (table.hasAttribute('data-equation-row-spacing') || table.hasAttribute('data-equation-spread')
         || table.querySelector(positionedMath) !== null)
       if (!singleTag && !tagsAtMargin && !positionedCells) {
-        const positioned = positionedMathFragments(presentation, expression, 1, scale)
+        const positioned = positionedMathFragments(presentation, expression, 1, scale, measuredLayout)
         if (positioned) return { ...positioned, display }
         const rect = relative(presentation.getBoundingClientRect())
         if (rect.w > 0 && rect.h > 0) return { expression, rect, display }
@@ -1056,7 +1126,7 @@ export function collectSnapshot(options: {
             if (cell.hasAttribute('aria-hidden')) continue
             const formula = cell.firstElementChild
             if (singleFormula || !cell.hasAttribute('data-equation-body') || !formula || cell.children.length !== 1) return
-            singleFormula = mathProjection(formula, cellData.children[0], true, scale)
+            singleFormula = mathProjection(formula, cellData.children[0], true, scale, customThickness)
             if (!singleFormula) return
           }
           else {
@@ -1105,7 +1175,7 @@ export function collectSnapshot(options: {
               }
             }
             const positioned = content && cell.children.length === 1
-              ? positionedMathFragments(content, cellData.children[0], rowOpacity, scale) : undefined
+              ? positionedMathFragments(content, cellData.children[0], rowOpacity, scale, measuredLayout) : undefined
             if (positioned) {
               measuredCells.push(...positioned.cells)
               if (positioned.rules) rules.push(...positioned.rules)
@@ -1262,10 +1332,10 @@ export function collectSnapshot(options: {
         && el.parentElement?.classList.contains('math-inline')
       const presentation = fragment ? semantics : semantics?.localName === 'semantics' && !el.hasAttribute('class') ? semantics.firstElementChild : undefined
       if (presentation) {
-        const customThickness = computed.getPropertyValue('--math-min-rule').trim()
+        const customThickness = Boolean(computed.getPropertyValue('--math-min-rule').trim())
         if (!customThickness || (!presentation.matches(unmeasuredRule) && !presentation.querySelector(unmeasuredRule))) {
-          const expression = mathExpression(presentation)
-          const source = expression && mathProjection(presentation, expression, el.getAttribute('display') === 'block', scale)
+          const expression = mathExpression(presentation, customThickness)
+          const source = expression && mathProjection(presentation, expression, el.getAttribute('display') === 'block', scale, customThickness)
           if (source) record.math = source
         }
       }
