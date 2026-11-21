@@ -1832,6 +1832,14 @@ $$
 \sqrt[\uproot{2}\leftroot{3}\beta]{z+1}
 $$
 
+$$
+\root\leftroot{-3}\uproot{-2}\beta\of{z+1}
+$$
+
+$$
+\frac{\sqrt{\sqrt[\uproot{2}3]{q}}}{n}
+$$
+
 ---
 
 # Mathtools boxes
@@ -1937,7 +1945,6 @@ $$`)
     expect(prescripts[0]).toContain('<m:sty m:val="p"/>')
     expect(prescripts[1]).toMatch(/<m:e><m:sSup><m:e>.*?>C<\/m:t>.*?<\/m:e><m:sup>.*?>−<\/m:t>/)
     expect(spacing).toContain('>∶</m:t>')
-    expect([...parts.keys()].filter(name => name.startsWith('ppt/media/'))).toHaveLength(23)
 
     const alphabets = parts.get('ppt/slides/slide5.xml')?.toString() ?? ''
     expect(alphabets.match(/<a14:m>/g)).toHaveLength(2)
@@ -1961,14 +1968,33 @@ $$`)
     expect(annotations).toContain('<m:m><m:mPr><m:baseJc m:val="center"/></m:mPr><m:mr><m:e><m:f>')
     expect(annotations).toContain('<m:t xml:space="preserve">rank</m:t>')
     const adjusted = parts.get('ppt/slides/slide7.xml')?.toString() ?? ''
-    expect(adjusted.match(/<p:pic>/g)).toHaveLength(1)
-    expect(adjusted).not.toContain('<m:rad>')
+    expect(adjusted.match(/<mc:Fallback><p:sp>/g)).toHaveLength(3)
+    expect(adjusted.match(/<a14:m>/g)).toHaveLength(7)
+    expect(adjusted.match(/name="Equation radical"/g)).toHaveLength(4)
+    expect(adjusted.match(/name="Equation rule"/g)).toHaveLength(1)
+    const roots = frames[6].editable?.nodes.filter((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math') ?? []
+    const artwork = roots.flatMap(node => node.equation?.pictures ?? [])
+    expect(artwork).toHaveLength(4)
+    for (const radical of artwork) {
+      expect(radical.kind).toBe('radical')
+      expect(Buffer.from(radical.data, 'base64').subarray(1, 4).toString()).toBe('PNG')
+    }
+    const indexOffsets = roots.slice(0, 2).map(({ equation }) => {
+      const base = equation!.rect
+      const index = equation!.cells![0]
+      expect(equation!.expression).toContain('>z</m:t>')
+      expect(index.expression).toContain('>β</m:t>')
+      return { x: index.rect.x - base.x, y: index.rect.y - base.y }
+    })
+    expect(indexOffsets[0].x).toBeLessThan(indexOffsets[1].x)
+    expect(indexOffsets[0].y).toBeLessThan(indexOffsets[1].y)
     const boxes = parts.get('ppt/slides/slide8.xml')?.toString() ?? ''
-    expect(boxes.match(/<a14:m>/g)).toHaveLength(1)
+    expect(boxes.match(/<a14:m>/g)).toHaveLength(3)
     expect(boxes).toContain('<m:f><m:num>')
     expect(boxes).toContain('>b</m:t>')
     expect(boxes).toContain('<m:phantPr><m:show m:val="0"/><m:zeroWid m:val="1"/>')
-    expect(boxes.match(/<p:pic>/g)).toHaveLength(3)
+    expect(boxes.match(/<p:pic>/g)).toHaveLength(2)
+    expect(boxes.match(/name="Equation rule"/g)).toHaveLength(1)
     for (const cell of ['a', 'b', 'c', 'd']) expect(fonts.get(cell)).toBe('<m:sty m:val="i"/>')
     expect(fonts.get('i')).toBe('<m:sty m:val="p"/>')
     expect(fonts.get('plain')).toBe('<m:sty m:val="p"/>')

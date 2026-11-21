@@ -183,9 +183,9 @@ function drawEquation(equation: NonNullable<IrRaster['equation']>, id: number, r
     return shape(nextId(), 'Equation frame', transform(path) + rectShape(0, path) + fill(background) + line(border))
   }).join('') ?? ''
   const strokes = equation.rules?.map(rule => drawBox(rule, nextId, 'Equation rule')).join('') ?? ''
-  const delimiters = equation.pictures?.map(picture =>
-    embeddedPicture(nextId(), image(picture.data), picture.rect, 'Equation delimiter')).join('') ?? ''
-  const editable = decorations + strokes + delimiters + mathShape(equation, id, 'Equation')
+  const artwork = equation.pictures?.map(picture =>
+    embeddedPicture(nextId(), image(picture.data), picture.rect, picture.kind === 'radical' ? 'Equation radical' : 'Equation delimiter')).join('') ?? ''
+  const editable = decorations + strokes + artwork + mathShape(equation, id, 'Equation')
     + (equation.cells?.map(cell => mathShape(cell, nextId(), 'Equation cell')).join('') ?? '')
     + (equation.tags?.map(tag => mathShape(tag, nextId(), 'Equation tag')).join('') ?? '')
   const picture = `<a:blipFill><a:blip r:embed="${relationship}"/><a:stretch><a:fillRect/></a:stretch></a:blipFill>`

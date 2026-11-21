@@ -85,8 +85,10 @@ export function collectSnapshot(options: {
   const decoratedArray = 'mtable[data-math-array-decoration]'
   const multilineStack = 'mtable[data-multlined-position]'
   const alignedFraction = 'mfrac:is([numalign], [denomalign])'
-  const stackedMath = `${multilineStack}, ${alignedFraction}`
-  const measuredLayout = `${decoratedArray}, ${stackedMath}`
+  const adjustedDegree = 'mrow.math-root-offset'
+  const measuredStrut = 'mrow[data-math-strut][aria-hidden="true"]'
+  const measuredStructure = `${multilineStack}, ${alignedFraction}, ${adjustedDegree}, ${measuredStrut}`
+  const measuredLayout = `${decoratedArray}, ${measuredStructure}`
   const raisedMathBox = 'mtext.math-raised-box'
   const positionedMath = `${overlappingMath}, ${measuredMathBox}, ${graphicMathBox}, ${raisedMathBox}, ${measuredLayout}`
   const raisedMathBody = ':scope > span > span > math > mrow'
@@ -877,19 +879,19 @@ export function collectSnapshot(options: {
         }
         return true
       }
-      function mathPicture(node: Element, fractionRule = false): boolean {
+      function mathPicture(node: Element, kind: RawMathPicture['kind']): boolean {
         const box = node.getBoundingClientRect()
         if (!(box.width > 0 && box.height > 0)) return false
         flush()
         const sourceId = nextId++
         node.setAttribute(options.idAttribute, String(sourceId))
-        pictures.push({ sourceId, rect: relative(box), ...(fractionRule && { fractionRule }) })
+        pictures.push({ sourceId, rect: relative(box), kind })
         bounds.push(box)
         return true
       }
       function pictureFence(node: Element): boolean {
         return node.localName === 'mo' && node.getAttribute('stretchy') === 'true'
-          && /^[()[\]{}|‖⟨⟩⌊⌋⌈⌉⟮⟯⎰⎱⟦⟧⦃⦄]$/u.test(node.textContent ?? '') && mathPicture(node)
+          && /^[()[\]{}|‖⟨⟩⌊⌋⌈⌉⟮⟯⎰⎱⟦⟧⦃⦄]$/u.test(node.textContent ?? '') && mathPicture(node, 'delimiter')
       }
       function visitRow(node: Element, data: RawMathElement): boolean {
         // The edge spaces and struts have already positioned the visible terms.
@@ -901,6 +903,13 @@ export function collectSnapshot(options: {
         const result = boxes.slice(start, end).every((child, index) => visit(child, data.children[start + index]))
         flush()
         return result
+      }
+      function visitArgument(node: Element, data: RawMathElement): boolean {
+        if (node.localName === 'mrow' && (!Object.keys(data.attributes).length || node.matches(adjustedDegree)))
+          return visitRow(node, data)
+        const collected = visit(node, data)
+        flush()
+        return collected
       }
       function collectStack(node: Element, data: RawMathElement): boolean {
         flush()
@@ -915,21 +924,30 @@ export function collectSnapshot(options: {
         }
         if (node.children.length !== 2) return false
         const thickness = data.attributes.linethickness
-        if ((thickness === undefined || Number.parseFloat(thickness) !== 0) && !mathPicture(node, true)) return false
+        if ((thickness === undefined || Number.parseFloat(thickness) !== 0) && !mathPicture(node, 'fraction-rule')) return false
         return Array.from(node.children).every((child, index) => {
           const argument = data.children[index]
           const aligned = child.classList.contains('math-fraction-alignment') && child.children.length === 1
-          const ink = aligned ? child.children[0] : child
-          const inkData = aligned ? argument.children[0] : argument
-          const collected = ink.localName === 'mrow' && !Object.keys(inkData.attributes).length
-            ? visitRow(ink, inkData) : visit(ink, inkData)
-          flush()
-          return collected
+          return aligned ? visitArgument(child.children[0], argument.children[0]) : visitArgument(child, argument)
         })
+      }
+      function collectRadical(node: Element, data: RawMathElement): boolean {
+        if (!mathPicture(node, 'radical')) return false
+        split = true
+        if (node.localName === 'msqrt') return visitRow(node, data)
+        return Array.from(node.children).every((child, index) => visitArgument(child, data.children[index]))
       }
       function visit(node: Element, data: RawMathElement): boolean {
         if (node.matches(decoratedArray)) return collectArray(node, data)
-        if (node.matches(stackedMath) || (node.localName === 'mfrac' && node.querySelector(stackedMath))) return collectStack(node, data)
+        if (node.matches(measuredStrut)) {
+          // The strut is invisible. Its height and depth are already included
+          // in the measured positions of the surrounding terms.
+          split = true
+          return true
+        }
+        if (node.matches(multilineStack) || node.matches(alignedFraction)
+          || (node.localName === 'mfrac' && node.querySelector(measuredStructure))) return collectStack(node, data)
+        if (node.matches('mroot, msqrt') && node.querySelector(measuredStructure)) return collectRadical(node, data)
         const content = positionedContent(node, data)
         if (content) {
           flush()

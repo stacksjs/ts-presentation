@@ -194,9 +194,9 @@ export async function captureEditable(browser: Browser, canvas: SlideCanvas, sli
           for (const decoration of node.equation.pictures) {
             const clip = requests.get(decoration.sourceId)?.clip
             if (!clip) throw new Error('Missing equation decoration bounds')
-            const isRule = decoration.fractionRule === true
-            decoration.data = await picture(browser, clip, decoration.sourceId, isRule, attribute, isRule)
-            if (isRule) {
+            const ownArtwork = decoration.kind !== 'delimiter'
+            decoration.data = await picture(browser, clip, decoration.sourceId, ownArtwork, attribute, ownArtwork)
+            if (decoration.kind === 'fraction-rule') {
               const rule = await evaluate(browser, fractionRule, decoration)
               const rules = node.equation.rules ??= []
               rules.push(rule)
