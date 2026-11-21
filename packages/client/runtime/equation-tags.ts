@@ -204,9 +204,17 @@ function fitEmpheq(element: HTMLElement): void {
     if (box.style.getPropertyValue(property) !== value) box.style.setProperty(property, value)
   }
   const width = (side: HTMLElement | null) => side ? side.getBoundingClientRect().width / xScale : 0
-  function reserve(): void {
-    assign(element, '--empheq-inline-start', width(left) + inlineInset)
-    assign(element, '--empheq-inline-end', width(right) + inlineInset)
+  const tolerance = 0.03
+  function reserve(relaxation = 1): boolean {
+    let changed = false
+    for (const [property, side] of [['--empheq-inline-start', left], ['--empheq-inline-end', right]] as const) {
+      const before = Number.parseFloat(element.style.getPropertyValue(property)) || 0
+      const delta = width(side) + inlineInset - before
+      if (Math.abs(delta) <= tolerance) continue
+      assign(element, property, before + delta * relaxation)
+      changed = true
+    }
+    return changed
   }
   function body() {
     const root = element.getBoundingClientRect()
@@ -257,16 +265,28 @@ function fitEmpheq(element: HTMLElement): void {
   }
   assign(element, '--empheq-block-pad', totalInset)
   reserve()
-  let bounds = body()
-  if (!bounds) return
+  const initialBounds = body()
+  if (!initialBounds) return
+  let bounds = initialBounds
   fitSides(bounds)
   reserve()
   if (table.hasAttribute('data-equation-tags')) fitTable(table)
   bounds = body() ?? bounds
   fitSides(bounds)
   if (measuredBoxes.length) {
-    reserve()
-    bounds = body() ?? bounds
+    // A full-width alignment can shrink when its measured side grows.
+    // Damp the feedback if the first correction changes the measured size.
+    const widthOf = (rect: typeof bounds) => rect.right - rect.x
+    const heightOf = (rect: typeof bounds) => rect.bottom - rect.y
+    for (let pass = 0; pass < 16 && reserve(pass === 0 ? 1 : 0.5); pass++) {
+      if (table.hasAttribute('data-equation-tags')) fitTable(table)
+      const placed = body() ?? bounds
+      const changed = Math.abs(widthOf(placed) - widthOf(bounds)) > tolerance
+        || Math.abs(heightOf(placed) - heightOf(bounds)) > tolerance
+      bounds = placed
+      if (!changed && pass === 0) break
+      fitSides(bounds)
+    }
   }
 
   const framed = (box: HTMLElement, rect: typeof bounds, pad: number) => {

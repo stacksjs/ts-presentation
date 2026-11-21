@@ -500,6 +500,15 @@ $$
 ]{align}
 X&=\frac{1}{2}\tag{A}\\
 Y&=\frac{3}{4}\tag{Longer}
+\end{empheq}
+
+---
+
+# Full-width measured decoration
+
+\begin{empheq}[innerbox=\fbox,left={\resizebox*{.25\EmphEqdisplaywidth}{15px}{L}}]{flalign}
+x&=a & y&=b\\
+z&=c & w&=d
 \end{empheq}`)
     const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
     const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
@@ -619,6 +628,21 @@ Y&=\frac{3}{4}\tag{Longer}
       const resized = await measureDecorations()
       expect(resized.frameHeight).toBeGreaterThan(measured.frameHeight)
       verifyDecorations(resized)
+
+      await view.evaluate('window.presentationNavigation.go(4)')
+      const wide = await view.evaluate<{ body: number, decoration: number, register: number }>(`(async () => {
+        await new Promise(requestAnimationFrame)
+        const group = document.querySelector('#stage > article:not([hidden]) .math-empheq')
+        const inner = getComputedStyle(group.querySelector('[data-empheq-box="inner"]'))
+        const inset = parseFloat(inner.paddingLeft) + parseFloat(inner.borderLeftWidth)
+        return {
+          body: parseFloat(inner.width) - 2 * inset,
+          decoration: parseFloat(group.querySelector('[data-empheq-measure]').getAttribute('width')),
+          register: parseFloat(getComputedStyle(group).getPropertyValue('--empheq-displaywidth')),
+        }
+      })()`)
+      expect(wide.register).toBeCloseTo(wide.body, 1)
+      expect(wide.decoration).toBeCloseTo(wide.body * 0.25, 1)
     }
     finally {
       view.close()
