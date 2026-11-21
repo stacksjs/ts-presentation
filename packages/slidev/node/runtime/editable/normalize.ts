@@ -562,7 +562,7 @@ function buildSlideIr(
   function emitChart(node: RawNode, style: RawStyle | undefined): boolean {
     if (!node.chartParts?.length || !style || style.boxShadow !== 'none'
       || [style.borderTopLeftRadius, style.borderTopWidth, style.borderRightWidth, style.borderBottomWidth, style.borderLeftWidth].some(value => parseLength(value) > 0)
-      || rasterReasonFor({ ...node, tag: 'DIV' }, style)) return false
+      || rasterReasonFor({ ...node, tag: 'DIV', hasForeignObject: false }, style)) return false
     const backdrop = parseColor(style.backgroundColor)
     if (style.backgroundColor && !backdrop) return false
     const result: IrNode[] = []
@@ -575,6 +575,14 @@ function buildSlideIr(
     }
 
     for (const part of node.chartParts) {
+      if (part.kind === 'picture') {
+        if (!node.pageRect || !insideSlide(part.rect)) return false
+        result.push({
+          kind: 'raster', sourceId: part.sourceId, rect: part.rect, reason: 'foreign-object',
+          isolate: true, hideDescendants: false, data: '',
+        })
+        continue
+      }
       if (part.kind === 'shape') {
         if (!insideSlide(part.visibleBounds ?? part.rect, part.strokeWidth / 2)) return false
         const fill = part.fill === 'none' ? undefined : parseColor(part.fill)
@@ -601,8 +609,7 @@ function buildSlideIr(
         if (box.fill || box.borders) result.push(box)
         continue
       }
-      const labelStyle = styles[part.style]
-      if (!labelStyle || !part.lines.length || !parseColor(part.fill)) return false
+      if (!part.lines.length) return false
       const rects = part.lines.map(line => line.rect)
       const rect = boundsOf(rects)
       if (!insideSlide(part.visibleBounds ?? rect)) return false
@@ -612,10 +619,16 @@ function buildSlideIr(
       // A DrawingML text box preserves one shared anchor and line pitch.
       if (lineHeight <= 0 || rects.some((line, index) => Math.abs(line.x + line.w * anchor - origin) > 0.8
         || Math.abs(line.y - rects[0].y - lineHeight * index) > 0.8)) return false
-      const runs = part.lines.map(({ text }, index) => ({
-        ...runFrom(text, { ...labelStyle, color: part.fill }, fontResolution, undefined, link, part.opacity),
-        breakBefore: index > 0,
-      }))
+      const runs: IrRun[] = []
+      for (const [lineIndex, line] of part.lines.entries()) {
+        for (const [runIndex, fragment] of line.runs.entries()) {
+          const labelStyle = styles[fragment.style]
+          if (!labelStyle || !isVisible(parseColor(fragment.fill))) return false
+          const run = runFrom(fragment.text, { ...labelStyle, color: fragment.fill }, fontResolution, undefined, link, fragment.opacity)
+          if (lineIndex > 0 && runIndex === 0) run.breakBefore = true
+          runs.push(run)
+        }
+      }
       result.push({
         kind: 'text', sourceId, rect, elementRect: rect, lineCount: rects.length,
         align: part.align, valign: 'middle', lineHeight, noWrap: true, rotation: part.rotation, runs,
@@ -624,8 +637,17 @@ function buildSlideIr(
 
     // A themed SVG can have a CSS background behind its vector content.
     if (result.length && isVisible(backdrop)) emitBox(node, style)
-    // Keep a single picture fallback if any visible SVG feature needs it.
-    for (const item of result) push(item, node)
+    // Commit the parts only after the whole chart has been validated.
+    for (const item of result) {
+      if (item.kind === 'raster' && node.pageRect) {
+        pageRects.set(item.sourceId, {
+          ...item.rect,
+          x: node.pageRect.x + item.rect.x - node.rect.x,
+          y: node.pageRect.y + item.rect.y - node.rect.y,
+        })
+      }
+      push(item, node)
+    }
     return result.length > 0
   }
 

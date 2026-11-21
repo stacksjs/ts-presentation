@@ -208,7 +208,11 @@ function outline(node: Node, fill: string, stroke: string): string {
 function label(node: Node, ink: string): string {
   const center = node.width / 2
   const offset = (node.height - node.lines.length * lineHeight) / 2 + (node.icon ? 10 : 0)
-  const icon = node.icon ? `<foreignObject x="0" y="${offset - 20}" width="${node.width}" height="20"><div xmlns="http://www.w3.org/1999/xhtml" style="text-align:center"><i class="mindmap-icon ${node.icon}" aria-hidden="true"></i></div></foreignObject>` : ''
+  const icon = node.icon ? `<foreignObject data-mindmap-icon="" overflow="hidden" x="0" y="${offset - 20}" width="${node.width}" height="20">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="display:grid;place-items:center;height:20px;color:${ink};font-size:16px;line-height:1">
+      <i class="mindmap-icon ${node.icon}" aria-hidden="true"></i>
+    </div>
+  </foreignObject>` : ''
   return icon + node.lines.map((line, index) => {
     if (!line.length) return ''
     const content = line.map(run => {

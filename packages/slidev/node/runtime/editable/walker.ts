@@ -1,5 +1,5 @@
 // Adapted from Slidev v53.1.0. See licenses/Slidev-MIT.txt.
-import type { RawChartPart, RawMathElement, RawMathFragment, RawMathFrame, RawMathSnapshot, RawNode, RawSlide, RawSnapshot, RawStyle } from './ir.ts'
+import type { RawChartPart, RawChartRun, RawMathElement, RawMathFragment, RawMathFrame, RawMathSnapshot, RawNode, RawSlide, RawSnapshot, RawStyle } from './ir.ts'
 
 /**
  * The one function that runs inside the browser. Invariant: zero free variables.
@@ -416,22 +416,74 @@ export function collectSnapshot(options: {
           && style.getPropertyValue('marker-mid') === 'none' && style.getPropertyValue('marker-end') === 'none'
       }
 
+      const hasCharacterCoordinates = (element: Element) =>
+        ['x', 'y', 'dx', 'dy', 'rotate', 'textLength'].some(name => element.hasAttribute(name))
+
+      function inlineLabel(element: SVGTextElement, style: CSSStyleDeclaration, scale: number): RawChartRun[] | undefined {
+        const runs: RawChartRun[] = []
+        const preserve = /^(?:pre|pre-wrap|break-spaces)$/.test(style.whiteSpace)
+        let previousSpace = true
+        for (const child of Array.from(element.childNodes)) {
+          if (child.nodeType === 8) continue
+          let paint = style
+          if (child.nodeType === 1) {
+            const span = child as SVGElement
+            if (span.localName !== 'tspan' || span.children.length || hasCharacterCoordinates(span)) return
+            paint = getComputedStyle(span)
+            if (paint.textAnchor !== style.textAnchor || paint.direction !== style.direction || paint.writingMode !== style.writingMode
+              || paint.whiteSpace !== style.whiteSpace || paint.visibility !== 'visible' || paint.display === 'none'
+              || paint.clipPath !== 'none' || paint.transform !== 'none' || paint.rotate !== 'none' || paint.scale !== 'none'
+              || paint.translate !== 'none' || paint.stroke !== 'none' || paint.textShadow !== 'none' || !simplePaint(paint)
+              || paint.getPropertyValue('baseline-shift') !== '0px'
+              || paint.getPropertyValue('dominant-baseline') !== style.getPropertyValue('dominant-baseline')) return
+          }
+          else if (child.nodeType !== 3) return
+          let text = child.textContent ?? ''
+          if (!preserve) {
+            text = text.replace(/[\t\n\r\f ]+/g, ' ')
+            if (previousSpace) text = text.replace(/^ /, '')
+            if (text) previousSpace = text.endsWith(' ')
+          }
+          if (!text) continue
+          const opacity = Number(paint.opacity) * Number(paint.fillOpacity)
+          if (!(opacity > 0) || paint.fill === 'none' || !(Number.parseFloat(paint.fontSize) > 0) || /[\r\n]/.test(text)) return
+          resolveStack(paint.fontFamily)
+          runs.push({ text, style: intern(paint, scale, true), fill: paint.fill, opacity })
+        }
+        const last = runs.at(-1)
+        if (!preserve && last) {
+          last.text = last.text.replace(/ $/, '')
+          if (!last.text) runs.pop()
+        }
+        return runs
+      }
+
       function readLabel(element: SVGTextElement, style: CSSStyleDeclaration, matrix: DOMMatrix, scale: number, clip: DOMRect): boolean {
         const lines: Extract<RawChartPart, { kind: 'text' }>['lines'] = []
         const sources = element.children.length ? Array.from(element.children) : [element]
-        if (element.children.length && Array.from(element.childNodes).some(node => node.nodeType === 3 && node.textContent?.trim())) return false
         const align = style.textAnchor === 'middle' ? 'center' : style.textAnchor === 'end' ? 'right' : 'left'
         const fill = style.fill
         const opacity = Number(style.fillOpacity)
-        const textStyle = intern(style, scale, true)
-        const typography = ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing', 'textDecorationLine', 'textTransform'] as const
         const rotation = Math.atan2(matrix.b, matrix.a) * 180 / Math.PI
         const rotated = Math.abs(rotation) > 1e-5
         const bounds = element.getBBox()
-        const visibleBounds = relative(element.getBoundingClientRect())
-        if (fill === 'none' || opacity === 0) return true
+        const visible = element.getBoundingClientRect()
         if (style.stroke !== 'none' || style.textShadow !== 'none' || style.writingMode !== 'horizontal-tb'
-          || style.direction !== 'ltr' || Number.parseFloat(style.fontSize) <= 0) return false
+          || style.direction !== 'ltr' || Number.parseFloat(style.fontSize) <= 0
+          || element.hasAttribute('textLength') || element.hasAttribute('rotate')) return false
+        const rotationInfo = rotated ? { rotation, visibleBounds: relative(visible) } : {}
+        if (element.children.length && sources.every(span => !hasCharacterCoordinates(span))) {
+          if (!contained(visible, clip)) return false
+          const runs = inlineLabel(element, style, scale)
+          if (!runs) return false
+          const rect = relative(rotated ? beforeRotation(bounds, bounds, matrix, scale) : visible)
+          if (runs.length) parts.push({ kind: 'text', lines: [{ rect, runs }], align, ...rotationInfo })
+          return true
+        }
+        if (fill === 'none' || opacity === 0) return true
+        if (element.children.length && Array.from(element.childNodes).some(node => node.nodeType === 3 && node.textContent?.trim())) return false
+        const textStyle = intern(style, scale, true)
+        const typography = ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing', 'textDecorationLine', 'textTransform'] as const
         for (const line of sources) {
           if (line !== element && (line.localName !== 'tspan' || line.children.length)) return false
           if (line.hasAttribute('textLength') || line.hasAttribute('rotate')) return false
@@ -447,11 +499,11 @@ export function collectSnapshot(options: {
           let box = line.getBoundingClientRect()
           if (!contained(box, clip)) return false
           if (rotated) box = beforeRotation((line as SVGGraphicsElement).getBBox(), bounds, matrix, scale)
-          lines.push({ rect: relative(box), text })
+          lines.push({ rect: relative(box), runs: [{ text, style: textStyle, fill, opacity }] })
         }
         if (lines.length) {
           resolveStack(style.fontFamily)
-          parts.push({ kind: 'text', lines, style: textStyle, fill, opacity, align, ...(rotated && { rotation, visibleBounds }) })
+          parts.push({ kind: 'text', lines, align, ...rotationInfo })
         }
         return true
       }
@@ -459,6 +511,19 @@ export function collectSnapshot(options: {
       function collect(element: Element, outerClip: DOMRect, depth = 0): boolean {
         if (++count > 12_000 || depth > 32) return false
         if (['title', 'desc', 'style', 'clipPath', 'defs'].includes(element.localName)) return true
+        if (element.localName === 'foreignObject' && element.hasAttribute('data-mindmap-icon')
+          && svg.getAttribute('data-diagram-kind') === 'mindmap') {
+          const style = getComputedStyle(element)
+          if (style.display === 'none' || style.visibility !== 'visible' || Number(style.opacity) === 0) return true
+          if (!simplePaint(style) || style.clipPath !== 'none' || !['hidden', 'clip'].includes(style.overflow)) return false
+          const bounds = element.getBoundingClientRect()
+          if (!bounds.width || !bounds.height) return true
+          if (!contained(bounds, outerClip)) return false
+          const sourceId = nextId++
+          element.setAttribute(options.idAttribute, String(sourceId))
+          parts.push({ kind: 'picture', sourceId, rect: relative(bounds) })
+          return true
+        }
         if (element.namespaceURI !== 'http://www.w3.org/2000/svg' || !['g', 'text', 'rect', 'circle', 'ellipse', 'path', 'polygon', 'line'].includes(element.localName)) return false
         const graphic = element as SVGGraphicsElement
         const style = getComputedStyle(element)
@@ -957,8 +1022,9 @@ export function collectSnapshot(options: {
       }
       if (record.tag === 'SVG') {
         if (el.querySelector('foreignObject')) record.hasForeignObject = true
-        if (!record.hasForeignObject && effectiveOpacity === 1 && (['treemap', 'mindmap'].includes(el.getAttribute('data-diagram-kind') ?? '')
-          || el.querySelector(':scope > g:is([data-diagram-kind="gitgraph"], [data-diagram-kind="gantt"])'))) {
+        const kind = el.getAttribute('data-diagram-kind')
+        if (effectiveOpacity === 1 && (kind === 'mindmap' || (!record.hasForeignObject && (kind === 'treemap'
+          || el.querySelector(':scope > g:is([data-diagram-kind="gitgraph"], [data-diagram-kind="gantt"])'))))) {
           const parts = chartArtwork(el as SVGSVGElement)
           if (parts) record.chartParts = parts
         }

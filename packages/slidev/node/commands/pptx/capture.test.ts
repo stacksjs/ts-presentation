@@ -46,6 +46,9 @@ it.skipIf(!chrome)('exports GitGraph, Gantt, and mind map shapes, paths, and lab
       '~~~mermaid', '---', 'config:', '  layout: tidy-tree', '---',
       'mindmap', '  root((Planning))', '    work{{Work streams}}',
       '      design)Design(', '    delivery[Delivery]', '~~~',
+      '', '---', '', '# Formatted and illustrated mind map', '',
+      '~~~mermaid', '---', 'config:', '  themeCSS: |', '    .status-icon::before { content: "●"; color: #c63158; }', '---',
+      'mindmap', '  result["`**New** and *reviewed*`"]', '    release[Release notes]', '    ::icon(status-icon)', '~~~',
     ].join('\n'))
     const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
     const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
@@ -53,12 +56,13 @@ it.skipIf(!chrome)('exports GitGraph, Gantt, and mind map shapes, paths, and lab
     if (status) throw new Error(stderr)
     const frames: PowerPointFrame[] = []
     await captureFrames({ root: join(root, 'dist'), executable: chrome!, scale: 1, canvas, editable: true, withClicks: false }, frame => { frames.push(frame) })
-    expect(frames).toHaveLength(4)
+    expect(frames).toHaveLength(5)
     const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Editable diagrams' }))
     const graph = parts.get('ppt/slides/slide1.xml')?.toString() ?? ''
     const schedule = parts.get('ppt/slides/slide2.xml')?.toString() ?? ''
     const filtered = parts.get('ppt/slides/slide3.xml')?.toString() ?? ''
     const mindmap = parts.get('ppt/slides/slide4.xml')?.toString() ?? ''
+    const illustrated = parts.get('ppt/slides/slide5.xml')?.toString() ?? ''
     expect(graph).toContain('<a:prstGeom prst="ellipse">')
     expect(graph).toContain('<a:custGeom>')
     expect(graph).toContain('<a:quadBezTo>')
@@ -78,6 +82,14 @@ it.skipIf(!chrome)('exports GitGraph, Gantt, and mind map shapes, paths, and lab
     expect(mindmap).toContain('>Work streams</a:t>')
     expect(mindmap).toContain('>Design</a:t>')
     expect(mindmap).not.toContain('<p:pic>')
+    expect(illustrated).toContain('>Release notes</a:t>')
+    expect(illustrated).toMatch(/<a:rPr [^>]*\bb="1"[^>]*>.*?<\/a:rPr><a:t xml:space="preserve">New<\/a:t>/)
+    expect(illustrated).toMatch(/<a:rPr [^>]*\bi="1"[^>]*>.*?<\/a:rPr><a:t xml:space="preserve">reviewed<\/a:t>/)
+    expect(illustrated).toContain('> and </a:t>')
+    expect(illustrated.match(/<p:pic>/g)).toHaveLength(1)
+    const icon = frames[4].editable?.nodes.find((node): node is IrRaster => node.kind === 'raster')
+    expect(icon?.reason).toBe('foreign-object')
+    expect(icon?.rect.h).toBeLessThan(60)
   }
   finally {
     await rm(root, { recursive: true, force: true })

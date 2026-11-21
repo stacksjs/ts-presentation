@@ -118,6 +118,8 @@ export type RawMathSnapshot = {
   frames?: RawMathFrame[]
 } & ({ expression: RawMathElement, cells?: never } | { cells: RawMathFragment[], expression?: never })
 
+export interface RawChartRun { text: string, style: number, fill: string, opacity: number }
+
 /** Browser-measured SVG artwork in document paint order. */
 export type RawChartPart =
   | {
@@ -127,9 +129,10 @@ export type RawChartPart =
     dashes?: number[], cap?: Border['cap'], join?: Border['join'],
   }
   | {
-    kind: 'text', lines: { rect: Rect, text: string }[], style: number, fill: string, opacity: number,
+    kind: 'text', lines: { rect: Rect, runs: RawChartRun[] }[],
     align: 'left' | 'center' | 'right', rotation?: number, visibleBounds?: Rect,
   }
+  | { kind: 'picture', sourceId: number, rect: Rect }
 
 export interface RawNode {
   /** Index into `RawSnapshot.nodes`, and the value of `data-slidev-export-id`. */
