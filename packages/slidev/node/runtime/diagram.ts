@@ -11,6 +11,7 @@ import { relationshipsDiagram } from './mermaid/relationships.ts'
 import { sankey } from './mermaid/sankey.ts'
 import { sequence } from './mermaid/sequence.ts'
 import { timeline } from './mermaid/timeline.ts'
+import { treemapDiagram } from './mermaid/treemap.ts'
 import { xyDiagram } from './mermaid/xy.ts'
 
 function inlineQuotedScalars(yaml: string): string {
@@ -65,7 +66,7 @@ const diagramDirectives = new RegExp(
 const diagramScopes: Readonly<Record<string, string>> = {
   graph: 'flowchart', 'flowchart-v2': 'flowchart', sequenceDiagram: 'sequence',
   classDiagram: 'class', erDiagram: 'er', stateDiagram: 'state', 'stateDiagram-v2': 'state',
-  xychart: 'xyChart', 'xychart-beta': 'xyChart', 'sankey-beta': 'sankey',
+  xychart: 'xyChart', 'xychart-beta': 'xyChart', 'sankey-beta': 'sankey', 'treemap-beta': 'treemap',
 }
 
 function parseDirectiveYaml(literal: string): MermaidOptions | undefined {
@@ -137,6 +138,7 @@ function render(code: string, marker: string, options: MermaidOptions, header: s
   if (header === 'classDiagram' || header === 'erDiagram') return relationshipsDiagram(code, marker)
   if (/^pie(?:\s|$)/.test(header ?? '')) return pieDiagram(code, marker, options.pie, title)
   if (/^quadrantChart(?:\s|;|$)/i.test(header ?? '')) return quadrantDiagram(code, marker, options)
+  if (/^treemap(?:-beta)?(?:\s|;|$)/i.test(header ?? '')) return treemapDiagram(code, marker, options)
   return flowchart(code, marker)
 }
 

@@ -36,9 +36,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@stacksjs/stx": "https://registry.pantry.dev/@stacksjs/stx@8279a3b",
+    "@ts-charts/hierarchy": "^0.2.8",
     "ts-charts": "https://codeload.github.com/stacksjs/ts-charts/tar.gz/8f52ad0da5763365b958036d093371f3b4777c8d",
-    "ts-syntax-highlighter": "^0.2.20",
-    "@stacksjs/stx": "https://registry.pantry.dev/@stacksjs/stx@8279a3b"
+    "ts-syntax-highlighter": "^0.2.20"
   },
   "devDependencies": {
     "better-dx": "^0.2.15"

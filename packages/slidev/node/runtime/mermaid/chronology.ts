@@ -46,13 +46,14 @@ export function sizeChronologySvg(svg: string | undefined, useMaxWidth: unknown)
   return svg?.replace(/^(<svg\b[^>]*\bviewBox="0 0 ([\d.]+) ([\d.]+)")/, '$1 width="$2" height="$3"')
 }
 
-export function readChronology(source: string | readonly string[], title: string, syntax: { singleQuotes?: boolean, gantt?: boolean, entities?: boolean } = {}): Chronology | undefined {
-  const lines = (typeof source === 'string' ? source.split(/\r?\n/) : source).map(line => line.trim())
-  const header = lines.findIndex(line => line && !/^(?:%%|#)/.test(line))
+export function readChronology(source: string | readonly string[], title: string, syntax: { singleQuotes?: boolean, gantt?: boolean, entities?: boolean, preserveIndent?: boolean } = {}): Chronology | undefined {
+  const lines = typeof source === 'string' ? source.split(/\r?\n/) : source
+  const header = lines.findIndex(line => line.trim() && !/^\s*(?:%%|#)/.test(line))
   if (header < 0) return
-  const chart: Chronology = { title, header: lines[header], accessibleTitle: '', description: '', rows: [] }
+  const chart: Chronology = { title, header: lines[header].trim(), accessibleTitle: '', description: '', rows: [] }
   let description: string[] | undefined
-  for (const line of lines.slice(header + 1)) {
+  for (const rawLine of lines.slice(header + 1)) {
+    const line = rawLine.trim()
     const open = /^accDescr\s*\{\s*([\s\S]*)$/i.exec(line)
     if (open && !description) description = [open[1]]
     else if (description) description.push(line)
@@ -74,7 +75,7 @@ export function readChronology(source: string | readonly string[], title: string
     if (title) chart.title = title
     else if (accTitle !== undefined) chart.accessibleTitle = accTitle
     else if (accDesc !== undefined) chart.description = accDesc
-    else chart.rows.push(row)
+    else chart.rows.push(syntax.preserveIndent ? (rawLine.match(/^[\t ]*/)?.[0] ?? '') + row : row)
   }
   if (description) return
   if (syntax.entities) {

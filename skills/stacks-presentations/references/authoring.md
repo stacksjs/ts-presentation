@@ -300,6 +300,11 @@ speaker notes. Each hook can be asynchronous.
   Set `nodeAlignment` to `left`, `right`, `center`, or `justify`.
   Choose `linkColor: gradient`, `source`, `target`, or a CSS color.
 - Use `type: timeline` with `sections` and `type: journey` with `phases`.
+- Use `type: treemap` with `nodes`. Each node has a `label` and either
+  `children` or a nonnegative `value`. Imported `treemap-beta` fences use
+  indentation for groups and quoted leaf labels followed by values. Use
+  `:::class` with `classDef` to style cells and `config.treemap.valueFormat`
+  to format their values, such as `$,.2f` for currency.
 - Use `type: gantt` with `sections` containing tasks. Give each task a
   `name`, an optional `id`, a `start` date or `after` list, and one
   of `end`, `duration`, or `until`. A task without a start follows the
@@ -322,7 +327,7 @@ speaker notes. Each hook can be asynchronous.
   `fontSize`.
 - Imported Slidev diagram fences pass through a compatibility parser.
   Styled flowchart groups, sequence and state diagrams, relationships,
-  pie charts, quadrant charts, XY charts, Sankey diagrams, Gantt schedules, Git histories, timelines, and journeys use
+  pie charts, quadrant charts, XY charts, Sankey diagrams, treemaps, Gantt schedules, Git histories, timelines, and journeys use
   the same `ts-charts` renderers as `charts` fences.
 - In a `charts` fence with `type: quadrant`, list `quadrants` in top-right,
   top-left, bottom-left, bottom-right order. Use `xAxis` and `yAxis` for one

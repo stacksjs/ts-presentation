@@ -1,6 +1,7 @@
 import type { FlowchartDiagramOptions, GanttChartOptions, GitGraphOptions, JourneyChartOptions, PieChartOptions, QuadrantChartOptions, RelationshipChartOptions, SankeyChartOptions, SequenceChartOptions, TimelineChartOptions, XYChartOptions } from 'ts-charts/diagrams'
 import { flowchartDiagram, ganttChart, gitGraphChart, journeyChart, pieChart, quadrantChart, relationshipChart, sankeyChart, sequenceChart, timelineChart, xyChart } from 'ts-charts/diagrams'
 import { optionsForSvg } from './diagram-svg.ts'
+import { treemapSvg } from './treemap.ts'
 
 type Chart =
   | ({ type: 'flowchart' | 'state' } & FlowchartDiagramOptions)
@@ -14,8 +15,9 @@ type Chart =
   | ({ type: 'timeline' } & TimelineChartOptions)
   | ({ type: 'xy' } & XYChartOptions)
   | ({ type: 'sankey' } & SankeyChartOptions)
+  | { type: 'treemap', nodes: unknown }
 
-function chartSvg(chart: Chart): string | undefined {
+function chartSvg(chart: Chart & Record<string, unknown>): string | undefined {
   switch (chart.type) {
     case 'flowchart':
     case 'state': return flowchartDiagram({ ...chart, kind: chart.type })
@@ -30,6 +32,7 @@ function chartSvg(chart: Chart): string | undefined {
     case 'timeline': return timelineChart(chart)
     case 'xy': return xyChart(chart)
     case 'sankey': return sankeyChart(chart)
+    case 'treemap': return treemapSvg(chart)
   }
 }
 

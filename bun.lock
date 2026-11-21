@@ -6,6 +6,7 @@
       "name": "ts-presentation",
       "dependencies": {
         "@stacksjs/stx": "https://registry.pantry.dev/@stacksjs/stx@8279a3b",
+        "@ts-charts/hierarchy": "^0.2.8",
         "ts-charts": "https://codeload.github.com/stacksjs/ts-charts/tar.gz/8f52ad0da5763365b958036d093371f3b4777c8d",
         "ts-syntax-highlighter": "^0.2.20",
       },
@@ -109,6 +110,8 @@
     "@stacksjs/ts-validation": ["@stacksjs/ts-validation@0.5.7", "", {}, "sha512-H6S0Fc3m/KvrYxh+UrDgP7CmqWYVtA1RwQrg2FRmRXFvXWS0FJxTSHghRNpBYTUPPhuXsZSMSUFgRA4e4DTP1w=="],
 
     "@stacksjs/ts-webp": ["@stacksjs/ts-webp@0.1.7", "", {}, "sha512-MKIO37g9Y1kIOCeAkrctT2yM5wFwKCL6IY+K7QeLifIq504S1n2bK20OR/AsUecQwmSuK4eXECXhcb7as8m5LA=="],
+
+    "@ts-charts/hierarchy": ["@ts-charts/hierarchy@0.2.8", "", {}, "sha512-l6/SueLE4NuUOOER5QVS9POczV+Bd1OXN5Pa8XnAJEHXHFNAfDrkyj4BFy2LXbo4RIZ91bu9O+dPGiUhX8rdkA=="],
 
     "@ts-presentation/cli": ["@ts-presentation/cli@workspace:packages/slidev"],
 
