@@ -20,6 +20,7 @@ import type {
 import { isVisible, parseColor, withOpacity } from './color.ts'
 import { linearBackground } from './gradient.ts'
 import { officeMath } from './office-math.ts'
+import { svgPath } from './svg-path.ts'
 
 /**
  * `RawSnapshot` to `SlideIr`: every judgement in the exporter, in one pure module with
@@ -559,8 +560,11 @@ function buildSlideIr(
   }
 
   function emitChart(node: RawNode, style: RawStyle | undefined): boolean {
-    if (!node.chartParts?.length || !style || style.boxShadow !== 'none' || hasDecoration(node)
+    if (!node.chartParts?.length || !style || style.boxShadow !== 'none'
+      || [style.borderTopLeftRadius, style.borderTopWidth, style.borderRightWidth, style.borderBottomWidth, style.borderLeftWidth].some(value => parseLength(value) > 0)
       || rasterReasonFor({ ...node, tag: 'DIV' }, style)) return false
+    const backdrop = parseColor(style.backgroundColor)
+    if (style.backgroundColor && !backdrop) return false
     const result: IrNode[] = []
     const sourceId = node.id
     const link = linkFor(node)
@@ -571,17 +575,27 @@ function buildSlideIr(
     }
 
     for (const part of node.chartParts) {
-      if (part.kind === 'rect') {
-        if (!insideSlide(part.rect, part.strokeWidth / 2)) return false
+      if (part.kind === 'shape') {
+        if (!insideSlide(part.visibleBounds ?? part.rect, part.strokeWidth / 2)) return false
         const fill = part.fill === 'none' ? undefined : parseColor(part.fill)
         const stroke = part.strokeWidth > 0 ? parseColor(part.stroke) : undefined
         if ((part.fill !== 'none' && !fill) || (part.strokeWidth > 0 && !stroke)) return false
-        const box: IrBox = { kind: 'box', sourceId, rect: part.rect }
+        const box: IrBox = { kind: 'box', sourceId, rect: part.rect, radius: part.radius, rotation: part.rotation }
+        if (part.ellipse) box.geometry = { kind: 'ellipse' }
+        else if (part.path) {
+          const commands = svgPath(part.path.data, part.path.scale, part.path.x, part.path.y)
+          if (!commands) return false
+          box.geometry = { kind: 'path', commands }
+          box.rect = { ...part.rect, w: part.rect.w || 1, h: part.rect.h || 1 }
+        }
         const background = withOpacity(fill, part.fillOpacity)
         const outline = withOpacity(stroke, part.strokeOpacity)
         if (isVisible(background)) box.fill = background
         if (isVisible(outline)) {
-          const border: Border = { width: part.strokeWidth, color: outline!, style: 'solid' }
+          const border: Border = {
+            width: part.strokeWidth, color: outline!, style: 'solid',
+            dashes: part.dashes, cap: part.cap, join: part.join,
+          }
           box.borders = [border, border, border, border]
         }
         if (box.fill || box.borders) result.push(box)
@@ -591,7 +605,7 @@ function buildSlideIr(
       if (!labelStyle || !part.lines.length || !parseColor(part.fill)) return false
       const rects = part.lines.map(line => line.rect)
       const rect = boundsOf(rects)
-      if (!insideSlide(rect)) return false
+      if (!insideSlide(part.visibleBounds ?? rect)) return false
       const anchor = part.align === 'left' ? 0 : part.align === 'right' ? 1 : 0.5
       const origin = rects[0].x + rects[0].w * anchor
       const lineHeight = rects.length > 1 ? rects[1].y - rects[0].y : rect.h
@@ -604,10 +618,12 @@ function buildSlideIr(
       }))
       result.push({
         kind: 'text', sourceId, rect, elementRect: rect, lineCount: rects.length,
-        align: part.align, valign: 'middle', lineHeight, noWrap: true, runs,
+        align: part.align, valign: 'middle', lineHeight, noWrap: true, rotation: part.rotation, runs,
       })
     }
 
+    // A themed SVG can have a CSS background behind its vector content.
+    if (result.length && isVisible(backdrop)) emitBox(node, style)
     // Keep a single picture fallback if any visible SVG feature needs it.
     for (const item of result) push(item, node)
     return result.length > 0

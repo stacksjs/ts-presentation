@@ -120,8 +120,16 @@ export type RawMathSnapshot = {
 
 /** Browser-measured SVG artwork in document paint order. */
 export type RawChartPart =
-  | { kind: 'rect', rect: Rect, fill: string, fillOpacity: number, stroke: string, strokeOpacity: number, strokeWidth: number }
-  | { kind: 'text', lines: { rect: Rect, text: string }[], style: number, fill: string, opacity: number, align: 'left' | 'center' | 'right' }
+  | {
+    kind: 'shape', rect: Rect, fill: string, fillOpacity: number, stroke: string, strokeOpacity: number, strokeWidth: number,
+    radius?: number, ellipse?: boolean, path?: { data: string, scale: number, x: number, y: number },
+    rotation?: number, visibleBounds?: Rect,
+    dashes?: number[], cap?: Border['cap'], join?: Border['join'],
+  }
+  | {
+    kind: 'text', lines: { rect: Rect, text: string }[], style: number, fill: string, opacity: number,
+    align: 'left' | 'center' | 'right', rotation?: number, visibleBounds?: Rect,
+  }
 
 export interface RawNode {
   /** Index into `RawSnapshot.nodes`, and the value of `data-slidev-export-id`. */
@@ -204,6 +212,10 @@ export interface Border {
   width: number
   color: Rgba
   style: 'solid' | 'dashed' | 'dotted'
+  /** SVG paint lengths in canvas pixels. */
+  dashes?: number[]
+  cap?: 'flat' | 'rnd' | 'sq'
+  join?: 'round' | 'bevel' | 'miter'
 }
 
 export interface LinearGradient {
@@ -230,8 +242,12 @@ export interface IrBox extends IrBase {
   borders?: [Border?, Border?, Border?, Border?]
   /** Pixels. The builder converts; `rectRadius` is in inches despite its docs. */
   radius?: number
+  geometry?: { kind: 'ellipse' } | { kind: 'path', commands: PathCommand[] }
+  rotation?: number
   shadow?: { blur: number, offset: number, angle: number, color: Rgba }
 }
+
+export type PathCommand = { kind: 'M' | 'L' | 'Q' | 'C', points: number[] } | { kind: 'Z' }
 
 export interface IrRun {
   /** Already `text-transform`ed. */
@@ -267,6 +283,7 @@ export interface IrText extends IrBase {
   lineCount: number
   /** The source already positioned every line, including multiline SVG labels. */
   noWrap?: boolean
+  rotation?: number
   align: 'left' | 'center' | 'right' | 'justify'
   /** Defaults to top, since the box is measured from the glyphs; middle is for chip labels, whose box is the decoration rather than the ink. */
   valign?: 'top' | 'middle'

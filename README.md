@@ -80,7 +80,8 @@ Fixed-width `\makebox` content, `\mathmakebox` with `\dimexpr` widths, and
 `\raisebox` content can export as editable equations positioned where they
 appear in the math line. Rotated boxes, stretched text, and boxes nested in
 fractions or scripts use pictures.
-Supported treemap cells and labels use editable rectangles and text boxes.
+Supported treemaps, GitGraph histories, and Gantt schedules use editable
+PowerPoint shapes, paths, and text boxes.
 Other formulas, complex diagrams, and browser artwork are embedded as pictures.
 Eligible deck-local PNG and JPEG images retain their source bytes and
 slide-edge crops. Browser capture preserves effects like image opacity and

@@ -366,16 +366,24 @@ export function collectSnapshot(options: {
       const clips = new Map(Array.from(svg.querySelectorAll<SVGClipPathElement>('clipPath[id]'), clip => [clip.id, clip]))
       let count = 0
 
-      function scaleOf(matrix: DOMMatrix | null): number | undefined {
-        if (matrix && matrix.is2D !== false && Math.abs(matrix.b) < 1e-6 && Math.abs(matrix.c) < 1e-6
-          && matrix.a > 0 && Math.abs(matrix.a - matrix.d) < 1e-6)
-          return matrix.a
+      function scaleOf(matrix: DOMMatrix | null, allowRotation = false): number | undefined {
+        if (!matrix || matrix.is2D === false || Math.abs(matrix.a - matrix.d) > 1e-6 || Math.abs(matrix.b + matrix.c) > 1e-6) return
+        if (allowRotation) return Math.hypot(matrix.a, matrix.b) || undefined
+        if (matrix.a > 0 && Math.abs(matrix.b) < 1e-6) return matrix.a
       }
 
       function contained(box: DOMRect, clip: DOMRect, stroke = 0): boolean {
         const tolerance = 0.35
         return box.left - stroke >= clip.left - tolerance && box.top - stroke >= clip.top - tolerance
           && box.right + stroke <= clip.right + tolerance && box.bottom + stroke <= clip.bottom + tolerance
+      }
+
+      function beforeRotation(box: DOMRect, centerOf: DOMRect, matrix: DOMMatrix, scale: number): DOMRect {
+        const centerX = centerOf.x + centerOf.width / 2
+        const centerY = centerOf.y + centerOf.height / 2
+        const center = new DOMPoint(centerX, centerY).matrixTransform(matrix)
+        return new DOMRect(center.x + (box.x - centerX) * scale, center.y + (box.y - centerY) * scale,
+          box.width * scale, box.height * scale)
       }
 
       function clipBounds(element: SVGGraphicsElement, path: string, outer: DOMRect): DOMRect | undefined {
@@ -408,7 +416,7 @@ export function collectSnapshot(options: {
           && style.getPropertyValue('marker-mid') === 'none' && style.getPropertyValue('marker-end') === 'none'
       }
 
-      function readLabel(element: SVGTextElement, style: CSSStyleDeclaration, scale: number, clip: DOMRect): boolean {
+      function readLabel(element: SVGTextElement, style: CSSStyleDeclaration, matrix: DOMMatrix, scale: number, clip: DOMRect): boolean {
         const lines: Extract<RawChartPart, { kind: 'text' }>['lines'] = []
         const sources = element.children.length ? Array.from(element.children) : [element]
         if (element.children.length && Array.from(element.childNodes).some(node => node.nodeType === 3 && node.textContent?.trim())) return false
@@ -417,6 +425,10 @@ export function collectSnapshot(options: {
         const opacity = Number(style.fillOpacity)
         const textStyle = intern(style, scale, true)
         const typography = ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing', 'textDecorationLine', 'textTransform'] as const
+        const rotation = Math.atan2(matrix.b, matrix.a) * 180 / Math.PI
+        const rotated = Math.abs(rotation) > 1e-5
+        const bounds = element.getBBox()
+        const visibleBounds = relative(element.getBoundingClientRect())
         if (fill === 'none' || opacity === 0) return true
         if (style.stroke !== 'none' || style.textShadow !== 'none' || style.writingMode !== 'horizontal-tb'
           || style.direction !== 'ltr' || Number.parseFloat(style.fontSize) <= 0) return false
@@ -432,13 +444,14 @@ export function collectSnapshot(options: {
               || lineStyle.rotate !== 'none' || lineStyle.scale !== 'none' || lineStyle.translate !== 'none'))) return false
           const text = (line.textContent ?? '').replace(/\s+/g, ' ').trim()
           if (!text) continue
-          const box = line.getBoundingClientRect()
+          let box = line.getBoundingClientRect()
           if (!contained(box, clip)) return false
+          if (rotated) box = beforeRotation((line as SVGGraphicsElement).getBBox(), bounds, matrix, scale)
           lines.push({ rect: relative(box), text })
         }
         if (lines.length) {
           resolveStack(style.fontFamily)
-          parts.push({ kind: 'text', lines, style: textStyle, fill, opacity, align })
+          parts.push({ kind: 'text', lines, style: textStyle, fill, opacity, align, ...(rotated && { rotation, visibleBounds }) })
         }
         return true
       }
@@ -446,31 +459,87 @@ export function collectSnapshot(options: {
       function collect(element: Element, outerClip: DOMRect, depth = 0): boolean {
         if (++count > 12_000 || depth > 32) return false
         if (['title', 'desc', 'style', 'clipPath', 'defs'].includes(element.localName)) return true
-        if (element.namespaceURI !== 'http://www.w3.org/2000/svg' || !['g', 'text', 'rect'].includes(element.localName)) return false
+        if (element.namespaceURI !== 'http://www.w3.org/2000/svg' || !['g', 'text', 'rect', 'circle', 'ellipse', 'path', 'polygon', 'line'].includes(element.localName)) return false
         const graphic = element as SVGGraphicsElement
         const style = getComputedStyle(element)
-        if (style.display === 'none' || Number(style.opacity) === 0) return true
-        // Group opacity is composited after its children paint, which cannot be
-        // reproduced by turning down the opacity of overlapping Office shapes.
-        if (Number(style.opacity) !== 1 || !simplePaint(style)) return false
+        const opacity = Number(style.opacity)
+        if (style.display === 'none' || opacity === 0) return true
+        if (!simplePaint(style)) return false
         const clip = style.clipPath === 'none' ? outerClip : clipBounds(graphic, style.clipPath, outerClip)
         if (!clip) return false
-        if (element.localName === 'g') return Array.from(element.children).every(child => collect(child, clip, depth + 1))
+        // Opacity on a group applies after painting the group, including overlaps.
+        if (element.localName === 'g') return opacity === 1 && Array.from(element.children).every(child => collect(child, clip, depth + 1))
         if (style.visibility !== 'visible') return true
-        const scale = scaleOf(graphic.getScreenCTM())
-        if (scale === undefined) return false
-        if (element.localName === 'text') return readLabel(element as SVGTextElement, style, scale, clip)
-        if (style.strokeDasharray !== 'none' || style.vectorEffect !== 'none'
-          || !['auto', '0px'].includes(style.rx) || !['auto', '0px'].includes(style.ry)) return false
+        const tag = element.localName
+        const preset = ['rect', 'ellipse', 'circle'].includes(tag)
+        const matrix = graphic.getScreenCTM()
+        const scale = scaleOf(matrix, preset || tag === 'text')
+        if (!matrix || scale === undefined) return false
+        if (element.localName === 'text') return opacity === 1 && readLabel(element as SVGTextElement, style, matrix, scale, clip)
+        if (style.vectorEffect !== 'none') return false
         const box = element.getBoundingClientRect()
-        if (!box.width || !box.height) return true
+        if (preset && (!box.width || !box.height)) return true
+        if (!box.width && !box.height) return true
         if (style.stroke !== 'none' && !/^(?:0|[\d.]+px)$/.test(style.strokeWidth)) return false
         const strokeWidth = style.stroke === 'none' || Number(style.strokeOpacity) === 0 ? 0 : Number.parseFloat(style.strokeWidth) * scale
+        const fill = element.localName === 'line' ? 'none' : style.fill
+        if (strokeWidth && fill !== 'none' && Number(style.fillOpacity) > 0 && opacity !== 1) return false
         if (!Number.isFinite(strokeWidth) || !contained(box, clip, strokeWidth / 2)) return false
-        parts.push({
-          kind: 'rect', rect: relative(box), fill: style.fill, fillOpacity: Number(style.fillOpacity),
-          stroke: style.stroke, strokeOpacity: Number(style.strokeOpacity), strokeWidth,
-        })
+        const part: Extract<RawChartPart, { kind: 'shape' }> = {
+          kind: 'shape', rect: relative(box), fill, fillOpacity: Number(style.fillOpacity) * opacity,
+          stroke: style.stroke, strokeOpacity: Number(style.strokeOpacity) * opacity, strokeWidth,
+        }
+        if (preset) {
+          const rotation = Math.atan2(matrix.b, matrix.a) * 180 / Math.PI
+          if (Math.abs(rotation) > 1e-5) {
+            const local = graphic.getBBox()
+            part.rect = relative(beforeRotation(local, local, matrix, scale))
+            part.rotation = rotation
+            part.visibleBounds = relative(box)
+          }
+        }
+        if (strokeWidth) {
+          if (style.strokeDasharray !== 'none') {
+            if (!/^0(?:px)?$/.test(style.strokeDashoffset)) return false
+            const dash = style.strokeDasharray.split(/[,\s]+/).filter(Boolean)
+            if (dash.length > 32 || dash.some(value => !/^[\d.]+px$/.test(value) || !(Number.parseFloat(value) > 0))) return false
+            const lengths = dash.map(value => Number.parseFloat(value) * scale)
+            part.dashes = lengths.length % 2 ? [...lengths, ...lengths] : lengths
+          }
+          part.cap = style.strokeLinecap === 'round' ? 'rnd' : style.strokeLinecap === 'square' ? 'sq' : 'flat'
+          if (!['round', 'bevel', 'miter'].includes(style.strokeLinejoin)) return false
+          if (style.strokeLinejoin === 'miter' && Number(style.strokeMiterlimit) !== 4) return false
+          part.join = style.strokeLinejoin as 'round' | 'bevel' | 'miter'
+        }
+        if (tag === 'circle' || tag === 'ellipse') part.ellipse = true
+        else if (tag === 'rect') {
+          const { rx, ry } = style
+          if ((rx !== 'auto' && !/^[\d.]+px$/.test(rx)) || (ry !== 'auto' && !/^[\d.]+px$/.test(ry))
+            || (rx !== ry && rx !== 'auto' && ry !== 'auto')) return false
+          const radius = Number.parseFloat(rx === 'auto' ? ry : rx) || 0
+          if (radius) part.radius = radius * scale
+        }
+        else {
+          if (fill !== 'none' && style.fillRule !== 'nonzero') return false
+          let data: string | null
+          if (tag === 'line') {
+            const line = element as SVGLineElement
+            data = `M${line.x1.baseVal.value} ${line.y1.baseVal.value}L${line.x2.baseVal.value} ${line.y2.baseVal.value}`
+          }
+          else if (tag === 'polygon') {
+            const points = Array.from((element as SVGPolygonElement).points)
+            if (points.length < 3 || points.length > 1500) return false
+            data = `M${points.map(point => `${point.x} ${point.y}`).join('L')}Z`
+          }
+          else {
+            const cssPath = style.getPropertyValue('d')
+            if (cssPath === 'none') return true
+            data = /^path\("([^"]*)"\)$/.exec(cssPath)?.[1] ?? element.getAttribute('d')
+          }
+          if (!data) return false
+          part.path = { data, scale, x: matrix.e - box.left, y: matrix.f - box.top }
+        }
+        parts.push(part)
         return true
       }
 
@@ -888,7 +957,8 @@ export function collectSnapshot(options: {
       }
       if (record.tag === 'SVG') {
         if (el.querySelector('foreignObject')) record.hasForeignObject = true
-        if (!record.hasForeignObject && effectiveOpacity === 1 && el.getAttribute('data-diagram-kind') === 'treemap') {
+        if (!record.hasForeignObject && effectiveOpacity === 1 && (el.getAttribute('data-diagram-kind') === 'treemap'
+          || el.querySelector(':scope > g:is([data-diagram-kind="gitgraph"], [data-diagram-kind="gantt"])'))) {
           const parts = chartArtwork(el as SVGSVGElement)
           if (parts) record.chartParts = parts
         }

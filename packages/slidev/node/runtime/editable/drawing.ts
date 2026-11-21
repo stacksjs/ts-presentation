@@ -7,8 +7,9 @@ export function xml(text: string): string {
   return escapeHtml(text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\uFFFE\uFFFF]/g, ''))
 }
 
-export function extents(width: number, height: number, x = 0, y = 0): string {
-  return `<a:xfrm><a:off x="${Math.round(x * EMU_PER_PX)}" y="${Math.round(y * EMU_PER_PX)}"/><a:ext cx="${Math.round(width * EMU_PER_PX)}" cy="${Math.round(height * EMU_PER_PX)}"/></a:xfrm>`
+export function extents(width: number, height: number, x = 0, y = 0, degrees = 0): string {
+  const rotation = degrees ? ` rot="${Math.round(((degrees + 360) % 360) * 60000)}"` : ''
+  return `<a:xfrm${rotation}><a:off x="${Math.round(x * EMU_PER_PX)}" y="${Math.round(y * EMU_PER_PX)}"/><a:ext cx="${Math.round(width * EMU_PER_PX)}" cy="${Math.round(height * EMU_PER_PX)}"/></a:xfrm>`
 }
 
 function rgb(color: Rgba): string {
@@ -30,12 +31,23 @@ function gradientFill(gradient: LinearGradient): string {
 
 function line(border?: Border): string {
   if (!border) return '<a:ln><a:noFill/></a:ln>'
-  const dash = { solid: 'solid', dotted: 'sysDot', dashed: 'dash' }[border.style]
-  return `<a:ln w="${Math.round(border.width * EMU_PER_PX)}">${fill(border.color)}<a:prstDash val="${dash}"/></a:ln>`
+  const cap = border.cap ? ` cap="${border.cap}"` : ''
+  const join = border.join === 'miter' ? '<a:miter lim="400000"/>'
+    : border.join ? `<a:${border.join}/>` : ''
+  const preset = { solid: 'solid', dotted: 'sysDot', dashed: 'dash' }[border.style]
+  let dash = `<a:prstDash val="${preset}"/>`
+  if (border.dashes?.length) {
+    const percentage = (value: number) => Math.min(2_147_483_647, Math.round(value / border.width * 100_000))
+    let stops = ''
+    for (let index = 0; index < border.dashes.length; index += 2)
+      stops += `<a:ds d="${percentage(border.dashes[index])}" sp="${percentage(border.dashes[index + 1])}"/>`
+    dash = `<a:custDash>${stops}</a:custDash>`
+  }
+  return `<a:ln w="${Math.round(border.width * EMU_PER_PX)}"${cap}>${fill(border.color)}${dash}${join}</a:ln>`
 }
 
-function transform(rect: Rect): string {
-  return extents(rect.w, rect.h, rect.x, rect.y)
+function transform(rect: Rect, rotation?: number): string {
+  return extents(rect.w, rect.h, rect.x, rect.y, rotation)
 }
 
 function rectShape(radius: number, rect: Rect): string {
@@ -43,6 +55,21 @@ function rectShape(radius: number, rect: Rect): string {
   return adjustment
     ? `<a:prstGeom prst="roundRect"><a:avLst><a:gd name="adj" fmla="val ${adjustment}"/></a:avLst></a:prstGeom>`
     : '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>'
+}
+
+function boxGeometry(box: IrBox, stroked: boolean): string {
+  if (box.geometry?.kind === 'ellipse') return '<a:prstGeom prst="ellipse"><a:avLst/></a:prstGeom>'
+  if (box.geometry?.kind !== 'path') return rectShape(box.radius ?? 0, box.rect)
+  const tags = { M: 'moveTo', L: 'lnTo', Q: 'quadBezTo', C: 'cubicBezTo' }
+  const commands = box.geometry.commands.map(command => {
+    if (command.kind === 'Z') return '<a:close/>'
+    let points = ''
+    for (let index = 0; index < command.points.length; index += 2)
+      points += `<a:pt x="${Math.round(command.points[index] * EMU_PER_PX)}" y="${Math.round(command.points[index + 1] * EMU_PER_PX)}"/>`
+    const tag = tags[command.kind]
+    return `<a:${tag}>${points}</a:${tag}>`
+  }).join('')
+  return `<a:custGeom><a:avLst/><a:gdLst/><a:ahLst/><a:cxnLst/><a:rect l="0" t="0" r="r" b="b"/><a:pathLst><a:path w="${Math.round(box.rect.w * EMU_PER_PX)}" h="${Math.round(box.rect.h * EMU_PER_PX)}" fill="${box.fill ? 'norm' : 'none'}" stroke="${Number(stroked)}">${commands}</a:path></a:pathLst></a:custGeom>`
 }
 
 function shape(id: number, name: string, properties: string, body = ''): string {
@@ -60,7 +87,7 @@ function drawBox(box: IrBox, nextId: () => number): string {
     const shadow = box.shadow
     const effects = shadow ? `<a:effectLst><a:outerShdw blurRad="${Math.round(shadow.blur * EMU_PER_PX)}" dist="${Math.round(shadow.offset * EMU_PER_PX)}" dir="${Math.round((shadow.angle + 360) % 360 * 60000)}">${rgb(shadow.color)}</a:outerShdw></a:effectLst>` : ''
     const paint = box.gradient ? gradientFill(box.gradient) : fill(box.fill)
-    result += shape(nextId(), 'Box', transform(box.rect) + rectShape(box.radius ?? 0, box.rect) + paint + line(uniform ? first : undefined) + effects)
+    result += shape(nextId(), box.geometry ? 'Chart shape' : 'Box', transform(box.rect, box.rotation) + boxGeometry(box, Boolean(uniform)) + paint + line(uniform ? first : undefined) + effects)
   }
   if (!uniform) {
     borders.forEach((border, side) => {
@@ -128,7 +155,7 @@ function drawText(node: IrText, id: number, hyperlink: (href: string) => Hyperli
     ? paragraphs.slice(0, -paragraph.length)
     : `${paragraphs}</a:p>`
   const body = `<p:txBody><a:bodyPr lIns="0" rIns="0" tIns="0" bIns="0" wrap="${singleLine || node.noWrap ? 'none' : 'square'}" anchor="${node.valign === 'middle' ? 'ctr' : 't'}"><a:noAutofit/></a:bodyPr><a:lstStyle/>${paragraphs}</p:txBody>`
-  return shape(id, 'Text', extents(node.rect.w + slack, node.rect.h, x, node.rect.y) + rectShape(0, node.rect) + fill() + line(), body)
+  return shape(id, 'Text', extents(node.rect.w + slack, node.rect.h, x, node.rect.y, node.rotation) + rectShape(0, node.rect) + fill() + line(), body)
 }
 
 export function embeddedPicture(id: number, relationship: string, rect: Rect, label: string, link?: HyperlinkRef, crop?: IrImage['crop']): string {

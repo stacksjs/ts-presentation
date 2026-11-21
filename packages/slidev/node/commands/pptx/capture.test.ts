@@ -25,6 +25,55 @@ it('accepts native PNG and JPEG data URIs and sends mismatches or SVG through br
   expect(dataPicture('data:image/svg+xml;base64,PHN2Zy8+')).toBeUndefined()
 })
 
+it.skipIf(!chrome)('exports GitGraph and Gantt shapes, paths, and labels as editable PowerPoint objects', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-gitgraph-gantt-'))
+  const canvas = { width: 960, height: 540 }
+  try {
+    const entry = join(root, 'slides.md')
+    await Bun.write(entry, [
+      '# Repository history', '',
+      '~~~mermaid', '---', 'config:', '  theme: redux', '  themeVariables:', '    commitLabelBackground: "#ecd9ff"', '---',
+      'gitGraph', '  commit id: "start"', '  branch review',
+      '  commit id: "change" type: REVERSE', '  checkout main',
+      '  cherry-pick id: "change"', '  merge review tag: "Release"', '~~~', '',
+      '---', '', '# Delivery schedule', '',
+      '~~~mermaid', 'gantt', '  dateFormat YYYY-MM-DD', '  todayMarker off',
+      '  section Release', '  Draft :draft, 2026-11-20, 2d', '  Ship :milestone, after draft, 0d', '~~~', '',
+      '---', '', '# Filtered repository history', '',
+      '~~~mermaid', '---', 'config:', '  themeCSS: ".diagram-git-edge { filter: blur(1px); }"', '---',
+      'gitGraph', '  commit id: "old"', '  commit id: "new"', '~~~',
+    ].join('\n'))
+    const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
+    const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
+    const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
+    if (status) throw new Error(stderr)
+    const frames: PowerPointFrame[] = []
+    await captureFrames({ root: join(root, 'dist'), executable: chrome!, scale: 1, canvas, editable: true, withClicks: false }, frame => { frames.push(frame) })
+    expect(frames).toHaveLength(3)
+    const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Editable diagrams' }))
+    const graph = parts.get('ppt/slides/slide1.xml')?.toString() ?? ''
+    const schedule = parts.get('ppt/slides/slide2.xml')?.toString() ?? ''
+    const filtered = parts.get('ppt/slides/slide3.xml')?.toString() ?? ''
+    expect(graph).toContain('<a:prstGeom prst="ellipse">')
+    expect(graph).toContain('<a:custGeom>')
+    expect(graph).toContain('<a:quadBezTo>')
+    expect(graph).toContain('<a:custDash>')
+    expect(graph.match(/<a:xfrm rot="2700000">/g)?.length).toBeGreaterThanOrEqual(4)
+    expect(graph).toContain('>review</a:t>')
+    expect(graph).toContain('>Release</a:t>')
+    expect(graph).not.toContain('<p:pic>')
+    expect(schedule).toContain('<a:prstGeom prst="roundRect">')
+    expect(schedule).toContain('<a:custGeom>')
+    expect(schedule).toContain('>Draft</a:t>')
+    expect(schedule).toContain('>Ship</a:t>')
+    expect(schedule).not.toContain('<p:pic>')
+    expect(filtered).toContain('<p:pic>')
+  }
+  finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}, 45_000)
+
 it.skipIf(!chrome)('keeps treemap rectangles and formatted multiline labels editable in PowerPoint', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-treemap-'))
   const canvas = { width: 960, height: 540 }
