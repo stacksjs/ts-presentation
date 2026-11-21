@@ -285,6 +285,39 @@ test('preserves literal TeX characters through eager definitions and macro callb
   expect(math(source, false).split('<annotation')[0]).toContain(String.raw`<mtext>\undefined _##1</mtext>`)
 })
 
+test('expands signed TeX integer expressions with precedence and exact rounded scaling', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const plain = (formula: string) => math(formula, false).split('<annotation')[0]
+  expect(plain(String.raw`\number\numexpr 2+3*(4+1)\relax x`)).toContain('<mn>17</mn><mi>x</mi>')
+  expect(plain(String.raw`\number\numexpr 2*(\numexpr 3+4\relax)+1`)).toContain('<mn>15</mn>')
+  expect(plain(String.raw`\number\numexpr -5/2\relax`)).toContain('<mo>−</mo><mn>3</mn>')
+  expect(plain(String.raw`\number\numexpr 5/(-2)\relax`)).toContain('<mo>−</mo><mn>3</mn>')
+  expect(plain(String.raw`\number\numexpr 2147483647*2147483647/2147483647\relax`)).toContain('<mn>2147483647</mn>')
+  expect(plain(String.raw`\number"2F+\number'77`)).toContain('<mn>47</mn><mo>+</mo><mn>63</mn>')
+  expect(plain('\\number`A')).toContain('<mn>65</mn>')
+  expect(plain(String.raw`\let\value=\numexpr\text{Count \number\value 2+3\relax .}`)).toContain('<mtext>Count 5.</mtext>')
+  expect(() => plain(String.raw`\number\numexpr 1/(3-3)`)).toThrow('Division by zero')
+  expect(() => plain(String.raw`\number\numexpr 2147483647+1`)).toThrow('TeX integer overflow')
+  expect(() => plain(String.raw`\number\numexpr 2147483647*2`)).toThrow('TeX integer overflow')
+  expect(() => plain(String.raw`\number\numexpr (2+3`)).toThrow('Missing closing parenthesis')
+  expect(() => plain(String.raw`\number\numexpr 2+`)).toThrow('Expected a TeX integer')
+})
+
+test('uses integer expressions in eager macro definitions and measured math box widths', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const source = String.raw`
+    \def\unit{2}
+    \edef\label{\number\numexpr\unit*3\relax}
+    \def\unit{9}
+    \makebox[\dimexpr(10px)*\numexpr\label/2\relax\relax]{Release \label}
+  `
+  const html = math(source, false).split('<annotation')[0]
+  expect(html).toContain('--math-box-width:calc((10px * 3))')
+  expect(html).toContain('<mtext>Release 6</mtext>')
+  expect(() => createMathRenderer({ maxExpand: 1, throwOnError: true })(String.raw`\number\numexpr2+3`, false))
+    .toThrow('Too many math macro expansions')
+})
+
 test('keeps a snapshot of the lookahead and primitive meanings when using let', () => {
   const math = createMathRenderer({ throwOnError: true })
   const clauses = math(String.raw`\def\original{A}\def\action{\def\original{B}\next}\futurelet\next\action\original`, false)

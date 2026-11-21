@@ -149,6 +149,9 @@ speaker notes. Each hook can be asynchronous.
 - Use `\detokenize{...}` to show a TeX fragment literally or
   `\string\alpha` to show a single command name. These conversions also
   work inside `\edef` and `\xdef`.
+- Use `\number\numexpr 2*(3+4)\relax` to print a computed integer.
+  The same arithmetic can set a box scale, as in
+  `\makebox[\dimexpr12px*\numexpr 2+3\relax\relax]{Label}`.
 - Put ranges after a display opener, as in `$$ {hide|1|2|all}`. Each
   additional range uses one click. Add `{at: 3, startLine: 2, finally: 'all'}`
   after the ranges to control click and line numbering and the final state.

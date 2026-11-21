@@ -12,6 +12,104 @@ const dimensionPattern = /^([+-]?)\s*(\d+(?:\.\d*)?|\.\d+)\s*(px|em|ex|pt|bp|cm|
 
 export const nullDelimiterWidth = '0.12em'
 
+interface IntegerTokens {
+  peek: (skipSpace?: boolean) => string
+  advance: () => void
+  characterCode: () => number
+}
+
+const texIntegerLimit = 2_147_483_647n
+
+/** Read a signed TeX integer, optionally using e-TeX expression arithmetic. */
+export function mathInteger(tokens: IntegerTokens, expression: boolean): bigint {
+  const { peek, advance, characterCode } = tokens
+
+  function checked(value: bigint): bigint {
+    if (value < -texIntegerLimit || value > texIntegerLimit) throw new MathParseError('TeX integer overflow')
+    return value
+  }
+
+  function divide(left: bigint, right: bigint): bigint {
+    if (right === 0n) throw new MathParseError('Division by zero in TeX integer expression')
+    const quotient = left / right
+    const remainder = left % right
+    const magnitude = remainder < 0n ? -remainder : remainder
+    const divisor = right < 0n ? -right : right
+    if (magnitude * 2n < divisor) return quotient
+    return quotient + ((left < 0n) === (right < 0n) ? 1n : -1n)
+  }
+
+  function quantity(depth: number, allowGroup: boolean): bigint {
+    if (depth > 100) throw new MathParseError('TeX integer expressions are nested too deeply')
+    let sign = 1n
+    let first = peek()
+    while (first === '+' || first === '-') {
+      if (first === '-') sign = -sign
+      advance()
+      first = peek()
+    }
+    if (first === '\\numexpr' || (allowGroup && first === '(')) {
+      advance()
+      const value = sum(depth + 1)
+      if (first === '(' && peek() !== ')') throw new MathParseError('Missing closing parenthesis in TeX integer expression')
+      if (first === '(' || peek() === '\\relax') advance()
+      return sign * value
+    }
+    if (first === '`') {
+      advance()
+      const code = characterCode()
+      if (!Number.isInteger(code)) throw new MathParseError('Invalid TeX character constant')
+      if (/^[ \t\r\n]+$/.test(peek(false))) advance()
+      return sign * BigInt(code)
+    }
+    const radix = first === '"' ? 16 : first === "'" ? 8 : 10
+    const valid = radix === 16 ? /^[\dA-F]$/i : radix === 8 ? /^[0-7]$/ : /^\d$/
+    if (radix !== 10) advance()
+    let digit = peek(false)
+    if (!valid.test(digit)) throw new MathParseError('Expected a TeX integer')
+    const base = BigInt(radix)
+    let value = 0n
+    while (valid.test(digit)) {
+      value = checked(value * base + BigInt(Number.parseInt(digit, radix)))
+      advance()
+      digit = peek(false)
+    }
+    if (/^[ \t\r\n]+$/.test(digit)) advance()
+    return sign * value
+  }
+
+  function term(depth: number): bigint {
+    let value = quantity(depth, true)
+    for (let operator = peek(); operator === '*' || operator === '/'; operator = peek()) {
+      advance()
+      const right = quantity(depth, true)
+      if (operator === '*' && peek() === '/') {
+        // Scale in one operation so the intermediate product can exceed
+        // the integer limit when the divided result is in range.
+        advance()
+        value = checked(divide(value * right, quantity(depth, true)))
+      }
+      else value = checked(operator === '*' ? value * right : divide(value, right))
+    }
+    return value
+  }
+
+  function sum(depth: number): bigint {
+    let value = term(depth)
+    for (let operator = peek(); operator === '+' || operator === '-'; operator = peek()) {
+      advance()
+      const right = term(depth)
+      value = checked(operator === '+' ? value + right : value - right)
+    }
+    return value
+  }
+
+  if (!expression) return quantity(0, false)
+  const value = sum(0)
+  if (peek() === '\\relax') advance()
+  return value
+}
+
 function toEm(value: number, unit: string): number {
   if (unit === 'em') return value
   if (unit === 'mu') return value / 18

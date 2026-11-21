@@ -8,7 +8,7 @@ import { MathParseError } from './math-error.ts'
 import { chemicalFormula, physicalUnits } from './math-chemistry.ts'
 import type { Markup, MathStyle } from './math-markup.ts'
 import { fractionStyle, joinMarkup, renderMarkup, scriptStyle, xml } from './math-markup.ts'
-import { fractionRule, mathBoxDimensionExpression, mathDimension, nullDelimiterWidth } from './math-sizing.ts'
+import { fractionRule, mathBoxDimensionExpression, mathDimension, mathInteger, nullDelimiterWidth } from './math-sizing.ts'
 import { resolveRowClasses, rowSpacing } from './math-spacing.ts'
 import type { MathClass } from './math-spacing.ts'
 import { isCenteredGlyph, isColonRelationCommand, mathSymbol, textSymbol, unicodeColonRelation } from './math-symbols.ts'
@@ -312,7 +312,7 @@ function tokenize(source: string, onTrailingComment?: () => void): string[] {
 }
 
 type MathMode = 'math' | 'text'
-const expansionPrimitives = ['\\expandafter', '\\noexpand', '\\unexpanded', '\\detokenize', '\\string', '\\@firstoftwo', '\\@secondoftwo', '\\@ifnextchar', '\\@ifstar', '\\TextOrMath', '\\html@mathml', '\\message', '\\errmessage', '\\char', '\\MoveEqLeft'] as const
+const expansionPrimitives = ['\\expandafter', '\\noexpand', '\\unexpanded', '\\detokenize', '\\string', '\\@firstoftwo', '\\@secondoftwo', '\\@ifnextchar', '\\@ifstar', '\\TextOrMath', '\\html@mathml', '\\message', '\\errmessage', '\\char', '\\number', '\\numexpr', '\\MoveEqLeft'] as const
 const expansionPrimitiveNames = new Set<string>(expansionPrimitives)
 const macroDeclaration = /^\\(?:[gex]?def|(?:future)?let|(?:new|renew|provide)command|DeclarePairedDelimiter(?:X(?:PP)?)?|Declare(?:Left|Right)Delimiter|MakeAboxedCommand|mathtoolsset|empheqset|EmphEqdelimiter(?:factor|shortfall)|(?:new|renew|use)tagform|fboxsep|fboxrule|setlength|newsavebox|sbox|savebox|global|long|protected)$/
 const tagFormDeclaration = /^\\(?:new|renew|use)tagform$/
@@ -320,7 +320,7 @@ const tagValueToken = '\u0000equation-tag-value'
 const definitionCommand = /^\\[gex]?def$/
 const assignmentPrefix = /^\\(?:global|long|protected)$/
 type ExpansionPrimitive = typeof expansionPrimitives[number]
-type ConditionalPrimitive = Exclude<ExpansionPrimitive, '\\expandafter' | '\\noexpand' | '\\unexpanded' | '\\detokenize' | '\\string' | '\\message' | '\\errmessage' | '\\char' | '\\MoveEqLeft'>
+type ConditionalPrimitive = Exclude<ExpansionPrimitive, '\\expandafter' | '\\noexpand' | '\\unexpanded' | '\\detokenize' | '\\string' | '\\message' | '\\errmessage' | '\\char' | '\\number' | '\\numexpr' | '\\MoveEqLeft'>
 interface TokenMacro { body: string[], parameters: string[][], prefix: string[], optional?: string[], unexpandable?: boolean, protected?: boolean, source?: string }
 type DelimitedNotation = 'Braket' | 'Set' | 'set'
 type DotsMacro = 'dots' | 'dotsc' | 'dotso' | 'cdots'
@@ -1342,6 +1342,37 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return result
   }
 
+  function expandInteger(expression: boolean, eager: boolean): string[] {
+    const internalExpression = (token: string) => {
+      const macro = macroDefinition(token)
+      return macro && typeof macro !== 'function' && 'primitive' in macro && macro.primitive === '\\numexpr'
+    }
+    const peek = (skipSpace = true): string => {
+      do {
+        if (skipSpace) space()
+        // An internal quantity has its own scan boundary. Its result must
+        // not absorb digits after that quantity's terminating \relax.
+        if (internalExpression(tokens[cursor])) return '\\numexpr'
+      } while (expandOnce(eager) !== false)
+      return tokenCharacters(tokens[cursor] ?? '')
+    }
+    const value = mathInteger({
+      peek,
+      advance() {
+        const token = tokens[cursor++]
+        if (internalExpression(token)) countExpansions(1)
+        if (controlWord.test(tokenText(token))) space()
+      },
+      characterCode() {
+        const raw = tokens[cursor++] ?? ''
+        const spelling = raw.startsWith(literalCharacterToken) ? tokenCharacters(raw) : tokenText(raw).replace(/^\\/, '')
+        const characters = [...spelling]
+        return characters.length === 1 ? characters[0].codePointAt(0)! : NaN
+      },
+    }, expression)
+    return Array.from(String(value), character => literalToken + character)
+  }
+
   function expandNativeMacro(macro: NativeMacro, eager = false): string[] {
     if ('notation' in macro) return expandDelimitedNotation(macro.notation)
     if ('pairedDelimiter' in macro) return expandPairedDelimiter(macro.pairedDelimiter)
@@ -1389,6 +1420,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       return []
     }
     if (primitive === '\\char') return expandCharacter()
+    if (primitive === '\\number' || primitive === '\\numexpr') return expandInteger(primitive === '\\numexpr', eager)
     if (primitive === '\\MoveEqLeft') {
       if (mode !== 'math') throw new MathParseError('Math command \\MoveEqLeft requires math mode')
       const input = rawBracket()
