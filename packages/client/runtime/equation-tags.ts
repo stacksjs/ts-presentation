@@ -63,7 +63,7 @@ function fitTransformedBox(box: Element): void {
   const width = measuredWidth - spaces * extra
   const dimensions: Readonly<Record<string, number>> = { width, height, depth, totalheight: totalHeight, center: (height - depth) / 2 }
   const boxStyle = sizing === 'scale' ? undefined : getComputedStyle(box)
-  function target(specification: string, axis: 'width' | 'height'): number {
+  function target(specification: string, axis: string): number {
     if (specification === 'length')
       return Number.parseFloat(boxStyle?.getPropertyValue(`--math-box-${axis}`) ?? '')
     const [natural, multiplier] = specification.split(':')
@@ -96,6 +96,15 @@ function fitTransformedBox(box: Element): void {
     descent = depth
     origin = 'left'
     transform = `translateX(${length(offset)})`
+  }
+  else if (sizing === 'raise') {
+    const offset = target(box.getAttribute('data-raise') ?? '', 'raise')
+    const below = box.getAttribute('data-depth')
+    advance = width
+    ascent = Math.max(0, vertical ? target(vertical, 'height') : height + offset)
+    descent = Math.max(0, below ? target(below, 'depth') : depth - offset)
+    origin = 'left'
+    transform = `translateY(${length(-offset)})`
   }
   else if (sizing === 'rotate') {
     const angle = Number(box.getAttribute('data-angle'))

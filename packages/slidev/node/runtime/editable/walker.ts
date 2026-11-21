@@ -663,7 +663,7 @@ export function collectSnapshot(options: {
 
       let box = el.getBoundingClientRect()
       if (el.localName === 'math') {
-        // Laps and shifted root indices can paint beyond the formula's layout box.
+        // Laps, shifted root indices and custom boxes can paint beyond the layout box.
         for (const overlap of el.querySelectorAll('.math-overlap-l, .math-overlap-c, .math-overlap-r, .math-root-offset, [data-math-box-ink]')) {
           const ink = overlap.getBoundingClientRect()
           const left = Math.min(box.left, ink.left)

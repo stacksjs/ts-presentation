@@ -494,6 +494,8 @@ const textLigatures: Readonly<Record<string, string>> = {
   '\x60': '\u2018', "'": '\u2019',
 }
 const typesettingNames = new Set(['TeX', 'LaTeX', 'KaTeX'])
+const boxDimension = /^([+-]?(?:\d+(?:\.\d*)?|\.\d+)?)\s*\\(width|height|depth|totalheight)$/
+type BoxDimensionProperty = 'width' | 'height' | 'raise' | 'depth'
 const graphicsNumber = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/
 const textBoxes = new Set(['colorbox', 'fcolorbox', 'fbox', 'reflectbox', 'scalebox', 'resizebox', 'rotatebox', 'makebox', 'framebox'])
 const verticalBoxCommands = new Set(['phantom', 'hphantom', 'vphantom', 'smash', 'raisebox', 'rule'])
@@ -1944,7 +1946,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const alignment = placement === 't' ? 'l' : placement === 'b' ? 'r' : placement
     const lengths = new Map<string, string>()
     const size = graphicsLength(expandDefinition(width).join('').trim(), 'width', lengths)
-    const content = transformedBox(textArgument('hbox'), framed ? 'frame' : 'make', size, alignment, lengths)
+    const content = transformedBox(textArgument('hbox'), framed ? 'frame' : 'make', { width: size, height: alignment }, lengths)
     return framed ? frameBox(content) : content
   }
 
@@ -1972,8 +1974,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return `calc(${parts.join('')})`
   }
 
-  function graphicsLength(raw: string, axis: 'width' | 'height', lengths: Map<string, string>): string {
-    const reference = /^([+-]?(?:\d+(?:\.\d*)?|\.\d+)?)\s*\\(width|height|depth|totalheight)$/.exec(raw)
+  function graphicsLength(raw: string, axis: BoxDimensionProperty, lengths: Map<string, string>): string {
+    const reference = boxDimension.exec(raw)
     if (reference) {
       const amount = reference[1]
       const multiplier = amount === '-' ? -1 : amount === '+' || !amount ? 1 : Number(amount)
@@ -1986,15 +1988,15 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return 'length'
   }
 
-  function transformedBox(content: Markup, kind: string, horizontal: string, vertical: string, lengths: Map<string, string>, angle?: number): Markup {
+  function transformedBox(content: Markup, kind: string, geometry: Record<string, string | number>, lengths: Map<string, string>): Markup {
     const style = lengths.size ? ` style="${[...lengths].map(([axis, length]) => `--math-box-${axis}:${length}`).join(';')}"` : ''
     const measured = style.includes('var(--empheq-') ? ' data-empheq-measure' : ''
-    const rotation = angle === undefined ? '' : ` data-angle="${angle}"`
-    const overflow = kind === 'make' || kind === 'frame' ? ' data-math-box-ink' : ''
+    const attributes = Object.entries(geometry).map(([axis, value]) => ` data-${axis}="${value}"`).join('')
+    const overflow = kind === 'make' || kind === 'frame' || kind === 'raise' ? ' data-math-box-ink' : ''
     const anchor = '<mspace width="0" height="0" depth="0" aria-hidden="true"/>'
     const inline = '<mspace class="math-box-axis-x" width="0" height="0" depth="0" aria-hidden="true"/>'
     const block = '<mspace class="math-box-axis-y" width="0" height="0" depth="0" aria-hidden="true"/>'
-    return xml`<mpadded data-math-transform-box="${kind}" data-width="${horizontal}" data-height="${vertical}"${rotation}${measured}${style}><mrow><mrow${overflow}>${content}</mrow>${anchor}${inline}${block}</mrow></mpadded>`
+    return xml`<mpadded data-math-transform-box="${kind}"${attributes}${measured}${style}><mrow><mrow${overflow}>${content}</mrow>${anchor}${inline}${block}</mrow></mpadded>`
   }
 
   function scaledBox(name: 'scalebox' | 'resizebox'): Markup {
@@ -2005,7 +2007,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const horizontal = factor(rawGroup())
       const optional = rawBracket()
       const vertical = optional ? factor(optional) : horizontal
-      return transformedBox(textArgument('hbox'), 'scale', horizontal, vertical, lengths)
+      return transformedBox(textArgument('hbox'), 'scale', { width: horizontal, height: vertical }, lengths)
     }
     const starred = peek() === '*'
     if (starred) take()
@@ -2017,7 +2019,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const vertical = size('height')
     const content = textArgument('hbox')
     if (horizontal === '!' && vertical === '!') return content
-    return transformedBox(content, starred ? 'total' : 'height', horizontal, vertical, lengths)
+    return transformedBox(content, starred ? 'total' : 'height', { width: horizontal, height: vertical }, lengths)
   }
 
   function rotatedBox(): Markup {
@@ -2056,7 +2058,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const angle = readGraphicsNumber(expandDefinition(rawGroup()).join('').trim(), 'Invalid math rotation angle')
     const radians = -(angle % units) / units * 2 * Math.PI
     const content = textArgument('hbox')
-    return radians ? transformedBox(content, 'rotate', horizontal, vertical, lengths, radians) : content
+    return radians ? transformedBox(content, 'rotate', { width: horizontal, height: vertical, angle: radians }, lengths) : content
   }
 
   function readBoxColors(name: string): { frame?: string, background: string } {
@@ -2139,14 +2141,32 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
     if (name === 'raisebox') {
       if (peek() !== '{') throw new MathParseError('Raised math box requires a grouped dimension')
-      const offset = readDimension('0px')
-      const height = optionalBoxDimension()
-      const depth = optionalBoxDimension()
+      const read = (parts: string[]) => expandDefinition(parts).join('').trim()
+      const displacement = read(rawGroup()) || '0px'
+      const heightOption = rawBracket()
+      const heightInput = heightOption && read(heightOption)
+      const depthOption = rawBracket()
+      const depthInput = depthOption && read(depthOption)
+      if ([displacement, heightInput, depthInput].some(value => value && (boxDimension.test(value) || measureEmpheqLength.test(value)))) {
+        const lengths = new Map<string, string>()
+        const geometry = {
+          raise: graphicsLength(displacement, 'raise', lengths),
+          height: heightInput ? graphicsLength(heightInput, 'height', lengths) : '',
+          depth: depthInput ? graphicsLength(depthInput, 'depth', lengths) : '',
+        }
+        return transformedBox(textArgument('hbox'), 'raise', geometry, lengths)
+      }
+      const offset = dimension(displacement)
+      if (offset === undefined) throw new MathParseError('Invalid math dimension')
+      const height = heightInput ? dimension(heightInput) : undefined
+      const depth = depthInput ? dimension(depthInput) : undefined
+      if ((heightInput && height === undefined) || (depthInput && depth === undefined))
+        throw new MathParseError('Invalid math box dimension')
       const body = renderMarkup(textArgument(), 1)
       // Use an inline box baseline so the shift affects both layout and paint.
       // Zero font adjustment removes the empty line strut without shrinking the content.
       const text = `<math style="font-size:math;font-family:inherit;font-style:inherit;font-weight:inherit" scriptlevel="0" displaystyle="false"><mrow>${body}</mrow></math>`
-      const shifted = `<span style="display:inline-block;font-size-adjust:none;vertical-align:${offset}">${text}</span>`
+      const shifted = `<span${height || depth ? ' data-math-box-ink' : ''} style="display:inline-block;font-size-adjust:none;vertical-align:${offset}">${text}</span>`
       const box = `<mtext class="math-raised-box" style="line-height:0"><span style="display:inline-block;line-height:0;font-size-adjust:0">${shifted}</span></mtext>`
       return height || depth ? `<mpadded${height ? ` height="${height}"` : ''}${depth ? ` depth="${depth}"` : ''}>${box}</mpadded>` : box
     }

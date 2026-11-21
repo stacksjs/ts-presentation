@@ -321,7 +321,7 @@ it.skipIf(!chrome)('exports cramped superscripts, stacks, and measured laps as e
   }
 }, 45_000)
 
-it.skipIf(!chrome)('reserves transformed and fixed-width math box dimensions in the browser and PowerPoint', async () => {
+it.skipIf(!chrome)('reserves transformed, fixed-width, and raised math box dimensions in the browser and PowerPoint', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-scaled-box-'))
   const canvas = { width: 960, height: 540 }
   try {
@@ -379,7 +379,21 @@ $x\makebox[160px][s]{two words}z$
 
 $\hspace{7em}x\makebox[12px][r]{Wide text}z$
 
-$x{\setlength{\fboxsep}{4px}\fboxrule=2px\framebox[100px][r]{A}}z$`)
+$x{\setlength{\fboxsep}{4px}\fboxrule=2px\framebox[100px][r]{A}}z$
+
+---
+
+# Raised boxes
+
+$\raisebox{\depth}{Agp}$
+
+$\raisebox{-.5\height}[\height][.25\totalheight]{Agp}$
+
+$\raisebox{5px}[\height][0px]{Agp}$
+
+$\raisebox{.1\width}{Agp}$
+
+$\raisebox{30px}[2px][0px]{Agp}$`)
     const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
     const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
     const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
@@ -487,6 +501,37 @@ $x{\setlength{\fboxsep}{4px}\fboxrule=2px\framebox[100px][r]{A}}z$`)
       expect(framed.width).toBeCloseTo(88, 1)
       expect(framed.outer).toBeCloseTo(100, 1)
       expect(framed.offset + framed.ink).toBeCloseTo(88, 1)
+
+      await view.evaluate('window.presentationNavigation.go(5)')
+      const raised = await view.evaluate<{
+        ascent: number, descent: number, height: number, depth: number, width: number, offset: number
+      }[]>(`(async () => {
+        await new Promise(requestAnimationFrame)
+        return [...document.querySelectorAll('#stage > article:not([hidden]) [data-math-transform-box="raise"]')].map(box => {
+          const [ink, anchor] = box.firstElementChild.children
+          const inner = box.firstElementChild.getBoundingClientRect()
+          const baseline = anchor.getBoundingClientRect().top
+          const width = parseFloat(box.getAttribute('width'))
+          const scale = inner.width / width
+          return {
+            ascent: parseFloat(box.getAttribute('height')), descent: parseFloat(box.getAttribute('depth')),
+            height: (baseline - inner.top) / scale, depth: (inner.bottom - baseline) / scale,
+            width, offset: (inner.top - ink.getBoundingClientRect().top) / scale,
+          }
+        })
+      })()`)
+      expect(raised).toHaveLength(4)
+      const [lift, lower, fixed, relativeLift] = raised
+      expect(lift.offset).toBeCloseTo(lift.depth, 1)
+      expect(lift.ascent).toBeCloseTo(lift.height + lift.depth, 1)
+      expect(lift.descent).toBe(0)
+      expect(lower.offset).toBeCloseTo(-lower.height / 2, 1)
+      expect(lower.ascent).toBeCloseTo(lower.height, 1)
+      expect(lower.descent).toBeCloseTo((lower.height + lower.depth) / 4, 1)
+      expect(fixed.offset).toBeCloseTo(5, 1)
+      expect(fixed.ascent).toBeCloseTo(fixed.height, 1)
+      expect(fixed.descent).toBe(0)
+      expect(relativeLift.offset).toBeCloseTo(relativeLift.width / 10, 1)
     }
     finally {
       view.close()
@@ -510,6 +555,12 @@ $x{\setlength{\fboxsep}{4px}\fboxrule=2px\framebox[100px][r]{A}}z$`)
     expect(text).toHaveLength(6)
     expect(text[4].rect.w).toBeGreaterThan(45)
     expect(parts.get('ppt/slides/slide4.xml')?.toString().match(/<p:pic>/g)).toHaveLength(6)
+    const raised = frames[4].editable?.nodes.filter((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math') ?? []
+    expect(raised).toHaveLength(5)
+    expect(raised.every(node => node.data && !node.equation)).toBe(true)
+    expect(raised[1].rect.h).toBeGreaterThan(raised[0].rect.h + 2)
+    expect(raised[4].rect.h).toBeGreaterThan(30)
+    expect(parts.get('ppt/slides/slide5.xml')?.toString().match(/<p:pic>/g)).toHaveLength(5)
   }
   finally { await rm(root, { recursive: true, force: true }) }
 }, 45_000)

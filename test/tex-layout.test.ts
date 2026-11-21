@@ -2094,6 +2094,18 @@ test('applies only valid TeX smash flags and expands optional box dimensions', (
   expect(() => math(String.raw`\text{\rule[wrong]{1em}{2pt}}`, false)).toThrow('Invalid math box dimension')
 })
 
+test('raises TeX boxes by their natural dimensions and accepts independent layout overrides', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const html = math(String.raw`\def\lift{.5\width}\raisebox{\lift}{Mixed $x^2$}
+    \text{\raisebox{-\depth}[\height][.5\totalheight]{Label}}
+    \raisebox{2px}[\height][0px]{Fixed shift}`, false)
+  expect(html).toContain('data-math-transform-box="raise" data-raise="width:0.5" data-height="" data-depth=""')
+  expect(html).toContain('<msup>')
+  expect(html).toContain('data-raise="depth:-1" data-height="height:1" data-depth="totalheight:0.5"')
+  expect(html).toContain('data-raise="length" data-height="height:1" data-depth="length" style="--math-box-raise:2px;--math-box-depth:0px"')
+  expect(() => math(String.raw`\raisebox{\height}[invalid]{x}`, false)).toThrow('Invalid math box dimension')
+})
+
 test('supports optional arguments, delimited macros and scoped definitions', () => {
   const math = String.raw`\newcommand{\sumPair}[2][z]{#1 + #2}
     \def\pair#1,#2\endpair{\left(#1,#2\right)}

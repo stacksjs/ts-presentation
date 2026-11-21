@@ -1238,6 +1238,16 @@ math .math-measured-r { justify-self: end; }
   inherits: false;
   initial-value: 0px;
 }
+@property --math-box-depth {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --math-box-raise {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
 /* Measure the text independently of the advance reserved by mpadded. */
 math [data-math-transform-box] > mrow { inline-size: max-content; white-space: nowrap; }
 /* Paint-only offsets expose the projected axes without changing the box size. */
