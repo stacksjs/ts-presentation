@@ -310,7 +310,7 @@ function tokenize(source: string, onTrailingComment?: () => void): string[] {
 type MathMode = 'math' | 'text'
 const expansionPrimitives = ['\\expandafter', '\\noexpand', '\\@firstoftwo', '\\@secondoftwo', '\\@ifnextchar', '\\@ifstar', '\\TextOrMath', '\\html@mathml', '\\message', '\\errmessage', '\\char', '\\MoveEqLeft'] as const
 const expansionPrimitiveNames = new Set<string>(expansionPrimitives)
-const macroDeclaration = /^\\(?:[gex]?def|(?:future)?let|(?:new|renew|provide)command|DeclarePairedDelimiter(?:X(?:PP)?)?|Declare(?:Left|Right)Delimiter|MakeAboxedCommand|mathtoolsset|empheqset|EmphEqdelimiter(?:factor|shortfall)|(?:new|renew|use)tagform|fboxsep|fboxrule|setlength|global|long)$/
+const macroDeclaration = /^\\(?:[gex]?def|(?:future)?let|(?:new|renew|provide)command|DeclarePairedDelimiter(?:X(?:PP)?)?|Declare(?:Left|Right)Delimiter|MakeAboxedCommand|mathtoolsset|empheqset|EmphEqdelimiter(?:factor|shortfall)|(?:new|renew|use)tagform|fboxsep|fboxrule|setlength|newsavebox|sbox|savebox|global|long)$/
 const tagFormDeclaration = /^\\(?:new|renew|use)tagform$/
 const tagValueToken = '\u0000equation-tag-value'
 const assignmentCommand = /^\\(?:[gex]?def|(?:future)?let)$/
@@ -326,9 +326,11 @@ interface PairedDelimiter {
 }
 type NativeMacro = { primitive: ExpansionPrimitive } | { notation: DelimitedNotation } | { separator: () => string[] } | { dots: DotsMacro } | { pairedDelimiter: PairedDelimiter }
 type Macro = TokenMacro | NativeMacro | MathMacroFunction
+interface SavedBox { markup: string, scale: number }
 interface MathState {
   configured: ReadonlyMap<string, Macro>
   globals: Map<string, Macro | undefined>
+  savedBoxes?: Map<string, SavedBox | null>
   options: KatexOptions
   inlineBreaks: boolean
 }
@@ -497,7 +499,7 @@ const typesettingNames = new Set(['TeX', 'LaTeX', 'KaTeX'])
 const boxDimension = /^([+-]?(?:\d+(?:\.\d*)?|\.\d+)?)\s*\\(width|height|depth|totalheight)$/
 type BoxDimensionProperty = 'width' | 'height' | 'raise' | 'depth'
 const graphicsNumber = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/
-const textBoxes = new Set(['colorbox', 'fcolorbox', 'fbox', 'reflectbox', 'scalebox', 'resizebox', 'rotatebox', 'makebox', 'framebox'])
+const textBoxes = new Set(['colorbox', 'fcolorbox', 'fbox', 'reflectbox', 'scalebox', 'resizebox', 'rotatebox', 'makebox', 'framebox', 'usebox'])
 const verticalBoxCommands = new Set(['phantom', 'hphantom', 'vphantom', 'smash', 'raisebox', 'rule'])
 const textSymbols: Record<string, string> = {
   '\\textdollar': '$', '\\textunderscore': '_', '\\textbackslash': '\\',
@@ -1177,7 +1179,9 @@ export function renderMath(source: string, display = false, configured: MathMacr
 
   const macros = new Map<string, Macro>(state?.configured ?? compileMathMacros(configured))
   const macroFor = (token: string) => macros.get(token) ?? builtinMacros.get(token)
-  const scopes: { undo: Map<string, Macro | undefined>, callback?: boolean }[] = []
+  let savedBoxes = state?.savedBoxes && new Map(state.savedBoxes)
+  let reusedBoxSize = 0
+  const scopes: { undo: Map<string, Macro | undefined>, boxes?: Map<string, SavedBox | null>, callback?: boolean }[] = []
   function assign(name: string, definition: Macro | undefined, global = false): void {
     const scope = scopes.at(-1)?.undo
     if (global) {
@@ -1204,6 +1208,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       if (previous) macros.set(command, previous)
       else macros.delete(command)
     }
+    for (const [name, previous] of scope.boxes ?? []) savedBoxes!.set(name, previous)
   }
 
   function inScope<T>(render: () => T): T {
@@ -1259,7 +1264,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   }
 
   function defined(token: string): boolean {
-    if (macroFor(token) || activeCharacter.test(token) || isExpansionPrimitive(token) || macroDeclaration.test(token)) return true
+    if (macroFor(token) || savedBoxes?.has(token) || activeCharacter.test(token) || isExpansionPrimitive(token) || macroDeclaration.test(token)) return true
     const name = token.slice(1)
     return sharedFunctions.has(name) || mathModeFunctions.has(name) || functions.has(name)
       || !!greekLetter(name) || !!mathSymbol(name) || !!textSymbol(token)
@@ -1925,6 +1930,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   }
 
   function textBox(name: string): Markup {
+    if (name === 'usebox') return useSavedBox()
     if (name === 'scalebox' || name === 'resizebox') return scaledBox(name)
     if (name === 'rotatebox') return rotatedBox()
     if (name === 'makebox' || name === 'framebox') return horizontalTextBox(name === 'framebox')
@@ -1948,6 +1954,52 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const size = graphicsLength(expandDefinition(width).join('').trim(), 'width', lengths)
     const content = transformedBox(textArgument('hbox'), framed ? 'frame' : 'make', { width: size, height: alignment }, lengths)
     return framed ? frameBox(content) : content
+  }
+
+  function boxRegister(): string {
+    const name = literalGroup().trim()
+    if (!controlSequence.test(name)) throw new MathParseError('Expected a TeX box register name')
+    return name
+  }
+
+  function requireSavedBox(name: string): SavedBox | null {
+    const box = savedBoxes?.get(name)
+    if (box === undefined) throw new MathParseError(`Unknown TeX box register: ${name}`)
+    return box
+  }
+
+  function storeSavedBox(name: string, body: Markup, color: string, legacyFont?: string): void {
+    const previous = requireSavedBox(name)
+    // Store the typeset contents so later macro assignments cannot change an existing box.
+    const font = textFontCSS({ ...normalFont, ...textFont })
+    const styled = legacyFont ? fontMarkup(body, legacyFont) : body
+    const text = `<mrow style="${font}">${renderMarkup(styled, 1)}</mrow>`
+    const box = { markup: color ? `<mrow style="color:${color}">${text}</mrow>` : text, scale: fontScale }
+    const scope = scopes.at(-1)
+    if (scope) {
+      const previousBoxes = scope.boxes ??= new Map()
+      if (!previousBoxes.has(name)) previousBoxes.set(name, previous)
+    }
+    else if (state && options?.globalGroup) state.savedBoxes!.set(name, box)
+    savedBoxes!.set(name, box)
+  }
+
+  function useSavedBox(): Markup {
+    const box = requireSavedBox(boxRegister())
+    if (!box) return ''
+    reusedBoxSize += box.markup.length
+    if (reusedBoxSize > 1_000_000) throw new MathParseError('Expanded TeX boxes are too large')
+    const scale = box.scale / fontScale
+    return style => renderMarkup(scaledMath(style === 1 ? box.markup : mathSize(1, box.markup), scale), style)
+  }
+
+  function saveBoxEnvironment(color = currentColor, legacyFont?: string): void {
+    const name = boxRegister()
+    requireSavedBox(name)
+    space()
+    const body = inMode('text', () => parseTextArgument('', false, undefined, boundary, ['\\end']))
+    if (take() !== '\\end' || literalGroup() !== 'lrbox') throw new MathParseError('Unclosed TeX lrbox environment')
+    storeSavedBox(name, body, color, legacyFont)
   }
 
   function readGraphicsNumber(raw: string, message: string): number {
@@ -2427,7 +2479,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
         }
         if (!token || token === boundary || token === '}' || token === '\\endgroup') throw new MathParseError('Unclosed math text')
         cursor++
-        if (token === '\\relax' || declareMacro(token) || equationDirective(token)) continue
+        if (token === '\\relax' || declareMacro(token, textColor || currentColor, legacyFont) || equationDirective(token)) continue
         const command = token.startsWith('\\') ? token.slice(1) : ''
         const verbatim = token === tagValueToken ? equationTagValue : verbatimMarkup(token)
         if (verbatim !== undefined) {
@@ -2471,6 +2523,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
           flush()
           if (token === '\\begingroup') space()
           parts.push(parseTextArgument('', false, undefined, token === '{' ? '}' : '\\endgroup'))
+        }
+        else if (token === '\\begin') {
+          if (literalGroup() !== 'lrbox') throw new MathParseError(`Math command ${token} requires math mode`)
+          saveBoxEnvironment(textColor || currentColor, legacyFont)
         }
         else if (Object.hasOwn(textFonts, command)) {
           flush()
@@ -3725,7 +3781,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return value
   }
 
-  function declareMacro(token: string): boolean {
+  function declareMacro(token: string, color = currentColor, legacyFont?: string): boolean {
     if (!macroDeclaration.test(token)) return false
     let global = false
     const prefixed = token === '\\global' || token === '\\long'
@@ -3736,6 +3792,21 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (prefixed && !assignmentCommand.test(token))
       throw new MathParseError('Invalid token after math macro prefix')
     const name = token.slice(1)
+    if (name === 'newsavebox') {
+      const register = boxRegister()
+      if (defined(register)) throw new MathParseError(`TeX box register is already defined: ${register}`)
+      savedBoxes ??= new Map()
+      savedBoxes.set(register, null)
+      if (state && options?.globalGroup) (state.savedBoxes ??= new Map()).set(register, null)
+      return true
+    }
+    if (name === 'sbox' || name === 'savebox') {
+      const register = boxRegister()
+      requireSavedBox(register)
+      const body = name === 'sbox' ? textArgument('hbox') : horizontalTextBox(false)
+      storeSavedBox(register, body, color, legacyFont)
+      return true
+    }
     if (tagFormDeclaration.test(token)) {
       declareTagForm(token)
       return true
@@ -4011,7 +4082,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
     const sized = /^(bigg|Bigg|big|Big)([lrm]?)$/.exec(name)
     if (sized) return { markup: sizedFence(readDelimiter(name), sizedDelimiters[sized[1]], sized[2]) }
-    if (name === 'begin') return { markup: inScope(() => matrix(literalGroup())) }
+    if (name === 'begin') {
+      const environment = literalGroup()
+      if (environment !== 'lrbox') return { markup: inScope(() => matrix(environment)) }
+      saveBoxEnvironment()
+      return { markup: '' }
+    }
     if (name === 'end' || name === 'endgroup') throw new MathParseError(`Unexpected math token: ${token}`)
     if (['frac', 'dfrac', 'tfrac', 'binom', 'dbinom', 'tbinom'].includes(name)) {
       const binomial = name.endsWith('binom')

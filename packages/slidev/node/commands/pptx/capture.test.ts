@@ -565,6 +565,54 @@ $\raisebox{30px}[2px][0px]{Agp}$`)
   finally { await rm(root, { recursive: true, force: true }) }
 }, 45_000)
 
+it.skipIf(!chrome)('reuses TeX boxes across slides and keeps simple saved equations editable', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-saved-boxes-'))
+  const canvas = { width: 960, height: 540 }
+  try {
+    const entry = join(root, 'slides.md')
+    await Bun.write(entry, String.raw`---
+math:
+  globalGroup: true
+---
+
+# Define labels
+
+$$
+\newsavebox{\plain}\newsavebox{\wide}
+\sbox{\plain}{\textbf{Fraction} $\frac{1}{2}$}
+\savebox{\wide}[96px][r]{Wide}
+\usebox{\plain}
+$$
+
+---
+
+# Reuse labels
+
+$\usebox{\plain}$
+
+$\usebox{\wide}$`)
+    const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
+    const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
+    const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
+    if (status) throw new Error(stderr)
+    const frames: PowerPointFrame[] = []
+    await captureFrames({ root: join(root, 'dist'), executable: chrome!, scale: 1, canvas, range: '2', editable: true, withClicks: false }, frame => { frames.push(frame) })
+    expect(frames).toHaveLength(1)
+    const formulas = frames[0].editable?.nodes.filter((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math') ?? []
+    expect(formulas).toHaveLength(2)
+    expect(formulas[0].equation?.expression).toContain('<m:f>')
+    expect(formulas[0].equation?.expression).toContain('Fraction')
+    expect(formulas[1].rect.w).toBeCloseTo(96, 0)
+    expect(formulas[1].data).toBeTruthy()
+    const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Saved equations' }))
+    const slide = parts.get('ppt/slides/slide1.xml')?.toString()
+    expect(slide).toContain('<a14:m>')
+    expect(slide).toContain('<m:f>')
+    expect(slide?.match(/<p:pic>/g)).toHaveLength(1)
+  }
+  finally { await rm(root, { recursive: true, force: true }) }
+}, 45_000)
+
 it.skipIf(!chrome)('keeps empheq frames and delimiters aligned around editable numbered reveals', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-empheq-'))
   const canvas = { width: 960, height: 540 }

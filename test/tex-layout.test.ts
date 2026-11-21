@@ -108,6 +108,50 @@ test('supports natural and specified TeX text boxes and scopes their frame dimen
   expect(() => math(String.raw`\setlength{\fboxsep}{-2px}\framebox{Label}`, false)).toThrow('Invalid text frame dimension')
 })
 
+test('saves and reuses typeset TeX boxes with local assignments and deck scope', () => {
+  const math = createMathRenderer({ throwOnError: true, globalGroup: true })
+  const initial = math(String.raw`
+    \newsavebox{\panel}\newsavebox{\emptybox}\usebox{\emptybox}
+    \def\word{Saved}\color{blue}\sbox{\panel}{\textbf{\word} $x^2$}
+    \def\word{Changed}\usebox{\panel}
+  `, true).split('<annotation')[0]
+  expect(initial).toContain('<mrow style="color:blue"><mrow style="font-family:math;')
+  expect(initial).toContain('style="font-weight:bold"><mtext>Saved</mtext>')
+  expect(initial).toContain('<msup>')
+  expect(initial).not.toContain('Changed')
+  const updated = math(String.raw`
+    {\savebox{\panel}[4em][r]{Temporary}\usebox{\panel}}
+    \usebox{\panel}+\text{Example \usebox{\panel}}+x_{\usebox{\panel}}
+  `, false).split('<annotation')[0]
+  expect(updated).toContain('data-math-transform-box="make" data-width="length" data-height="r" style="--math-box-width:4em"')
+  expect(updated.match(/<mtext>Temporary<\/mtext>/g)).toHaveLength(1)
+  expect(updated.match(/<mtext>Saved<\/mtext>/g)).toHaveLength(3)
+  expect(updated).toContain('<mstyle displaystyle="false" scriptlevel="0">')
+  expect(math(String.raw`\usebox{\panel}`, false)).toContain('<mtext>Saved</mtext>')
+  expect(() => createMathRenderer({ throwOnError: true })(String.raw`\usebox{\panel}`, false)).toThrow('Unknown TeX box register')
+  expect(() => math(String.raw`\newsavebox{\panel}`, false)).toThrow('TeX box register is already defined')
+  expect(() => math(String.raw`\sbox{panel}{Invalid}`, false)).toThrow('Expected a TeX box register name')
+})
+
+test('captures lrbox text, scopes its declarations, and bounds repeated reuse', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const html = math(String.raw`
+    {\newsavebox{\panel}}
+    \def\word{outer}
+    \begin{lrbox}{\panel}  \def\word{inner}\word\end{lrbox}
+    \usebox{\panel}+\word
+    \text{\begin{lrbox}{\panel}    Words $y^2$   \end{lrbox}\usebox{\panel}}
+  `, false).split('<annotation')[0]
+  expect(html).toContain('<mtext>inner</mtext>')
+  expect(html).toContain('<mi>o</mi><mi>u</mi><mi>t</mi><mi>e</mi><mi>r</mi>')
+  expect(html).toContain('<mtext>Words </mtext><mrow class="math-font-reset"><msup><mi>y</mi><mn>2</mn></msup>')
+  expect(html).not.toContain('</msup></mrow><mtext>')
+  expect(() => math(String.raw`\newsavebox{\reg}\begin{lrbox}{\reg}x\end{wrong}`, false)).toThrow('Unclosed TeX lrbox environment')
+  const doubling = String.raw`\sbox{\reg}{\usebox{\reg}\usebox{\reg}}`
+  const exponential = String.raw`\newsavebox{\reg}\sbox{\reg}{Body}` + doubling.repeat(25) + String.raw`\usebox{\reg}`
+  expect(() => math(exponential, false)).toThrow('Expanded TeX boxes are too large')
+})
+
 test('scopes legacy font declarations and selects MathML branches without expanding skipped input', () => {
   const math = createMathRenderer({ throwOnError: true })
   const html = math(String.raw`{\cal A{\bf B} C} D+\mathrm{x\mathit{y}}+\Alpha\Gamma\varGamma`, false)
