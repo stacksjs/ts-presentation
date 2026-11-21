@@ -248,6 +248,13 @@ test('expands a token after a delayed definition target and preserves noexpand t
   const eager = math(String.raw`\def\pick{A}\def\keep{\noexpand\pick}\edef\saved{\keep}\def\pick{B}\saved`, false)
   expect(eager).toContain('<mrow><mi>B</mi></mrow>')
   expect(math(String.raw`\def\skipme{A}x\noexpand\skipme B `, false)).toContain('<mrow><mi>x</mi><mi>B</mi></mrow>')
+  const formula = (source: string) => math(source, false).split('<annotation')[0]
+  expect(formula(String.raw`\noexpand\frac xy\noexpand\sqrt z\noexpand\Alpha w`)).toBe(formula('xyzw'))
+  expect(formula(String.raw`\noexpand\def\pair{xy}\pair\noexpand\alpha`)).toBe(formula(String.raw`xy\alpha`))
+  expect(formula(String.raw`\edef\saved{\noexpand\frac} \saved{a}{b}`)).toBe(formula(String.raw`\frac{a}{b}`))
+  expect(formula(String.raw`\let\oldfrac=\frac\noexpand\oldfrac xy`)).toBe(formula('xy'))
+  expect(formula(String.raw`\let\letter=\alpha\noexpand\letter y`)).toBe(formula(String.raw`\alpha y`))
+  expect(formula(String.raw`\let\define=\def\noexpand\define\word{X}\word`)).toBe(formula('X'))
   expect(() => math(String.raw`\expandafter\def`, false)).toThrow('Missing token after delayed math expansion')
 })
 
@@ -2396,7 +2403,13 @@ test('parses inner AMS baselines and Mathtools gathered alignments', () => {
     expect(gathered).not.toContain('math-equation-number')
     expect(() => math(String.raw`\begin{${name}}x&=y\end{${name}}`, false)).toThrow('Too many columns')
   }
-  expect(() => math(String.raw`\begin{aligned}[left]a&=b\end{aligned}`, false)).toThrow('Invalid inner alignment position')
+  const bracketed = math(String.raw`\begin{aligned}[a]&[b]\\ [c]&[d]\end{aligned}`, false).split('<annotation')[0]
+  expect(bracketed).toContain('class="math-alignment-axis"')
+  expect(bracketed.match(/<mo stretchy="false"[^>]*>\[<\/mo>/g)).toHaveLength(4)
+  expect(() => math(String.raw`\begin{aligned}[a]&[b]\\[c]&[d]\end{aligned}`, false)).toThrow('Invalid array row spacing')
+  const incomplete = math(String.raw`\begin{aligned}[t&=[b]\end{aligned}`, false).split('<annotation')[0]
+  expect(incomplete).toContain('<mo stretchy="false">[</mo><mi>t</mi>')
+  expect(incomplete).toContain('class="math-alignment-axis"')
 })
 
 test('validates AMS environment modes and arguments, and accepts rules inside matrices', () => {
@@ -4899,6 +4912,15 @@ test('uses KaTeX Greek glyphs, distinct circled minus symbols, and logical arrow
     .toBe(formula(String.raw`\;=\;`))
   expect(formula(String.raw`\def\Longleftrightarrow{=}\edef\relation{\iff}\def\Longleftrightarrow{<}\relation`))
     .toBe(formula(String.raw`\;=\;`))
+})
+
+test('discards lexical spaces after TeX control words and preserves control spaces', () => {
+  expect(formula(String.raw`\text{\textellipsis !}`)).toBe(formula(String.raw`\text{\textellipsis!}`))
+  expect(formula(String.raw`\text{\relax }`)).toBe(formula(String.raw`\text{}`))
+  expect(formula(String.raw`\text{\textellipsis\ !}`)).toContain('<mtext>… !</mtext>')
+  expect(formula(String.raw`\text{\def\A{A}\A\ B}`)).toContain('<mtext>A B</mtext>')
+  expect(formula(String.raw`\argmin_x f(x) + \argmax_y g(y)`, true)).toContain('<munder><mo>arg min</mo>')
+  expect(formula(String.raw`\argmin_x f(x) + \argmax_y g(y)`, true)).toContain('<munder><mo>arg max</mo>')
 })
 
 test.skipIf(!chrome)('renders colored and multiline paired fences around full-height math in Chromium', async () => {

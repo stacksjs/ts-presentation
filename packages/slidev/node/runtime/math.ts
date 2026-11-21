@@ -11,7 +11,7 @@ import { fractionStyle, joinMarkup, renderMarkup, scriptStyle, xml } from './mat
 import { fractionRule, mathBoxDimensionExpression, mathDimension, mathInteger, mathScaledDimension, nullDelimiterWidth } from './math-sizing.ts'
 import { resolveRowClasses, rowSpacing } from './math-spacing.ts'
 import type { MathClass } from './math-spacing.ts'
-import { isCenteredGlyph, isColonRelationCommand, mathSymbol, textSymbol, unicodeColonRelation } from './math-symbols.ts'
+import { isCenteredGlyph, isColonRelationCommand, katexExpandableCommands, mathSymbol, textSymbol, unicodeColonRelation } from './math-symbols.ts'
 import type { MathSymbol, MathSymbolKind } from './math-symbols.ts'
 import { isMathAttributeCommand, isMathUrlCommand, mathAttributes, mathKeyValues, mathUrl, trustedMath } from './math-trust.ts'
 import { readUnicodeToken, unicodeAccents } from './math-unicode.ts'
@@ -72,6 +72,7 @@ const symbolClasses: Partial<Record<MathSymbolKind, MathClass>> = {
   binary: 'bin', relation: 'rel', punctuation: 'punct', inner: 'inner',
 }
 const namedLimits: Record<string, string> = {
+  argmin: 'arg min', argmax: 'arg max',
   liminf: 'lim inf', limsup: 'lim sup', injlim: 'inj lim', projlim: 'proj lim',
 }
 const accentedLimits: Record<string, string> = {
@@ -284,7 +285,7 @@ function verbatimMarkup(token: string): string | undefined {
 }
 
 function tokenize(source: string, onTrailingComment?: () => void): string[] {
-  if (!source.includes('%')) return source.match(mathTokens) ?? []
+  if (!source.includes('%')) return discardControlWordSpaces(source.match(mathTokens) ?? [])
   const lexer = new RegExp(mathTokens)
   const tokens: string[] = []
   for (let match = lexer.exec(source); match; match = lexer.exec(source)) {
@@ -312,6 +313,16 @@ function tokenize(source: string, onTrailingComment?: () => void): string[] {
     for (const entry of source.slice(start, end).match(rawMathTokens) ?? []) tokens.push(entry)
     lexer.lastIndex = end
   }
+  return discardControlWordSpaces(tokens)
+}
+
+function discardControlWordSpaces(tokens: string[]): string[] {
+  let length = 0
+  for (const token of tokens) {
+    if (texWhitespace.test(token) && controlWord.test(tokens[length - 1] ?? '')) continue
+    tokens[length++] = token
+  }
+  tokens.length = length
   return tokens
 }
 
@@ -1376,7 +1387,11 @@ export function renderMath(source: string, display = false, configured: MathMacr
 
   function expandable(token: string): boolean {
     const macro = macroDefinition(token)
-    return !!macro && (typeof macro === 'function' || !('unexpandable' in macro && macro.unexpandable))
+    if (macro && (typeof macro === 'function' || !('body' in macro))) return true
+    if (macro?.unexpandable) return false
+    if (macro && macro.frozenMeaning === undefined) return true
+    const command = controlName(macro?.frozenMeaning ?? token)
+    return command.startsWith('\\') && katexExpandableCommands.has(command.slice(1))
   }
 
   function defined(token: string): boolean {
@@ -1900,7 +1915,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
   }
 
   function literalGroup(): string {
-    return rawGroup().map(tokenCharacters).join('')
+    const parts = rawGroup().map(tokenCharacters)
+    // Retain control-word boundaries when the raw argument is parsed again,
+    // such as a named prefix followed by a unit letter in \pu.
+    return parts.map((part, index) => controlWord.test(part) && /^[A-Za-z@]/.test(parts[index + 1] ?? '') ? `${part} ` : part).join('')
   }
 
   function delimitedArgument(delimiter: readonly string[], unwrapGroup = false): string[] {
@@ -3590,6 +3608,22 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
   }
 
+  function innerAlignmentPosition(): MultlinedPosition {
+    if (peek() !== '[') return 'c'
+    const opening = cursor++
+    const position = peek()
+    if (position === 't' || position === 'c' || position === 'b') {
+      cursor++
+      if (peek() === ']') {
+        cursor++
+        return position
+      }
+    }
+    // Keep the bracket and any expanded content as the start of the row.
+    cursor = opening
+    return 'c'
+  }
+
   function matrix(environment: string, closing = environment, emphasisPairs?: string): Markup {
     const emphasized = Boolean(emphasizedDisplay) && closing === 'empheq'
     const unclosed = () => new MathParseError(`Unclosed math environment: ${environment}`)
@@ -3614,9 +3648,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const inner = /^(?:aligned(?:at)?|[lr]?gathered)$/.test(environment)
     if (!inner && !spreadEnvironment && !/^(?:[pbBvV]?matrix[*]?|smallmatrix|d?r?cases\*?|align(?:at)?[*]?|gather[*]?|split|d?array|(?:cramped)?subarray)$/.test(environment))
       throw new MathParseError(`Unsupported math environment: ${environment}`)
-    const positionTokens = inner ? rawBracket() : undefined
-    const position = positionTokens === undefined ? 'c' : expandDefinition(positionTokens).join('').trim()
-    if (!/^[tcb]$/.test(position)) throw new MathParseError('Invalid inner alignment position')
+    const position = inner ? innerAlignmentPosition() : 'c'
     const cramped = environment === 'crampedsubarray'
     const subarray = cramped || environment === 'subarray'
     const smallMatrix = environment === 'smallmatrix'

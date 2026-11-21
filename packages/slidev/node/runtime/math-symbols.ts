@@ -187,3 +187,45 @@ export function textSymbol(token: string): string | undefined {
   const name = token.slice(1)
   return Object.hasOwn(text, name) ? text[name] : undefined
 }
+
+// Built-in functions and aliases inhibited by \noexpand in KaTeX 0.19.1.
+// User definitions, symbols, and TeX primitives use their own expansion rules.
+export const katexExpandableCommands: ReadonlySet<string> = new Set([
+  ...`
+    @binrel @char AA Alpha Bbb Bbbk Beta Big Bigg Biggl Biggm Biggr Bigl Bigm Bigr Chi Colonapprox Coloneq
+    Coloneqq Colonsim Complex Dagger Darr Epsilon Eqcolon Eqqcolon Eta H Harr Huge Iota KaTeX Kappa LARGE
+    LaTeX Large Larr Lrarr Mu N Nu Omicron Overrightarrow Pr R Rarr Reals Rho Tau TeX Uarr Z Zeta aa above
+    acute alef alefsym angl approxcolon approxcoloncolon arccos arcctg arcsin arctan arctg arg argmax
+    argmin atop bar bcancel begin bf big bigcap bigcup bigg biggl biggm biggr bigl bigm bigodot bigoplus
+    bigotimes bigr bigsqcup biguplus bigvee bigwedge binom bm bmod bold boldsymbol brace brack breve bull
+    c cal cancel cfrac ch check choose clap clubs cnums colon colonapprox coloncolon coloncolonapprox
+    coloncolonequals coloncolonminus coloncolonsim coloneq coloneqq colonequals colonminus colonsim color
+    colorbox coprod copyright cos cosec cosh cot cotg coth csc ctg cth dArr darr dbinom dblcolon ddddot
+    dddot ddot deg det dfrac diamonds dim dot emph empty end enskip enspace eqcolon eqqcolon equalscolon
+    equalscoloncolon exist exp fbox fcolorbox footnotesize frac frak gcd genfrac global grave gvertneqq
+    hArr harr hat hdashline hearts hline hom hphantom href htmlClass htmlData htmlId htmlStyle huge iiint
+    iint image imath includegraphics inf infin injlim int intop isin it jmath ker lArr lBrace lang large
+    larr lg lim liminf limsup llap llbracket llcorner ln log long lq lrArr lrarr lrcorner lvertneqq
+    mapsfrom mathbb mathbf mathcal mathclap mathfrak mathit mathllap mathnormal mathreflectbox mathring
+    mathrlap mathrm mathscr mathsf mathsfit mathstrut mathtt max medspace min minuscolon minuscoloncolon
+    minuso mod natnums ne negmedspace negthickspace negthinspace neq newcommand newline ngeqq ngeqslant
+    nleqq nleqslant not notin notni nshortmid nshortparallel nsubseteqq nsupseteqq oiiint oiint oint
+    operatorname operatorname@ operatornamewithlimits ordinarycolon over overbrace overbracket overgroup
+    overleftarrow overleftharpoon overleftrightarrow overline overlinesegment overrightarrow
+    overrightharpoon overset phantom phase plim plusmn pmb pmod pod prod projlim providecommand qquad quad
+    r rArr rBrace raisebox rang rarr ratio real reals reflectbox renewcommand rlap rm rq rrbracket rule
+    scriptsize sdot sec sect sf sh simcolon simcoloncolon sin sinh sixptsize small smallint smash sout
+    spades sqrt stackrel sub sube sum sup supe tag tan tanh tbinom text textbf textcircled textcolor
+    textit textmd textnormal textregistered textrm textsf texttt textup tfrac tg th thetasym thickspace
+    thinspace tilde tiny tt u uArr uarr ulcorner underbar underbrace underbracket undergroup
+    underleftarrow underleftrightarrow underline underlinesegment underrightarrow underset urcorner url
+    utilde v varDelta varGamma varLambda varOmega varPhi varPi varPsi varSigma varTheta varUpsilon varXi
+    varinjlim varliminf varlimsup varprojlim varsubsetneq varsubsetneqq varsupsetneq varsupsetneqq
+    vcentcolon vcenter vdots vec vphantom weierp widecheck widehat widetilde xLeftarrow xLeftrightarrow
+    xRightarrow xcancel xhookleftarrow xhookrightarrow xleftarrow xleftequilibrium xleftharpoondown
+    xleftharpoonup xleftrightarrow xleftrightharpoons xlongequal xmapsto xrightarrow xrightequilibrium
+    xrightharpoondown xrightharpoonup xrightleftarrows xrightleftharpoons xtofrom xtwoheadleftarrow
+    xtwoheadrightarrow
+  `.trim().split(/\s+/),
+  '!', '"', "'", ',', '.', ':', ';', '=', '>', '\\', '^', '`', '~',
+])
