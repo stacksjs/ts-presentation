@@ -38,3 +38,49 @@ jobs:
         run: bun test --timeout 45000 --reporter junit --reporter-outfile "$RUNNER_TEMP/bun-test.xml"
       - name: Verify every mapped Slidev case ran
         run: bun test/verify-slidev-report.ts "$RUNNER_TEMP/bun-test.xml"
+      - name: Build charts from the packed CLI
+        run: |
+          smoke=$(mktemp -d "$RUNNER_TEMP/presentation-package.XXXXXX")
+          trap 'rm -rf "$smoke"' EXIT
+          archive=$(bun pm pack --destination "$smoke" --quiet)
+          cd "$smoke"
+          printf '{"private":true,"type":"module"}\n' > package.json
+          bun add --prefer-offline "$archive"
+          cat > slides.md <<'EOF'
+          # Standalone chart build
+
+          ~~~mermaid
+          gantt
+            todayMarker off
+            Draft :draft, 2030-01-01, 2d
+            Ship :milestone, after draft, 0d
+          ~~~
+
+          ~~~mermaid
+          gitGraph
+            commit id: "Start"
+            branch review
+            commit id: "Review"
+          ~~~
+
+          ~~~mermaid
+          mindmap
+            root((Project))
+              review[Review]
+          ~~~
+
+          ~~~charts
+          type: treemap
+          nodes:
+            - label: Review
+              value: 2
+          ~~~
+          EOF
+          bun run ts-presentation build slides.md --out dist
+          for kind in gantt gitgraph mindmap treemap; do
+            if ! grep -Fq "data-diagram-kind=\"$kind\"" dist/index.html; then
+              printf 'Missing %s from the packed deck build\n' "$kind" >&2
+              exit 1
+            fi
+          done
+          test ! -e node_modules/@ts-charts/hierarchy

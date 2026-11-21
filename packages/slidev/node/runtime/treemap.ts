@@ -1,6 +1,6 @@
-import { hierarchy, treemap } from '@ts-charts/hierarchy'
 import { color } from 'ts-charts/color'
 import { format, formatSpecifier } from 'ts-charts/format'
+import { hierarchy, treemap } from 'ts-charts/hierarchy'
 import { diagramOptionsRecord } from './diagram-options.ts'
 import { escapeHtml } from './html.ts'
 import { diagramPixels } from './mermaid/chronology.ts'

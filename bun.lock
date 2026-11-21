@@ -6,8 +6,7 @@
       "name": "ts-presentation",
       "dependencies": {
         "@stacksjs/stx": "https://registry.pantry.dev/@stacksjs/stx@8279a3b",
-        "@ts-charts/hierarchy": "^0.2.8",
-        "ts-charts": "https://codeload.github.com/stacksjs/ts-charts/tar.gz/8f52ad0da5763365b958036d093371f3b4777c8d",
+        "ts-charts": "https://codeload.github.com/stacksjs/ts-charts/tar.gz/69bcead0135848b893eb5adee113fdc642625dff",
         "ts-syntax-highlighter": "^0.2.20",
       },
       "devDependencies": {
@@ -47,7 +46,7 @@
       },
       "dependencies": {
         "@stacksjs/stx": "https://registry.pantry.dev/@stacksjs/stx@8279a3b",
-        "ts-charts": "https://codeload.github.com/stacksjs/ts-charts/tar.gz/8f52ad0da5763365b958036d093371f3b4777c8d",
+        "ts-charts": "https://codeload.github.com/stacksjs/ts-charts/tar.gz/69bcead0135848b893eb5adee113fdc642625dff",
         "ts-syntax-highlighter": "^0.2.20",
       },
     },
@@ -111,8 +110,6 @@
 
     "@stacksjs/ts-webp": ["@stacksjs/ts-webp@0.1.7", "", {}, "sha512-MKIO37g9Y1kIOCeAkrctT2yM5wFwKCL6IY+K7QeLifIq504S1n2bK20OR/AsUecQwmSuK4eXECXhcb7as8m5LA=="],
 
-    "@ts-charts/hierarchy": ["@ts-charts/hierarchy@0.2.8", "", {}, "sha512-l6/SueLE4NuUOOER5QVS9POczV+Bd1OXN5Pa8XnAJEHXHFNAfDrkyj4BFy2LXbo4RIZ91bu9O+dPGiUhX8rdkA=="],
-
     "@ts-presentation/cli": ["@ts-presentation/cli@workspace:packages/slidev"],
 
     "@ts-presentation/client": ["@ts-presentation/client@workspace:packages/client"],
@@ -171,7 +168,7 @@
 
     "ts-broadcasting": ["ts-broadcasting@0.0.13", "", { "bin": { "broadcast": "./dist/bin/cli.js" } }, "sha512-F9amVHcLX3DzslD9HuFEZh8l0HnQR8e1yc1H/lo0TIsbw0EcZLg8UTbOGAipCywkdJtJrMvlm9ab/dhM9ugBmA=="],
 
-    "ts-charts": ["ts-charts@https://codeload.github.com/stacksjs/ts-charts/tar.gz/8f52ad0da5763365b958036d093371f3b4777c8d", { "hasInstallScript": true }, "sha512-EKaCUEaqKutjcGUGYRl22lDlA5VU486PGNEhZ4nkKpKg66Aq2jbkCz1qzhZ8VEW91KAhyUwcFgf857rwZZh/7g=="],
+    "ts-charts": ["ts-charts@https://codeload.github.com/stacksjs/ts-charts/tar.gz/69bcead0135848b893eb5adee113fdc642625dff", { "hasInstallScript": true }, "sha512-pGW77dGfR0ESMMXoUvpScEVU3H3qhKWsEDDP6c6U6f37H7EK6YpQlJXHfdO1TI7mSK0hz0UMxJ/SVJDAJ6GlMg=="],
 
     "ts-error-handling": ["ts-error-handling@0.1.4", "", {}, "sha512-kclM6oGVMKWp/uznLiZH+r7i4OZZll/hjpMxotX1f9EYe5UHYEklIJzSBq71uDWIPQrYWHJ4W0H6HLidV0Vb/A=="],
 

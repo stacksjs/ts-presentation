@@ -1,5 +1,5 @@
-import { hierarchy, tree } from '@ts-charts/hierarchy'
 import { color } from 'ts-charts/color'
+import { hierarchy, tree } from 'ts-charts/hierarchy'
 import { diagramOptionsRecord } from './diagram-options.ts'
 import { escapeHtml, unescapeHtml } from './html.ts'
 import { diagramFontFamily, diagramPixels } from './mermaid/chronology.ts'
