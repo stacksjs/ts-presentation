@@ -5,6 +5,7 @@ import { flowchart } from './mermaid/flowchart.ts'
 import { gantt, isGanttHeader } from './mermaid/gantt.ts'
 import { gitGraph } from './mermaid/gitgraph.ts'
 import { journey } from './mermaid/journey.ts'
+import { mindmapDiagram } from './mermaid/mindmap.ts'
 import { pieDiagram } from './mermaid/pie.ts'
 import { quadrantDiagram } from './mermaid/quadrant.ts'
 import { relationshipsDiagram } from './mermaid/relationships.ts'
@@ -77,7 +78,7 @@ function parseDirectiveYaml(literal: string): MermaidOptions | undefined {
 function diagramScope(header: string | undefined): string | undefined {
   const type = header?.split(/[\s:;]/, 1)[0]
   if (!type) return
-  if (/^gantt$/i.test(type)) return 'gantt'
+  if (/^(?:gantt|mindmap)$/i.test(type)) return type.toLowerCase()
   if (/^quadrantchart$/i.test(type)) return 'quadrantChart'
   return Object.hasOwn(diagramScopes, type) ? diagramScopes[type] : type
 }
@@ -139,6 +140,7 @@ function render(code: string, marker: string, options: MermaidOptions, header: s
   if (/^pie(?:\s|$)/.test(header ?? '')) return pieDiagram(code, marker, options.pie, title)
   if (/^quadrantChart(?:\s|;|$)/i.test(header ?? '')) return quadrantDiagram(code, marker, options)
   if (/^treemap(?:-beta)?(?:\s|;|$)/i.test(header ?? '')) return treemapDiagram(code, marker, options)
+  if (/^mindmap(?:\s|;|$)/i.test(header ?? '')) return mindmapDiagram(code, marker, options)
   return flowchart(code, marker)
 }
 

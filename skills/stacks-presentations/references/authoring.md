@@ -334,8 +334,15 @@ speaker notes. Each hook can be asynchronous.
   `fontSize`.
 - Imported Slidev diagram fences pass through a compatibility parser.
   Styled flowchart groups, sequence and state diagrams, relationships,
-  pie charts, quadrant charts, XY charts, Sankey diagrams, treemaps, Gantt schedules, Git histories, timelines, and journeys use
+  pie charts, quadrant charts, XY charts, Sankey diagrams, treemaps, mind
+  maps, Gantt schedules, Git histories, timelines, and journeys use
   the same `ts-charts` renderers as `charts` fences.
+- Use `type: mindmap` with `root: { label: Plan, children: [Design, Review] }`.
+  Each child can be a label or a node with its own `children`. Set
+  `layout: tidy-tree` for a top-down tree and `colorBy: depth` to share colors
+  across each level. Imported `mindmap` outlines infer parents from indentation
+  and accept shaped nodes such as `root((Plan))`. Icon classes require icon
+  styles supplied by the deck or theme.
 - In a `charts` fence with `type: quadrant`, list `quadrants` in top-right,
   top-left, bottom-left, bottom-right order. Use `xAxis` and `yAxis` for one
   or two labels in low-to-high order. Each point has a `label` and `x` and

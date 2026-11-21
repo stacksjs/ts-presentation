@@ -957,7 +957,7 @@ export function collectSnapshot(options: {
       }
       if (record.tag === 'SVG') {
         if (el.querySelector('foreignObject')) record.hasForeignObject = true
-        if (!record.hasForeignObject && effectiveOpacity === 1 && (el.getAttribute('data-diagram-kind') === 'treemap'
+        if (!record.hasForeignObject && effectiveOpacity === 1 && (['treemap', 'mindmap'].includes(el.getAttribute('data-diagram-kind') ?? '')
           || el.querySelector(':scope > g:is([data-diagram-kind="gitgraph"], [data-diagram-kind="gantt"])'))) {
           const parts = chartArtwork(el as SVGSVGElement)
           if (parts) record.chartParts = parts

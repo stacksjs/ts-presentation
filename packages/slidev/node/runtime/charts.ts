@@ -1,6 +1,7 @@
 import type { FlowchartDiagramOptions, GanttChartOptions, GitGraphOptions, JourneyChartOptions, PieChartOptions, QuadrantChartOptions, RelationshipChartOptions, SankeyChartOptions, SequenceChartOptions, TimelineChartOptions, XYChartOptions } from 'ts-charts/diagrams'
 import { flowchartDiagram, ganttChart, gitGraphChart, journeyChart, pieChart, quadrantChart, relationshipChart, sankeyChart, sequenceChart, timelineChart, xyChart } from 'ts-charts/diagrams'
-import { optionsForSvg } from './diagram-svg.ts'
+import { applyDiagramTheme, optionsForSvg } from './diagram-svg.ts'
+import { mindmapSvg } from './mindmap.ts'
 import { treemapSvg } from './treemap.ts'
 
 type Chart =
@@ -16,6 +17,7 @@ type Chart =
   | ({ type: 'xy' } & XYChartOptions)
   | ({ type: 'sankey' } & SankeyChartOptions)
   | { type: 'treemap', nodes: unknown }
+  | { type: 'mindmap', root: unknown }
 
 function chartSvg(chart: Chart & Record<string, unknown>): string | undefined {
   switch (chart.type) {
@@ -33,6 +35,7 @@ function chartSvg(chart: Chart & Record<string, unknown>): string | undefined {
     case 'xy': return xyChart(chart)
     case 'sankey': return sankeyChart(chart)
     case 'treemap': return treemapSvg(chart)
+    case 'mindmap': return mindmapSvg(chart)
   }
 }
 
@@ -44,7 +47,9 @@ export function renderChart(source: string, idPrefix: string): string | undefine
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return
     const chart = { ...parsed, idPrefix } as Chart & Record<string, unknown>
     const svg = chartSvg(chart)
-    return svg && optionsForSvg(svg, chart)
+    if (!svg) return
+    const formatted = optionsForSvg(svg, chart)
+    return chart.type === 'mindmap' ? applyDiagramTheme(formatted, idPrefix, chart) : formatted
   }
   catch {
     // Keep the source visible when YAML or chart data is invalid.

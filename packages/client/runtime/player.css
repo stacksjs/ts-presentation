@@ -688,6 +688,12 @@ v-switch { display: block; }
   margin-inline: auto;
   background: var(--diagram-background, transparent);
 }
+.slide svg[data-diagram-kind="mindmap"] {
+  display: block;
+  max-height: min(380px, calc(var(--slide-height, 540px) * .66));
+  max-width: 100%;
+  margin-inline: auto;
+}
 .slide-diagram:is([data-diagram-theme="base"], [data-diagram-theme="neutral"]) {
   --diagram-background: #f3f5f7;
   --diagram-fill: #e7ecf2;

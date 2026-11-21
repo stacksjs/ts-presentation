@@ -25,7 +25,7 @@ it('accepts native PNG and JPEG data URIs and sends mismatches or SVG through br
   expect(dataPicture('data:image/svg+xml;base64,PHN2Zy8+')).toBeUndefined()
 })
 
-it.skipIf(!chrome)('exports GitGraph and Gantt shapes, paths, and labels as editable PowerPoint objects', async () => {
+it.skipIf(!chrome)('exports GitGraph, Gantt, and mind map shapes, paths, and labels as editable PowerPoint objects', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-gitgraph-gantt-'))
   const canvas = { width: 960, height: 540 }
   try {
@@ -42,6 +42,10 @@ it.skipIf(!chrome)('exports GitGraph and Gantt shapes, paths, and labels as edit
       '---', '', '# Filtered repository history', '',
       '~~~mermaid', '---', 'config:', '  themeCSS: ".diagram-git-edge { filter: blur(1px); }"', '---',
       'gitGraph', '  commit id: "old"', '  commit id: "new"', '~~~',
+      '', '---', '', '# Planning mind map', '',
+      '~~~mermaid', '---', 'config:', '  layout: tidy-tree', '---',
+      'mindmap', '  root((Planning))', '    work{{Work streams}}',
+      '      design)Design(', '    delivery[Delivery]', '~~~',
     ].join('\n'))
     const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
     const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
@@ -49,11 +53,12 @@ it.skipIf(!chrome)('exports GitGraph and Gantt shapes, paths, and labels as edit
     if (status) throw new Error(stderr)
     const frames: PowerPointFrame[] = []
     await captureFrames({ root: join(root, 'dist'), executable: chrome!, scale: 1, canvas, editable: true, withClicks: false }, frame => { frames.push(frame) })
-    expect(frames).toHaveLength(3)
+    expect(frames).toHaveLength(4)
     const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Editable diagrams' }))
     const graph = parts.get('ppt/slides/slide1.xml')?.toString() ?? ''
     const schedule = parts.get('ppt/slides/slide2.xml')?.toString() ?? ''
     const filtered = parts.get('ppt/slides/slide3.xml')?.toString() ?? ''
+    const mindmap = parts.get('ppt/slides/slide4.xml')?.toString() ?? ''
     expect(graph).toContain('<a:prstGeom prst="ellipse">')
     expect(graph).toContain('<a:custGeom>')
     expect(graph).toContain('<a:quadBezTo>')
@@ -68,6 +73,11 @@ it.skipIf(!chrome)('exports GitGraph and Gantt shapes, paths, and labels as edit
     expect(schedule).toContain('>Ship</a:t>')
     expect(schedule).not.toContain('<p:pic>')
     expect(filtered).toContain('<p:pic>')
+    expect(mindmap).toContain('<a:prstGeom prst="ellipse">')
+    expect(mindmap).toContain('<a:cubicBezTo>')
+    expect(mindmap).toContain('>Work streams</a:t>')
+    expect(mindmap).toContain('>Design</a:t>')
+    expect(mindmap).not.toContain('<p:pic>')
   }
   finally {
     await rm(root, { recursive: true, force: true })
