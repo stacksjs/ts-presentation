@@ -700,7 +700,7 @@ function buildSlideIr(
         const tags = math.tags?.map(tag => convertFragment(tag, false)) ?? []
         const fragments = math.cells ?? [{ expression: math.expression, rect: math.rect, fontSize, opacity: 1 }]
         const bodies = fragments.map(fragment => convertFragment(fragment, math.display))
-        const frames = math.frames?.map(({ rect, color, background, width, opacity: alpha }) => {
+        const frames = math.frames?.map(({ rect, color, background, width, opacity: alpha, ellipse }) => {
           const clipped = clipToSlide(rect, size)
           const stroke = parseColor(color, unparsed)
           const fill = parseColor(background, unparsed)
@@ -710,6 +710,7 @@ function buildSlideIr(
             rect,
             border: width && stroke.a ? { width, style: 'solid' as const, color: { ...stroke, a: stroke.a * alpha * opacity } } : undefined,
             fill: fill.a ? { ...fill, a: fill.a * alpha * opacity } : undefined,
+            ...(ellipse && { ellipse }),
           }
         }) ?? []
         const rules = math.rules?.map(({ rect, color, opacity: alpha, ellipse, dash }): IrBox | undefined => {

@@ -108,6 +108,7 @@ export interface RawMathFragment {
 
 export interface RawMathFrame {
   rect: Rect
+  ellipse?: boolean
   color: string
   background: string
   width: number
@@ -364,7 +365,7 @@ export interface IrRaster extends IrBase {
   equation?: IrEquation & {
     tags?: IrEquation[]
     cells?: IrEquation[]
-    frames?: { rect: Rect, border?: Border, fill?: Rgba }[]
+    frames?: { rect: Rect, border?: Border, fill?: Rgba, ellipse?: boolean }[]
     rules?: IrBox[]
     pictures?: (RawMathPicture & { data: string })[]
   }

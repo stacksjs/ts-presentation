@@ -91,9 +91,11 @@ export function collectSnapshot(options: {
   const lineAccent = ':is(mrow, mo):is(.math-overline, .math-underline)'
   const bracketAccent = 'mrow:is(.math-overbracket, .math-underbracket, .math-overlinesegment, .math-underlinesegment)'
   const frameBox = 'mrow.math-color-box'
+  const circledText = 'mrow.math-text-circled'
+  const actuarial = 'mrow.math-angl'
   const sizedFrame = `${frameBox}:is([style], :has(> mpadded[data-math-transform-box="frame"]))`
-  const measuredStructures = `${decoratedArray}, ${multilineStack}, ${alignedFraction}, ${ruledFraction}, ${adjustedDegree}, ${measuredStrut}, ${bracketAccent}, ${sizedFrame}`
-  const unmeasuredRule = 'mroot, msqrt, menclose, .math-angl, .math-text-circled'
+  const measuredStructures = `${decoratedArray}, ${multilineStack}, ${alignedFraction}, ${ruledFraction}, ${adjustedDegree}, ${measuredStrut}, ${bracketAccent}, ${sizedFrame}, ${circledText}`
+  const unmeasuredRule = 'mroot, msqrt, menclose'
   const raisedMathBox = 'mtext.math-raised-box'
   const positionedBoxes = `${overlappingMath}, ${measuredMathBox}, ${graphicMathBox}, ${raisedMathBox}`
   const raisedMathBody = ':scope > span > span > math > mrow'
@@ -128,6 +130,7 @@ export function collectSnapshot(options: {
       // a custom stroke cannot be extracted from its surrounding layout.
       if (customThickness && element.matches(lineAccent)) attributes['data-math-custom-line'] = ''
       if (customThickness && element.matches(`${frameBox}.math-frame`)) attributes['data-math-custom-frame'] = ''
+      if (customThickness && element.matches(actuarial)) attributes['data-math-custom-angle'] = ''
       const text = Array.from(element.childNodes).filter(node => node.nodeType === 3).map(node => node.nodeValue).join('')
       characters += text.length
       if (characters > 4096) return
@@ -989,22 +992,57 @@ export function collectSnapshot(options: {
         if (node.localName === 'msqrt') return visitRow(node, data)
         return Array.from(node.children).every((child, index) => visitArgument(child, data.children[index]))
       }
-      function collectFrame(node: Element, data: RawMathElement): boolean {
-        flush()
-        const box = node.getBoundingClientRect()
+      function enclosureStyle(node: Element, box: DOMRect): CSSStyleDeclaration | undefined {
+        if (!(box.width > 0 && box.height > 0)) return
         const style = getComputedStyle(node)
-        if (!(box.width > 0 && box.height > 0) || style.transform !== 'none' || style.filter !== 'none'
-          || style.boxShadow !== 'none' || style.backgroundImage !== 'none' || Number(style.opacity) !== 1) return false
-        for (const side of ['top', 'bottom', 'left', 'right']) {
+        if (style.transform === 'none' && style.filter === 'none' && style.boxShadow === 'none'
+          && style.backgroundImage === 'none' && style.clipPath === 'none'
+          && style.rotate === 'none' && style.scale === 'none' && style.translate === 'none'
+          && style.borderImageSource === 'none' && Number(style.opacity) === 1) return style
+      }
+      function enclosureRadius(style: CSSStyleDeclaration, radius: string): boolean {
+        return [style.borderTopLeftRadius, style.borderTopRightRadius, style.borderBottomLeftRadius, style.borderBottomRightRadius]
+          .every(value => value === radius)
+      }
+      function collectFrame(node: Element, data: RawMathElement): boolean {
+        const box = node.getBoundingClientRect()
+        const style = enclosureStyle(node, box)
+        const ellipse = node.matches(circledText)
+        if (!style || !enclosureRadius(style, ellipse ? '50%' : '0px')) return false
+        for (const side of ['bottom', 'left', 'right']) {
           const property = `border-${side}`
           if (style.getPropertyValue(`${property}-width`) !== style.borderTopWidth
             || style.getPropertyValue(`${property}-style`) !== style.borderTopStyle
             || style.getPropertyValue(`${property}-color`) !== style.borderTopColor) return false
         }
         const width = Number.parseFloat(style.borderTopWidth) * scale
-        if (!Number.isFinite(width) || (width && style.borderTopStyle !== 'solid')
-          || [style.borderTopLeftRadius, style.borderTopRightRadius, style.borderBottomLeftRadius, style.borderBottomRightRadius].some(radius => radius !== '0px')) return false
-        frames.push({ rect: relative(box), width, color: style.borderTopColor, background: style.backgroundColor, opacity })
+        if (!Number.isFinite(width) || (width && style.borderTopStyle !== 'solid')) return false
+        frames.push({ rect: relative(box), width, color: style.borderTopColor, background: style.backgroundColor, opacity, ...(ellipse && { ellipse }) })
+        flush()
+        bounds.push(box)
+        split = true
+        return visitRow(node, data)
+      }
+      function collectActuarial(node: Element, data: RawMathElement): boolean {
+        const box = node.getBoundingClientRect()
+        const style = enclosureStyle(node, box)
+        if (!style || !enclosureRadius(style, '0px') || style.backgroundColor !== 'rgba(0, 0, 0, 0)'
+          || style.writingMode !== 'horizontal-tb' || style.borderBottomWidth !== '0px') return false
+        const right = style.direction !== 'rtl'
+        const side = right ? 'border-right' : 'border-left'
+        const opposite = right ? style.borderLeftWidth : style.borderRightWidth
+        const color = style.borderTopColor
+        if (opposite !== '0px' || style.borderTopStyle !== 'solid' || style.getPropertyValue(`${side}-style`) !== 'solid'
+          || style.getPropertyValue(`${side}-color`) !== color) return false
+        const height = Number.parseFloat(style.borderTopWidth) * scale
+        const width = Number.parseFloat(style.getPropertyValue(`${side}-width`)) * scale
+        if (!(height > 0 && height < box.height && width > 0 && width < box.width)) return false
+        rules.push({ rect: relative({ left: box.left, top: box.top, width: box.width, height }), color, opacity })
+        rules.push({
+          rect: relative({ left: right ? box.right - width : box.left, top: box.top + height, width, height: box.height - height }),
+          color, opacity,
+        })
+        flush()
         bounds.push(box)
         split = true
         return visitRow(node, data)
@@ -1072,7 +1110,8 @@ export function collectSnapshot(options: {
           return true
         }
         if (node.matches(multilineStack)) return collectMultline(node, data)
-        if (node.matches(frameBox) && node.matches(measuredLayout)) return collectFrame(node, data)
+        if (node.matches(`${frameBox}, ${circledText}, ${actuarial}`) && node.matches(measuredLayout))
+          return node.matches(actuarial) ? collectActuarial(node, data) : collectFrame(node, data)
         const line = node.matches(lineAccent)
         if (node.matches(bracketAccent) || (line && (node.matches(measuredLayout) || node.querySelector(measuredLayout))))
           return collectAccent(node, data, line)
@@ -1130,7 +1169,7 @@ export function collectSnapshot(options: {
     }
 
     function mathProjection(presentation: Element, expression: RawMathElement, display: boolean, scale: number, customThickness: boolean): RawMathSnapshot | undefined {
-      const measuredLayout = customThickness ? `${measuredStructures}, ${lineAccent}, ${frameBox}` : measuredStructures
+      const measuredLayout = customThickness ? `${measuredStructures}, ${lineAccent}, ${frameBox}, ${actuarial}` : measuredStructures
       const positionedMath = `${positionedBoxes}, ${measuredLayout}`
       let table = presentation
       let data = expression

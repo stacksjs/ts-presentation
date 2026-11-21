@@ -906,6 +906,70 @@ $$`)
   finally { await rm(root, { recursive: true, force: true }) }
 }, 45_000)
 
+it.skipIf(!chrome)('keeps circled text and measured actuarial strokes editable in PowerPoint', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-shaped-enclosures-'))
+  const canvas = { width: 960, height: 540 }
+  try {
+    const entry = join(root, 'slides.md')
+    await Bun.write(entry, String.raw`---
+math:
+  minRuleThickness: 0.16
+---
+
+# Actuarial notation
+
+$\textcolor{#0055cc}{\text{\textcircled{\textbf{A}}}}$
+
+$$
+\begin{align}
+P&=\textcolor{#005566}{\angl{12}}\tag{N}\\
+Q&=\text{\textcircled{B}}\tag{L}
+\end{align}
+$$
+
+$a_{\angl{n}}$`)
+    const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
+    const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
+    const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
+    if (status) throw new Error(stderr)
+    const frames: PowerPointFrame[] = []
+    await captureFrames({ root: join(root, 'dist'), executable: chrome!, scale: 1, canvas, editable: true, withClicks: false }, frame => { frames.push(frame) })
+    const formulas = frames[0].editable?.nodes.filter((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math') ?? []
+    expect(formulas).toHaveLength(3)
+    const [inline, aligned, nested] = formulas.map(node => node.equation)
+
+    expect(inline?.frames).toHaveLength(1)
+    const circle = inline!.frames![0]
+    expect(circle.ellipse).toBe(true)
+    expect(circle.border?.color).toEqual({ r: 0, g: 85, b: 204, a: 1 })
+    expect(circle.border?.width).toBeGreaterThan(3)
+    expect(inline?.expression).toContain('>A</m:t>')
+    expect(inline?.expression).toMatch(/<m:sty m:val="b"\/>| b="1"/)
+    expect(circle.rect.w).toBeGreaterThan(inline!.rect.w)
+    expect(circle.rect.h).toBeGreaterThan(inline!.rect.h)
+
+    expect(aligned?.frames?.[0].ellipse).toBe(true)
+    expect(aligned?.rules).toHaveLength(2)
+    const [top, side] = aligned!.rules!
+    expect(top.fill).toEqual({ r: 0, g: 85, b: 102, a: 1 })
+    expect(side.fill).toEqual(top.fill)
+    expect(top.rect.h).toBeGreaterThan(3)
+    expect(side.rect.w).toBeCloseTo(top.rect.h)
+    expect(side.rect.y).toBeCloseTo(top.rect.y + top.rect.h)
+    expect(side.rect.x + side.rect.w).toBeCloseTo(top.rect.x + top.rect.w)
+    expect(aligned?.cells?.some(cell => cell.expression.includes('>12</m:t>'))).toBe(true)
+    expect(aligned?.tags?.map(tag => tag.expression).join('')).toMatch(/>\(N\)<\/m:t>.*>\(L\)<\/m:t>/)
+    expect(nested).toBeUndefined()
+
+    const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Actuarial notation' }))
+    const slide = parts.get('ppt/slides/slide1.xml')?.toString() ?? ''
+    expect(slide.match(/<a:prstGeom prst="ellipse">/g)).toHaveLength(2)
+    expect(slide.match(/name="Equation rule"/g)).toHaveLength(2)
+    expect(slide.match(/<p:pic>/g)).toHaveLength(1)
+  }
+  finally { await rm(root, { recursive: true, force: true }) }
+}, 45_000)
+
 it.skipIf(!chrome)('keeps empheq frames and delimiters aligned around editable numbered reveals', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-empheq-'))
   const canvas = { width: 960, height: 540 }

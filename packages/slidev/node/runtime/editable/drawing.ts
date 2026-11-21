@@ -57,8 +57,10 @@ function rectShape(radius: number, rect: Rect): string {
     : '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>'
 }
 
+const ellipseGeometry = '<a:prstGeom prst="ellipse"><a:avLst/></a:prstGeom>'
+
 function boxGeometry(box: IrBox, stroked: boolean): string {
-  if (box.geometry?.kind === 'ellipse') return '<a:prstGeom prst="ellipse"><a:avLst/></a:prstGeom>'
+  if (box.geometry?.kind === 'ellipse') return ellipseGeometry
   if (box.geometry?.kind !== 'path') return rectShape(box.radius ?? 0, box.rect)
   const tags = { M: 'moveTo', L: 'lnTo', Q: 'quadBezTo', C: 'cubicBezTo' }
   const commands = box.geometry.commands.map(command => {
@@ -174,13 +176,14 @@ function mathShape({ display, expression, rect, rotation }: IrEquation, id: numb
 }
 
 function drawEquation(equation: NonNullable<IrRaster['equation']>, id: number, relationship: string, pictureRect: Rect, nextId: () => number, image: (data: string) => string): string {
-  const decorations = equation.frames?.map(({ rect, border, fill: background }) => {
+  const decorations = equation.frames?.map(({ rect, border, fill: background, ellipse }) => {
     if (!border && !background) return ''
     // DrawingML centers the stroke and CSS draws it within the measured box.
     const width = border?.width ?? 0
     const inset = width / 2
     const path = { x: rect.x + inset, y: rect.y + inset, w: rect.w - width, h: rect.h - width }
-    return shape(nextId(), 'Equation frame', transform(path) + rectShape(0, path) + fill(background) + line(border))
+    const geometry = ellipse ? ellipseGeometry : rectShape(0, path)
+    return shape(nextId(), 'Equation frame', transform(path) + geometry + fill(background) + line(border))
   }).join('') ?? ''
   const strokes = equation.rules?.map(rule => drawBox(rule, nextId, 'Equation rule')).join('') ?? ''
   const artwork = equation.pictures?.map(picture =>
