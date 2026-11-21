@@ -166,11 +166,11 @@ export function embeddedPicture(id: number, relationship: string, rect: Rect, la
   return `<p:pic><p:nvPicPr><p:cNvPr id="${id}" name="${title}" descr="${title}">${click}</p:cNvPr><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="${relationship}"/>${source}<a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>${transform(rect)}${rectShape(0, rect)}</p:spPr></p:pic>`
 }
 
-function mathShape({ display, expression, rect }: IrEquation, id: number, name: string): string {
+function mathShape({ display, expression, rect, rotation }: IrEquation, id: number, name: string): string {
   const math = `<m:oMath>${expression}</m:oMath>`
   const content = display ? `<m:oMathPara><m:oMathParaPr><m:jc m:val="center"/></m:oMathParaPr>${math}</m:oMathPara>` : math
   const body = `<p:txBody><a:bodyPr lIns="0" rIns="0" tIns="0" bIns="0" wrap="none" anchor="ctr"><a:noAutofit/></a:bodyPr><a:lstStyle/><a:p><a:pPr algn="ctr"/><a14:m>${content}</a14:m></a:p></p:txBody>`
-  return shape(id, name, transform(rect) + rectShape(0, rect) + fill() + line(), body)
+  return shape(id, name, transform(rect, rotation) + rectShape(0, rect) + fill() + line(), body)
 }
 
 function drawEquation(equation: NonNullable<IrRaster['equation']>, id: number, relationship: string, pictureRect: Rect, nextId: () => number): string {

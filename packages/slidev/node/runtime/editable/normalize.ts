@@ -690,11 +690,12 @@ function buildSlideIr(
       const opacity = node.opacity ?? 1
       if (color?.a === 1 && opacity > 0 && opacity <= 1 && fontSize > 0 && bounds?.w === math.rect.w && bounds.h === math.rect.h) {
         const convertFragment = (fragment: RawMathFragment, display: boolean) => {
-          const visible = clipToSlide(fragment.rect, size)
-          if (visible?.w !== fragment.rect.w || visible.h !== fragment.rect.h || !(fragment.fontSize > 0)
+          const ink = fragment.visibleBounds ?? fragment.rect
+          const visible = clipToSlide(ink, size)
+          if (visible?.w !== ink.w || visible.h !== ink.h || !(fragment.fontSize > 0)
             || !Number.isFinite(fragment.opacity) || fragment.opacity < 0 || fragment.opacity > 1) return
           const expression = officeMath(fragment.expression, fragment.fontSize, color, opacity * fragment.opacity, display)
-          if (expression) return { expression, rect: fragment.rect, display }
+          if (expression) return { expression, rect: fragment.rect, display, ...(fragment.rotation === undefined ? {} : { rotation: fragment.rotation }) }
         }
         const tags = math.tags?.map(tag => convertFragment(tag, false)) ?? []
         const fragments = math.cells ?? [{ expression: math.expression, rect: math.rect, fontSize, opacity: 1 }]

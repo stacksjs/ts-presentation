@@ -539,7 +539,22 @@ y&=\raisebox{5px}{$\frac{1}{2}$}+z\tag{R}
 
 $\frac{\raisebox{5px}{A}}{2}$
 
-$\frac{\makebox[32px]{B}}{2}$`)
+$\frac{\makebox[32px]{B}}{2}$
+
+---
+
+# Transformed math and alignment
+
+$$
+\scalebox{1.5}{$a^2$}
+$$
+
+\begin{align}
+u&=\rotatebox[origin=rB]{36}{$\frac{1}{2}$}+v\tag{T}\\
+w&=\resizebox{4em}{!}{$r_0$}+z
+\end{align}
+
+$\frac{\rotatebox{30}{Nested}}{2}$`)
     const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
     const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
     const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
@@ -693,15 +708,21 @@ $\frac{\makebox[32px]{B}}{2}$`)
     await captureFrames({ root: dist, executable: chrome!, scale: 1, canvas, editable: true, withClicks: false }, frame => { frames.push(frame) })
     const rendered = frames[0].editable?.nodes.filter((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math') ?? []
     expect(rendered).toHaveLength(5)
-    expect(rendered.every(node => node.data && !node.equation)).toBe(true)
+    expect(rendered.every(node => node.data)).toBe(true)
+    expect(rendered.map(node => Boolean(node.equation))).toEqual([false, true, true, false, false])
+    expect(rendered[1].equation?.cells?.[0].rect.w).toBeCloseTo(90, 1)
+    expect(rendered[2].equation?.cells?.[0].rect.h).toBeCloseTo(40, 1)
     const plain = frames[1].editable?.nodes.find((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math')
     expect(plain?.equation?.expression).toContain('<m:f>')
     const parts = await storedParts(createPowerPoint(frames, { ...canvas, title: 'Scaled equations' }))
     const slide = parts.get('ppt/slides/slide1.xml')?.toString() ?? ''
-    expect(slide.match(/<p:pic>/g)).toHaveLength(5)
+    expect(slide.match(/<p:pic>/g)).toHaveLength(3)
+    expect(slide.match(/<a14:m>/g)).toHaveLength(6)
     expect(parts.get('ppt/slides/slide2.xml')?.toString()).toContain('<m:f>')
     const rotated = parts.get('ppt/slides/slide3.xml')?.toString() ?? ''
-    expect(rotated.match(/<p:pic>/g)).toHaveLength(5)
+    expect(rotated.match(/<p:pic>/g)).toHaveLength(1)
+    expect([...rotated.matchAll(/<a:xfrm rot="(\d+)">/g)].map(([, angle]) => Number(angle)))
+      .toEqual([16200000, 10800000, 16200000, 5400000])
     const text = frames[3].editable?.nodes.filter((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math') ?? []
     expect(text).toHaveLength(7)
     expect(text[4].rect.w).toBeGreaterThan(45)
@@ -735,6 +756,18 @@ $\frac{\makebox[32px]{B}}{2}$`)
     expect(aligned).toContain('>(R)</m:t>')
     expect(aligned).toContain('<m:f>')
     expect(aligned.match(/<p:pic>/g)).toHaveLength(2)
+    const transformed = frames[6].editable?.nodes.filter((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math') ?? []
+    expect(transformed).toHaveLength(3)
+    expect(transformed[0].equation?.expression).toContain('<m:sSup>')
+    expect(transformed[0].equation!.rect.w).toBeGreaterThan(25)
+    const fraction = transformed[1].equation?.cells?.find(cell => cell.rotation)
+    expect(fraction?.expression).toContain('<m:f>')
+    expect(fraction?.rotation).toBeCloseTo(-36, 5)
+    expect(transformed[1].equation?.tags?.[0].expression).toContain('>(T)</m:t>')
+    expect(transformed[2].equation).toBeUndefined()
+    const graphic = parts.get('ppt/slides/slide7.xml')?.toString() ?? ''
+    expect(graphic).toContain('<a:xfrm rot="19440000">')
+    expect(graphic.match(/<p:pic>/g)).toHaveLength(1)
   }
   finally { await rm(root, { recursive: true, force: true }) }
 }, 45_000)

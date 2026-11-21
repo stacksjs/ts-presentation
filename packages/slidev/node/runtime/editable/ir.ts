@@ -101,6 +101,9 @@ export interface RawMathFragment {
   rect: Rect
   opacity: number
   fontSize: number
+  rotation?: number
+  /** Painted extent after rotating the unrotated PowerPoint placement box. */
+  visibleBounds?: Rect
 }
 
 export interface RawMathFrame {
@@ -333,6 +336,7 @@ export interface IrEquation {
   expression: string
   rect: Rect
   display: boolean
+  rotation?: number
 }
 
 export interface IrRaster extends IrBase {

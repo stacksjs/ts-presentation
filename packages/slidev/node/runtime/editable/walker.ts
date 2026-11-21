@@ -81,8 +81,9 @@ export function collectSnapshot(options: {
 
   const overlappingMath = '[data-math-smash-operator], [data-math-cramped-lap]'
   const measuredMathBox = 'mpadded:is([data-math-transform-box="make"], [data-math-transform-box="raise"])'
+  const graphicMathBox = 'mpadded:is([data-math-transform-box="rotate"], [data-math-transform-box="scale"], [data-math-transform-box="height"], [data-math-transform-box="total"])'
   const raisedMathBox = 'mtext.math-raised-box'
-  const positionedMath = `${overlappingMath}, ${measuredMathBox}, ${raisedMathBox}`
+  const positionedMath = `${overlappingMath}, ${measuredMathBox}, ${graphicMathBox}, ${raisedMathBox}`
   const raisedMathBody = ':scope > span > span > math > mrow'
   function positionedMathInk(element: Element): Element | undefined {
     if (!element.matches(overlappingMath)) return
@@ -690,11 +691,17 @@ export function collectSnapshot(options: {
       const bounds: DOMRect[] = []
       let pieces: { element: Element, expression: RawMathElement }[] = []
       let split = false
-      function add(boxes: DOMRect[], content: RawMathElement, context: Element): void {
-        const rect = mathBounds(boxes)
-        if (!rect) return
+      type GraphicPlacement = Pick<RawMathFragment, 'rect' | 'rotation' | 'visibleBounds'> & { fontScale: number }
+      type PositionedContent = { element: Element, expression: RawMathElement, graphic?: GraphicPlacement }
+      function add(boxes: DOMRect[], content: RawMathElement, context: Element, graphic?: GraphicPlacement): void {
+        const visible = mathBounds(boxes)
+        if (!visible) return
         bounds.push(...boxes)
-        cells.push({ expression: content, opacity, rect, fontSize: Number.parseFloat(getComputedStyle(context).fontSize) * scale })
+        const fontSize = Number.parseFloat(getComputedStyle(context).fontSize) * scale * (graphic?.fontScale ?? 1)
+        cells.push({
+          expression: content, opacity, rect: graphic?.rect ?? visible, fontSize,
+          ...(graphic?.rotation === undefined ? {} : { rotation: graphic.rotation, visibleBounds: graphic.visibleBounds }),
+        })
       }
       function flush(): void {
         if (!pieces.length) return
@@ -703,9 +710,52 @@ export function collectSnapshot(options: {
         add(pieces.map(piece => piece.element.getBoundingClientRect()), content, pieces[0].element)
         pieces = []
       }
-      function positionedContent(node: Element, data: RawMathElement) {
+      function graphicPlacement(ink: Element, angle?: number): GraphicPlacement | undefined {
+        const style = getComputedStyle(ink)
+        if (style.transform === 'none' || style.rotate !== 'none' || style.scale !== 'none' || style.translate !== 'none'
+          || style.filter !== 'none' || style.backdropFilter !== 'none' || style.clipPath !== 'none'
+          || style.maskImage !== 'none' || style.mixBlendMode !== 'normal' || style.textShadow !== 'none' || Number(style.opacity) !== 1) return
+        const matrix = new DOMMatrixReadOnly(style.transform)
+        const size = Math.hypot(matrix.a, matrix.b)
+        const epsilon = size * 1e-5
+        // An equation can rotate or use a single font scale. It cannot
+        // stretch its glyphs independently on the two axes or reflect them.
+        if (!matrix.is2D || !(size > 0) || Math.abs(matrix.a - matrix.d) > epsilon || Math.abs(matrix.b + matrix.c) > epsilon) return
+        const box = ink.getBoundingClientRect()
+        if (!(box.width > 0 && box.height > 0)) return
+        if (angle === undefined) {
+          if (matrix.a > 0 && Math.abs(matrix.b) <= epsilon) return { rect: relative(box), fontScale: size }
+          return
+        }
+        if (!Number.isFinite(angle) || Math.abs(matrix.a - Math.cos(angle)) > 1e-5
+          || Math.abs(matrix.b - Math.sin(angle)) > 1e-5) return
+        const w = Number.parseFloat(style.width) * scale
+        const h = Number.parseFloat(style.height) * scale
+        if (!(w > 0 && h > 0)) return
+        const c = Math.abs(Math.cos(angle))
+        const s = Math.abs(Math.sin(angle))
+        if (Math.abs(w * c + h * s - box.width) > 0.35 || Math.abs(w * s + h * c - box.height) > 0.35) return
+        // PowerPoint rotates about the center. The rendered bounds have the
+        // same center regardless of the TeX top, baseline, or custom origin.
+        const visible = relative(box)
+        const rect = { x: visible.x + (visible.w - w) / 2, y: visible.y + (visible.h - h) / 2, w, h }
+        return { rect, visibleBounds: visible, rotation: angle * 180 / Math.PI, fontScale: 1 }
+      }
+      function positionedContent(node: Element, data: RawMathElement): PositionedContent | undefined {
         const ink = positionedMathInk(node)
         if (ink && data.children.length === 1) return { element: ink, expression: data.children[0] }
+        if (node.matches(graphicMathBox)) {
+          const ink = node.querySelector(':scope > mrow > mrow:first-child')
+          const content = data.children[0]?.children[0]
+          if (!ink || !content) return
+          const { style, ...attributes } = content.attributes
+          const rotated = node.getAttribute('data-math-transform-box') === 'rotate'
+          const transform = /^transform-origin:[^;]+;transform:translateX\(-?[\d.]+px\) (rotate|scale)\([^;]+\)$/.exec(style ?? '')?.[1]
+          if (transform !== (rotated ? 'rotate' : 'scale')) return
+          const graphic = graphicPlacement(ink, rotated ? Number(node.getAttribute('data-angle')) : undefined)
+          if (graphic) return { element: ink, expression: { ...content, attributes }, graphic }
+          return
+        }
         if (node.matches(measuredMathBox)) {
           const element = node.querySelector(':scope > mrow > mrow[data-math-box-ink]')
           const expression = data.children[0]?.children[0]
@@ -730,7 +780,7 @@ export function collectSnapshot(options: {
         if (content) {
           flush()
           split = true
-          add([content.element.getBoundingClientRect()], content.expression, content.element)
+          add([content.element.getBoundingClientRect()], content.expression, content.element, content.graphic)
         }
         else if (node.localName === 'mrow' && !data.text.trim() && !Object.keys(data.attributes).length && node.querySelector(positionedMath)) {
           for (const [index, child] of Array.from(node.children).entries()) visit(child, data.children[index])
