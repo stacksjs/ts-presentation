@@ -308,15 +308,16 @@ function tokenize(source: string, onTrailingComment?: () => void): string[] {
 }
 
 type MathMode = 'math' | 'text'
-const expansionPrimitives = ['\\expandafter', '\\noexpand', '\\@firstoftwo', '\\@secondoftwo', '\\@ifnextchar', '\\@ifstar', '\\TextOrMath', '\\html@mathml', '\\message', '\\errmessage', '\\char', '\\MoveEqLeft'] as const
+const expansionPrimitives = ['\\expandafter', '\\noexpand', '\\unexpanded', '\\@firstoftwo', '\\@secondoftwo', '\\@ifnextchar', '\\@ifstar', '\\TextOrMath', '\\html@mathml', '\\message', '\\errmessage', '\\char', '\\MoveEqLeft'] as const
 const expansionPrimitiveNames = new Set<string>(expansionPrimitives)
-const macroDeclaration = /^\\(?:[gex]?def|(?:future)?let|(?:new|renew|provide)command|DeclarePairedDelimiter(?:X(?:PP)?)?|Declare(?:Left|Right)Delimiter|MakeAboxedCommand|mathtoolsset|empheqset|EmphEqdelimiter(?:factor|shortfall)|(?:new|renew|use)tagform|fboxsep|fboxrule|setlength|newsavebox|sbox|savebox|global|long)$/
+const macroDeclaration = /^\\(?:[gex]?def|(?:future)?let|(?:new|renew|provide)command|DeclarePairedDelimiter(?:X(?:PP)?)?|Declare(?:Left|Right)Delimiter|MakeAboxedCommand|mathtoolsset|empheqset|EmphEqdelimiter(?:factor|shortfall)|(?:new|renew|use)tagform|fboxsep|fboxrule|setlength|newsavebox|sbox|savebox|global|long|protected)$/
 const tagFormDeclaration = /^\\(?:new|renew|use)tagform$/
 const tagValueToken = '\u0000equation-tag-value'
-const assignmentCommand = /^\\(?:[gex]?def|(?:future)?let)$/
+const definitionCommand = /^\\[gex]?def$/
+const assignmentPrefix = /^\\(?:global|long|protected)$/
 type ExpansionPrimitive = typeof expansionPrimitives[number]
-type ConditionalPrimitive = Exclude<ExpansionPrimitive, '\\expandafter' | '\\noexpand' | '\\message' | '\\errmessage' | '\\char' | '\\MoveEqLeft'>
-interface TokenMacro { body: string[], parameters: string[][], prefix: string[], optional?: string[], unexpandable?: boolean, source?: string }
+type ConditionalPrimitive = Exclude<ExpansionPrimitive, '\\expandafter' | '\\noexpand' | '\\unexpanded' | '\\message' | '\\errmessage' | '\\char' | '\\MoveEqLeft'>
+interface TokenMacro { body: string[], parameters: string[][], prefix: string[], optional?: string[], unexpandable?: boolean, protected?: boolean, source?: string }
 type DelimitedNotation = 'Braket' | 'Set' | 'set'
 type DotsMacro = 'dots' | 'dotsc' | 'dotso' | 'cdots'
 interface PairedDelimiter {
@@ -362,6 +363,8 @@ for (const [name, script] of [['\\sb', '_'], ['\\sp', '^']])
   builtinMacros.set(name, { body: [script], parameters: [], prefix: [] })
 builtinMacros.set('\\substack', { body: tokenize('\\begin{subarray}{c}#1\\end{subarray}'), parameters: [[]], prefix: [] })
 builtinMacros.set('\\crampedsubstack', { body: tokenize('\\begin{crampedsubarray}{c}#1\\end{crampedsubarray}'), parameters: [[]], prefix: [] })
+const paletteBranches = ['displaystyle', 'textstyle', 'scriptstyle', 'scriptscriptstyle'].map(style => `{#1\\${style}{#2}}`)
+builtinMacros.set('\\mathpalette', plainMacro(tokenize(`\\mathchoice${paletteBranches.join('')}`), 2))
 builtinMacros.set('\\ensuremath', { body: tokenize('\\TextOrMath{\\(#1\\)}{#1}'), parameters: [[]], prefix: [] })
 builtinMacros.set('\\vdotswithin', { body: tokenize('{\\mathmakebox[\\widthof{\\ensuremath{{}#1{}}}][c]{\\vdots}}'), parameters: [[]], prefix: [] })
 builtinMacros.set('\\shortvdotswithin', { body: tokenize('\\@ifstar\\@shortvdotsleft\\@shortvdotsright'), parameters: [], prefix: [] })
@@ -1309,7 +1312,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (expandedCount > maxExpand) throw new MathParseError('Too many math macro expansions')
   }
 
-  function expandNativeMacro(macro: NativeMacro): string[] {
+  function expandNativeMacro(macro: NativeMacro, eager = false): string[] {
     if ('notation' in macro) return expandDelimitedNotation(macro.notation)
     if ('pairedDelimiter' in macro) return expandPairedDelimiter(macro.pairedDelimiter)
     if ('separator' in macro) return macro.separator()
@@ -1322,8 +1325,14 @@ export function renderMath(source: string, display = false, configured: MathMacr
       if (primitive === '\\noexpand') return [expandable(next) ? inhibitedToken + next : next]
       space()
       if (!tokens[cursor] || tokens[cursor] === boundary) throw new MathParseError('Missing token after delayed math expansion')
-      expandOnce(true)
+      expandOnce(eager, true)
       return [next]
+    }
+    if (primitive === '\\unexpanded') {
+      expand(true, eager)
+      if (tokenValue(tokens[cursor] ?? '') !== '{') throw new MathParseError('Expected a group after \\unexpanded')
+      const body = rawGroup()
+      return eager ? body.map(token => inhibitedToken + token) : body
     }
     if (primitive === '\\message' || primitive === '\\errmessage') {
       const message = literalGroup()
@@ -1402,26 +1411,31 @@ export function renderMath(source: string, display = false, configured: MathMacr
     }
   }
 
-  function expandOnce(eager = false): number | false {
+  function expandOnce(eager = false, delayed = false): number | false {
     const token = tokens[cursor]
     const definition = macroDefinition(token)
+    const expansionOnly = eager || delayed
     if (!definition) {
-      if (eager && controlSequence.test(token) && !defined(token)) throw new MathParseError(`Undefined control sequence: ${token}`)
+      if (expansionOnly && controlSequence.test(token) && !defined(token)) throw new MathParseError(`Undefined control sequence: ${token}`)
       return false
     }
-    if (eager && typeof definition !== 'function' && 'body' in definition && definition.unexpandable) return false
-    if (eager && typeof definition !== 'function' && 'pairedDelimiter' in definition && definition.pairedDelimiter.template) return false
+    if (typeof definition !== 'function') {
+      if ('body' in definition) {
+        if ((expansionOnly && definition.unexpandable) || (eager && !delayed && definition.protected)) return false
+      }
+      else if (expansionOnly && 'pairedDelimiter' in definition && definition.pairedDelimiter.template) return false
+    }
     countExpansions(1)
     const start = cursor++
     if (controlWord.test(token)) space()
     if (typeof definition !== 'function' && !('body' in definition))
-      return replaceExpansion(start, expandNativeMacro(definition))
+      return replaceExpansion(start, expandNativeMacro(definition, eager))
     let macro: TokenMacro
     if (typeof definition === 'function') {
       const result = definition(context ??= createMacroContext())
       if (!isConfiguredMacro(result)) throw new Error(`Invalid expansion from math macro ${token}`)
       macro = compileTokenMacro(result)
-      if (eager && macro.unexpandable) {
+      if (expansionOnly && macro.unexpandable) {
         replaceExpansion(start, [token])
         return false
       }
@@ -1579,9 +1593,9 @@ export function renderMath(source: string, display = false, configured: MathMacr
         tokens: publicTokens(macro.body).reverse(),
         numArgs: macro.parameters.length,
         delimiters: [macro.prefix, ...macro.parameters].map(delimiter => [...delimiter]),
-        unexpandable: macro.unexpandable,
+        unexpandable: macro.protected ? true : macro.unexpandable,
       }
-      if (macro.optional !== undefined) macroSnapshots.set(expansion, macro)
+      if (macro.optional !== undefined || macro.protected) macroSnapshots.set(expansion, macro)
       return expansion
     }
     const callback: MathMacroFunction = () => ({ tokens: publicTokens(expandNativeMacro(macro)).reverse(), numArgs: 0 })
@@ -3810,12 +3824,15 @@ export function renderMath(source: string, display = false, configured: MathMacr
   function declareMacro(token: string, color = currentColor, legacyFont?: string): boolean {
     if (!macroDeclaration.test(token)) return false
     let global = false
-    const prefixed = token === '\\global' || token === '\\long'
-    while (token === '\\global' || token === '\\long') {
+    let protection = false
+    const prefixed = assignmentPrefix.test(token)
+    while (assignmentPrefix.test(token)) {
       global ||= token === '\\global'
+      protection ||= token === '\\protected'
       token = take()
     }
-    if (prefixed && !assignmentCommand.test(token))
+    const definition = definitionCommand.test(token)
+    if (prefixed && !(definition || (!protection && /^\\(?:future)?let$/.test(token))))
       throw new MathParseError('Invalid token after math macro prefix')
     const name = token.slice(1)
     if (name === 'newsavebox') {
@@ -3905,7 +3922,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       assign(target, plainMacro([customAlignedBox, '{', ...wrapper, '}', '{', '#1', '}'], 1))
       return true
     }
-    if (['def', 'gdef', 'edef', 'xdef'].includes(name)) {
+    if (definition) {
       const command = definitionTarget()
       space()
       const prefix: string[] = []
@@ -3931,7 +3948,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const body = rawGroup()
       const replacement = name === 'edef' || name === 'xdef' ? expandDefinition(body, 'definition') : body
       if (openDelimiter) replacement.push('{')
-      assign(command, { body: replacement, parameters, prefix }, global || name === 'gdef' || name === 'xdef')
+      assign(command, { body: replacement, parameters, prefix, protected: protection }, global || name === 'gdef' || name === 'xdef')
       return true
     }
     if (name === 'let' || name === 'futurelet') {

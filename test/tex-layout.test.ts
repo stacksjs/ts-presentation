@@ -211,6 +211,45 @@ test('expands a token after a delayed definition target and preserves noexpand t
   expect(() => math(String.raw`\expandafter\def`, false)).toThrow('Missing token after delayed math expansion')
 })
 
+test('defers protected macros and unexpanded token groups inside eager TeX definitions', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const source = String.raw`
+    \def\value{A}
+    \protected\def\marker#1{\value#1}
+    \edef\saved{\marker{\value}\value\unexpanded{\value\later}}
+    \def\value{B}\def\later{L}
+    \saved
+  `
+  expect(math(source, false)).toContain('<mi>B</mi><mi>A</mi><mi>A</mi><mi>B</mi><mi>L</mi>')
+
+  const scope = String.raw`
+    \protected\def\outercmd{A}
+    {\global\protected\long\def\globalcmd{\value}\protected\def\outercmd{I}\outercmd}
+    \xdef\saved{\globalcmd\outercmd}
+    \def\value{V}\saved
+  `
+  expect(math(scope, false)).toContain('<mrow><mi>I</mi></mrow><mi>V</mi><mi>A</mi>')
+  expect(math(String.raw`\protected\def\label{L}\noexpand\label\unexpanded{\label}`, false))
+    .toContain('<mrow><mi>L</mi></mrow>')
+  expect(math(String.raw`\protected\def\name{\label}\expandafter\def\name{L}\label`, false))
+    .toContain('<mrow><mi>L</mi></mrow>')
+  expect(math(String.raw`\def\brace{{\label}}\edef\saved{\unexpanded\brace}\def\label{L}\saved`, false))
+    .toContain('<mrow><mi>L</mi></mrow>')
+  expect(() => math(String.raw`\protected\let\name=A`, false)).toThrow('Invalid token after math macro prefix')
+  expect(() => math(String.raw`\unexpanded A`, false)).toThrow('Expected a group after \\unexpanded')
+})
+
+test('passes each current math style to reusable mathpalette commands', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const define = String.raw`\def\styled#1#2{{#1\frac{#2}{2}}}`
+  const palette = String.raw`\mathpalette\styled{z}`
+  const fraction = '<mfrac><mrow><mi>z</mi></mrow><mrow><mn>2</mn></mrow></mfrac>'
+  expect(math(define + palette, true)).toContain('<mstyle displaystyle="true" scriptlevel="0">' + fraction)
+  expect(math(define + palette, false)).toContain('<mstyle displaystyle="false" scriptlevel="0">' + fraction)
+  expect(math(define + `x^{${palette}}`, false)).toContain('<mstyle displaystyle="false" scriptlevel="1">' + fraction)
+  expect(math(define + `x^{y^{${palette}}}`, false)).toContain('<mstyle displaystyle="false" scriptlevel="2">' + fraction)
+})
+
 test('keeps a snapshot of the lookahead and primitive meanings when using let', () => {
   const math = createMathRenderer({ throwOnError: true })
   const clauses = math(String.raw`\def\original{A}\def\action{\def\original{B}\next}\futurelet\next\action\original`, false)

@@ -142,6 +142,10 @@ speaker notes. Each hook can be asynchronous.
   Set `math.leqno: true` in deck frontmatter to put tags on the left, or
   `math.fleqn: true` to align displays left with a 2 em inset. The same
   options are available through `setup/katex.ts`.
+- Use `\protected\def` to keep a macro call intact inside `\edef` and
+  `\xdef`, or `\unexpanded{...}` to defer one group of tokens. A macro
+  called with `\mathpalette\myMacro{x}` receives the current math style
+  as its first argument and `x` as its second.
 - Put ranges after a display opener, as in `$$ {hide|1|2|all}`. Each
   additional range uses one click. Add `{at: 3, startLine: 2, finally: 'all'}`
   after the ranges to control click and line numbering and the final state.

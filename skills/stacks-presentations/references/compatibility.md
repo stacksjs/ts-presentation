@@ -103,6 +103,8 @@ in a new ts-presentation project.
 | TeX character codes and scripts | `\char` expands decimal, octal, hexadecimal, and literal character codes inside macros, including eager definitions. Superscripts and subscripts accept `\relax` before the argument, and leading Unicode scripts render with an empty base |
 | MathML number grouping | Leading decimals, braced digit groups, and braced thousands separators form one number. A single subscript or superscript attaches to the full number, and simultaneous upper and lower scripts preserve the final atom boundary |
 | KaTeX math choices | `\mathchoice` selects display, text, script, and scriptscript branches with operator spacing from the enclosing row |
+| TeX math palettes | `\mathpalette\myMacro{arg}` passes the active display, text, script, or scriptscript style to a two-argument macro, followed by the supplied argument |
+| e-TeX protected expansion | `\protected` works with `\def`, `\gdef`, `\edef`, and `\xdef`, including the `\global` and `\long` prefixes. `\unexpanded{...}` preserves the token group during `\edef` or `\xdef`. The preserved tokens expand when the saved formula is rendered |
 | KaTeX parser diagnostics | Macro declaration and scope checks, undefined commands in eager expansion, unexpected delimiters, text-mode command checks, and validation of expanded colors |
 | KaTeX error display | Invalid formulas display their TeX source with a parser tooltip. Set `math.errorColor` for the error color or `math.throwOnError: true` to report parse errors in the build log while rendering the rest of the deck |
 | KaTeX macro and color settings | Deck-scoped `globalGroup`, per-formula `maxExpand` including eager definitions, and two-argument `\color` via `colorIsTextColor` |
