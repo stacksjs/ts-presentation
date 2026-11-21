@@ -321,7 +321,7 @@ it.skipIf(!chrome)('exports cramped superscripts, stacks, and measured laps as e
   }
 }, 45_000)
 
-it.skipIf(!chrome)('reserves scaled and rotated math box dimensions in the browser and PowerPoint', async () => {
+it.skipIf(!chrome)('reserves transformed and fixed-width math box dimensions in the browser and PowerPoint', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-scaled-box-'))
   const canvas = { width: 960, height: 540 }
   try {
@@ -363,7 +363,23 @@ $x\rotatebox[x=0.5\width,y=3px]{90}{Agp}z$
 
 $x\rotatebox[origin=lB,units=-400]{100}{Agp}z$
 
-$x\rotatebox[origin=c]{36}{\scalebox{1.3}[-1.2]{Agp}}z$`)
+$x\rotatebox[origin=c]{36}{\scalebox{1.3}[-1.2]{Agp}}z$
+
+---
+
+# Text boxes
+
+$x\makebox[72px][l]{A}z$
+
+$x\makebox[72px]{A}z$
+
+$x\makebox[72px][r]{A}z$
+
+$x\makebox[160px][s]{two words}z$
+
+$\hspace{7em}x\makebox[12px][r]{Wide text}z$
+
+$x{\setlength{\fboxsep}{4px}\fboxrule=2px\framebox[100px][r]{A}}z$`)
     const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
     const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
     const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
@@ -439,6 +455,38 @@ $x\rotatebox[origin=c]{36}{\scalebox{1.3}[-1.2]{Agp}}z$`)
       expect(resized.width).toBeGreaterThan(nestedScale.width)
       expect(resized.width).toBeCloseTo(resized.natural[0] * 1.3, 1)
       expect(resized.error).toBeLessThan(0.15)
+
+      await view.evaluate('window.presentationNavigation.go(4)')
+      const text = await view.evaluate<{
+        width: number, ink: number, offset: number, outer: number, stretch: number
+      }[]>(`(async () => {
+        await new Promise(requestAnimationFrame)
+        return [...document.querySelectorAll('#stage > article:not([hidden]) [data-math-transform-box]')].map(box => {
+          const ink = box.querySelector('[data-math-box-ink]')
+          const bounds = box.getBoundingClientRect()
+          const width = parseFloat(box.getAttribute('width'))
+          const scale = bounds.width / width
+          return {
+            width, ink: ink.getBoundingClientRect().width / scale,
+            offset: (ink.getBoundingClientRect().left - bounds.left) / scale,
+            outer: box.parentElement.getBoundingClientRect().width / scale,
+            stretch: parseFloat(ink.getAttribute('data-extra-space') ?? 0),
+          }
+        })
+      })()`)
+      expect(text).toHaveLength(6)
+      const [left, centered, right, spread, overflowing, framed] = text
+      expect([left.width, centered.width, right.width]).toEqual([72, 72, 72])
+      expect(left.offset).toBeCloseTo(0, 1)
+      expect(centered.offset).toBeCloseTo((centered.width - centered.ink) / 2, 1)
+      expect(right.offset + right.ink).toBeCloseTo(right.width, 1)
+      expect(spread.stretch).toBeGreaterThan(0)
+      expect(spread.ink).toBeCloseTo(160, 1)
+      expect(overflowing.ink).toBeGreaterThan(overflowing.width)
+      expect(overflowing.offset + overflowing.ink).toBeCloseTo(12, 1)
+      expect(framed.width).toBeCloseTo(88, 1)
+      expect(framed.outer).toBeCloseTo(100, 1)
+      expect(framed.offset + framed.ink).toBeCloseTo(88, 1)
     }
     finally {
       view.close()
@@ -458,6 +506,10 @@ $x\rotatebox[origin=c]{36}{\scalebox{1.3}[-1.2]{Agp}}z$`)
     expect(parts.get('ppt/slides/slide2.xml')?.toString()).toContain('<m:f>')
     const rotated = parts.get('ppt/slides/slide3.xml')?.toString() ?? ''
     expect(rotated.match(/<p:pic>/g)).toHaveLength(5)
+    const text = frames[3].editable?.nodes.filter((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math') ?? []
+    expect(text).toHaveLength(6)
+    expect(text[4].rect.w).toBeGreaterThan(45)
+    expect(parts.get('ppt/slides/slide4.xml')?.toString().match(/<p:pic>/g)).toHaveLength(6)
   }
   finally { await rm(root, { recursive: true, force: true }) }
 }, 45_000)
@@ -506,7 +558,7 @@ Y&=\frac{3}{4}\tag{Longer}
 
 # Full-width measured decoration
 
-\begin{empheq}[innerbox=\fbox,left={\resizebox*{.25\EmphEqdisplaywidth}{15px}{L}}]{flalign}
+\begin{empheq}[innerbox=\fbox,left={\makebox[.25\EmphEqdisplaywidth]{L}}]{flalign}
 x&=a & y&=b\\
 z&=c & w&=d
 \end{empheq}`)

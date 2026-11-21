@@ -33,9 +33,9 @@ function fitTransformedBox(box: Element): void {
   const [ink, baseline, inline, block] = frame.children
   if (!ink || !baseline || !inline || !block) return
   const frameStyle = getComputedStyle(frame)
-  const width = Number.parseFloat(frameStyle.width)
+  const measuredWidth = Number.parseFloat(frameStyle.width)
   const totalHeight = Number.parseFloat(frameStyle.height)
-  if (!Number.isFinite(width) || !Number.isFinite(totalHeight)) return
+  if (!Number.isFinite(measuredWidth) || !Number.isFinite(totalHeight)) return
 
   // Project onto the screen axis most aligned with the box's local y axis,
   // then remove the horizontal contribution from a rotated ancestor.
@@ -45,7 +45,7 @@ function fitTransformedBox(box: Element): void {
   const blockProbe = block.getBoundingClientRect()
   const axis = Math.abs(blockProbe.left - base.left) > Math.abs(blockProbe.top - base.top) ? 'left' : 'top'
   const blockStep = blockProbe[axis] - base[axis]
-  const span = width * (inlineProbe[axis] - base[axis])
+  const span = measuredWidth * (inlineProbe[axis] - base[axis])
   const start = base[axis] + (frameStyle.direction === 'rtl' ? Math.min(0, span) : Math.min(0, -span))
   const extent = blockStep ? (start - bounds[axis]) / Math.abs(blockStep) : 0
   const height = Math.min(totalHeight, Math.max(0, blockStep < 0 ? totalHeight - extent : extent))
@@ -54,6 +54,13 @@ function fitTransformedBox(box: Element): void {
   const horizontal = box.getAttribute('data-width') ?? ''
   const vertical = box.getAttribute('data-height') ?? ''
   const sizing = box.getAttribute(transformBox)
+  const textBox = sizing === 'make' || sizing === 'frame'
+  const glue = textBox && vertical === 's'
+    ? Array.from(ink.querySelectorAll('mtext')).filter(text =>
+      text.closest(`[${transformBox}]`) === box && !ink.contains(text.closest('.math-font-reset'))) : []
+  const spaces = glue.reduce((count, text) => count + (text.textContent?.match(/ /g)?.length ?? 0), 0)
+  const extra = Number(ink.getAttribute('data-extra-space') ?? 0)
+  const width = measuredWidth - spaces * extra
   const dimensions: Readonly<Record<string, number>> = { width, height, depth, totalheight: totalHeight, center: (height - depth) / 2 }
   const boxStyle = sizing === 'scale' ? undefined : getComputedStyle(box)
   function target(specification: string, axis: 'width' | 'height'): number {
@@ -68,7 +75,29 @@ function fitTransformedBox(box: Element): void {
   let descent: number
   let origin: string
   let transform: string
-  if (sizing === 'rotate') {
+  if (textBox) {
+    const frameStyle = sizing === 'frame' && box.parentElement ? getComputedStyle(box.parentElement) : undefined
+    const border = frameStyle ? Number.parseFloat(frameStyle.borderLeftWidth) + Number.parseFloat(frameStyle.borderRightWidth) : 0
+    const padding = frameStyle ? Number.parseFloat(frameStyle.paddingLeft) + Number.parseFloat(frameStyle.paddingRight) : 0
+    advance = target(horizontal, 'width')
+    if (frameStyle) advance = Math.max(0, advance - border - padding)
+    if (!Number.isFinite(advance)) return
+    const surplus = advance - width
+    const offset = vertical === 'c' ? surplus / 2 : vertical === 'r' ? surplus : 0
+    if (spaces) {
+      const stretch = Math.max(0, surplus / spaces)
+      // Layout metrics are rounded to the browser's subpixel grid.
+      if (Math.abs(stretch - extra) > 0.02) {
+        for (const text of glue) (text as HTMLElement).style.wordSpacing = length(stretch)
+        ink.setAttribute('data-extra-space', String(Number(stretch.toFixed(4))))
+      }
+    }
+    ascent = height
+    descent = depth
+    origin = 'left'
+    transform = `translateX(${length(offset)})`
+  }
+  else if (sizing === 'rotate') {
     const angle = Number(box.getAttribute('data-angle'))
     const x = target(horizontal, 'width')
     const y = height - target(vertical, 'height')
@@ -104,7 +133,11 @@ function fitTransformedBox(box: Element): void {
   // MPadded reserves the transformed dimensions at the original baseline.
   const style = `transform-origin:${origin};transform:${transform}`
   if (ink.getAttribute('style') !== style) ink.setAttribute('style', style)
-  for (const [attribute, value] of [['width', advance], ['height', ascent], ['depth', descent]] as const) {
+  if (textBox) {
+    const margin = advance < 0 ? length(advance) : ''
+    if ((box as HTMLElement).style.marginInlineEnd !== margin) (box as HTMLElement).style.marginInlineEnd = margin
+  }
+  for (const [attribute, value] of [['width', Math.max(0, advance)], ['height', ascent], ['depth', descent]] as const) {
     const dimension = length(value)
     if (box.getAttribute(attribute) !== dimension) box.setAttribute(attribute, dimension)
   }

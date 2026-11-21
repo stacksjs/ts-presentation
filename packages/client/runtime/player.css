@@ -1017,8 +1017,8 @@ math .math-cd-arrow[data-direction="down"]::after {
   bottom: 0;
   transform: translateX(-50%) rotate(180deg);
 }
-math .math-color-box { padding: 0.3em; }
-math .math-frame { border: max(0.04em, var(--math-min-rule, 0px)) solid currentColor; }
+math .math-color-box { padding: var(--math-box-padding, 0.3em); }
+math .math-frame { border: var(--math-box-rule, max(0.04em, var(--math-min-rule, 0px))) solid currentColor; }
 math .math-vcenter > mtr > mtd { padding: 0; }
 math .math-alignment-axis > mtr > mtd { padding: 0; }
 math .math-array-dots {
@@ -1238,6 +1238,8 @@ math .math-measured-r { justify-self: end; }
   inherits: false;
   initial-value: 0px;
 }
+/* Measure the text independently of the advance reserved by mpadded. */
+math [data-math-transform-box] > mrow { inline-size: max-content; white-space: nowrap; }
 /* Paint-only offsets expose the projected axes without changing the box size. */
 math .math-box-axis-x { transform: translateX(1px); }
 math .math-box-axis-y { transform: translateY(1px); }

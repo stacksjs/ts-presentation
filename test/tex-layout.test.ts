@@ -91,6 +91,23 @@ test('parses TeX rotations with default and custom origins, dimensions, and angu
   expect(() => math(String.raw`\rotatebox{clockwise}{x}`, false)).toThrow('Invalid math rotation angle')
 })
 
+test('supports natural and specified TeX text boxes and scopes their frame dimensions', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const source = String.raw`\makebox{Natural $x^2$}
+{\setlength{\fboxsep}{4px}\fboxrule=2px
+\framebox[5em][r]{Framed}}
+\framebox{Restored}
+\text{\makebox[1.5\width][s]{Spaced words}}`
+  const html = math(source, false).split('<annotation')[0]
+  expect(html).toContain('<msup>')
+  expect(html).toContain('class="math-color-box math-frame" style="--math-box-padding:4px;--math-box-rule:2px"')
+  expect(html).toContain('data-math-transform-box="frame" data-width="length" data-height="r" style="--math-box-width:5em"')
+  expect(html).toContain('<mrow class="math-color-box math-frame"><mtext>Restored</mtext></mrow>')
+  expect(html).toContain('data-math-transform-box="make" data-width="width:1.5" data-height="s"')
+  expect(() => math(String.raw`\makebox[2em][middle]{Label}`, false)).toThrow('Invalid text box alignment')
+  expect(() => math(String.raw`\setlength{\fboxsep}{-2px}\framebox{Label}`, false)).toThrow('Invalid text frame dimension')
+})
+
 test('scopes legacy font declarations and selects MathML branches without expanding skipped input', () => {
   const math = createMathRenderer({ throwOnError: true })
   const html = math(String.raw`{\cal A{\bf B} C} D+\mathrm{x\mathit{y}}+\Alpha\Gamma\varGamma`, false)

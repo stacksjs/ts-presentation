@@ -310,7 +310,7 @@ function tokenize(source: string, onTrailingComment?: () => void): string[] {
 type MathMode = 'math' | 'text'
 const expansionPrimitives = ['\\expandafter', '\\noexpand', '\\@firstoftwo', '\\@secondoftwo', '\\@ifnextchar', '\\@ifstar', '\\TextOrMath', '\\html@mathml', '\\message', '\\errmessage', '\\char', '\\MoveEqLeft'] as const
 const expansionPrimitiveNames = new Set<string>(expansionPrimitives)
-const macroDeclaration = /^\\(?:[gex]?def|(?:future)?let|(?:new|renew|provide)command|DeclarePairedDelimiter(?:X(?:PP)?)?|Declare(?:Left|Right)Delimiter|MakeAboxedCommand|mathtoolsset|empheqset|EmphEqdelimiter(?:factor|shortfall)|(?:new|renew|use)tagform|setlength|global|long)$/
+const macroDeclaration = /^\\(?:[gex]?def|(?:future)?let|(?:new|renew|provide)command|DeclarePairedDelimiter(?:X(?:PP)?)?|Declare(?:Left|Right)Delimiter|MakeAboxedCommand|mathtoolsset|empheqset|EmphEqdelimiter(?:factor|shortfall)|(?:new|renew|use)tagform|fboxsep|fboxrule|setlength|global|long)$/
 const tagFormDeclaration = /^\\(?:new|renew|use)tagform$/
 const tagValueToken = '\u0000equation-tag-value'
 const assignmentCommand = /^\\(?:[gex]?def|(?:future)?let)$/
@@ -495,7 +495,7 @@ const textLigatures: Readonly<Record<string, string>> = {
 }
 const typesettingNames = new Set(['TeX', 'LaTeX', 'KaTeX'])
 const graphicsNumber = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/
-const textBoxes = new Set(['colorbox', 'fcolorbox', 'fbox', 'reflectbox', 'scalebox', 'resizebox', 'rotatebox'])
+const textBoxes = new Set(['colorbox', 'fcolorbox', 'fbox', 'reflectbox', 'scalebox', 'resizebox', 'rotatebox', 'makebox', 'framebox'])
 const verticalBoxCommands = new Set(['phantom', 'hphantom', 'vphantom', 'smash', 'raisebox', 'rule'])
 const textSymbols: Record<string, string> = {
   '\\textdollar': '$', '\\textunderscore': '_', '\\textbackslash': '\\',
@@ -1158,6 +1158,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
   let emphasisFactor = 950
   let emphasisShortfall: string | undefined
   let emphasisSide = false
+  let boxPadding: string | undefined
+  let boxRule: string | undefined
   let fontScale = 1
   let textItalic = false
   let textMonospace = false
@@ -1212,6 +1214,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const previousEmphasisDefaults = emphasisDefaults
     const previousEmphasisFactor = emphasisFactor
     const previousEmphasisShortfall = emphasisShortfall
+    const previousBoxPadding = boxPadding
+    const previousBoxRule = boxRule
     const previousTagForms = tagForms
     const previousTagFormName = tagFormName
     scopes.push({ undo: new Map() })
@@ -1225,6 +1229,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
       emphasisDefaults = previousEmphasisDefaults
       emphasisFactor = previousEmphasisFactor
       emphasisShortfall = previousEmphasisShortfall
+      boxPadding = previousBoxPadding
+      boxRule = previousBoxRule
       tagForms = previousTagForms
       tagFormName = previousTagFormName
       while (scopes.length > before) restoreScope()
@@ -1905,14 +1911,41 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return color
   }
 
+  function frameBox(content: Markup, frame?: string, background?: string): Markup {
+    const framed = frame !== undefined || background === undefined
+    const styles = [
+      boxPadding && `--math-box-padding:${boxPadding}`,
+      framed && boxRule && `--math-box-rule:${boxRule}`,
+      background && `background-color:${background}`,
+      frame && `border-color:${frame}`,
+    ].filter(Boolean).join(';')
+    return xml`<mrow class="math-color-box${framed ? ' math-frame' : ''}"${styles ? ` style="${styles}"` : ''}>${content}</mrow>`
+  }
+
   function textBox(name: string): Markup {
     if (name === 'scalebox' || name === 'resizebox') return scaledBox(name)
     if (name === 'rotatebox') return rotatedBox()
+    if (name === 'makebox' || name === 'framebox') return horizontalTextBox(name === 'framebox')
     if (name === 'reflectbox') return xml`<mrow class="math-reflect">${textArgument('hbox')}</mrow>`
-    if (name === 'fbox') return xml`<mrow class="math-color-box math-frame">${textArgument('hbox')}</mrow>`
+    if (name === 'fbox') return frameBox(textArgument('hbox'))
     const { frame, background } = readBoxColors(name)
-    const content = textArgument('hbox')
-    return xml`<mrow class="math-color-box${frame ? ' math-frame' : ''}" style="background-color:${background}${frame ? `;border-color:${frame}` : ''}">${content}</mrow>`
+    return frameBox(textArgument('hbox'), frame, background)
+  }
+
+  function horizontalTextBox(framed: boolean): Markup {
+    const width = rawBracket()
+    if (width === undefined) {
+      const content = textArgument('hbox')
+      return framed ? frameBox(content) : content
+    }
+    const option = rawBracket()
+    const placement = option === undefined ? 'c' : expandDefinition(option).join('').trim()
+    if (!/^[lcrstb]$/.test(placement)) throw new MathParseError('Invalid text box alignment')
+    const alignment = placement === 't' ? 'l' : placement === 'b' ? 'r' : placement
+    const lengths = new Map<string, string>()
+    const size = graphicsLength(expandDefinition(width).join('').trim(), 'width', lengths)
+    const content = transformedBox(textArgument('hbox'), framed ? 'frame' : 'make', size, alignment, lengths)
+    return framed ? frameBox(content) : content
   }
 
   function readGraphicsNumber(raw: string, message: string): number {
@@ -1957,10 +1990,11 @@ export function renderMath(source: string, display = false, configured: MathMacr
     const style = lengths.size ? ` style="${[...lengths].map(([axis, length]) => `--math-box-${axis}:${length}`).join(';')}"` : ''
     const measured = style.includes('var(--empheq-') ? ' data-empheq-measure' : ''
     const rotation = angle === undefined ? '' : ` data-angle="${angle}"`
+    const overflow = kind === 'make' || kind === 'frame' ? ' data-math-box-ink' : ''
     const anchor = '<mspace width="0" height="0" depth="0" aria-hidden="true"/>'
     const inline = '<mspace class="math-box-axis-x" width="0" height="0" depth="0" aria-hidden="true"/>'
     const block = '<mspace class="math-box-axis-y" width="0" height="0" depth="0" aria-hidden="true"/>'
-    return xml`<mpadded data-math-transform-box="${kind}" data-width="${horizontal}" data-height="${vertical}"${rotation}${measured}${style}><mrow><mrow>${content}</mrow>${anchor}${inline}${block}</mrow></mpadded>`
+    return xml`<mpadded data-math-transform-box="${kind}" data-width="${horizontal}" data-height="${vertical}"${rotation}${measured}${style}><mrow><mrow${overflow}>${content}</mrow>${anchor}${inline}${block}</mrow></mpadded>`
   }
 
   function scaledBox(name: 'scalebox' | 'resizebox'): Markup {
@@ -2055,7 +2089,11 @@ export function renderMath(source: string, display = false, configured: MathMacr
         take()
         groups++
       }
-      const style = alignedBoxDimensions()
+      const style = [
+        boxPadding ? `--math-frame-padding:${boxPadding}` : '',
+        boxRule ? `--math-frame-rule:${boxRule}` : '',
+        ...alignedBoxDimensions(),
+      ].filter(Boolean)
       const command = take()
       const name = command.slice(1)
       if (name !== 'fbox' && name !== 'colorbox' && name !== 'fcolorbox')
@@ -3704,10 +3742,17 @@ export function renderMath(source: string, display = false, configured: MathMacr
       else emphasisShortfall = readDimension()
       return true
     }
-    if (name === 'setlength') {
-      const register = literalGroup().trim()
+    if (name === 'setlength' || name === 'fboxsep' || name === 'fboxrule') {
+      const register = name === 'setlength' ? literalGroup().trim() : token
       if (register === '\\jot') equationJot = readDimension()
       else if (register === emphasisShortfallCommand) emphasisShortfall = readDimension()
+      else if (register === '\\fboxsep' || register === '\\fboxrule') {
+        if (name !== 'setlength' && peek() === '=') take()
+        const length = readDimension()
+        if (Number.parseFloat(length) < 0) throw new MathParseError('Invalid text frame dimension')
+        if (register === '\\fboxsep') boxPadding = length
+        else boxRule = length
+      }
       else throw new MathParseError('Unsupported math length register')
       return true
     }
