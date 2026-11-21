@@ -321,7 +321,7 @@ it.skipIf(!chrome)('exports cramped superscripts, stacks, and measured laps as e
   }
 }, 45_000)
 
-it.skipIf(!chrome)('reserves transformed, fixed-width, and raised math box dimensions in the browser and PowerPoint', async () => {
+it.skipIf(!chrome)('preserves math box geometry and exports positioned boxes as editable equations', async () => {
   const root = await mkdtemp(join(tmpdir(), 'presentation-pptx-scaled-box-'))
   const canvas = { width: 960, height: 540 }
   try {
@@ -377,7 +377,7 @@ $x\makebox[72px][r]{A}z$
 
 $x\makebox[160px][s]{two words}z$
 
-$\hspace{7em}x\makebox[12px][r]{Wide text}z$
+$\mathrm{Leading}x\makebox[12px][r]{Wide text}z$
 
 $x{\setlength{\fboxsep}{4px}\fboxrule=2px\framebox[100px][r]{A}}z$
 
@@ -397,7 +397,20 @@ $\raisebox{.1\width}{Agp}$
 
 $\raisebox{30px}[2px][0px]{Agp}$
 
-$\raisebox{\dimexpr(\height-\depth)/2+2px\relax}[\dimexpr9px+4px*2][3px]{Agp}$`)
+$\raisebox{\dimexpr(\height-\depth)/2+2px\relax}[\dimexpr9px+4px*2][3px]{Agp}$
+
+---
+
+# Aligned and nested boxes
+
+\begin{align}
+x&=\makebox[72px][r]{A}+z\tag{W} \\
+y&=\raisebox{5px}{$\frac{1}{2}$}+z\tag{R}
+\end{align}
+
+$\frac{\raisebox{5px}{A}}{2}$
+
+$\frac{\makebox[32px]{B}}{2}$`)
     const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
     const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
     const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
@@ -563,13 +576,36 @@ $\raisebox{\dimexpr(\height-\depth)/2+2px\relax}[\dimexpr9px+4px*2][3px]{Agp}$`)
     const text = frames[3].editable?.nodes.filter((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math') ?? []
     expect(text).toHaveLength(7)
     expect(text[4].rect.w).toBeGreaterThan(45)
-    expect(parts.get('ppt/slides/slide4.xml')?.toString().match(/<p:pic>/g)).toHaveLength(7)
+    for (const node of [text[0], text[1], text[2], text[4], text[6]]) {
+      expect(node.equation?.expression).toContain('>x</m:t>')
+      expect(node.equation?.cells).toHaveLength(2)
+      expect(node.equation?.cells?.[1].expression).toContain('>z</m:t>')
+    }
+    const [left, centered, right] = text.slice(0, 3).map(node => node.equation!.cells![0].rect)
+    for (const node of text.slice(0, 3)) expect(node.equation?.cells?.[0].expression).toContain('>A</m:t>')
+    expect(centered.x - left.x).toBeCloseTo((right.x - left.x) / 2, 1)
+    expect(right.x + right.w - left.x).toBeCloseTo(72, 0)
+    expect(text[4].equation!.cells![0].rect.x).toBeLessThan(text[4].equation!.rect.x + text[4].equation!.rect.w)
+    expect(text[6].equation?.cells?.[0].expression).toContain('>Inset</m:t>')
+    expect(text[3].equation).toBeUndefined()
+    expect(text[5].equation).toBeUndefined()
+    const textSlide = parts.get('ppt/slides/slide4.xml')?.toString() ?? ''
+    expect(textSlide.match(/<a14:m>/g)).toHaveLength(15)
+    expect(textSlide.match(/<p:pic>/g)).toHaveLength(2)
     const raised = frames[4].editable?.nodes.filter((node): node is IrRaster => node.kind === 'raster' && node.reason === 'math') ?? []
     expect(raised).toHaveLength(6)
-    expect(raised.every(node => node.data && !node.equation)).toBe(true)
+    for (const node of raised) expect(node.equation?.expression).toContain('>Agp</m:t>')
     expect(raised[1].rect.h).toBeGreaterThan(raised[0].rect.h + 2)
     expect(raised[4].rect.h).toBeGreaterThan(30)
-    expect(parts.get('ppt/slides/slide5.xml')?.toString().match(/<p:pic>/g)).toHaveLength(6)
+    expect(raised[4].equation!.rect.h).toBeLessThan(raised[4].rect.h)
+    const raisedSlide = parts.get('ppt/slides/slide5.xml')?.toString() ?? ''
+    expect(raisedSlide.match(/<a14:m>/g)).toHaveLength(6)
+    expect(raisedSlide).not.toContain('<p:pic>')
+    const aligned = parts.get('ppt/slides/slide6.xml')?.toString() ?? ''
+    expect(aligned).toContain('>(W)</m:t>')
+    expect(aligned).toContain('>(R)</m:t>')
+    expect(aligned).toContain('<m:f>')
+    expect(aligned.match(/<p:pic>/g)).toHaveLength(2)
   }
   finally { await rm(root, { recursive: true, force: true }) }
 }, 45_000)

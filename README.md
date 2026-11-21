@@ -76,6 +76,10 @@ become Office Math objects with picture alternatives. Supported AMS alignment
 and gather environments export as equation arrays with separate editable tags
 and per-row click dimming. Custom row gaps use separately positioned editable
 cells. Single equation tags also support bold text and embedded math.
+Fixed-width `\makebox` content, `\mathmakebox` with `\dimexpr` widths, and
+`\raisebox` content can export as editable equations positioned where they
+appear in the math line. Rotated boxes, stretched text, and boxes nested in
+fractions or scripts use pictures.
 Other formulas, diagrams, and browser artwork are embedded as pictures.
 Eligible deck-local PNG and JPEG images retain their source bytes and
 slide-edge crops. Browser capture preserves effects like image opacity and

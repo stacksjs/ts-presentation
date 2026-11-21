@@ -79,9 +79,13 @@ export function collectSnapshot(options: {
   const styles: RawStyle[] = []
   const styleIndex = new Map<string, number>()
 
-  const positionedMath = '[data-math-smash-operator], [data-math-cramped-lap]'
+  const overlappingMath = '[data-math-smash-operator], [data-math-cramped-lap]'
+  const measuredMathBox = 'mpadded:is([data-math-transform-box="make"], [data-math-transform-box="raise"])'
+  const raisedMathBox = 'mtext.math-raised-box'
+  const positionedMath = `${overlappingMath}, ${measuredMathBox}, ${raisedMathBox}`
+  const raisedMathBody = ':scope > span > span > math > mrow'
   function positionedMathInk(element: Element): Element | undefined {
-    if (!element.matches(positionedMath)) return
+    if (!element.matches(overlappingMath)) return
     const ink = element.hasAttribute('data-math-cramped-lap')
       ? element.firstElementChild : element.lastElementChild?.firstElementChild
     if (ink && /^math-overlap-[lcr]$/.test(ink.getAttribute('class') ?? '') && ink.children.length === 1) return ink
@@ -95,6 +99,13 @@ export function collectSnapshot(options: {
       if (element.localName === 'mtext' && element.getAttribute('class') === 'math-equation-reference') {
         const expression = element.querySelector(':scope > a[data-slide-link] > math > mrow')
         return expression ? read(expression, depth + 1) : undefined
+      }
+      if (element.matches(raisedMathBox)) {
+        const body = element.querySelector(raisedMathBody)
+        const expression = body && read(body, depth + 1)
+        // Keep the wrapper so Office Math declines a raise nested inside a
+        // fraction or script where the browser's coordinates cannot be used.
+        return expression ? { name: 'mtext', attributes: { class: 'math-raised-box' }, text: '', children: [expression] } : undefined
       }
       // Ignore annotations at the root by capturing its presentation child.
       const attributes = Object.fromEntries(Array.from(element.attributes)
@@ -432,12 +443,34 @@ export function collectSnapshot(options: {
         add(pieces.map(piece => piece.element.getBoundingClientRect()), content, pieces[0].element)
         pieces = []
       }
-      function visit(node: Element, data: RawMathElement): void {
+      function positionedContent(node: Element, data: RawMathElement) {
         const ink = positionedMathInk(node)
-        if (ink && data.children.length === 1) {
+        if (ink && data.children.length === 1) return { element: ink, expression: data.children[0] }
+        if (node.matches(measuredMathBox)) {
+          const element = node.querySelector(':scope > mrow > mrow[data-math-box-ink]')
+          const expression = data.children[0]?.children[0]
+          // Justified text uses CSS word spacing that an equation run cannot reproduce.
+          if (element && expression && !element.hasAttribute('data-extra-space')) {
+            const { 'data-math-box-ink': marker, style, ...attributes } = expression.attributes
+            if (marker === '' && /^transform-origin:left;transform:translate[XY]\(-?[\d.]+px\)$/.test(style ?? ''))
+              return { element, expression: { ...expression, attributes } }
+          }
+          return
+        }
+        const raised = node.matches(raisedMathBox) ? node
+          : node.localName === 'mpadded' && node.children.length === 1 && node.firstElementChild?.matches(raisedMathBox)
+            ? node.firstElementChild : undefined
+        if (!raised) return
+        const element = raised.querySelector(raisedMathBody)
+        const raw = raised === node ? data : data.children[0]
+        if (element && raw.children.length === 1) return { element, expression: raw.children[0] }
+      }
+      function visit(node: Element, data: RawMathElement): void {
+        const content = positionedContent(node, data)
+        if (content) {
           flush()
           split = true
-          add([ink.getBoundingClientRect()], data.children[0], ink)
+          add([content.element.getBoundingClientRect()], content.expression, content.element)
         }
         else if (node.localName === 'mrow' && !data.text.trim() && !Object.keys(data.attributes).length && node.querySelector(positionedMath)) {
           for (const [index, child] of Array.from(node.children).entries()) visit(child, data.children[index])
