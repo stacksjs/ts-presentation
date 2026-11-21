@@ -226,7 +226,24 @@ function fitEmpheq(element: HTMLElement): void {
     factor: Number(fence.getAttribute('data-empheq-factor') ?? 950) / 1000,
     shortfall: Number.parseFloat(getComputedStyle(fence).getPropertyValue('--empheq-shortfall')) || 0,
   }))
-  function stretch(bounds: NonNullable<ReturnType<typeof body>>): void {
+  const probe = element.querySelector(':scope > [data-empheq-axis] > mrow')
+  const measuredBoxes = [left, right].flatMap(side => side?.querySelector('[data-empheq-measure]')
+    ? Array.from(side.querySelectorAll(`mpadded[${transformBox}]`)).reverse() : [])
+  const tags = measuredBoxes.length ? table.querySelectorAll(':scope > mtr > .math-equation-number > :first-child') : []
+  function fitSides(bounds: NonNullable<ReturnType<typeof body>>): void {
+    if (probe && measuredBoxes.length) {
+      const [axis, baseline] = probe.children
+      const axisBox = axis.getBoundingClientRect()
+      const reference = baseline.getBoundingClientRect().top
+      const half = (bounds.bottom - bounds.y) / 2 + innerInset
+      const axisHeight = Math.max(0, Math.min(half, (reference - (axisBox.top + axisBox.bottom) / 2) / yScale))
+      const tagWidth = Math.max(0, ...Array.from(tags, tag => tag.getBoundingClientRect().width / xScale))
+      assign(element, '--empheq-displaywidth', bounds.right - bounds.x)
+      assign(element, '--empheq-displayheight', half + axisHeight)
+      assign(element, '--empheq-displaydepth', half - axisHeight)
+      assign(element, '--empheq-tagwidth', tagWidth)
+      for (const box of measuredBoxes) fitTransformedBox(box)
+    }
     for (const { fence, phantom, pad, factor, shortfall } of fences) {
       const naturalHeight = bounds.bottom - bounds.y + 2 * pad
       const target = Math.max(0, naturalHeight * factor, naturalHeight - shortfall)
@@ -242,11 +259,15 @@ function fitEmpheq(element: HTMLElement): void {
   reserve()
   let bounds = body()
   if (!bounds) return
-  stretch(bounds)
+  fitSides(bounds)
   reserve()
   if (table.hasAttribute('data-equation-tags')) fitTable(table)
   bounds = body() ?? bounds
-  stretch(bounds)
+  fitSides(bounds)
+  if (measuredBoxes.length) {
+    reserve()
+    bounds = body() ?? bounds
+  }
 
   const framed = (box: HTMLElement, rect: typeof bounds, pad: number) => {
     assign(box, 'left', rect.x - pad)

@@ -1613,6 +1613,23 @@ ${display}
   expect(() => math(String.raw`\EmphEqdelimitershortfall={2fr}` + display, true)).toThrow('Invalid math dimension')
 })
 
+test('resolves Empheq register expressions only in custom side decorations', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const source = String.raw`\begin{empheq}[
+  left={\resizebox*{.25\EmphEqdisplaywidth}{\EmphEqdisplayheight + \EmphEqdisplaydepth}{Label}},
+  right={\rotatebox[x=\EmphEqtagwidth - 1pt,y=-\EmphEqdisplaydepth]{90}{Marker}}
+]{align}
+a&=b\\
+c&=d
+\end{empheq}`
+  const html = math(source, true).split('<annotation')[0]
+  expect(html).toContain('data-empheq-measure style="--math-box-width:calc((var(--empheq-displaywidth) * 0.25));--math-box-height:calc(var(--empheq-displayheight) + var(--empheq-displaydepth))"')
+  expect(html).toContain('data-empheq-measure style="--math-box-width:calc(var(--empheq-tagwidth) - 1pt);--math-box-height:calc((-1 * var(--empheq-displaydepth)))"')
+  expect(html.match(/data-empheq-axis/g)).toHaveLength(1)
+  expect(() => math(String.raw`\resizebox*{!}{\EmphEqdisplayheight}{Label}`, false)).toThrow('Empheq display lengths require a side decoration')
+  expect(() => math(source.replace('+ \\EmphEqdisplaydepth', '+ malformed'), true)).toThrow('Invalid Empheq length expression')
+})
+
 test('selects the last empheq outer frame option and requires flush-left math for margin frames', () => {
   const math = createMathRenderer({ throwOnError: true, fleqn: true })
   const display = (options: string) => String.raw`\begin{empheq}[${options}]{equation*}x=1\end{empheq}`

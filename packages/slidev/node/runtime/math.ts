@@ -979,6 +979,8 @@ const mathtoolsSpacingOptions = new Set([
 const arrowBetweenLines = '\\ArrowBetweenLines'
 const emphasisEnvironments = /^(?:(?:equation|align|alignat|flalign|gather|multline)\*?)$/
 const emphasisEdges = ' data-empheq-start data-empheq-end'
+const measureEmpheqLength = /\\EmphEq(?:display(?:width|height|depth)|tagwidth)(?![A-Za-z@])/
+const emphasisAxisProbe = '<math xmlns="http://www.w3.org/1998/Math/MathML" data-empheq-axis aria-hidden="true"><mrow><mtable><mtr><mtd><mspace width="0" height="0" depth="0"/></mtd></mtr></mtable><mspace width="0" height="0" depth="0"/></mrow></math>'
 const emphasisFactorCommand = '\\EmphEqdelimiterfactor'
 const emphasisShortfallCommand = '\\EmphEqdelimitershortfall'
 const swapAboveDisplaySkip = '\\SwapAboveDisplaySkip'
@@ -1919,6 +1921,24 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return value
   }
 
+  function empheqLength(raw: string): string | undefined {
+    if (!measureEmpheqLength.test(raw)) return
+    if (!emphasisSide) throw new MathParseError('Empheq display lengths require a side decoration')
+    const term = /\s*([+-]?)\s*(?:(\d+(?:\.\d*)?|\.\d+)?\s*\\EmphEq(displaywidth|displayheight|displaydepth|tagwidth)|((?:\d+(?:\.\d*)?|\.\d+)(?:\s*[a-z]{2})?))/y
+    const parts: string[] = []
+    while (term.lastIndex < raw.length) {
+      const match = term.exec(raw)
+      if (!match || (parts.length && !match[1])) throw new MathParseError('Invalid Empheq length expression')
+      const [, sign, coefficient, register, literal] = match
+      const factor = Number(coefficient ?? 1)
+      const value = register ? `var(--empheq-${register})` : dimension(literal)
+      if (!value || !Number.isFinite(factor)) throw new MathParseError('Invalid Empheq length expression')
+      const magnitude = factor === 1 ? value : `(${value} * ${factor})`
+      parts.push(parts.length ? ` ${sign} ${magnitude}` : sign === '-' ? `(-1 * ${magnitude})` : magnitude)
+    }
+    return `calc(${parts.join('')})`
+  }
+
   function graphicsLength(raw: string, axis: 'width' | 'height', lengths: Map<string, string>): string {
     const reference = /^([+-]?(?:\d+(?:\.\d*)?|\.\d+)?)\s*\\(width|height|depth|totalheight)$/.exec(raw)
     if (reference) {
@@ -1927,7 +1947,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       if (!Number.isFinite(multiplier)) throw new MathParseError('Invalid math box dimension')
       return `${reference[2]}:${multiplier}`
     }
-    const length = dimension(raw)
+    const length = empheqLength(raw) ?? dimension(raw)
     if (length === undefined) throw new MathParseError('Invalid math box dimension')
     lengths.set(axis, length)
     return 'length'
@@ -1935,11 +1955,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
 
   function transformedBox(content: Markup, kind: string, horizontal: string, vertical: string, lengths: Map<string, string>, angle?: number): Markup {
     const style = lengths.size ? ` style="${[...lengths].map(([axis, length]) => `--math-box-${axis}:${length}`).join(';')}"` : ''
+    const measured = style.includes('var(--empheq-') ? ' data-empheq-measure' : ''
     const rotation = angle === undefined ? '' : ` data-angle="${angle}"`
     const anchor = '<mspace width="0" height="0" depth="0" aria-hidden="true"/>'
     const inline = '<mspace class="math-box-axis-x" width="0" height="0" depth="0" aria-hidden="true"/>'
     const block = '<mspace class="math-box-axis-y" width="0" height="0" depth="0" aria-hidden="true"/>'
-    return xml`<mpadded data-math-transform-box="${kind}" data-width="${horizontal}" data-height="${vertical}"${rotation}${style}><mrow><mrow>${content}</mrow>${anchor}${inline}${block}</mrow></mpadded>`
+    return xml`<mpadded data-math-transform-box="${kind}" data-width="${horizontal}" data-height="${vertical}"${rotation}${measured}${style}><mrow><mrow>${content}</mrow>${anchor}${inline}${block}</mrow></mpadded>`
   }
 
   function scaledBox(name: 'scalebox' | 'resizebox'): Markup {
@@ -3469,13 +3490,14 @@ export function renderMath(source: string, display = false, configured: MathMacr
         }
       }
       const decorations = box(margin ? 'marginbox' : 'box', 'outer') + box('innerbox', 'inner') + adornment('left') + adornment('right')
+      const probe = decorations.includes(' data-empheq-measure') ? emphasisAxisProbe : ''
       const single = environment === 'equation' || environment === 'equation*'
       emphasizedDisplay = decorations ? (single ? 'equation' : 'alignment') : undefined
       depth++
       try {
         const content = renderMarkup(matrix(environment, 'empheq', pairs), 0)
         const formula = formulaMarkup(`<mrow>${content}</mrow>`, tex())
-        return decorations ? `<div class="math-empheq"${margin ? ' data-empheq-marginbox' : ''}>${decorations}${formula}</div>` : formula
+        return decorations ? `<div class="math-empheq"${margin ? ' data-empheq-marginbox' : ''}>${decorations}${probe}${formula}</div>` : formula
       }
       finally {
         depth--

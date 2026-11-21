@@ -801,7 +801,8 @@ v-switch { display: block; }
 .math-empheq [data-empheq-start] { margin-inline-start: var(--empheq-inline-start, 0px); }
 .math-empheq [data-empheq-end] { margin-inline-end: var(--empheq-inline-end, 0px); }
 .math-empheq .math-display-grid > mtr[data-equation-intertext] > mtd { grid-column: 2 / -2; }
-.math-empheq-box, .math-empheq-side { position: absolute; visibility: hidden; }
+.math-empheq-box, .math-empheq-side, [data-empheq-axis] { position: absolute; visibility: hidden; }
+[data-empheq-axis] { pointer-events: none; }
 .math-empheq-box {
   box-sizing: border-box;
   pointer-events: none;

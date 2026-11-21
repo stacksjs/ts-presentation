@@ -487,7 +487,20 @@ $$ {1|2|all}
 X&=\frac{1}{2}\label{a}\\
 Y&=\frac{3}{4}\label{b}
 \end{empheq}
-$$`)
+$$
+
+---
+
+# Measured decorations
+
+\begin{empheq}[
+  innerbox=\fbox,
+  left={\resizebox*{.25\EmphEqdisplaywidth}{\EmphEqdisplayheight+\EmphEqdisplaydepth}{L}},
+  right={\resizebox{\EmphEqtagwidth+4px}{.5\EmphEqdisplayheight}{R}}
+]{align}
+X&=\frac{1}{2}\tag{A}\\
+Y&=\frac{3}{4}\tag{Longer}
+\end{empheq}`)
     const cli = fileURLToPath(new URL('../../cli.ts', import.meta.url))
     const build = Bun.spawn([process.execPath, cli, 'build', entry], { stderr: 'pipe', stdout: 'ignore', timeout: 20_000 })
     const [status, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()])
@@ -560,15 +573,61 @@ $$`)
       expect(layout.delimiters[1].ink).toBeGreaterThan(layout.bodyHeight)
       expect(layout.border).toBe('rgb(0, 0, 255)')
       expect(layout.fill).toBe('rgb(0, 0, 128)')
+
+      await view.evaluate('window.presentationNavigation.go(3)')
+      const measureDecorations = () => view.evaluate<{
+        heights: number[], frameHeight: number, bodyWidth: number, tagWidth: number, boxes: number[][]
+      }>(`(async () => {
+        await new Promise(requestAnimationFrame)
+        const group = document.querySelector('#stage > article:not([hidden]) .math-empheq')
+        const style = getComputedStyle(group)
+        const bounds = group.getBoundingClientRect()
+        const xScale = bounds.width / parseFloat(style.width)
+        const yScale = bounds.height / parseFloat(style.height)
+        const grid = group.querySelector('.math-display-grid')
+        const cells = [...grid.querySelectorAll('mtr > mtd:not(.math-equation-number, [aria-hidden])')]
+          .map(cell => cell.getBoundingClientRect()).filter(cell => cell.width && cell.height)
+        const tags = [...grid.querySelectorAll('.math-equation-number > :first-child')]
+        return {
+          heights: ['height', 'depth'].map(axis => parseFloat(style.getPropertyValue('--empheq-display' + axis))),
+          frameHeight: group.querySelector('[data-empheq-box="inner"]').getBoundingClientRect().height / yScale,
+          bodyWidth: (Math.max(...cells.map(cell => cell.right)) - Math.min(...cells.map(cell => cell.left))) / xScale,
+          tagWidth: Math.max(...tags.map(tag => tag.getBoundingClientRect().width)) / xScale,
+          boxes: [...group.querySelectorAll('[data-empheq-measure]')].map(box =>
+            ['width', 'height', 'depth'].map(name => parseFloat(box.getAttribute(name)))),
+        }
+      })()`)
+      const verifyDecorations = (measured: Awaited<ReturnType<typeof measureDecorations>>) => {
+        const [height, depth] = measured.heights
+        const [[leftWidth, leftHeight, leftDepth], [rightWidth, rightHeight]] = measured.boxes
+        expect(height).toBeGreaterThan(depth)
+        expect(height + depth).toBeCloseTo(measured.frameHeight, 1)
+        expect(leftHeight + leftDepth).toBeCloseTo(measured.frameHeight, 1)
+        expect(leftWidth).toBeCloseTo(measured.bodyWidth * 0.25, 1)
+        expect(rightWidth).toBeCloseTo(measured.tagWidth + 4, 1)
+        expect(rightHeight).toBeCloseTo(height * 0.5, 1)
+      }
+      const measured = await measureDecorations()
+      verifyDecorations(measured)
+      await view.evaluate(`(async () => {
+        const group = document.querySelector('#stage > article:not([hidden]) .math-empheq')
+        const initial = group.style.getPropertyValue('--empheq-displayheight')
+        group.style.fontSize = '34px'
+        for (let attempts = 0; attempts < 40 && group.style.getPropertyValue('--empheq-displayheight') === initial; attempts++)
+          await new Promise(requestAnimationFrame)
+      })()`)
+      const resized = await measureDecorations()
+      expect(resized.frameHeight).toBeGreaterThan(measured.frameHeight)
+      verifyDecorations(resized)
     }
     finally {
       view.close()
       await server.stop(true)
     }
     const frames: PowerPointFrame[] = []
-    await captureFrames({ root: dist, executable: chrome!, scale: 1, canvas, range: '2', editable: true, withClicks: true }, frame => { frames.push(frame) })
-    expect(frames.map(frame => frame.position?.click)).toEqual([0, 1, 2])
-    for (const [step, frame] of frames.entries()) {
+    await captureFrames({ root: dist, executable: chrome!, scale: 1, canvas, range: '2,3', editable: true, withClicks: true }, frame => { frames.push(frame) })
+    expect(frames.map(frame => [frame.position?.slide, frame.position?.click])).toEqual([[2, 0], [2, 1], [2, 2], [3, 0]])
+    for (const [step, frame] of frames.slice(0, 3).entries()) {
       const equation = frame.editable?.nodes.flatMap(node => node.kind === 'raster' && node.equation?.tags ? [node.equation] : [])[0]
       expect(equation).toBeDefined()
       expect(equation?.tags?.map(tag => tag.expression.match(/\(\d+\)/)?.[0])).toEqual(['(1)', '(2)'])
@@ -581,6 +640,10 @@ $$`)
     expect(slide).toContain('val="000080"')
     expect(slide).toContain('val="0000FF"')
     expect(slide).toContain('<p:pic>')
+    const decorations = parts.get('ppt/slides/slide4.xml')?.toString() ?? ''
+    expect(decorations.match(/<p:pic>/g)).toHaveLength(2)
+    expect(decorations.match(/name="Equation tag"/g)).toHaveLength(2)
+    expect(decorations.match(/<m:f>/g)).toHaveLength(2)
   }
   finally {
     await rm(root, { recursive: true, force: true })
