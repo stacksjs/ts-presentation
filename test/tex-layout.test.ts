@@ -429,6 +429,78 @@ test('compares inhibited active characters and expands protected operands while 
   expect(math(source, false)).toContain('<mi>A</mi><mi>B</mi><mi>C</mi><mi>D</mi><mi>E</mi>')
 })
 
+test('builds callable TeX control sequences from expanded names', () => {
+  const math = createMathRenderer({
+    throwOnError: true,
+    macros: {
+      '\\label:9': 'L',
+      '\\relay': context => {
+        const token = context.popToken()
+        expect(token).toEqual({ text: '\\score:2', constructedName: true })
+        return { tokens: [token], numArgs: 0 }
+      },
+    },
+  })
+  const source = String.raw`
+    \def\part{score}
+    \expandafter\def\csname\part:\number\numexpr1+1\relax\endcsname#1{#1^2}
+    \expandafter\let\expandafter\alias\csname score:2\endcsname
+    \expandafter\newcommand\csname section-3\endcsname{y}
+    \def\tilde{\string~}
+    \expandafter\def\csname{} []\tilde\endcsname{B}
+    \edef\saved{\csname score:2\endcsname{x}}
+    \saved+\alias{z}+\csname section-3\endcsname+\csname{} []\string~\endcsname
+    +\csname\csname part\endcsname:2\endcsname{w}
+    +\expandafter\relay\csname score:2\endcsname{r}
+    +\csname label:9\endcsname
+    +\text{\expandafter\string\csname score:2\endcsname}
+  `
+  const html = math(source, false).split('<annotation')[0]
+  expect(html).toContain('<msup><mi>x</mi>')
+  expect(html).toContain('<msup><mi>z</mi>')
+  expect(html).toContain('<mi>y</mi>')
+  expect(html).toContain('<mi>B</mi>')
+  expect(html).toContain('<msup><mi>w</mi>')
+  expect(html).toContain('<msup><mi>r</mi>')
+  expect(html).toContain('<mi>L</mi>')
+  expect(html).toContain('<mtext>\\score:2</mtext>')
+})
+
+test('checks dynamic TeX names without creating them and scopes implicit relax assignments', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const source = String.raw`
+    \let\finish=\endcsname
+    \def\suffix{temp}
+    \let\temp=\missing
+    \ifcsname\suffix\finish\fail\else A\fi
+    \ifdefined\temp\fail\else B\fi
+    {
+      \csname\suffix\finish
+      \ifcsname\suffix\finish C\else\fail\fi
+      \expandafter\ifx\csname\suffix\finish\relax D\else\fail\fi
+    }
+    \unless\ifcsname\suffix\finish E\else\fail\fi
+    \ifcsname\iftrue alpha\else\missing\fi\finish F\else\fail\fi
+    \iffalse\ifcsname\missing\endcsname\fail\fi\else G\fi
+  `
+  expect(math(source, false)).toContain('<mi>A</mi><mi>B</mi><mrow><mi>C</mi><mi>D</mi></mrow><mi>E</mi><mi>F</mi><mi>G</mi>')
+  expect(() => math(String.raw`\csname missing`, false)).toThrow('Missing \\endcsname')
+  expect(() => math(String.raw`\ifcsname\relax\endcsname A\fi`, false)).toThrow('Expected characters before \\endcsname')
+})
+
+test('preserves a constructed TeX command and its subsequent whitespace in an eager definition', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const source = String.raw`
+    \protected\def\displayWord{Hello}
+    \def\spaceToken{ }
+    \edef\copy{\csname displayWord\endcsname\spaceToken world}
+    \expandafter\def\csname\endcsname{X}
+    \csname\endcsname+\text{\copy}
+  `
+  expect(math(source, false)).toContain('<mi>X</mi>')
+  expect(math(source, false)).toContain('<mtext>Hello world</mtext>')
+})
+
 test('preserves macro flags and character categories in TeX meaning tests', () => {
   let calls = 0
   const same = () => { calls++; return 'unused' }

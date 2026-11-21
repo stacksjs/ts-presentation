@@ -160,6 +160,10 @@ speaker notes. Each hook can be asynchronous.
   as `x`, such as another letter.
 - Use `\ifx\first\second ... \else ... \fi` to compare two tokens
   without expanding them. A `\let` alias keeps the meaning it captured.
+- Use `\expandafter\def\csname score:2\endcsname{...}` to define a command
+  with a name built from expanded tokens. Invoke it with
+  `\csname score:2\endcsname` or test for it with
+  `\ifcsname score:2\endcsname ... \else ... \fi`.
 - Put ranges after a display opener, as in `$$ {hide|1|2|all}`. Each
   additional range uses one click. Add `{at: 3, startLine: 2, finally: 'all'}`
   after the ranges to control click and line numbering and the final state.
