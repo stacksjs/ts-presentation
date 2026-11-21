@@ -8,7 +8,7 @@ import { MathParseError } from './math-error.ts'
 import { chemicalFormula, physicalUnits } from './math-chemistry.ts'
 import type { Markup, MathStyle } from './math-markup.ts'
 import { fractionStyle, joinMarkup, renderMarkup, scriptStyle, xml } from './math-markup.ts'
-import { fractionRule, mathBoxDimensionExpression, mathDimension, mathInteger, nullDelimiterWidth } from './math-sizing.ts'
+import { fractionRule, mathBoxDimensionExpression, mathDimension, mathInteger, mathScaledDimension, nullDelimiterWidth } from './math-sizing.ts'
 import { resolveRowClasses, rowSpacing } from './math-spacing.ts'
 import type { MathClass } from './math-spacing.ts'
 import { isCenteredGlyph, isColonRelationCommand, mathSymbol, textSymbol, unicodeColonRelation } from './math-symbols.ts'
@@ -316,14 +316,14 @@ function tokenize(source: string, onTrailingComment?: () => void): string[] {
 }
 
 type MathMode = 'math' | 'text'
-const conditionalTests = ['\\iftrue', '\\iffalse', '\\ifmmode', '\\ifdefined', '\\ifcsname', '\\if', '\\ifcat', '\\ifx', '\\ifnum', '\\ifodd', '\\ifcase'] as const
+const conditionalTests = ['\\iftrue', '\\iffalse', '\\ifmmode', '\\ifdefined', '\\ifcsname', '\\if', '\\ifcat', '\\ifx', '\\ifnum', '\\ifdim', '\\ifodd', '\\ifcase'] as const
 const conditionalDelimiters = ['\\or', '\\else', '\\fi'] as const
 type ConditionalTest = typeof conditionalTests[number]
 type ConditionalDelimiter = typeof conditionalDelimiters[number]
 type ConditionalBranch = 'boolean' | 'case' | 'else'
 const conditionalTestNames = new Set<string>(conditionalTests)
 const conditionalDelimiterNames = new Set<string>(conditionalDelimiters)
-const otherTeXConditional = /^\\if(?:dim|vmode|hmode|inner|void|hbox|vbox|eof|fontchar)$/
+const otherTeXConditional = /^\\if(?:vmode|hmode|inner|void|hbox|vbox|eof|fontchar)$/
 const characterCategories: Readonly<Record<string, string>> = {
   '{': 'begin-group',
   '}': 'end-group',
@@ -1047,7 +1047,7 @@ const mathModeFunctions = new Set([
 ])
 const sharedFunctions = new Set([
   ...Object.keys(textFonts), ...typesettingNames, ...textBoxes, ...verticalBoxCommands, ...spacingCommands,
-  'begingroup', 'endgroup', 'endcsname', 'relax', 'newline', 'cr', 'color', 'textcolor', 'verb',
+  'begingroup', 'endgroup', 'endcsname', 'relax', 'dimexpr', 'newline', 'cr', 'color', 'textcolor', 'verb',
   'sout', 'underline', 'underbar', 'textcircled', 'llap', 'clap', 'rlap', '@char',
   'tag', 'raisetag', 'label', 'ref', 'eqref', 'refeq', 'noeqref', 'notag', 'nonumber', 'nobreak', 'hline', 'hdashline',
 ])
@@ -1459,7 +1459,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return command !== undefined && conditionalDelimiterNames.has(command)
   }
 
-  function integerScanner(eager: boolean, conditionalDepth = -1) {
+  function quantityScanner(eager: boolean, conditionalDepth = -1, dimension = false) {
     const peek = (skipSpace = true): string => {
       do {
         if (skipSpace) space()
@@ -1467,14 +1467,17 @@ export function renderMath(source: string, display = false, configured: MathMacr
         // An internal quantity has its own scan boundary. Its result must
         // not absorb digits after that quantity's terminating \relax.
         if (primitive === '\\numexpr' || (conditionals.length <= conditionalDepth && isConditionalDelimiter(primitive))) return primitive
-      } while (expandOnce(eager) !== false)
+      } while (expandOnce(eager, dimension) !== false)
       return tokenCharacters(tokens[cursor] ?? '')
     }
     return {
       peek,
+      consumeSpace() {
+        if (texWhitespace.test(tokenText(tokens[cursor] ?? ''))) cursor++
+      },
       advance() {
         const token = tokens[cursor++]
-        if (macroPrimitive(token) === '\\numexpr') countExpansions(1)
+        if (macroPrimitive(token) === '\\numexpr' || tokenValue(token) === '\\dimexpr') countExpansions(1)
         if (controlWord.test(unwrappedToken(token))) space()
       },
       characterCode() {
@@ -1487,7 +1490,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   }
 
   function expandInteger(expression: boolean, eager: boolean): string[] {
-    const value = mathInteger(integerScanner(eager), expression)
+    const value = mathInteger(quantityScanner(eager), expression)
     return Array.from(String(value), character => literalToken + character)
   }
 
@@ -1621,19 +1624,21 @@ export function renderMath(source: string, display = false, configured: MathMacr
         const right = conditionalTokenMeaning(readRawExpansionToken(test))
         return sameMacroMeaning(left, right)
       }
-      const scanner = integerScanner(eager, conditionals.length)
-      const left = mathInteger(scanner, false)
+      const dimension = test === '\\ifdim'
+      const scanner = quantityScanner(eager, conditionals.length, dimension)
+      const quantity = dimension ? () => mathScaledDimension(scanner, fontScale) : () => mathInteger(scanner, false)
+      const left = quantity()
       if (test === '\\ifodd') return left % 2n !== 0n
       const relation = scanner.peek()
       if (relation !== '<' && relation !== '=' && relation !== '>')
-        throw new MathParseError('Expected <, =, or > in TeX integer comparison')
+        throw new MathParseError(`Expected <, =, or > in TeX ${dimension ? 'dimension' : 'integer'} comparison`)
       scanner.advance()
-      const right = mathInteger(scanner, false)
+      const right = quantity()
       return relation === '<' ? left < right : relation === '>' ? left > right : left === right
     }
 
     const cases = test === '\\ifcase'
-    let choice = cases ? mathInteger(integerScanner(eager, conditionals.length), false)
+    let choice = cases ? mathInteger(quantityScanner(eager, conditionals.length), false)
       : condition() !== invert ? 0n : -1n
     while (choice !== 0n) {
       const delimiter = skipConditionalText()

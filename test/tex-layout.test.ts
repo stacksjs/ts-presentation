@@ -365,6 +365,47 @@ test('evaluates TeX conditionals in eager definitions and through delayed expans
     .toContain('<mrow><mi>X</mi></mrow>')
 })
 
+test('compares TeX lengths in scaled points without rendering the discarded branch', () => {
+  const math = createMathRenderer({ maxSize: 0.1, throwOnError: true })
+  const source = String.raw`
+    \ifdim 12pt=1pcA\else\fail\fi
+    \ifdim .5pt=32768spB\else\fail\fi
+    \ifdim 1truein=4736286spC\else\fail\fi
+    \unless\ifdim 1in=72.27ptD\else\fail\fi
+    \ifdim --,5pc=6PTE\else\fail\fi
+    \ifdim -0.5pt>-.4pt\fail\else F\fi
+    \ifdim 1.75sp=1spG\else\fail\fi
+    \iffalse\ifdim\missing=1pt\fail\fi\else H\fi
+  `
+  expect(math(source, false)).toContain('<mi>A</mi><mi>B</mi><mi>C</mi><mi>D</mi><mi>E</mi><mi>F</mi><mi>G</mi><mi>H</mi>')
+  expect(math(String.raw`\text{\large\ifdim1em=12pt large\else\fail\fi}`, false)).toContain('<mtext>large</mtext>')
+  expect(math(String.raw`\ifdim1em=10ptA\fi`, false)).toContain('<mi>A</mi>')
+})
+
+test('evaluates nested dimension expressions and rounded integer scaling in TeX comparisons', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const source = String.raw`
+    \let\lengthExpression=\dimexpr
+    \protected\def\baseLength{2pt}
+    \edef\saved{\ifdim\lengthExpression(\baseLength+6pt)*3/2\relax=1pcA\else\fail\fi}
+    \def\baseLength{99pt}
+    \saved
+    \ifdim\dimexpr\dimexpr2pt+1pt\relax*\numexpr2+1\relax\relax=9ptB\else\fail\fi
+    \ifdim\dimexpr-3sp/2\relax=-2spC\else\fail\fi
+    \ifdim\dimexpr600000000sp*3/2\relax=900000000spD\else\fail\fi
+    \ifdim\numexpr2+3\relax pt=5ptE\else\fail\fi
+    \let\compare=\ifdim
+    \compare 2pt<\dimexpr 1pt+2pt\relax F\else\fail\fi
+  `
+  expect(math(source, false)).toContain('<mi>A</mi><mi>B</mi><mi>C</mi><mi>D</mi><mi>E</mi><mi>F</mi>')
+  expect(() => math(String.raw`\ifdim2pt\relax1pt A\fi`, false)).toThrow('Expected <, =, or > in TeX dimension comparison')
+  expect(() => math(String.raw`\ifdim2mu=1pt A\fi`, false)).toThrow('Invalid TeX dimension unit: mu')
+  expect(() => math(String.raw`\ifdim2=1pt A\fi`, false)).toThrow('Expected a unit in TeX dimension')
+  expect(() => math(String.raw`\ifdim\dimexpr2pt/(1-1)\relax=1pt A\fi`, false)).toThrow('Division by zero in TeX dimension expression')
+  expect(() => math(String.raw`\ifdim\dimexpr(2pt+1pt\relax=1pt A\fi`, false)).toThrow('Missing closing parenthesis in TeX dimension expression')
+  expect(() => math(String.raw`\ifdim\dimexpr16383pt+1pt\relax=1pt A\fi`, false)).toThrow('TeX dimension overflow')
+})
+
 test('compares TeX token meanings before expanding either operand', () => {
   const math = createMathRenderer({ throwOnError: true })
   const source = String.raw`

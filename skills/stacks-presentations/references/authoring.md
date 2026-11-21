@@ -155,6 +155,8 @@ speaker notes. Each hook can be asynchronous.
 - Use `\ifmmode ... \else ... \fi` to select math or text content.
   `\ifdefined\myMacro ... \fi` checks for a command before using it.
   `\ifcase` selects a zero-based branch separated by `\or`.
+- Use `\ifdim\dimexpr(2pt+6pt)*3/2\relax=1pc ... \else ... \fi` to
+  compare lengths with TeX scaled-point arithmetic.
 - Use `\if\myMacro x ... \else ... \fi` to compare expanded character
   codes. Use `\ifcat\myMacro x ... \fi` to check for the same TeX category
   as `x`, such as another letter.

@@ -1,36 +1,54 @@
 import { MathParseError } from './math-error.ts'
 
-// TeX absolute units in points at a 10 pt text size. See KaTeX src/units.ts (MIT).
-const pointsPerUnit: Readonly<Record<string, number>> = {
-  pt: 1, bp: 803 / 800, px: 803 / 800, pc: 12,
-  mm: 7227 / 2540, cm: 7227 / 254, in: 72.27,
-  dd: 1238 / 1157, cc: 14856 / 1157, nd: 685 / 642, nc: 1370 / 107, sp: 1 / 65536,
+// TeX absolute units in points. The px and New Didot ratios follow KaTeX
+// src/units.ts (MIT).
+const pointRatios: Readonly<Record<string, readonly [number, number]>> = {
+  pt: [1, 1], bp: [803, 800], px: [803, 800], pc: [12, 1],
+  mm: [7227, 2540], cm: [7227, 254], in: [7227, 100],
+  dd: [1238, 1157], cc: [14856, 1157], nd: [685, 642], nc: [1370, 107], sp: [1, 65536],
 }
+const pointsPerUnit = Object.fromEntries(Object.entries(pointRatios).map(([unit, [numerator, denominator]]) => [unit, numerator / denominator]))
 
 const nativeUnits = new Set(['px', 'em', 'ex', 'pt', 'cm', 'mm', 'in', 'pc'])
 const dimensionPattern = /^([+-]?)\s*(\d+(?:\.\d*)?|\.\d+)\s*(px|em|ex|pt|bp|cm|mm|in|mu|pc|dd|cc|nd|nc|sp)?$/
 
 export const nullDelimiterWidth = '0.12em'
 
-interface IntegerTokens {
+interface QuantityTokens {
   peek: (skipSpace?: boolean) => string
   advance: () => void
   characterCode: () => number
+  consumeSpace: () => void
 }
 
 const texIntegerLimit = 2_147_483_647n
+const texDimensionLimit = 1_073_741_823n
+const scaledPoint = 65_536n
+const decimalDigit = /^\d$/
+const quantitySpace = /^[ \t\r\n]+$/
+type QuantityKind = 'integer' | 'dimension'
 
 /** Read a signed TeX integer, optionally using e-TeX expression arithmetic. */
-export function mathInteger(tokens: IntegerTokens, expression: boolean): bigint {
+export function mathInteger(tokens: QuantityTokens, expression: boolean): bigint {
+  return mathQuantity(tokens, 'integer', expression)
+}
+
+/** Read a TeX length as scaled points, including quantities such as \dimexpr. */
+export function mathScaledDimension(tokens: QuantityTokens, fontScale: number): bigint {
+  return mathQuantity(tokens, 'dimension', false, fontScale)
+}
+
+function mathQuantity(tokens: QuantityTokens, kind: QuantityKind, expression: boolean, fontScale = 1): bigint {
   const { peek, advance, characterCode } = tokens
 
-  function checked(value: bigint): bigint {
-    if (value < -texIntegerLimit || value > texIntegerLimit) throw new MathParseError('TeX integer overflow')
+  function checked(value: bigint, type: QuantityKind): bigint {
+    const limit = type === 'integer' ? texIntegerLimit : texDimensionLimit
+    if (value < -limit || value > limit) throw new MathParseError(`TeX ${type} overflow`)
     return value
   }
 
-  function divide(left: bigint, right: bigint): bigint {
-    if (right === 0n) throw new MathParseError('Division by zero in TeX integer expression')
+  function divide(left: bigint, right: bigint, type: QuantityKind): bigint {
+    if (right === 0n) throw new MathParseError(`Division by zero in TeX ${type} expression`)
     const quotient = left / right
     const remainder = left % right
     const magnitude = remainder < 0n ? -remainder : remainder
@@ -39,8 +57,77 @@ export function mathInteger(tokens: IntegerTokens, expression: boolean): bigint 
     return quotient + ((left < 0n) === (right < 0n) ? 1n : -1n)
   }
 
-  function quantity(depth: number, allowGroup: boolean): bigint {
-    if (depth > 100) throw new MathParseError('TeX integer expressions are nested too deeply')
+  function integerLiteral(first: string, consumeSpace: boolean): bigint {
+    if (first === '`') {
+      advance()
+      const code = characterCode()
+      if (!Number.isInteger(code)) throw new MathParseError('Invalid TeX character constant')
+      if (consumeSpace && quantitySpace.test(peek(false))) advance()
+      return BigInt(code)
+    }
+    const radix = first === '"' ? 16 : first === "'" ? 8 : 10
+    const valid = radix === 16 ? /^[\dA-F]$/i : radix === 8 ? /^[0-7]$/ : decimalDigit
+    if (radix !== 10) advance()
+    let digit = peek(false)
+    if (!valid.test(digit)) throw new MathParseError(consumeSpace ? 'Expected a TeX integer' : 'Expected a TeX dimension')
+    const base = BigInt(radix)
+    let value = 0n
+    while (valid.test(digit)) {
+      value = checked(value * base + BigInt(Number.parseInt(digit, radix)), 'integer')
+      advance()
+      digit = peek(false)
+    }
+    if (consumeSpace && quantitySpace.test(digit)) advance()
+    return value
+  }
+
+  function readUnit(): string {
+    function letter(skipSpace: boolean): string {
+      const token = peek(skipSpace)
+      if (!/^[a-z]$/i.test(token)) throw new MathParseError('Expected a unit in TeX dimension')
+      advance()
+      return token.toLowerCase()
+    }
+    const unit = letter(true) + letter(false)
+    if (unit !== 'tr') return unit
+    // The renderer uses TeX's default magnification, so "true" units need
+    // no additional scaling.
+    if (letter(false) + letter(false) !== 'ue') throw new MathParseError('Expected a unit in TeX dimension')
+    return letter(true) + letter(false)
+  }
+
+  function dimensionLiteral(first: string, depth: number): bigint {
+    const startsFraction = first === '.' || first === ','
+    const whole = first === '\\numexpr' ? quantity('integer', depth + 1, false)
+      : startsFraction ? 0n : integerLiteral(first, false)
+    let fraction = 0n
+    if ((decimalDigit.test(first) || startsFraction) && /^[.,]$/.test(peek(false))) {
+      advance()
+      let digits = ''
+      for (let digit = peek(false); decimalDigit.test(digit); digit = peek(false)) {
+        if (digits.length < 17) digits += digit
+        advance()
+      }
+      if (digits) {
+        const base = 10n ** BigInt(digits.length)
+        fraction = (BigInt(digits) * scaledPoint + base / 2n) / base
+      }
+    }
+    const unit = readUnit()
+    tokens.consumeSpace()
+    if (unit === 'sp') return whole
+    const points = whole * scaledPoint + fraction
+    if (unit === 'em' || unit === 'ex') {
+      const size = BigInt(Math.round(toEm(1, unit) * fontScale * 10 * Number(scaledPoint)))
+      return points * size / scaledPoint
+    }
+    if (!Object.hasOwn(pointRatios, unit)) throw new MathParseError(`Invalid TeX dimension unit: ${unit}`)
+    const [numerator, denominator] = pointRatios[unit]
+    return points * BigInt(numerator) / BigInt(denominator)
+  }
+
+  function quantity(type: QuantityKind, depth: number, allowGroup: boolean): bigint {
+    if (depth > 100) throw new MathParseError(`TeX ${type} expressions are nested too deeply`)
     let sign = 1n
     let first = peek()
     while (first === '+' || first === '-') {
@@ -48,64 +135,46 @@ export function mathInteger(tokens: IntegerTokens, expression: boolean): bigint 
       advance()
       first = peek()
     }
-    if (first === '\\numexpr' || (allowGroup && first === '(')) {
+    const internal = type === 'integer' ? '\\numexpr' : '\\dimexpr'
+    const grouped = allowGroup && first === '('
+    if (grouped || first === internal) {
       advance()
-      const value = sum(depth + 1)
-      if (first === '(' && peek() !== ')') throw new MathParseError('Missing closing parenthesis in TeX integer expression')
-      if (first === '(' || peek() === '\\relax') advance()
+      const value = sum(type, depth + 1)
+      if (grouped && peek() !== ')') throw new MathParseError(`Missing closing parenthesis in TeX ${type} expression`)
+      if (grouped || peek() === '\\relax') advance()
       return sign * value
     }
-    if (first === '`') {
-      advance()
-      const code = characterCode()
-      if (!Number.isInteger(code)) throw new MathParseError('Invalid TeX character constant')
-      if (/^[ \t\r\n]+$/.test(peek(false))) advance()
-      return sign * BigInt(code)
-    }
-    const radix = first === '"' ? 16 : first === "'" ? 8 : 10
-    const valid = radix === 16 ? /^[\dA-F]$/i : radix === 8 ? /^[0-7]$/ : /^\d$/
-    if (radix !== 10) advance()
-    let digit = peek(false)
-    if (!valid.test(digit)) throw new MathParseError('Expected a TeX integer')
-    const base = BigInt(radix)
-    let value = 0n
-    while (valid.test(digit)) {
-      value = checked(value * base + BigInt(Number.parseInt(digit, radix)))
-      advance()
-      digit = peek(false)
-    }
-    if (/^[ \t\r\n]+$/.test(digit)) advance()
-    return sign * value
+    return type === 'integer' ? sign * integerLiteral(first, true) : checked(sign * dimensionLiteral(first, depth), type)
   }
 
-  function term(depth: number): bigint {
-    let value = quantity(depth, true)
+  function term(type: QuantityKind, depth: number): bigint {
+    let value = quantity(type, depth, true)
     for (let operator = peek(); operator === '*' || operator === '/'; operator = peek()) {
       advance()
-      const right = quantity(depth, true)
+      const right = quantity('integer', depth, true)
       if (operator === '*' && peek() === '/') {
         // Scale in one operation so the intermediate product can exceed
         // the integer limit when the divided result is in range.
         advance()
-        value = checked(divide(value * right, quantity(depth, true)))
+        value = checked(divide(value * right, quantity('integer', depth, true), type), type)
       }
-      else value = checked(operator === '*' ? value * right : divide(value, right))
+      else value = checked(operator === '*' ? value * right : divide(value, right, type), type)
     }
     return value
   }
 
-  function sum(depth: number): bigint {
-    let value = term(depth)
+  function sum(type: QuantityKind, depth: number): bigint {
+    let value = term(type, depth)
     for (let operator = peek(); operator === '+' || operator === '-'; operator = peek()) {
       advance()
-      const right = term(depth)
-      value = checked(operator === '+' ? value + right : value - right)
+      const right = term(type, depth)
+      value = checked(operator === '+' ? value + right : value - right, type)
     }
     return value
   }
 
-  if (!expression) return quantity(0, false)
-  const value = sum(0)
+  if (!expression) return quantity(kind, 0, false)
+  const value = sum(kind, 0)
   if (peek() === '\\relax') advance()
   return value
 }
