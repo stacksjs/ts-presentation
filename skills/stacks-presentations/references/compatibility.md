@@ -105,6 +105,7 @@ in a new ts-presentation project.
 | KaTeX math choices | `\mathchoice` selects display, text, script, and scriptscript branches with operator spacing from the enclosing row |
 | TeX math palettes | `\mathpalette\myMacro{arg}` passes the active display, text, script, or scriptscript style to a two-argument macro, followed by the supplied argument |
 | e-TeX protected expansion | `\protected` works with `\def`, `\gdef`, `\edef`, and `\xdef`, including the `\global` and `\long` prefixes. `\unexpanded{...}` preserves the token group during `\edef` or `\xdef`. The preserved tokens expand when the saved formula is rendered |
+| TeX literal tokens | `\detokenize{...}` converts a balanced group to literal characters and inserts a space after control words. `\string` converts one token. Both keep syntax characters literal during rendering and inside eager definitions |
 | KaTeX parser diagnostics | Macro declaration and scope checks, undefined commands in eager expansion, unexpected delimiters, text-mode command checks, and validation of expanded colors |
 | KaTeX error display | Invalid formulas display their TeX source with a parser tooltip. Set `math.errorColor` for the error color or `math.throwOnError: true` to report parse errors in the build log while rendering the rest of the deck |
 | KaTeX macro and color settings | Deck-scoped `globalGroup`, per-formula `maxExpand` including eager definitions, and two-argument `\color` via `colorIsTextColor` |

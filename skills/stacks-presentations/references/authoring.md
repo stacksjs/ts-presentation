@@ -146,6 +146,9 @@ speaker notes. Each hook can be asynchronous.
   `\xdef`, or `\unexpanded{...}` to defer one group of tokens. A macro
   called with `\mathpalette\myMacro{x}` receives the current math style
   as its first argument and `x` as its second.
+- Use `\detokenize{...}` to show a TeX fragment literally or
+  `\string\alpha` to show a single command name. These conversions also
+  work inside `\edef` and `\xdef`.
 - Put ranges after a display opener, as in `$$ {hide|1|2|all}`. Each
   additional range uses one click. Add `{at: 3, startLine: 2, finally: 'all'}`
   after the ranges to control click and line numbering and the final state.

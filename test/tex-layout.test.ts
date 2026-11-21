@@ -250,6 +250,41 @@ test('passes each current math style to reusable mathpalette commands', () => {
   expect(math(define + `x^{y^{${palette}}}`, false)).toContain('<mstyle displaystyle="false" scriptlevel="2">' + fraction)
 })
 
+test('converts TeX token groups and single tokens to literal characters', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const plain = (formula: string) => math(formula, false).split('<annotation')[0]
+  expect(plain(String.raw`\def\pick{X}\texttt{\detokenize{\pick   \missing{a_1}&$#1}}`))
+    .toContain(String.raw`>\pick \missing {a_1}&amp;$##1</mtext>`)
+  expect(plain(String.raw`\text{\string\alpha beta, \string_2}`))
+    .toContain(String.raw`<mtext>\alphabeta, _2</mtext>`)
+  expect(plain(String.raw`\text{\detokenize{\verb|x_1|}}`)).toContain(String.raw`<mtext>\verb |x_1|</mtext>`)
+  expect(plain(String.raw`\string{A\string}`)).toContain('<mtext>{</mtext><mi>A</mi><mtext>}</mtext>')
+  expect(plain(String.raw`A\detokenize{_x}`)).toContain('<mi>A</mi><mtext>_</mtext><mi>x</mi>')
+  expect(plain(String.raw`\detokenize{12+3}`)).toBe(plain('12+3'))
+  expect(plain(String.raw`\begin{aligned}\detokenize{&}&=x\end{aligned}`))
+    .toContain('<mtext>&amp;</mtext>')
+  expect(plain(String.raw`\def\open{{abc}}\text{\detokenize\open}`)).toContain('<mtext>abc</mtext>')
+  expect(plain(String.raw`\text{\detokenize{<b>}}`)).toContain('<mtext>&lt;b&gt;</mtext>')
+  expect(plain(String.raw`\kern\detokenize{2pt}x`)).toContain('<mspace width="2pt"/><mi>x</mi>')
+  expect(() => plain(String.raw`\detokenize x`)).toThrow('Expected a group after \\detokenize')
+  expect(() => plain(String.raw`\string`)).toThrow('Expected a token after \\string')
+})
+
+test('preserves literal TeX characters through eager definitions and macro callbacks', () => {
+  const math = createMathRenderer({
+    throwOnError: true,
+    macros: {
+      '\\copy': context => {
+        const saved = context.expandMacro('\\saved')!
+        expect(saved.some(token => token.text === '_' && token.literalCharacter)).toBe(true)
+        return { tokens: [...saved].reverse(), numArgs: 0 }
+      },
+    },
+  })
+  const source = String.raw`\edef\saved{\detokenize{\undefined _#1}}\def\undefined{wrong}\def u{Z}\text{\copy}`
+  expect(math(source, false).split('<annotation')[0]).toContain(String.raw`<mtext>\undefined _##1</mtext>`)
+})
+
 test('keeps a snapshot of the lookahead and primitive meanings when using let', () => {
   const math = createMathRenderer({ throwOnError: true })
   const clauses = math(String.raw`\def\original{A}\def\action{\def\original{B}\next}\futurelet\next\action\original`, false)

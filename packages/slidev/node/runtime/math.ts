@@ -157,6 +157,8 @@ export interface MathMacroToken {
   text: string
   noexpand?: boolean
   treatAsRelax?: boolean
+  /** One literal character from a TeX string conversion. */
+  literalCharacter?: boolean
 }
 
 export interface MathMacroExpansion {
@@ -230,7 +232,9 @@ function isConfiguredMacro(value: unknown): value is string | MathMacroExpansion
   for (const token of tokens) {
     if (!token || typeof token !== 'object' || !isMacroTokenText(token.text)
       || (token.noexpand !== undefined && typeof token.noexpand !== 'boolean')
-      || (token.treatAsRelax !== undefined && typeof token.treatAsRelax !== 'boolean')) return false
+      || (token.treatAsRelax !== undefined && typeof token.treatAsRelax !== 'boolean')
+      || (token.literalCharacter !== undefined && (typeof token.literalCharacter !== 'boolean'
+        || (token.literalCharacter && !/^[\s\S]$/u.test(token.text))))) return false
     length += token.text.length
     if (length > 8192) return false
   }
@@ -308,7 +312,7 @@ function tokenize(source: string, onTrailingComment?: () => void): string[] {
 }
 
 type MathMode = 'math' | 'text'
-const expansionPrimitives = ['\\expandafter', '\\noexpand', '\\unexpanded', '\\@firstoftwo', '\\@secondoftwo', '\\@ifnextchar', '\\@ifstar', '\\TextOrMath', '\\html@mathml', '\\message', '\\errmessage', '\\char', '\\MoveEqLeft'] as const
+const expansionPrimitives = ['\\expandafter', '\\noexpand', '\\unexpanded', '\\detokenize', '\\string', '\\@firstoftwo', '\\@secondoftwo', '\\@ifnextchar', '\\@ifstar', '\\TextOrMath', '\\html@mathml', '\\message', '\\errmessage', '\\char', '\\MoveEqLeft'] as const
 const expansionPrimitiveNames = new Set<string>(expansionPrimitives)
 const macroDeclaration = /^\\(?:[gex]?def|(?:future)?let|(?:new|renew|provide)command|DeclarePairedDelimiter(?:X(?:PP)?)?|Declare(?:Left|Right)Delimiter|MakeAboxedCommand|mathtoolsset|empheqset|EmphEqdelimiter(?:factor|shortfall)|(?:new|renew|use)tagform|fboxsep|fboxrule|setlength|newsavebox|sbox|savebox|global|long|protected)$/
 const tagFormDeclaration = /^\\(?:new|renew|use)tagform$/
@@ -316,7 +320,7 @@ const tagValueToken = '\u0000equation-tag-value'
 const definitionCommand = /^\\[gex]?def$/
 const assignmentPrefix = /^\\(?:global|long|protected)$/
 type ExpansionPrimitive = typeof expansionPrimitives[number]
-type ConditionalPrimitive = Exclude<ExpansionPrimitive, '\\expandafter' | '\\noexpand' | '\\unexpanded' | '\\message' | '\\errmessage' | '\\char' | '\\MoveEqLeft'>
+type ConditionalPrimitive = Exclude<ExpansionPrimitive, '\\expandafter' | '\\noexpand' | '\\unexpanded' | '\\detokenize' | '\\string' | '\\message' | '\\errmessage' | '\\char' | '\\MoveEqLeft'>
 interface TokenMacro { body: string[], parameters: string[][], prefix: string[], optional?: string[], unexpandable?: boolean, protected?: boolean, source?: string }
 type DelimitedNotation = 'Braket' | 'Set' | 'set'
 type DotsMacro = 'dots' | 'dotsc' | 'dotso' | 'cdots'
@@ -1023,6 +1027,7 @@ const fractionFences: Record<string, [string, string]> = {
 const boundary = '\u0000math-expansion-boundary'
 const literalToken = '\u0000math-literal:'
 const inhibitedToken = '\u0000math-inhibited:'
+const literalCharacterToken = '\u0000math-character:'
 
 function plainMacro(body: string[], arity?: number, optional?: string[]): TokenMacro {
   const count = arity ?? Math.max(0, ...body.map(token => /^#[1-9]$/.test(token) ? Number(token[1]) : 0))
@@ -1032,12 +1037,13 @@ function plainMacro(body: string[], arity?: number, optional?: string[]): TokenM
 function bodyFromStack(tokens: readonly MathMacroToken[]): string[] {
   const body: string[] = []
   for (let cursor = tokens.length - 1; cursor >= 0; cursor--) {
-    const { text, noexpand, treatAsRelax } = tokens[cursor]
+    const { text, noexpand, treatAsRelax, literalCharacter } = tokens[cursor]
     const next = tokens[cursor - 1]
     if (treatAsRelax) body.push(inhibitedToken + text)
+    else if (literalCharacter) body.push(literalCharacterToken + text)
     else if (noexpand) body.push(literalToken + text)
     // KaTeX holds the parameter marker and digit as separate stack tokens.
-    else if (text === '#' && next && /^[1-9]$/.test(next.text) && !next.noexpand && !next.treatAsRelax) {
+    else if (text === '#' && next && /^[1-9]$/.test(next.text) && !next.noexpand && !next.treatAsRelax && !next.literalCharacter) {
       body.push(`#${next.text}`)
       cursor--
     }
@@ -1312,6 +1318,30 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (expandedCount > maxExpand) throw new MathParseError('Too many math macro expansions')
   }
 
+  function characterTokens(text: string): string[] {
+    return Array.from(text, character => texWhitespace.test(character) ? ' ' : literalCharacterToken + character)
+  }
+
+  function detokenize(body: string[]): string[] {
+    const result: string[] = []
+    for (const original of body) {
+      if (original.startsWith(literalCharacterToken)) {
+        result.push(original)
+        continue
+      }
+      const token = tokenText(original)
+      if (texWhitespace.test(token)) {
+        if (result.at(-1) !== ' ') result.push(' ')
+        continue
+      }
+      const spelling = mathVerbLength(token) ? `\\verb ${token.slice(5)}`
+        : controlWord.test(token) ? `${token} ` : token.replace(/^#(?=\d?$)/, '##')
+      for (const character of characterTokens(spelling)) result.push(character)
+      if (result.length > 12000) throw new MathParseError('Expanded equation is too long')
+    }
+    return result
+  }
+
   function expandNativeMacro(macro: NativeMacro, eager = false): string[] {
     if ('notation' in macro) return expandDelimitedNotation(macro.notation)
     if ('pairedDelimiter' in macro) return expandPairedDelimiter(macro.pairedDelimiter)
@@ -1328,11 +1358,29 @@ export function renderMath(source: string, display = false, configured: MathMacr
       expandOnce(eager, true)
       return [next]
     }
-    if (primitive === '\\unexpanded') {
+    if (primitive === '\\unexpanded' || primitive === '\\detokenize') {
       expand(true, eager)
-      if (tokenValue(tokens[cursor] ?? '') !== '{') throw new MathParseError('Expected a group after \\unexpanded')
+      if (tokenValue(tokens[cursor] ?? '') !== '{') throw new MathParseError(`Expected a group after ${primitive}`)
       const body = rawGroup()
+      if (primitive === '\\detokenize') return detokenize(body)
       return eager ? body.map(token => inhibitedToken + token) : body
+    }
+    if (primitive === '\\string') {
+      const next = tokens[cursor++]
+      if (!next || next === boundary) throw new MathParseError('Expected a token after \\string')
+      const spelling = next.startsWith(literalCharacterToken) ? tokenCharacters(next) : tokenText(next)
+      if (mathVerbLength(spelling)) {
+        tokens.splice(cursor, 0, ...tokenize(spelling.slice(5)))
+        return characterTokens('\\verb')
+      }
+      if (controlWord.test(spelling)) space()
+      // The tokenizer combines a parameter's marker and digit. \string
+      // consumes the marker, leaving its following digit in the input.
+      if (next === spelling && /^#[1-9]$/.test(spelling)) {
+        tokens.splice(cursor, 0, spelling[1])
+        return characterTokens('#')
+      }
+      return characterTokens(spelling)
     }
     if (primitive === '\\message' || primitive === '\\errmessage') {
       const message = literalGroup()
@@ -1378,13 +1426,16 @@ export function renderMath(source: string, display = false, configured: MathMacr
   }
 
   function expandCharacter(): string[] {
-    const prefix = peek()
+    expand()
+    const prefix = tokenCharacters(tokens[cursor] ?? '')
     let code: number
     if (prefix === '`') {
       cursor++
       // Character constants name the next token itself, even for a macro.
-      const token = tokenText(tokens[cursor++] ?? '')
-      code = token === boundary ? NaN : token.codePointAt(token.startsWith('\\') ? 1 : 0) ?? NaN
+      const raw = tokens[cursor++] ?? ''
+      const literal = raw.startsWith(literalCharacterToken)
+      const token = literal ? tokenCharacters(raw) : tokenText(raw)
+      code = token === boundary ? NaN : token.codePointAt(!literal && token.startsWith('\\') ? 1 : 0) ?? NaN
     }
     else {
       const radix = prefix === '"' ? 16 : prefix === "'" ? 8 : 10
@@ -1392,8 +1443,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const digit = radix === 16 ? /^[0-9a-f]$/i : radix === 8 ? /^[0-7]$/ : /^\d$/
       space()
       const start = cursor
-      while (digit.test(tokenValue(tokens[cursor] ?? ''))) cursor++
-      code = Number.parseInt(tokens.slice(start, cursor).map(tokenValue).join(''), radix)
+      while (digit.test(tokenCharacters(tokens[cursor] ?? ''))) cursor++
+      code = Number.parseInt(tokens.slice(start, cursor).map(tokenCharacters).join(''), radix)
     }
     if (!Number.isSafeInteger(code)) throw new MathParseError('Invalid math character code')
     // Freeze the generated digits so active character definitions cannot
@@ -1487,6 +1538,10 @@ export function renderMath(source: string, display = false, configured: MathMacr
     return token.startsWith(inhibitedToken) ? '\\relax' : tokenText(token)
   }
 
+  function tokenCharacters(token: string): string {
+    return token.startsWith(literalCharacterToken) ? token.slice(literalCharacterToken.length) : tokenValue(token)
+  }
+
   const peek = () => { expand(); return tokenValue(tokens[cursor] ?? '') }
   const take = () => { expand(); return tokenValue(tokens[cursor++] ?? '') }
 
@@ -1509,7 +1564,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
   }
 
   function literalGroup(): string {
-    return rawGroup().map(tokenValue).join('')
+    return rawGroup().map(tokenCharacters).join('')
   }
 
   function delimitedArgument(delimiter: readonly string[], unwrapGroup = false): string[] {
@@ -1564,7 +1619,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
         if (tokens[cursor] === boundary) break
         const token = tokens[cursor++]
         if (token.startsWith(inhibitedToken) && (eager || !preserveTokens)) result.push(token.slice(inhibitedToken.length))
-        else result.push(preserveTokens ? token : tokenValue(token))
+        else result.push(preserveTokens ? token : tokenCharacters(token))
       }
       return result
     })
@@ -1574,6 +1629,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
 
   function publicToken(token: string | undefined): MathMacroToken {
     if (!token || token === boundary) return { text: 'EOF' }
+    if (token.startsWith(literalCharacterToken)) return { text: tokenCharacters(token), noexpand: true, literalCharacter: true }
     const value = tokenText(token)
     const text = texWhitespace.test(value) ? ' ' : value
     if (token.startsWith(inhibitedToken)) return { text, noexpand: true, treatAsRelax: true }
@@ -1908,7 +1964,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
     else {
       while (true) {
         expand(false)
-        const token = tokenValue(tokens[cursor] ?? '')
+        const token = tokenCharacters(tokens[cursor] ?? '')
         if (!token || !dimensionPrefix.test(raw + token)) break
         raw += token
         cursor++
@@ -2442,6 +2498,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
 
   function textCharacter(token: string): string | undefined {
     if (token === '\\@char') return explicitCharacter()
+    if (token.startsWith(literalCharacterToken)) return tokenCharacters(token)
     if (/^(?:[&#^_]|#[1-9])$/.test(token)) throw new MathParseError(`Unexpected text token: ${token}`)
     if (!token.startsWith('\\')) {
       const unicode = checkUnicode(token)
@@ -3014,7 +3071,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
           }
         }
       }
-      parts.push({ markup: content, token, mathClass: part.mathClass, operator: part.limits !== undefined, fragment })
+      parts.push({ markup: content, token: tokenCharacters(token), mathClass: part.mathClass, operator: part.limits !== undefined, fragment })
     }
     depth--
     if (!infix && !lines) capture?.(parts)
@@ -4000,6 +4057,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
 
   function atom(token: string): Atom {
     if (token === tagValueToken) return { markup: equationTagValue }
+    if (token.startsWith(literalCharacterToken)) {
+      const text = tokenCharacters(token)
+      // Literal syntax characters draw as text. Usual math glyphs keep their
+      // math class, and the original character token cannot start a script.
+      return '\\{}$&#^_~'.includes(text) ? { markup: tag('mtext', text), mathClass: 'ord' } : atom(text)
+    }
     if (token === '{') {
       const content = inScope(() => row(['}']))
       if (take() !== '}') throw new MathParseError('Unclosed math group')
