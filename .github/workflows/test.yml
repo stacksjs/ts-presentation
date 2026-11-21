@@ -22,10 +22,10 @@ jobs:
           install: 'false'
           packages: bun.com@1.4.4
       - run: bun install --frozen-lockfile
-      - name: Verify Buddy uses first-party prompts
+      - name: Verify removed third-party packages stay out of the workspace
         run: |
-          if grep -Fq '"prompts"' bun.lock; then
-            printf 'The Buddy toolchain pulled in the removed prompts package\n' >&2
+          if grep -Eq '"(prompts|@types/dom-speech-recognition|data-uri-to-buffer)"' bun.lock; then
+            printf 'The workspace lockfile includes a removed third-party package\n' >&2
             exit 1
           fi
       - name: Install the MathML font used by Chrome on Linux

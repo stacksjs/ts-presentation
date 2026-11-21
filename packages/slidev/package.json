@@ -13,6 +13,6 @@
   "dependencies": {
     "ts-charts": "https://codeload.github.com/stacksjs/ts-charts/tar.gz/7fb7c9616fb304b4d7fdda6f84970ae2b76323a0",
     "ts-syntax-highlighter": "^0.2.20",
-    "@stacksjs/stx": "https://registry.pantry.dev/@stacksjs/stx@8279a3b"
+    "@stacksjs/stx": "https://registry.pantry.dev/@stacksjs/stx@6fd929f"
   }
 }
