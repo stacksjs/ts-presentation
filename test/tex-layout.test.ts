@@ -365,6 +365,56 @@ test('evaluates TeX conditionals in eager definitions and through delayed expans
     .toContain('<mrow><mi>X</mi></mrow>')
 })
 
+test('compares TeX token meanings before expanding either operand', () => {
+  const math = createMathRenderer({ throwOnError: true })
+  const source = String.raw`
+    \def\first#1!{\unknown  #1}
+    \def\second#1!{\unknown #1}
+    \def\other#1?{\unknown #1}
+    \let\stored=\first
+    \def\first{changed}
+    \let\alias=\relax
+    \let\letter=x
+    \let\unbound=\missing
+    \def\missing{N}
+    \ifx\stored\second A\else\fail\fi
+    \unless\ifx\stored\other B\else\fail\fi
+    \ifx\alias\relax C\else\fail\fi
+    \ifx\letter xD\else\fail\fi
+    \ifx\unbound\otherMissing E\else\fail\fi
+    \ifx z z\fail\else F\fi
+  `
+  expect(math(source, false)).toContain('<mi>A</mi><mi>B</mi><mi>C</mi><mi>D</mi><mi>E</mi><mi>F</mi>')
+  expect(() => math(String.raw`\ifx\missing`, false)).toThrow('Expected a token after \\ifx')
+})
+
+test('preserves macro flags and character categories in TeX meaning tests', () => {
+  let calls = 0
+  const same = () => { calls++; return 'unused' }
+  const math = createMathRenderer({ throwOnError: true, macros: { '\\one': same, '\\two': same, '\\three': () => 'unused' } })
+  const source = String.raw`
+    \newcommand*{\short}[1]{#1}
+    \newcommand{\longer}[1]{#1}
+    \def\plain#1{#1}
+    \protected\def\protectedMacro#1{#1}
+    \renewcommand*{\longer}[1]{#1}
+    \providecommand*{\plain}{\wrong}
+    \ifx\short\plain A\else\fail\fi
+    \ifx\short\longer B\else\fail\fi
+    \ifx\protectedMacro\short\fail\else C\fi
+    \long\def\longPlain#1{#1}
+    \ifx\longPlain\short\fail\else D\fi
+    \ifx\one\two E\else\fail\fi
+    \ifx\one\three\fail\else F\fi
+    \edef\letterOther{\detokenize{x}}
+    \expandafter\ifx\letterOther x\fail\else G\fi
+    \edef\digitOther{\detokenize{7}}
+    \expandafter\ifx\digitOther7 H\else\fail\fi
+  `
+  expect(math(source, false)).toContain('<mi>A</mi><mi>B</mi><mi>C</mi><mi>D</mi><mi>E</mi><mi>F</mi><mi>G</mi><mi>H</mi>')
+  expect(calls).toBe(0)
+})
+
 test('keeps a snapshot of the lookahead and primitive meanings when using let', () => {
   const math = createMathRenderer({ throwOnError: true })
   const clauses = math(String.raw`\def\original{A}\def\action{\def\original{B}\next}\futurelet\next\action\original`, false)

@@ -312,14 +312,14 @@ function tokenize(source: string, onTrailingComment?: () => void): string[] {
 }
 
 type MathMode = 'math' | 'text'
-const conditionalTests = ['\\iftrue', '\\iffalse', '\\ifmmode', '\\ifdefined', '\\ifnum', '\\ifodd', '\\ifcase'] as const
+const conditionalTests = ['\\iftrue', '\\iffalse', '\\ifmmode', '\\ifdefined', '\\ifx', '\\ifnum', '\\ifodd', '\\ifcase'] as const
 const conditionalDelimiters = ['\\or', '\\else', '\\fi'] as const
 type ConditionalTest = typeof conditionalTests[number]
 type ConditionalDelimiter = typeof conditionalDelimiters[number]
 type ConditionalBranch = 'boolean' | 'case' | 'else'
 const conditionalTestNames = new Set<string>(conditionalTests)
 const conditionalDelimiterNames = new Set<string>(conditionalDelimiters)
-const otherTeXConditional = /^\\if(?:x|cat|dim|vmode|hmode|inner|void|hbox|vbox|eof|csname|fontchar)?$/
+const otherTeXConditional = /^\\if(?:cat|dim|vmode|hmode|inner|void|hbox|vbox|eof|csname|fontchar)?$/
 const expansionPrimitives = ['\\expandafter', '\\noexpand', '\\unexpanded', '\\detokenize', '\\string', '\\@firstoftwo', '\\@secondoftwo', '\\@ifnextchar', '\\@ifstar', '\\TextOrMath', '\\html@mathml', '\\message', '\\errmessage', '\\char', '\\number', '\\numexpr', '\\MoveEqLeft', '\\unless'] as const
 const expansionPrimitiveNames = new Set<string>([...expansionPrimitives, ...conditionalTests, ...conditionalDelimiters])
 const macroDeclaration = /^\\(?:[gex]?def|(?:future)?let|(?:new|renew|provide)command|DeclarePairedDelimiter(?:X(?:PP)?)?|Declare(?:Left|Right)Delimiter|MakeAboxedCommand|mathtoolsset|empheqset|EmphEqdelimiter(?:factor|shortfall)|(?:new|renew|use)tagform|fboxsep|fboxrule|setlength|newsavebox|sbox|savebox|global|long|protected)$/
@@ -329,7 +329,18 @@ const definitionCommand = /^\\[gex]?def$/
 const assignmentPrefix = /^\\(?:global|long|protected)$/
 type ExpansionPrimitive = typeof expansionPrimitives[number] | ConditionalTest | ConditionalDelimiter
 type ConditionalPrimitive = Exclude<ExpansionPrimitive, '\\expandafter' | '\\noexpand' | '\\unexpanded' | '\\detokenize' | '\\string' | '\\message' | '\\errmessage' | '\\char' | '\\number' | '\\numexpr' | '\\MoveEqLeft' | ConditionalTest | ConditionalDelimiter | '\\unless'>
-interface TokenMacro { body: string[], parameters: string[][], prefix: string[], optional?: string[], unexpandable?: boolean, protected?: boolean, undefinedMeaning?: boolean, source?: string }
+interface TokenMacro {
+  body: string[]
+  parameters: string[][]
+  prefix: string[]
+  optional?: string[]
+  unexpandable?: boolean
+  protected?: boolean
+  long?: boolean
+  undefinedMeaning?: boolean
+  frozenMeaning?: string
+  source?: string
+}
 type DelimitedNotation = 'Braket' | 'Set' | 'set'
 type DotsMacro = 'dots' | 'dotsc' | 'dotso' | 'cdots'
 interface PairedDelimiter {
@@ -1023,7 +1034,7 @@ const mathModeFunctions = new Set([
 ])
 const sharedFunctions = new Set([
   ...Object.keys(textFonts), ...typesettingNames, ...textBoxes, ...verticalBoxCommands, ...spacingCommands,
-  'begingroup', 'endgroup', 'relax', 'newline', 'cr', 'color', 'textcolor',
+  'begingroup', 'endgroup', 'relax', 'newline', 'cr', 'color', 'textcolor', 'verb',
   'sout', 'underline', 'underbar', 'textcircled', 'llap', 'clap', 'rlap', '@char',
   'tag', 'raisetag', 'label', 'ref', 'eqref', 'refeq', 'noeqref', 'notag', 'nonumber', 'nobreak', 'hline', 'hdashline',
 ])
@@ -1040,6 +1051,55 @@ const literalCharacterToken = '\u0000math-character:'
 function plainMacro(body: string[], arity?: number, optional?: string[]): TokenMacro {
   const count = arity ?? Math.max(0, ...body.map(token => /^#[1-9]$/.test(token) ? Number(token[1]) : 0))
   return { body, parameters: Array.from({ length: count }, () => []), prefix: [], optional }
+}
+
+function sameMacroTokens(left: readonly string[] | undefined, right: readonly string[] | undefined): boolean {
+  if (left === right) return true
+  if (!left || !right) return false
+  function normalize(tokens: readonly string[]): string[] {
+    const result: string[] = []
+    let afterControlWord = false
+    for (const token of tokens) {
+      if (texWhitespace.test(token)) {
+        if (!afterControlWord && result.at(-1) !== ' ') result.push(' ')
+      }
+      else result.push(token)
+      afterControlWord = controlWord.test(token)
+    }
+    return result
+  }
+  const a = normalize(left)
+  const b = normalize(right)
+  return a.length === b.length && a.every((token, index) => token === b[index])
+}
+
+function sameMacroMeaning(left: Macro | string | undefined, right: Macro | string | undefined): boolean {
+  if (left === right) return true
+  if (typeof left !== 'object' || typeof right !== 'object') return false
+  if ('body' in left && 'body' in right) {
+    return Boolean(left.long) === Boolean(right.long)
+      && Boolean(left.protected) === Boolean(right.protected)
+      && Boolean(left.unexpandable) === Boolean(right.unexpandable)
+      && sameMacroTokens(left.body, right.body)
+      && sameMacroTokens(left.prefix, right.prefix)
+      && sameMacroTokens(left.optional, right.optional)
+      && left.parameters.length === right.parameters.length
+      && left.parameters.every((tokens, index) => sameMacroTokens(tokens, right.parameters[index]))
+  }
+  if ('primitive' in left && 'primitive' in right) return left.primitive === right.primitive
+  if ('notation' in left && 'notation' in right) return left.notation === right.notation
+  if ('dots' in left && 'dots' in right) return left.dots === right.dots
+  if ('separator' in left && 'separator' in right) return left.separator === right.separator
+  if ('pairedDelimiter' in left && 'pairedDelimiter' in right) {
+    const a = left.pairedDelimiter
+    const b = right.pairedDelimiter
+    return sameMacroTokens(a.opening, b.opening) && sameMacroTokens(a.closing, b.closing)
+      && a.template?.arity === b.template?.arity
+      && sameMacroTokens(a.template?.before, b.template?.before)
+      && sameMacroTokens(a.template?.body, b.template?.body)
+      && sameMacroTokens(a.template?.after, b.template?.after)
+  }
+  return false
 }
 
 function bodyFromStack(tokens: readonly MathMacroToken[]): string[] {
@@ -1414,16 +1474,59 @@ export function renderMath(source: string, display = false, configured: MathMacr
     throw new MathParseError('Unclosed TeX conditional')
   }
 
+  function readRawExpansionToken(command: string): string {
+    const token = tokens[cursor]
+    if (!token || token === boundary) throw new MathParseError(`Expected a token after ${command}`)
+    // The lexer groups a parameter marker with its digit, and captures
+    // verbatim spans before that control word is processed.
+    if (/^#[1-9]$/.test(token)) {
+      tokens[cursor] = token[1]
+      return '#'
+    }
+    cursor++
+    if (mathVerbLength(token)) {
+      tokens.splice(cursor, 0, ...tokenize(token.slice(5)))
+      return '\\verb'
+    }
+    if (controlWord.test(tokenText(token))) space()
+    return token
+  }
+
+  function primitiveTokenMeaning(token: string): string {
+    if (token.startsWith(literalCharacterToken)) {
+      const character = tokenCharacters(token)
+      // The string primitives yield category-12 characters, even for
+      // letters, active characters, and structural syntax.
+      return /^[\p{L}{}$&#^_~\\%]$/u.test(character) ? token : character
+    }
+    const text = tokenText(token)
+    return texWhitespace.test(text) ? ' ' : text
+  }
+
+  function conditionalTokenMeaning(token: string): Macro | string | undefined {
+    const macro = macroDefinition(token)
+    if (macro) {
+      if (typeof macro === 'function' || !('body' in macro)) return macro
+      if (macro.undefinedMeaning) return undefined
+      return macro.frozenMeaning === undefined ? macro : primitiveTokenMeaning(macro.frozenMeaning)
+    }
+    const meaning = primitiveTokenMeaning(token)
+    return meaning.startsWith('\\') && !defined(meaning) ? undefined : meaning
+  }
+
   function openConditional(test: ConditionalTest, invert: boolean, eager: boolean): string[] {
     function condition(): boolean {
       if (test === '\\iftrue') return true
       if (test === '\\iffalse') return false
       if (test === '\\ifmmode') return mode === 'math'
       if (test === '\\ifdefined') {
-        const token = tokenText(tokens[cursor++] ?? '')
-        if (!token || token === boundary) throw new MathParseError('Expected a token after \\ifdefined')
-        if (controlWord.test(token)) space()
+        const token = tokenText(readRawExpansionToken(test))
         return !token.startsWith('\\') || defined(token)
+      }
+      if (test === '\\ifx') {
+        const left = conditionalTokenMeaning(readRawExpansionToken(test))
+        const right = conditionalTokenMeaning(readRawExpansionToken(test))
+        return sameMacroMeaning(left, right)
       }
       const scanner = integerScanner(eager, conditionals.length)
       const left = mathInteger(scanner, false)
@@ -1500,20 +1603,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
       return eager ? body.map(token => inhibitedToken + token) : body
     }
     if (primitive === '\\string') {
-      const next = tokens[cursor++]
-      if (!next || next === boundary) throw new MathParseError('Expected a token after \\string')
+      const next = readRawExpansionToken(primitive)
       const spelling = next.startsWith(literalCharacterToken) ? tokenCharacters(next) : tokenText(next)
-      if (mathVerbLength(spelling)) {
-        tokens.splice(cursor, 0, ...tokenize(spelling.slice(5)))
-        return characterTokens('\\verb')
-      }
-      if (controlWord.test(spelling)) space()
-      // The tokenizer combines a parameter's marker and digit. \string
-      // consumes the marker, leaving its following digit in the input.
-      if (next === spelling && /^#[1-9]$/.test(spelling)) {
-        tokens.splice(cursor, 0, spelling[1])
-        return characterTokens('#')
-      }
       return characterTokens(spelling)
     }
     if (primitive === '\\message' || primitive === '\\errmessage') {
@@ -1793,7 +1884,8 @@ export function renderMath(source: string, display = false, configured: MathMacr
         delimiters: [macro.prefix, ...macro.parameters].map(delimiter => [...delimiter]),
         unexpandable: macro.protected ? true : macro.unexpandable,
       }
-      if (macro.optional !== undefined || macro.protected || macro.undefinedMeaning) macroSnapshots.set(expansion, macro)
+      if (macro.optional !== undefined || macro.protected || macro.long || macro.frozenMeaning !== undefined)
+        macroSnapshots.set(expansion, macro)
       return expansion
     }
     const callback: MathMacroFunction = () => ({ tokens: publicTokens(expandNativeMacro(macro)).reverse(), numArgs: 0 })
@@ -4024,10 +4116,12 @@ export function renderMath(source: string, display = false, configured: MathMacr
     if (!macroDeclaration.test(token)) return false
     let global = false
     let protection = false
+    let long = false
     const prefixed = assignmentPrefix.test(token)
     while (assignmentPrefix.test(token)) {
       global ||= token === '\\global'
       protection ||= token === '\\protected'
+      long ||= token === '\\long'
       token = take()
     }
     const definition = definitionCommand.test(token)
@@ -4147,7 +4241,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const body = rawGroup()
       const replacement = name === 'edef' || name === 'xdef' ? expandDefinition(body, 'definition') : body
       if (openDelimiter) replacement.push('{')
-      assign(command, { body: replacement, parameters, prefix, protected: protection }, global || name === 'gdef' || name === 'xdef')
+      assign(command, { body: replacement, parameters, prefix, protected: protection, long }, global || name === 'gdef' || name === 'xdef')
       return true
     }
     if (name === 'let' || name === 'futurelet') {
@@ -4177,11 +4271,14 @@ export function renderMath(source: string, display = false, configured: MathMacr
       const command = value.startsWith('\\')
       const literal = command || activeCharacter.test(value) ? literalToken + value : value
       const undefinedMeaning = command && !defined(value)
-      const snapshot = { ...plainMacro([literal]), unexpandable: !command || undefinedMeaning, undefinedMeaning }
+      const snapshot = { ...plainMacro([literal]), unexpandable: !command || undefinedMeaning, undefinedMeaning, frozenMeaning: value }
       assign(target, existing ?? (isExpansionPrimitive(value) ? { primitive: value } : snapshot), global)
       return true
     }
     if (name === 'newcommand' || name === 'renewcommand' || name === 'providecommand') {
+      space()
+      const starred = tokenText(tokens[cursor] ?? '') === '*'
+      if (starred) cursor++
       const command = definitionTarget(true)
       const exists = defined(command)
       if (name === 'newcommand' && exists) throw new MathParseError(`Macro ${command} is already defined. Use \\renewcommand`)
@@ -4192,7 +4289,7 @@ export function renderMath(source: string, display = false, configured: MathMacr
       if (count !== undefined && (!/^\d+$/.test(count) || arity > 6000)) throw new MathParseError('Invalid macro argument count')
       const optional = arity ? rawBracket() : undefined
       const body = rawGroup()
-      if (name !== 'providecommand' || !exists) assign(command, plainMacro(body, arity, optional), global)
+      if (name !== 'providecommand' || !exists) assign(command, { ...plainMacro(body, arity, optional), long: !starred }, global)
       return true
     }
     return false
