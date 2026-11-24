@@ -42,7 +42,7 @@ jobs:
       - name: Publish to Pantry
         run: pantry publish . --access public --verify-existing
         env:
-          PANTRY_REGISTRY_TOKEN: ${{ secrets.PANTRY_TOKEN }}
+          PANTRY_TOKEN: ${{ secrets.PANTRY_TOKEN }}
 
       - name: Create GitHub Release
         uses: stacksjs/action-releaser@e925e292fd97978624d41cb513d7b1a5e120d693 # v1.2.9
